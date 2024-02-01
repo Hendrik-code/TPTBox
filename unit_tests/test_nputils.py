@@ -1,0 +1,148 @@
+# Call 'python -m unittest' on this folder
+# coverage run -m unittest
+# coverage report
+# coverage html
+import sys
+from pathlib import Path
+
+file = Path(__file__).resolve()
+sys.path.append(str(file.parents[2]))
+import random
+import unittest
+
+import numpy as np
+
+from TPTBox.core import np_utils
+from TPTBox.tests.tests import get_nii, repeats
+
+
+class Test_bids_file(unittest.TestCase):
+    def test_dice(self):
+        for value in range(repeats):
+            dims = random.randint(2, 3)
+            shape = tuple(random.randint(5, 100) for d in range(dims))
+            arr = np.ones(shape=shape, dtype=np.uint8) * value
+            binary_compare = random.random() < 0.5
+            dice = np_utils.np_dice(arr, arr, label=value, binary_compare=binary_compare)
+            self.assertEqual(dice, 1.0)
+
+    def test_erodedilate(self):
+        for value in range(repeats):
+            nii, points, orientation, sizes = get_nii()
+            arr = nii.get_seg_array()
+            volume = np_utils.np_volume(arr)
+            func = np_utils.np_erode_msk if value % 2 == 0 else np_utils.np_dilate_msk
+            arr2 = func(arr, mm=1, connectivity=1)
+            volume2 = np_utils.np_volume(arr2)
+
+            for k, v in volume.items():
+                if value % 2 == 0:
+                    if k not in volume2:
+                        self.assertTrue(True)
+                    else:
+                        self.assertTrue(
+                            v >= volume2[k] if k != 0 else v <= volume2[k],
+                            msg=f"{volume}, {volume2}",
+                        )
+                else:
+                    self.assertTrue(
+                        v <= volume2[k] if k != 0 else v >= volume2[k],
+                        msg=f"{volume}, {volume2}",
+                    )
+
+    def test_maplabels(self):
+        for value in range(repeats):
+            nii, points, orientation, sizes = get_nii()
+            arr = nii.get_seg_array()
+            volume = np_utils.np_volume(arr)
+            labelmap = {i: random.randint(0, 10) for i in volume.keys()}
+            arr2 = np_utils.np_map_labels(arr, labelmap)
+            volume2 = np_utils.np_volume(arr2)
+
+            correct = {}
+            for source, target in labelmap.items():
+                v = volume[source]
+                if target not in correct.keys():
+                    correct[target] = 0
+                correct[target] += v
+
+            for k, v in volume2.items():
+                self.assertTrue(v == correct[k])
+
+    def test_cutout(self):
+        for value in range(repeats):
+            nii, points, orientation, sizes = get_nii()
+            arr = nii.get_seg_array()
+            shape = arr.shape
+            cutout_size = tuple(int(random.random() * i * 2) for i in shape)
+            cutout_size = tuple(c if c % 2 == 0 else c + 1 for c in cutout_size)
+            cp = points[(1, 50)]
+            arr_cut, _, _ = np_utils.np_calc_crop_around_centerpoint(cp, arr, cutout_size=cutout_size)
+
+            shp = arr_cut.shape
+            self.assertTrue(shp[0] == cutout_size[0], msg=f"{shp}, {cutout_size}")
+            self.assertTrue(shp[1] == cutout_size[1], msg=f"{shp}, {cutout_size}")
+            self.assertTrue(shp[2] == cutout_size[2], msg=f"{shp}, {cutout_size}")
+
+    def test_fillholes(self):
+        for value in range(repeats):
+            nii, points, orientation, sizes = get_nii(min_size=3)
+            arr = nii.get_seg_array()
+            volume = np_utils.np_volume(arr)
+            for (p1, p2), com in points.items():
+                rand_point_in_cube = tuple(
+                    int(c) + random.randint(-sizes[p1 - 1][idx] // 2, sizes[p1 - 1][idx] // 2) for idx, c in enumerate(com)
+                )
+                arr[int(rand_point_in_cube[0])][int(rand_point_in_cube[1])][int(rand_point_in_cube[2])] = 0
+                filled = np_utils.np_fill_holes(arr)
+                volume_filled = np_utils.np_volume(filled)
+                self.assertTrue(volume[p1] == volume_filled[p1])
+
+    def test_connected_components(self):
+        for value in range(repeats):
+            nii, points, orientation, sizes = get_nii(min_size=3)
+            arr = nii.get_seg_array()
+            volume = np_utils.np_volume(arr)
+            subreg_cc, subreg_cc_stats = np_utils.np_connected_components(arr)
+            for label in [0, 1, 2, 3]:
+                self.assertTrue(volume[label], np.sum(subreg_cc_stats[label]["voxel_counts"]))
+
+                # see if get center of masses match with stats centroids
+                coms = np_utils.np_get_connected_components_center_of_mass(arr, label)
+                n_coms = len(coms)
+                self.assertTrue(n_coms == subreg_cc_stats[label]["N"])
+                if n_coms == 1:
+                    self.assertTrue(
+                        abs(coms[0][0] - subreg_cc_stats[label]["centroids"][0][0]) <= 0.00001,
+                        msg=f"{coms[0][0]}, {subreg_cc_stats[label]['centroids'][0][0]}",
+                    )
+            # TODO test other CC functions (sort by axis, ...)
+
+    def test_get_largest_k_connected_components(self):
+        a = np.zeros((50, 50))
+        a[10:20, 10:20] = 5
+        a[30:50, 30:50] = 7
+
+        a_cc = np_utils.np_get_largest_k_connected_components(a, k=2, return_original_labels=False)
+        a_volume = np_utils.np_volume(a_cc)
+        print(a_volume)
+
+        self.assertTrue(a_volume[1] > a_volume[2])
+
+    def test_fill_holes(self):
+        # Create a test NII object with a segmentation mask
+        arr = np.array([[0, 0, 0, 0, 0], [0, 1, 1, 1, 0], [0, 1, 0, 1, 0], [0, 1, 1, 1, 0], [0, 0, 0, 0, 0]], dtype=np.int16)
+
+        # Fill the holes in the segmentation mask
+        arr = np_utils.np_fill_holes(arr, label_ref=1)
+
+        # Check that the holes are filled correctly
+        expected_result = np.array([[0, 0, 0, 0, 0], [0, 1, 1, 1, 0], [0, 1, 1, 1, 0], [0, 1, 1, 1, 0], [0, 0, 0, 0, 0]])
+        assert np.array_equal(arr, expected_result), (arr, expected_result)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+# @unittest.skipIf(condition, reason)
+# with self.subTest(i=i):
