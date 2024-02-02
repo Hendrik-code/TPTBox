@@ -222,16 +222,16 @@ def np_bbox_nd(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 0) -
         px_dist = np.ones(N, dtype=np.uint8) * px_dist
     assert len(px_dist) == N, f"dimension mismatch, got img shape {shp} and px_dist {px_dist}"
 
-    out = []
+    bbox: list[float] = []
     for ax in itertools.combinations(reversed(range(N)), N - 1):
         nonzero = np.any(a=img, axis=ax)
-        out.extend(np.where(nonzero)[0][[0, -1]])  # type: ignore
-    out = tuple(
+        bbox.extend(np.where(nonzero)[0][[0, -1]])  # type: ignore
+    out: tuple[slice, ...] = tuple(
         slice(
-            max(out[i] - px_dist[i // 2], 0),
-            min(out[i + 1] + px_dist[i // 2], shp[i // 2]) + 1,
+            max(bbox[i] - px_dist[i // 2], 0),
+            min(bbox[i + 1] + px_dist[i // 2], shp[i // 2]) + 1,
         )
-        for i in range(0, len(out), 2)
+        for i in range(0, len(bbox), 2)
     )
     return out
 
@@ -293,7 +293,7 @@ def np_find_index_of_k_max_values(arr: np.ndarray, k: int = 2) -> list[int]:
     """
     idx = np.argpartition(arr, -k)[-k:]
     indices = idx[np.argsort((-arr)[idx])]
-    return indices
+    return list(indices)
 
 
 def np_connected_components(
@@ -365,6 +365,7 @@ def np_get_largest_k_connected_components(
     """
     import cc3d
 
+    assert k > 0
     assert 2 <= arr.ndim <= 3, f"expected 2D or 3D, but got {arr.ndim}"
     assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
     if arr.ndim == 2:
@@ -376,19 +377,20 @@ def np_get_largest_k_connected_components(
     labels: list[int] = _to_labels(arr, label_ref)
     arr2[np.isin(arr, labels, invert=True)] = 0  # type:ignore
 
-    labels_out, N = cc3d.largest_k(
-        arr,
-        k=k,
-        connectivity=connectivity,
-        delta=0,
-        return_N=True,
-    )
+    labels_out, N = cc3d.connected_components(arr, connectivity=connectivity, return_N=True)
+    k = min(k, N)  # if k > N, will return all N but still sorted
+    cts = cc3d.statistics(labels_out)["voxel_counts"]
+    label_volume_pairs = [(i, ct) for i, ct in enumerate(cts) if i > 0]
+    label_volume_pairs.sort(key=lambda x: x[1], reverse=True)
+    preserve: list[int] = [x[0] for x in label_volume_pairs[:k]]
+
+    cc_out = np.zeros(arr.shape, dtype=arr.dtype)
+    for i, label in enumerate(preserve):
+        cc_out[labels_out == label] = i + 1
     if return_original_labels:
-        arr *= labels_out > 0  # to get original labels
+        arr *= cc_out > 0  # to get original labels
         return arr
-    max_label = labels_out.max()
-    labels_out = np_map_labels(labels_out, label_map={i: max_label - i + 1 for i in range(1, max_label + 1)})
-    return labels_out
+    return cc_out
 
 
 def np_get_connected_components_center_of_mass(arr: np.ndarray, label: int, connectivity: int = 3, sort_by_axis: int | None = None):
@@ -407,7 +409,7 @@ def np_get_connected_components_center_of_mass(arr: np.ndarray, label: int, conn
         assert (
             0 <= sort_by_axis <= len(arr.shape) - 1
         ), f"sort_by_axis {sort_by_axis} invalid with an array of shape {arr.shape}"  # type:ignore
-    subreg_cc, _ = np_connected_components(arr.copy(), connectivity=connectivity, label_ref=label, verbose=False)
+    subreg_cc, subreg_cc_stats = np_connected_components(arr.copy(), connectivity=connectivity, label_ref=label, verbose=False)
     cc = subreg_cc[label]
     cc_label_set = np.unique(cc)
     coms = []
@@ -639,11 +641,11 @@ def np_betti_numbers(img: np.ndarray, verbose=False) -> tuple[int, int, int]:
 
 
 def _to_labels(arr: np.ndarray, labels: Label_Reference) -> list[int]:
-    if isinstance(labels, int):
-        labels = [labels]
     if labels is None:
-        labels = np.unique(arr)  # type:ignore
-    return labels  # type:ignore
+        labels = list(np.unique(arr))
+    if not isinstance(labels, list):
+        labels = [labels]
+    return labels
 
 
 def _generate_binary_structure(n_dim: int, connectivity: int, kernel_size: int = 3):
@@ -834,3 +836,18 @@ def _generate_array_indices(selem_center, selem_radius, selem_length, result_len
     # Last index for the structuring element array
     selem_end = selem_length - (result_end - result_length) if result_end > result_length else selem_length
     return (result_begin, result_end), (selem_begin, selem_end)
+
+
+if __name__ == "__main__":
+    a = np.array(
+        [
+            [1, 1, 0, 0, 0],
+            [1, 1, 2, 2, 2],
+            [0, 0, 2, 2, 2],
+            [0, 0, 2, 2, 2],
+            [0, 0, 0, 0, 0],
+        ]
+    )
+
+    print(np_get_connected_components_center_of_mass(a, label=1))
+    print(np_get_connected_components_center_of_mass(a, label=2))
