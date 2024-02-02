@@ -25,7 +25,7 @@ from TPTBox.core.poi import (
     load_poi,
 )
 from TPTBox.core.vert_constants import *
-from TPTBox.tests.tests import overlap, repeats, get_nii, get_centroids, get_random_ax_code
+from TPTBox.tests.test_utils import overlap, repeats, get_nii, get_centroids, get_random_ax_code
 
 
 class Test_Centroids(unittest.TestCase):

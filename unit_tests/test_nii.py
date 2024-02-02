@@ -16,7 +16,7 @@ import numpy as np
 from TPTBox.core.nii_wrapper import NII
 from TPTBox.core.poi import POI as Centroids  # _centroids_to_dict_list
 from TPTBox.core.poi import calc_centroids, v_idx2name
-from TPTBox.tests.tests import get_nii, get_random_ax_code, repeats
+from TPTBox.tests.test_utils import get_nii, get_random_ax_code, repeats
 
 
 def get_all_corner_points(affine, shape) -> np.ndarray:

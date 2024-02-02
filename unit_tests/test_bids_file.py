@@ -15,7 +15,7 @@ sys.path.append(str(file.parents[2]))
 import TPTBox.core.bids_files as bids
 import TPTBox
 
-from TPTBox.tests.tests import a, get_BIDS_test
+from TPTBox.tests.test_utils import a, get_BIDS_test
 
 
 class Test_bids_file(unittest.TestCase):

@@ -13,7 +13,7 @@ import unittest
 import numpy as np
 
 from TPTBox.core import np_utils
-from TPTBox.tests.tests import get_nii, repeats
+from TPTBox.tests.test_utils import get_nii, repeats
 
 
 class Test_bids_file(unittest.TestCase):
@@ -116,18 +116,33 @@ class Test_bids_file(unittest.TestCase):
                         abs(coms[0][0] - subreg_cc_stats[label]["centroids"][0][0]) <= 0.00001,
                         msg=f"{coms[0][0]}, {subreg_cc_stats[label]['centroids'][0][0]}",
                     )
-            # TODO test other CC functions (sort by axis, ...)
 
     def test_get_largest_k_connected_components(self):
         a = np.zeros((50, 50))
         a[10:20, 10:20] = 5
         a[30:50, 30:50] = 7
+        a[1:4, 1:4] = 1
 
+        # k less than N
         a_cc = np_utils.np_get_largest_k_connected_components(a, k=2, return_original_labels=False)
         a_volume = np_utils.np_volume(a_cc)
         print(a_volume)
-
+        self.assertTrue(len(a_volume) == 3)
         self.assertTrue(a_volume[1] > a_volume[2])
+
+        # k == N
+        a_cc = np_utils.np_get_largest_k_connected_components(a, k=3, return_original_labels=False)
+        a_volume = np_utils.np_volume(a_cc)
+        print(a_volume)
+        self.assertTrue(len(a_volume) == 4)
+        self.assertTrue(a_volume[1] > a_volume[2] > a_volume[3])
+
+        # k > N
+        a_cc = np_utils.np_get_largest_k_connected_components(a, k=20, return_original_labels=False)
+        a_volume = np_utils.np_volume(a_cc)
+        print(a_volume)
+        self.assertTrue(len(a_volume) == 4)
+        self.assertTrue(a_volume[1] > a_volume[2] > a_volume[3])
 
     def test_fill_holes(self):
         # Create a test NII object with a segmentation mask

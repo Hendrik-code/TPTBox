@@ -16,7 +16,7 @@ from TPTBox import BIDS_FILE
 import io
 import unittest
 import unittest.mock
-from TPTBox.tests.tests import get_BIDS_test, a
+from TPTBox.tests.test_utils import get_BIDS_test, a
 
 
 class Test_bids_file(unittest.TestCase):
