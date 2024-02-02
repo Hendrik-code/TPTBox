@@ -13,6 +13,7 @@ import numpy as np
 from TPTBox import Centroids
 from TPTBox.core.nii_wrapper import NII
 from TPTBox.core.poi import (
+    POI,
     LABEL_MAX,
     VertebraCentroids,
     _poi_to_dict_list,
@@ -56,6 +57,10 @@ def overlap(
     return all(sqr1d(a, b, c, d) for a, b, c, d in zip(c1, w1, c2, w2, strict=False))
 
 
+def extract_affine(nii: NII):
+    return {"origin": nii.origin, "shape": nii.shape, "rotation": nii.rotation}
+
+
 def sqr1d(c1: float, w1: float, c2: float, w2: float):
     if (c1 + w1) < (c2 - w2):
         # print("case1", c1 + w1, "<", (c2 - w2))
@@ -81,6 +86,27 @@ def get_centroids(x: tuple[int, int, int] = (50, 30, 40), num_point=3):
         point = tuple(random.randint(1, a * 100) / 100.0 for a in x)
         out_points[idx + 1, 50] = point
     return Centroids(out_points, orientation=("R", "A", "S"), zoom=(1, 1, 1))
+
+
+def get_poi(x: tuple[int, int, int] = (50, 30, 40), num_vert=3, num_subreg=1, rotation=True, min_subreg=1, max_subreg=255):
+    out_points: dict[int, dict[int, tuple[float, float, float]]] = {}
+
+    for idx in range(num_vert):
+        out_points[idx + 1] = {}
+        for idx2 in range(num_subreg):
+            point = tuple(random.randint(1, a * 100) / 100.0 for a in x)
+            subregion = random.randint(min_subreg, max_subreg)
+            out_points[idx + 1][subregion] = point
+    origin = tuple(random.randint(1, 100) for _ in range(3))
+    if rotation:
+        from scipy.spatial.transform import Rotation
+
+        m = 30
+        r = Rotation.from_euler("xyz", (random.randint(-m, m), random.randint(-m, m), random.randint(-m, m)), degrees=True)
+        r = np.round(r.as_matrix(), decimals=5)
+    else:
+        r = np.eye(3)
+    return POI(out_points, orientation=("R", "A", "S"), zoom=(1, 1, 1), shape=x, origin=origin, rotation=r)
 
 
 def get_nii(x: tuple[int, int, int] = None, num_point=3, min_size: int = 1):  # type: ignore
