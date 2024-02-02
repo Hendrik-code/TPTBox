@@ -1,3 +1,4 @@
+[![PyPI version tptbox](https://badge.fury.io/py/tptbox.svg)](https://pypi.python.org/pypi/tptbox/)
 
 # Torso Processing ToolBox (TPTBox)
 
