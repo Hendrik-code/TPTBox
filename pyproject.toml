@@ -25,6 +25,7 @@ dill = "^0.3.7"
 scikit-image = "^0.22.0"
 fill-voids = "^2.0.6"
 pyvista = "^0.43.2"
+connected-components-3d = "^3.12.3"
 
 
 [build-system]
