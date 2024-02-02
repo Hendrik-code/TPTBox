@@ -7,34 +7,7 @@ import numpy as np
 
 from TPTBox import POI, Ax_Codes, POI_Global
 from TPTBox.core.poi_abstract import POI_Descriptor
-
-
-def get_random_ax_code() -> Ax_Codes:
-    directions = [["R", "L"], ["S", "I"], ["A", "P"]]
-    idx = [0, 1, 2]
-    random.shuffle(idx)
-    return tuple(directions[i][random.randint(0, 1)] for i in idx)  # type: ignore
-
-
-def get_poi(x: tuple[int, int, int] = (50, 30, 40), num_vert=3, num_subreg=3, rotation=True, min_subreg=1, max_subreg=255):
-    out_points: dict[int, dict[int, Sequence[float]]] = {}
-
-    for idx in range(num_vert):
-        out_points[idx + 1] = {}
-        for _ in range(num_subreg):
-            point = tuple(random.randint(1, a * 100) / 100.0 for a in x)
-            subregion = random.randint(min_subreg, max_subreg)
-            out_points[idx + 1][subregion] = point
-    origin = tuple(random.randint(1, 100) for _ in range(3))
-    if rotation:
-        from scipy.spatial.transform import Rotation
-
-        m = 30
-        r = Rotation.from_euler("xyz", (random.randint(-m, m), random.randint(-m, m), random.randint(-m, m)), degrees=True)
-        r = np.round(r.as_matrix(), decimals=5)
-    else:
-        r = np.eye(3)
-    return POI(out_points, orientation=("R", "A", "S"), zoom=(1, 1, 1), shape=x, origin=origin, rotation=r)
+from TPTBox.tests.test_utils import get_random_ax_code, get_poi
 
 
 class TestPOI(unittest.TestCase):

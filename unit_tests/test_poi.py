@@ -13,32 +13,7 @@ import numpy as np
 from TPTBox.core.nii_wrapper import NII
 from TPTBox.core.poi import *
 from TPTBox.core.poi import LABEL_MAX, POI, _poi_to_dict_list, calc_centroids
-
-repeats = 20
-
-
-def sqr1d(c1: float, w1: float, c2: float, w2: float):
-    if (c1 + w1) < (c2 - w2):
-        # print("case1", c1 + w1, "<", (c2 - w2))
-        return False
-    if (c1 - w1) > (c2 + w2):
-        # print("case2", (c1 + w1), ">", (c2 - w2))
-        return False
-    # print("no", (c1, w1), "~", (c2, w2))
-    return True
-
-
-def overlap(
-    c1: tuple[float, float, float],
-    w1: tuple[float, float, float],
-    c2: tuple[float, float, float],
-    w2: tuple[float, float, float],
-):
-    return all(sqr1d(a, b, c, d) for a, b, c, d in zip(c1, w1, c2, w2))
-
-
-def extract_affine(nii: NII):
-    return {"origin": nii.origin, "shape": nii.shape, "rotation": nii.rotation}
+from TPTBox.tests.test_utils import overlap, sqr1d, repeats, get_centroids, extract_affine, get_random_ax_code, get_poi
 
 
 def get_nii(x: tuple[int, int, int] | None = None, num_point=3, rotation=True):  # type: ignore
@@ -54,12 +29,12 @@ def get_nii(x: tuple[int, int, int] | None = None, num_point=3, rotation=True): 
             break
         point = tuple(random.randint(1, a - 1) for a in x)
         size = tuple(random.randint(1, 1 + a) for a in [5, 5, 5])
-        if any(a - b < 0 for a, b in zip(point, size)):
+        if any(a - b < 0 for a, b in zip(point, size, strict=True)):
             continue
-        if any(a + b > c - 1 for a, b, c in zip(point, size, x)):
+        if any(a + b > c - 1 for a, b, c in zip(point, size, x, strict=True)):
             continue
         skip = False
-        for p2, s2 in zip(points, sizes):
+        for p2, s2 in zip(points, sizes, strict=True):
             if overlap(point, size, p2, s2):
                 skip = True
                 break
@@ -90,34 +65,6 @@ def get_nii(x: tuple[int, int, int] | None = None, num_point=3, rotation=True): 
     n = NII(nib.Nifti1Image(a, aff), seg=True)
 
     return n, out_points, n.orientation, sizes
-
-
-def get_random_ax_code() -> Ax_Codes:
-    directions = [["R", "L"], ["S", "I"], ["A", "P"]]
-    idx = [0, 1, 2]
-    random.shuffle(idx)
-    return tuple(directions[i][random.randint(0, 1)] for i in idx)  # type: ignore
-
-
-def get_poi(x: tuple[int, int, int] = (50, 30, 40), num_vert=3, num_subreg=1, rotation=True, min_subreg=1, max_subreg=255):
-    out_points: dict[int, dict[int, tuple[float, float, float]]] = {}
-
-    for idx in range(num_vert):
-        out_points[idx + 1] = {}
-        for idx2 in range(num_subreg):
-            point = tuple(random.randint(1, a * 100) / 100.0 for a in x)
-            subregion = random.randint(min_subreg, max_subreg)
-            out_points[idx + 1][subregion] = point
-    origin = tuple(random.randint(1, 100) for _ in range(3))
-    if rotation:
-        from scipy.spatial.transform import Rotation
-
-        m = 30
-        r = Rotation.from_euler("xyz", (random.randint(-m, m), random.randint(-m, m), random.randint(-m, m)), degrees=True)
-        r = np.round(r.as_matrix(), decimals=5)
-    else:
-        r = np.eye(3)
-    return POI(out_points, orientation=("R", "A", "S"), zoom=(1, 1, 1), shape=x, origin=origin, rotation=r)
 
 
 class Test_POI(unittest.TestCase):
