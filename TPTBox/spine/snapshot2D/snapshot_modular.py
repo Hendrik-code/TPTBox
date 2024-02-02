@@ -31,7 +31,7 @@ from TPTBox import (
     v_idx2name,
     v_idx_order,
 )
-from TPTBox.snapshot3D.mesh_colors import vert_color_map
+from TPTBox.spine.mesh3D.vert_mesh_colors import vert_color_map
 
 NII.suppress_dtype_change_printout_in_set_array(True)
 """

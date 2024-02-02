@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 
 from TPTBox import BIDS_FILE, NII, Centroids, Image_Reference, POI_Reference
-from TPTBox.snapshot2D.snapshot_modular import Snapshot_Frame, Visualization_Type, create_snapshot
+from TPTBox.spine.snapshot2D.snapshot_modular import Snapshot_Frame, Visualization_Type, create_snapshot
 
 
 ##########################
