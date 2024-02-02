@@ -174,7 +174,7 @@ class NII(NII_Math):
                 nii = Nifti1Image(self._arr,self.affine,self.header)
             else:
                 if not suppress_dtype_change_printout_in_set_array:
-                    log.print(f"'set_array' with different dtype: from {self.dtype} to {self._arr.dtype}",verbose=verbose) #type: ignore
+                    log.print(f"'set_array' with different dtype: from {self.dtype} to {self._arr.dtype}",verbose=True) #type: ignore
                 nii2 = Nifti1Image(self._arr,self.affine,self.header)
                 nii2.set_data_dtype(self._arr.dtype)
                 nii = Nifti1Image(self._arr,nii2.affine,nii2.header) # type: ignore
