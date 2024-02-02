@@ -640,10 +640,10 @@ def np_betti_numbers(img: np.ndarray, verbose=False) -> tuple[int, int, int]:
     return b0, b1, b2
 
 
-def _to_labels(arr: np.ndarray, labels: Label_Reference) -> list[int]:
+def _to_labels(arr: np.ndarray, labels: Label_Reference) -> Sequence[int]:
     if labels is None:
         labels = list(np.unique(arr))
-    if not isinstance(labels, list):
+    if not isinstance(labels, Sequence):
         labels = [labels]
     return labels
 
