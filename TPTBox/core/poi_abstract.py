@@ -5,9 +5,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
-from TPTBox.core.nii_wrapper import NII
 from scipy import interpolate
 from typing_extensions import Self
+
+from TPTBox.core.nii_wrapper import NII
 
 from . import vert_constants
 from .vert_constants import Coordinate, Location, POI_Dict, log, log_file, logging

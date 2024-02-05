@@ -2,22 +2,23 @@
 # coverage run -m unittest
 # coverage report
 # coverage html
-from pathlib import Path
 import sys
 import tempfile
+from pathlib import Path
 
 file = Path(__file__).resolve()
 sys.path.append(str(file.parents[2]))
-import unittest
-
 import os
 import random
+import unittest
+
+import nibabel as nib
 import numpy as np
-from TPTBox.core.poi import *
+
+import TPTBox.core.bids_files as bids
 from TPTBox import Centroids
 from TPTBox.core.nii_wrapper import NII
-import TPTBox.core.bids_files as bids
-import nibabel as nib
+from TPTBox.core.poi import *
 
 repeats = 20
 

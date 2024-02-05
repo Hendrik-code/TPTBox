@@ -10,8 +10,9 @@ from typing_extensions import Self
 
 # fmt: off
 if TYPE_CHECKING:
-    from TPTBox import NII
     from nibabel.nifti1 import Nifti1Header
+
+    from TPTBox import NII
     class NII_Proxy(Protocol):  # noqa: F821
         def get_array(self) -> np.ndarray:
             ...
@@ -109,15 +110,15 @@ class NII_Math(NII_Proxy):
 
     def __round__(self, decimals=0):
         return self._uni_opt(np.round)
-    def round(self,decimals):  # noqa: A003
+    def round(self,decimals):
         return self.__round__(decimals=decimals)
     def __floor__(self):
         return self._uni_opt(np.floor)
     def __ceil__(self):
         return self._uni_opt(np.ceil)
-    def max(self)->float:  # noqa: A003
+    def max(self)->float:
         return self.get_array().max()
-    def min(self)->float:  # noqa: A003
+    def min(self)->float:
         return self.get_array().min()
 
     def clamp(self, min=None,max=None,inplace=False)->Self:  # noqa: A002
@@ -167,7 +168,7 @@ class NII_Math(NII_Proxy):
         assert len(self.shape) == 3, f"TODO add >3 dim support: {self.shape}"
         x_ = np.pad(self.get_array()[tuple(crop)],padding,mode=mode,constant_values=self.get_c_val()) # type: ignore
         return self.set_array(x_,inplace=inplace)
-    def sum(self,axis = None,keepdims=False,where = np._NoValue)->float:  # noqa: A003 # type: ignore
+    def sum(self,axis = None,keepdims=False,where = np._NoValue)->float:  # type: ignore
         if hasattr(where,"get_array"):
             where=where.get_array().astype(bool)
 

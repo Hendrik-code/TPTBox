@@ -11,17 +11,20 @@
 # limitations under the License.
 from __future__ import annotations
 
-import SimpleITK as sitk
-import numpy as np
-from pathlib import Path
-import sys
 import itertools
+import sys
+from pathlib import Path
+
+import numpy as np
+import SimpleITK as sitk
 from scipy.ndimage.morphology import distance_transform_edt
+
 file = Path(__file__).resolve()
 sys.path.append(str(file.parents[1]))
 
-from sitk_utils import padZ, resample_img, to_str_sitk
 import time
+
+from sitk_utils import padZ, resample_img, to_str_sitk
 
 
 def main(files: list[str], filename_out: str = "", margin: int = 0, average_overlap: bool = False, verbose=True):
@@ -94,7 +97,6 @@ def main(files: list[str], filename_out: str = "", margin: int = 0, average_over
         # iterate over remaining images and add to stitched volume
 
         for cur_img in images:
-
             empty_arr = 1 - counts_arr
 
             cur_img_min_extent = cur_img.GetOrigin()[2]
@@ -113,7 +115,7 @@ def main(files: list[str], filename_out: str = "", margin: int = 0, average_over
                 binary_arr = empty_arr * binary_arr
 
             cur_arr = cur_arr * binary_arr
-            cur_arr = cur_arr / cur_arr.max() 
+            cur_arr = cur_arr / cur_arr.max()
             target_list.append(cur_arr)
             target_arr = cur_arr + target_arr  #
             count_list.append(binary_arr)
@@ -123,28 +125,27 @@ def main(files: list[str], filename_out: str = "", margin: int = 0, average_over
         for item in list(itertools.combinations(range(len(target_list)), 2)):
             arr_1 = count_list[item[0]]
             arr_2 = count_list[item[1]]
-            overlap = (arr_1*arr_2)>0.0
-            if overlap.sum()>0:
-                arr_1_ = (arr_1>0.0).astype(np.float)-overlap
-                arr_2_ = (arr_2>0.0).astype(np.float)-overlap
-                arr_1[overlap] = distance_transform_edt(1.0-arr_2_)[overlap]
-                arr_2[overlap] = distance_transform_edt(1.0-arr_1_)[overlap]
+            overlap = (arr_1 * arr_2) > 0.0
+            if overlap.sum() > 0:
+                arr_1_ = (arr_1 > 0.0).astype(float) - overlap
+                arr_2_ = (arr_2 > 0.0).astype(float) - overlap
+                arr_1[overlap] = distance_transform_edt(1.0 - arr_2_)[overlap]
+                arr_2[overlap] = distance_transform_edt(1.0 - arr_1_)[overlap]
                 arr_1_[overlap] = arr_1[overlap]
                 arr_2_[overlap] = arr_2[overlap]
-                sum_ = arr_1_+arr_2_
+                sum_ = arr_1_ + arr_2_
                 sum_[sum_ == 0] = 1.0
-                count_list[item[0]] = arr_1/sum_
-                count_list[item[1]] = arr_2/sum_
+                count_list[item[0]] = arr_1 / sum_
+                count_list[item[1]] = arr_2 / sum_
             else:
                 continue
-            
+
         counts_arr = np.stack(count_list)
-        target_arr = np.stack(target_list)*counts_arr
+        target_arr = np.stack(target_list) * counts_arr
         target_arr = target_arr.sum(0)
-            
+
         # counts_arr[counts_arr == 0] = 1
         # target_arr /= counts_arr
-            
 
         out_skit = np_to_skit(target_arr, target)
 
@@ -165,7 +166,6 @@ def main(files: list[str], filename_out: str = "", margin: int = 0, average_over
 
 
 if __name__ == "__main__":
-
     import argparse
 
     parser = argparse.ArgumentParser(description="Process some integers.")

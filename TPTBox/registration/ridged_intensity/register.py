@@ -35,14 +35,16 @@ def registrate_ants(moving: NII, fixed: NII, type_of_transform="DenseRigid", ver
 
 
 def registrate_nipy(
-    moving: NII, fixed: NII, similarity: Similarity_Measures = "cc", optimizer: Affine_Transforms = "rigid", other_moving: list[NII] = []
+    moving: NII, fixed: NII, similarity: Similarity_Measures = "cc", optimizer: Affine_Transforms = "rigid", other_moving: list[NII] = None
 ):
+    if other_moving is None:
+        other_moving = []
     hist_reg = nipy_reg.HistogramRegistration(fixed.nii, moving.nii, similarity=similarity)
     with HiddenPrints():
         T: Affine = hist_reg.optimize(optimizer, iterations=100)
     aligned_img = apply_registration_nipy(moving, fixed, T)
     out_arr = [apply_registration_nipy(i, fixed, T) for i in other_moving]
-    for out, other in zip(out_arr, other_moving):
+    for out, other in zip(out_arr, other_moving, strict=False):
         out.seg = other.seg
     return aligned_img, T, out_arr
 
@@ -66,7 +68,7 @@ def register_native_res(
     fixed: NII,
     similarity: Similarity_Measures = "cc",
     optimizer: Affine_Transforms = "rigid",
-    other_moving: list[NII] = [],
+    other_moving: list[NII] = None,
 ) -> tuple[NII, NII, Affine, list[NII]]:
     """register an image to an other, with its native resolution of moving. Uses Global coordinates.
 
@@ -79,6 +81,8 @@ def register_native_res(
     Returns:
         (NII,NII): _description_
     """
+    if other_moving is None:
+        other_moving = []
     fixed_m_res = fixed.copy()
     fixed_m_res.resample_from_to_(moving)
     aligned_img, T, out_arr = registrate_nipy(moving, fixed_m_res, similarity, optimizer, other_moving)

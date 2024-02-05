@@ -604,8 +604,8 @@ Image_Modes = Literal["CT", "MRI", "CTs", "MINMAX", "None"]
 class Snapshot_Frame:
     # Content
     image: Image_Reference
-    segmentation: Optional[Image_Reference] = None
-    centroids: Optional[POI_Reference] = None
+    segmentation: Image_Reference | None = None
+    centroids: POI_Reference | None = None
     # Views
     sagittal: bool = True
     coronal: bool = False
@@ -638,7 +638,7 @@ class Snapshot_Frame:
     curve_location: Location = Location.Vertebra_Corpus
 
 
-def to_cdt(ctd_bids: Optional[POI_Reference]) -> Optional[Centroids]:
+def to_cdt(ctd_bids: POI_Reference | None) -> Centroids | None:
     if ctd_bids is None:
         return None
     ctd = load_centroids(ctd_bids)
@@ -901,7 +901,7 @@ def create_snapshot(
 
     fig, axs = create_figure(dpi, img_list)
     for ax, (img, msk, ctd, wdw, is_sag, alpha, cmap, zms, curve_location, poi_labelmap, hide_centroid_labels, title) in zip(
-        axs, frame_list
+        axs, frame_list, strict=False
     ):
         if title is not None:
             ax.set_title(title, fontdict={"fontsize": 18, "color": "black"}, loc="center")

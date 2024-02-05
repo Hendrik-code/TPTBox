@@ -1,16 +1,15 @@
 """
 This script assumes that there are aligned Sagittal data and poorly aligned axial data.
 """
-from pathlib import Path
-from TPTBox import BIDS_Global_info
-from TPTBox import to_nii
-from TPTBox.core.bids_files import Subject_Container
-from TPTBox import NII
-from TPTBox import No_Logger
-from TPTBox.stitching import stitching
-from TPTBox.registration.ridged_intensity.register import registrate_nipy, only_change_affine
 import pickle
+from pathlib import Path
+
 import nibabel as nib
+
+from TPTBox import NII, BIDS_Global_info, No_Logger, to_nii
+from TPTBox.core.bids_files import Subject_Container
+from TPTBox.registration.ridged_intensity.register import only_change_affine, registrate_nipy
+from TPTBox.stitching import stitching
 
 
 def register_ax_and_stich_both(sub: Subject_Container, out_folder, buffer_path, verbose_stitching=True):
@@ -113,7 +112,7 @@ def register_ax_and_stich_both(sub: Subject_Container, out_folder, buffer_path, 
 
                 stitching(*reg_ax_files, out=out_ax_ms)
 
-        except Exception as e:
+        except Exception:
             # raise e
             No_Logger().print_error()
             try:

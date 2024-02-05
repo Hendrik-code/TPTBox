@@ -2,11 +2,11 @@
 # coverage run -m unittest
 # coverage report
 # coverage html
-from pathlib import Path
-import unittest
-import sys
 import os
 import random
+import sys
+import unittest
+from pathlib import Path
 
 file = Path(__file__).resolve()
 sys.path.append(str(file.parents[2]))
@@ -16,8 +16,9 @@ sys.path.append(str(file.parents[2]))
 
 file = Path(__file__).resolve()
 sys.path.append(str(file.parents[1]))
-from TPTBox import to_nii
 import nibabel as nib
+
+from TPTBox import to_nii
 
 test_data = [
     "BIDS/test/test_data/sub-fxclass0001_seg-subreg_msk.nii.gz",

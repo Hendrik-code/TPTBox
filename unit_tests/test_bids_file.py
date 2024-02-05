@@ -2,19 +2,18 @@
 # coverage run -m unittest
 # coverage report
 # coverage html
-from pathlib import Path
-import unittest
-import sys
 import os
 import random
+import sys
+import unittest
+from pathlib import Path
 
 if not os.path.isdir("test"):
     sys.path.append("..")
 file = Path(__file__).resolve()
 sys.path.append(str(file.parents[2]))
-import TPTBox.core.bids_files as bids
 import TPTBox
-
+import TPTBox.core.bids_files as bids
 from TPTBox.tests.test_utils import a, get_BIDS_test
 
 

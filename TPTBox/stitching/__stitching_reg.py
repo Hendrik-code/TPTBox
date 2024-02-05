@@ -11,25 +11,27 @@
 # limitations under the License.
 from __future__ import annotations
 
-import SimpleITK as sitk
-import numpy as np
-from pathlib import Path
 import sys
+from pathlib import Path
+
+import numpy as np
+import SimpleITK as sitk
 
 file = Path(__file__).resolve()
 sys.path.append(str(file.parents[1]))
 
+import time
+
 from sitk_utils import (
-    padZ,
-    resample_img,
-    to_str_sitk,
-    divide_by_max,
-    cropZ,
-    register_on_sub_image,
     affine_registration_transform,
     apply_transform,
+    cropZ,
+    divide_by_max,
+    padZ,
+    register_on_sub_image,
+    resample_img,
+    to_str_sitk,
 )
-import time
 
 z_index = 2
 
@@ -87,7 +89,6 @@ def main(
     reverse=True,
     verbose=True,
 ):
-
     stime = time.time()
     if len(files) > 1:
         print("stitching image...")
@@ -119,7 +120,7 @@ def main(
         output_skit = pad_to_space(images[0], min_extent, max_extent)
         itk_composite = sitk.CompositeTransform(3)
         # Affine transform to current image. (Going from top to bottom, see sorted)
-        for img1, img2 in zip(images[:-1], images[1:]):
+        for img1, img2 in zip(images[:-1], images[1:], strict=False):
             out = compute_overlap(img1, img2, verbose=False)
             if out is not None:
                 print(f"[*] Intersection between {out}") if verbose else None
@@ -163,7 +164,7 @@ def main(
                     out = sitk.Multiply(out, mask_old)
                     output_skit = sitk.Add(out, output_skit)
             else:
-                print(f"[*] No Intersection, just adding the image without registration") if verbose else None
+                print("[*] No Intersection, just adding the image without registration") if verbose else None
                 img2 = resample_img(pad_to_space(img2, min_extent, max_extent), output_skit, verbose)
                 output_skit = sitk.Add(output_skit, img2)
 
@@ -223,9 +224,7 @@ if __name__ == "__main__":
         help="enable averaging in overlap areas",
     )
     parser.add_argument("-v", "--verbose", default=False, action=argparse.BooleanOptionalAction)
-    parser.add_argument(
-        "-r", "--reverse", default=False, action=argparse.BooleanOptionalAction, help="flip registration direction"
-    )
+    parser.add_argument("-r", "--reverse", default=False, action=argparse.BooleanOptionalAction, help="flip registration direction")
     parser.add_argument(
         "-me",
         "--mean_shift",
