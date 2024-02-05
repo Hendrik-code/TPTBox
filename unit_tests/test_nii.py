@@ -231,6 +231,18 @@ class Test_bids_file(unittest.TestCase):
             msk2 = msk.erode_msk(verbose=False)
             self.assertNotEqual(msk.get_array().sum(), msk2.get_array().sum())
 
+    def test_assert_affine(self):
+        # asserts with itself
+        for _ in range(repeats):
+            msk, cent, order, sizes = get_nii(num_point=random.randint(3, 10))
+
+            self.assertTrue(msk.assert_affine(other=msk))
+            self.assertTrue(
+                msk.assert_affine(affine=msk.affine, zoom=msk.zoom, orientation=msk.orientation, origin=msk.origin, shape=msk.shape)
+            )
+
+        # TODO cases where it should return False
+
 
 if __name__ == "__main__":
     unittest.main()
