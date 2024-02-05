@@ -11,7 +11,7 @@ import nibabel.orientations as nio
 import nibabel.processing as nip
 import numpy as np
 from nibabel import Nifti1Header, Nifti1Image  # type: ignore
-from typing_extensions import Self
+from typing_extensions import TYPE_CHECKING, Self
 
 from TPTBox.core.nii_wrapper_math import NII_Math
 from TPTBox.core.np_utils import (
@@ -39,6 +39,13 @@ Label_Map = vc.Label_Map
 Directions = vc.Directions
 plane_dict = vc.plane_dict
 _formatwarning = warnings.formatwarning
+Zooms = vc.Zooms
+SHAPE = vc.Triple | tuple[int, int, int]
+ORIGIN = vc.Triple
+ROTATION = vc.Rotation
+
+if TYPE_CHECKING:
+    from TPTBox.core.poi import POI
 
 
 def formatwarning_tb(*args, **kwargs):
@@ -236,7 +243,7 @@ class NII(NII_Math):
         return nio.ornt2axcodes(ort) # type: ignore
 
     @property
-    def zoom(self) -> tuple[float, float, float]:
+    def zoom(self) -> Zooms:
         rotation_zoom = self.affine[:3, :3]
         zoom = np.sqrt(np.sum(rotation_zoom * rotation_zoom, axis=0)) if self.__divergent else self.header.get_zooms()
 
@@ -1133,6 +1140,81 @@ class NII(NII_Math):
     def volumes(self, labels: vc.Label_Reference = None) -> dict[int, int]:
         '''Returns a dict stating how many pixels are present for each label (including zero!)'''
         return np_volume(self.get_seg_array(), label_ref=labels)
+    
+    def assert_affine(
+            self, 
+            other: Self | "POI" | None = None, 
+            affine: AFFINE | None = None, 
+            zoom: Zooms | None = None, 
+            orientation: Ax_Codes | None = None, 
+            rotation: ROTATION | None = None,
+            origin: ORIGIN | None = None, 
+            shape: SHAPE | None = None, 
+            error_tolerance: float = 1e-4, 
+            raise_error: bool = True, 
+            verbose: logging = False,):
+        """Checks if the different metadata is equal to some comparison entries
+
+        Args:
+            other (Self | &quot;POI&quot; | None, optional): _description_. Defaults to None.
+            affine (AFFINE | None, optional): _description_. Defaults to None.
+            zms (Zooms | None, optional): _description_. Defaults to None.
+            orientation (Ax_Codes | None, optional): _description_. Defaults to None.
+            origin (ORIGIN | None, optional): _description_. Defaults to None.
+            shape (SHAPE | None, optional): _description_. Defaults to None.
+            error_tolerance (float, optional): _description_. Defaults to 1e-4.
+            raise_error (bool, optional): _description_. Defaults to True.
+            verbose (logging, optional): _description_. Defaults to False.
+
+        Raises:
+            NotImplementedError: _description_
+            AssertionError: _description_
+
+        Returns:
+            _type_: _description_
+        """
+        found_errors: list[str] = []
+
+        # Make Checks
+        if other is not None:
+            other_data = other._extract_affine()
+            other_match = self.assert_affine(other=None, **other_data)
+            if not other_match:
+                found_errors.append(f"object mismatch {str(self)}, {str(other)}")
+        if affine is not None:
+            affine_diff = self.affine - affine
+            affine_match = np.all([a <= error_tolerance for a in affine_diff.flatten()])
+            found_errors.append(f"affine mismatch {self.affine}, {affine}") if not affine_match else None
+        if rotation is not None:
+            rotation_diff = self.rotation - rotation
+            rotation_match = np.all([a <= error_tolerance for a in rotation_diff.flatten()])
+            found_errors.append(f"rotation mismatch {self.rotation}, {rotation}") if not rotation_match else None
+        if zoom is not None:
+            zms_diff = (self.zoom[i] - zoom[i] for i in range(3))
+            zms_match = np.all([a <= error_tolerance for a in zms_diff])
+            found_errors.append(f"zoom mismatch {self.zoom}, {zoom}") if not zms_match else None
+        if orientation is not None:
+            orientation_match = np.all([i == orientation[idx] for idx, i in enumerate(self.orientation)])
+            found_errors.append(f"orientation mismatch {self.orientation}, {orientation}") if not orientation_match else None
+        if origin is not None:
+            origin_diff = (self.origin[i] - origin[i] for i in range(3))
+            origin_match = np.all([a <= error_tolerance for a in origin_diff])
+            found_errors.append(f"origin mismatch {self.origin}, {origin}") if not origin_match else None
+        if shape is not None:
+            shape_diff = (self.shape[i] - shape[i] for i in range(3))
+            shape_match = np.all([a <= error_tolerance for a in shape_diff])
+            found_errors.append(f"shape mismatch {self.shape}, {shape}") if not shape_match else None
+
+        # Print errors
+        for err in found_errors:
+            log.print(err, verbose=verbose)
+
+        # Final conclusion and possible raising of AssertionError
+        has_errors = len(found_errors) > 0
+        if raise_error and has_errors:
+            raise AssertionError(f"assert_affine failed with {found_errors}")
+        
+        return not has_errors
 
 
 def to_nii_optional(img_bids: Image_Reference|None, seg=False, default=None) -> NII | None:
