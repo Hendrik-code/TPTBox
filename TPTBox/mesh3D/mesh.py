@@ -7,11 +7,12 @@ from enum import Enum
 
 import numpy as np
 import pyvista as pv
+from skimage.measure import marching_cubes
+
 from TPTBox import NII, POI, Log_Type
 from TPTBox.core import vert_constants as vc
 from TPTBox.core.np_utils import np_bbox_nd
 from TPTBox.core.poi import Coordinate
-from skimage.measure import marching_cubes
 
 log = vc.log
 logging = vc.logging

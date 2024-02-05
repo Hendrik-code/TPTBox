@@ -1,7 +1,7 @@
-from pathlib import Path
-import sys
 import os
+import sys
 import tempfile
+from pathlib import Path
 
 file = Path(__file__).resolve()
 sys.path.append(str(file.parents[2]))
@@ -13,8 +13,8 @@ import numpy as np
 from TPTBox import Centroids
 from TPTBox.core.nii_wrapper import NII
 from TPTBox.core.poi import (
-    POI,
     LABEL_MAX,
+    POI,
     VertebraCentroids,
     _poi_to_dict_list,
     calc_centroids_from_subreg_vert,
@@ -28,7 +28,6 @@ if not os.path.isdir("test"):
 file = Path(__file__).resolve()
 sys.path.append(str(file.parents[2]))
 import TPTBox.core.bids_files as bids
-
 
 repeats = 20
 

@@ -1,28 +1,29 @@
 import json
 import os
+import sys
 from pathlib import Path
 
 import matplotlib.colors
 import matplotlib.pyplot as plt
 from skimage.measure import marching_cubes
-import sys
 
 sys.path.append(str(Path(__file__).parent.parent))
-from TPTBox import (
-    Centroids,
-    NII,
-    POI_Reference,
-    Image_Reference,
-    to_nii_seg,
-)
 import numpy as np
-from TPTBox.core.poi import POI
-from TPTBox.snapshot3D.cut_single_vertebra import calculate_cbbox_cutout_coords, make_3d_cutout
 import pyvista as pv
 from tqdm import tqdm
 
+from TPTBox import (
+    NII,
+    Centroids,
+    Image_Reference,
+    POI_Reference,
+    to_nii_seg,
+)
+from TPTBox.core.poi import POI
+from TPTBox.snapshot3D.cut_single_vertebra import calculate_cbbox_cutout_coords, make_3d_cutout
+
 """
-This function reads the POI's saved in the "poi_space-aligASL_msk.json" file in the derivatives 
+This function reads the POI's saved in the "poi_space-aligASL_msk.json" file in the derivatives
 folder and plots them together with the vertebrae.
 
 Author: Kati, Hendrik
@@ -83,7 +84,7 @@ def plot_POIs_(path_to_derivatives, subject_number):  # k=subject to plot | k= i
 
             poi_lst = []
             # Loop through POIs
-            for poi_ind in conversion_poi.keys():
+            for poi_ind in conversion_poi:
                 # If the POI is not in the list, it will be skipped
                 try:
                     # read POI
@@ -91,7 +92,7 @@ def plot_POIs_(path_to_derivatives, subject_number):  # k=subject to plot | k= i
                     poi_lst.append(current_POI)
 
                 except:
-                    print("POI with label {} could not be found in the POI list for vert {}".format(poi_ind, i + 1))
+                    print(f"POI with label {poi_ind} could not be found in the POI list for vert {i + 1}")
 
             # saving all information for the last vert in the list of verts
             vert_lst.append(poi_lst)
@@ -123,7 +124,7 @@ def plot_POIs_(path_to_derivatives, subject_number):  # k=subject to plot | k= i
     for l, vert in enumerate(vert_lst):
         print("current vert is {}".format(POIs[l]["vert_label"]))
         # iterate through the POIs and LMs and add them to the plotter
-        for j in range(0, len(vert)):
+        for j in range(len(vert)):
             p.add_points(np.asarray(vert[j]), render_points_as_spheres=True, point_size=10, color="orange")
 
     p.show()

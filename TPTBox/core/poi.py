@@ -88,8 +88,7 @@ class POI(Abstract_POI):
         ...     (1, 0): (10.0, 20.0, 30.0),
         ...     (2, 1): (15.0, 25.0, 35.0),
         ... }
-        >>> poi_obj = POI(centroids=poi_data, orientation=("R", "A", "S"), zoom=(1.0, 1.0, 1.0),
-        ...               shape=(256, 256, 100))
+        >>> poi_obj = POI(centroids=poi_data, orientation=("R", "A", "S"), zoom=(1.0, 1.0, 1.0), shape=(256, 256, 100))
 
         >>> # Access attributes
         >>> print(poi_obj.orientation)
@@ -864,7 +863,7 @@ def _poi_to_dict_list(ctd: POI, additional_info: dict | None, save_hint=0, verbo
         if k not in ori:
             ori[k] = v
 
-    dict_list: list[Union[_Orientation, _Point3D | dict]] = [ori]
+    dict_list: list[_Orientation | (_Point3D | dict)] = [ori]
 
     if save_hint == FORMAT_OLD_POI:
         ctd = ctd.rescale((1, 1, 1), verbose=verbose).reorient_(("R", "P", "I"), verbose=verbose)

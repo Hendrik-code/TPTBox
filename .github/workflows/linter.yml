@@ -12,8 +12,13 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - uses: actions/setup-python@v3
-      with:
-        python-version: 3.10
-        cache: "pip"
     - run: pip install ruff
-    - run: ruff check .
+    - run: ruff check . #--fix
+    #- uses: chartboost/ruff-action@v1
+    #  with:
+    #    fix_args: --fix
+    #  with:
+    #    args: --check .
+    - uses: stefanzweifel/git-auto-commit-action@v4
+      with:
+        commit_message: 'style fixes by ruff'

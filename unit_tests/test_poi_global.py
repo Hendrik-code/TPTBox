@@ -7,7 +7,7 @@ import numpy as np
 
 from TPTBox import POI, Ax_Codes, POI_Global
 from TPTBox.core.poi_abstract import POI_Descriptor
-from TPTBox.tests.test_utils import get_random_ax_code, get_poi
+from TPTBox.tests.test_utils import get_poi, get_random_ax_code
 
 
 class TestPOI(unittest.TestCase):

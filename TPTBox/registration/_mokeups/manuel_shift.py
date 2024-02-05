@@ -1,7 +1,9 @@
 from pathlib import Path
+
 import nibabel as nib
-from TPTBox import NII
 import numpy as np
+
+from TPTBox import NII
 
 name = "spinegan0064/target-302_from-301/"
 

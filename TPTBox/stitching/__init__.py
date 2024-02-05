@@ -1,1 +1,1 @@
-from TPTBox.stitching.stitching_tools import stitching_raw, stitching, GNC_stitch_T2w
+from TPTBox.stitching.stitching_tools import GNC_stitch_T2w, stitching, stitching_raw

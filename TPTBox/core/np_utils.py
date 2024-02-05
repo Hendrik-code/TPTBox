@@ -3,9 +3,10 @@ import warnings
 from collections.abc import Callable, Sequence
 
 import numpy as np
-from TPTBox.core.vert_constants import Label_Map, Label_Reference
 from scipy.ndimage import binary_erosion, binary_fill_holes, center_of_mass, generate_binary_structure
 from skimage.measure import euler_number, label
+
+from TPTBox.core.vert_constants import Label_Map, Label_Reference
 
 
 def np_extract_label(arr: np.ndarray, label: int, to_label: int = 1, inplace: bool = True) -> np.ndarray:
@@ -406,9 +407,7 @@ def np_get_connected_components_center_of_mass(arr: np.ndarray, label: int, conn
         _type_: _description_
     """
     if sort_by_axis is not None:
-        assert (
-            0 <= sort_by_axis <= len(arr.shape) - 1
-        ), f"sort_by_axis {sort_by_axis} invalid with an array of shape {arr.shape}"  # type:ignore
+        assert 0 <= sort_by_axis <= len(arr.shape) - 1, f"sort_by_axis {sort_by_axis} invalid with an array of shape {arr.shape}"  # type:ignore
     subreg_cc, subreg_cc_stats = np_connected_components(arr.copy(), connectivity=connectivity, label_ref=label, verbose=False)
     cc = subreg_cc[label]
     cc_label_set = np.unique(cc)

@@ -50,10 +50,10 @@ class Test_bids_file(unittest.TestCase):
             msk2 = msk2.rescale(voxel_spacing=voxel_spacing2, verbose=False)
             cdt2 = calc_centroids(msk2)
 
-            for (k1, k2, v), (k1_2, k2_2, v2) in zip(cdt.items(), cdt2.items()):
+            for (k1, k2, v), (k1_2, k2_2, v2) in zip(cdt.items(), cdt2.items(), strict=True):
                 self.assertEqual(k1, k1_2)
                 self.assertEqual(k2, k2_2)
-                for v, v2 in zip(v, v2):
+                for v, v2 in zip(v, v2, strict=True):
                     self.assertAlmostEqual(v, v2)
 
     def test_rescale_corners(self):
@@ -140,10 +140,10 @@ class Test_bids_file(unittest.TestCase):
             msk2 = msk.rescale_and_reorient(axcode, voxel_spacing=voxel_spacing, verbose=False, inplace=False)
             msk2 = msk2.rescale_and_reorient(axcode_start, voxel_spacing=voxel_spacing2, verbose=False)
             cdt2 = calc_centroids(msk2)
-            for (k1, k2, v), (k1_2, k2_2, v2) in zip(cdt.items(), cdt2.items()):
+            for (k1, k2, v), (k1_2, k2_2, v2) in zip(cdt.items(), cdt2.items(), strict=False):
                 self.assertEqual(k1, k1_2)
                 self.assertEqual(k2, k2_2)
-                for v, v2 in zip(v, v2):
+                for v, v2 in zip(v, v2, strict=False):
                     self.assertAlmostEqual(v, v2)
 
     def test_get_plane(self):

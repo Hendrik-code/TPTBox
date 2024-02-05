@@ -332,7 +332,7 @@ def main(  # noqa: C901
     print("### compute output shape and affine ###") if verbose else None
     if is_segmentation:
         max_value = max([x.get_fdata().max() for x in niis])
-        if max_value < 256:  # noqa: PLR2004
+        if max_value < 256:
             dtype2 = np.uint8
         elif max_value < 256 * 256:
             dtype2 = np.uint16
