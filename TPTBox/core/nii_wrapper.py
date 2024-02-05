@@ -202,6 +202,7 @@ class NII(NII_Math):
             self._header = header
         else:
             self.__unpacked = False
+            self.__divergent = False
             self._nii = nii
 
     @property
