@@ -27,11 +27,11 @@ from TPTBox import (
     calc_centroids,
     load_centroids,
     to_nii,
-    to_nii_optional,
+    to_nii_optional,/
     v_idx2name,
     v_idx_order,
 )
-from TPTBox.spine.mesh3D.vert_mesh_colors import vert_color_map
+from TPTBox.mesh3D.mesh_colors import _color_map_in_row  # vert_color_map
 
 NII.suppress_dtype_change_printout_in_set_array(True)
 """
@@ -123,7 +123,7 @@ colors_itk = (1 / 255) * np.array(
     ]
 )
 
-cm_itk = ListedColormap(vert_color_map / 255.0)  # type: ignore
+cm_itk = ListedColormap(_color_map_in_row / 255.0)  # type: ignore
 cm_itk.set_bad(color="w", alpha=0)  # set NaN to full opacity for overlay
 # define HU windows
 wdw_sbone = Normalize(vmin=-500, vmax=1300, clip=True)

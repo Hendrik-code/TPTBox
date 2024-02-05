@@ -1,4 +1,5 @@
 import numpy as np
+
 from TPTBox import v_idx2name
 from TPTBox.mesh3D.mesh_colors import Mesh_Color_List, _color_dict
 
@@ -21,3 +22,7 @@ vert3d_color_dict = {
     for i in range(1, 150)
 }
 vert_color_map = np.array([v.rgb for v in vert3d_color_dict.values()])
+
+
+if __name__ == "__main__":
+    print(vert3d_color_dict)
