@@ -19,6 +19,12 @@ class RGB_Color:
             assert rgb.dtype == int, "rgb numpy array not of type int!"
         return cls(tuple(rgb))
 
+    def __repr__(self) -> str:
+        return str(self)
+
+    def __str__(self) -> str:
+        return "RGB_Color-" + str(self.rgb)
+
     def __call__(self, normed: bool = False):
         if normed:
             return self.rgb / 255.0
@@ -105,6 +111,8 @@ _color_dict = {v: getattr(Mesh_Color_List, v) for v in vars(Mesh_Color_List) if 
 _color_mapping_by_label: dict[int, RGB_Color] = {
     i: _color_dict[f"ITK_{i}"] if f"ITK_{i}" in _color_dict else Mesh_Color_List.BLACK for i in range(1, 150)
 }
+
+_color_map_in_row = np.array([v.rgb for v in _color_mapping_by_label.values()])
 
 
 def get_color_by_label(label: int):
