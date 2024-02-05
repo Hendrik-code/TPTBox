@@ -1,14 +1,16 @@
 from __future__ import annotations
+
 import math
 import sys
 from pathlib import Path
 
 file = Path(__file__).resolve()
 sys.path.append(str(file.parents[1]))
-from TPTBox.core.bids_files import BIDS_FILE
+import nibabel as nib
 import numpy as np
 from nii_utils import calc_centroids, centroids_to_dict_list
-import nibabel as nib
+
+from TPTBox.core.bids_files import BIDS_FILE
 
 if __name__ == "__main__":
     if False:

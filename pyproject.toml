@@ -134,6 +134,7 @@ ignore = [
     "TRY003",
     "UP038",
     "N999","E741",
+    "SIM118", # dictionay keys
 ]
 
 # Allow fix for all enabled rules (when `--fix`) is provided.
@@ -141,7 +142,7 @@ fixable = ["ALL"]
 unfixable = []
 ignore-init-module-imports = true
 extend-safe-fixes = ["RUF015", "C419", "C408", "B006"]
-#unnecessary-iterable-allocation-for-first-element = true 
+#unnecessary-iterable-allocation-for-first-element = true
 
 
 # Allow unused variables when underscore-prefixed.
@@ -170,7 +171,7 @@ docstring-code-format = true
 # Like Black, automatically detect the appropriate line ending.
 line-ending = "auto"
 # Add this to your setting.json (user)
-# Ctrl+shift+P settings json 
+# Ctrl+shift+P settings json
 #"[python]": {
 #        "editor.formatOnSave": true,
 #        "editor.defaultFormatter": "charliermarsh.ruff",

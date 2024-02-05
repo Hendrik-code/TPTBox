@@ -2,8 +2,7 @@
 from __future__ import annotations
 
 from TPTBox import *
-from TPTBox.docker.docker import run_docker_on_sample_advanced, run_docker_on_ds_advanced
-
+from TPTBox.docker.docker import run_docker_on_ds_advanced, run_docker_on_sample_advanced
 
 if __name__ == "__main__":
     import configargparse as argparse

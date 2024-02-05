@@ -4,14 +4,14 @@ from collections.abc import Sequence
 from enum import Enum
 from math import ceil, floor
 from pathlib import Path
-from typing import Literal, TypeVar, Union
+from typing import TYPE_CHECKING, Literal, TypeVar, Union
 
 import nibabel as nib
 import nibabel.orientations as nio
 import nibabel.processing as nip
 import numpy as np
 from nibabel import Nifti1Header, Nifti1Image  # type: ignore
-from typing_extensions import TYPE_CHECKING, Self
+from typing_extensions import Self
 
 from TPTBox.core.nii_wrapper_math import NII_Math
 from TPTBox.core.np_utils import (
@@ -1140,18 +1140,18 @@ class NII(NII_Math):
     def volumes(self, labels: vc.Label_Reference = None) -> dict[int, int]:
         '''Returns a dict stating how many pixels are present for each label (including zero!)'''
         return np_volume(self.get_seg_array(), label_ref=labels)
-    
+
     def assert_affine(
-            self, 
-            other: Self | "POI" | None = None, 
-            affine: AFFINE | None = None, 
-            zoom: Zooms | None = None, 
-            orientation: Ax_Codes | None = None, 
+            self,
+            other: Self | "POI" | None = None,
+            affine: AFFINE | None = None,
+            zoom: Zooms | None = None,
+            orientation: Ax_Codes | None = None,
             rotation: ROTATION | None = None,
-            origin: ORIGIN | None = None, 
-            shape: SHAPE | None = None, 
-            error_tolerance: float = 1e-4, 
-            raise_error: bool = True, 
+            origin: ORIGIN | None = None,
+            shape: SHAPE | None = None,
+            error_tolerance: float = 1e-4,
+            raise_error: bool = True,
             verbose: logging = False,):
         """Checks if the different metadata is equal to some comparison entries
 
@@ -1180,7 +1180,7 @@ class NII(NII_Math):
             other_data = other._extract_affine()
             other_match = self.assert_affine(other=None, **other_data)
             if not other_match:
-                found_errors.append(f"object mismatch {str(self)}, {str(other)}")
+                found_errors.append(f"object mismatch {self!s}, {other!s}")
         if affine is not None:
             affine_diff = self.affine - affine
             affine_match = np.all([a <= error_tolerance for a in affine_diff.flatten()])
@@ -1213,7 +1213,7 @@ class NII(NII_Math):
         has_errors = len(found_errors) > 0
         if raise_error and has_errors:
             raise AssertionError(f"assert_affine failed with {found_errors}")
-        
+
         return not has_errors
 
 

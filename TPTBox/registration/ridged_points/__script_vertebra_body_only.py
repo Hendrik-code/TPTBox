@@ -1,7 +1,8 @@
 from __future__ import annotations
+
 import sys
-from pathlib import Path
 import time
+from pathlib import Path
 
 from TPTBox.core.bids_files import BIDS_Family
 
@@ -10,14 +11,14 @@ sys.path.append(str(file.parents[1]))
 
 import math
 import os
-
-from typing import List
-import SimpleITK as sitk
 import secrets
 import traceback
-from TPTBox import BIDS_FILE, BIDS_Global_info, Searchquery, Subject_Container
-from TPTBox import POI_Reference, calc_centroids_labeled_buffered
+from typing import List
+
 import numpy as np
+import SimpleITK as sitk
+
+from TPTBox import BIDS_FILE, BIDS_Global_info, POI_Reference, Searchquery, Subject_Container, calc_centroids_labeled_buffered
 
 
 def crop_slice(msk):
@@ -56,7 +57,7 @@ def ridged_point_registration(
                 f_key.remove(key)
                 return rep
         print("No supported representative file")
-        raise NotImplemented()
+        raise NotImplementedError()
 
     a_representative = find_representative(a_list, a_key)
     b_representative = find_representative(b_list, b_key)
@@ -122,7 +123,7 @@ def ridged_point_registration(
         ex_slice_f, _ = crop_slice(sitk.GetArrayFromImage(img_a_sitk))
         ex_slice_m, _ = crop_slice(sitk.GetArrayFromImage(transformed_img))
 
-        ex_slice = [slice(max(a.start, b.start), min(a.stop, b.stop)) for a, b in zip(ex_slice_f, ex_slice_m)]
+        ex_slice = [slice(max(a.start, b.start), min(a.stop, b.stop)) for a, b in zip(ex_slice_f, ex_slice_m, strict=False)]
 
         print(ex_slice_f, ex_slice_m, ex_slice)
         target_sequ = a_representative.info["sequ"]
@@ -183,8 +184,8 @@ def ridged_point_registration(
             try:
                 img = nii_to_iso_sitk_img2(bids, tmp)
                 register_and_save_file(img, bids, True)
-            except Exception as e:
-                print(f"[!] Fail to register a sub_file, others will be registered \n\t{bids}\n\t {str(traceback.format_exc())}")
+            except Exception:
+                print(f"[!] Fail to register a sub_file, others will be registered \n\t{bids}\n\t {traceback.format_exc()!s}")
 
         # Single file from B
         register_and_save_file(img_b_sitk, b_representative, False)
@@ -192,7 +193,7 @@ def ridged_point_registration(
             img = nii_to_iso_sitk_img2(bids, tmp)
             register_and_save_file(img, bids, False)
 
-    except Exception as e:
+    except Exception:
         print("[!] Failed")
         print("\t", a_ctd)
         print("\t", b_ctd)
@@ -219,9 +220,9 @@ def _parallelized_preprocess_scan(subj_name, subject: Subject_Container, force_o
     # query1.filter("sequ", "303")
 
     for dict_A in query1.loop_dict():
-        if not "ctd" in dict_A or ("msk" in dict_A and force_override_A):
+        if "ctd" not in dict_A or ("msk" in dict_A and force_override_A):
             assert "msk" in dict_A, "No centroid file"
-            assert not isinstance(dict_A["msk"], List), f"{dict_A['msk']} contains more than one file"
+            assert not isinstance(dict_A["msk"], list), f"{dict_A['msk']} contains more than one file"
             msk_bids: BIDS_FILE = dict_A["msk"][0]
             cdt_file: Path = msk_bids.get_changed_path(file_type="json", format="ctd", info={"seg": "subreg"}, parent="derivatives_msk")
             print(cdt_file)
@@ -252,7 +253,7 @@ def _parallelized_preprocess_scan(subj_name, subject: Subject_Container, force_o
                 out = []
                 keys = []
                 for k, v in d.items():
-                    if isinstance(v, List):
+                    if isinstance(v, list):
                         for i, l in enumerate(v):
                             if "nii.gz" in l.file:
                                 out.append(l)
@@ -303,14 +304,12 @@ def parallel_execution(n_jobs, force_override_A=False):
     print(f"Found {len(global_info.subjects)} subjects in {global_info.datasets}")
 
     if n_jobs > 1:
-        print("[*] Running {} parallel jobs. Note that stdout will not be sequential".format(n_jobs))
+        print(f"[*] Running {n_jobs} parallel jobs. Note that stdout will not be sequential")
 
     Parallel(n_jobs=n_jobs)(
         delayed(_parallelized_preprocess_scan)(subj_name, subject, force_override_A)
         for subj_name, subject in global_info.enumerate_subjects()
     )
-
-    return None
 
 
 if __name__ == "__main__":

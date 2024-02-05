@@ -5,6 +5,7 @@ import SimpleITK as sitk
 
 if TYPE_CHECKING:
     from nibabel import Nifti1Image
+
     from TPTBox import NII, POI
 
 
@@ -295,11 +296,11 @@ def sitk_to_nii(image: sitk.Image, seg: bool) -> "NII":
 
 def transform_centroid(ctd: "POI", transform: sitk.Transform, img_fixed: sitk.Image, img_moving: sitk.Image, reg_type):
     import TPTBox
-    from TPTBox.core.poi import POI, POI_Dict, POI_Descriptor
+    from TPTBox.core.poi import POI, POI_Descriptor, POI_Dict
 
     out = TPTBox.core.poi.POI_Descriptor()
 
-    if "deformable" == reg_type:
+    if reg_type == "deformable":
         for key, key2, (x, y, z) in ctd.items():
             ctr_b = transform.TransformPoint((x, y, z))
             out[key, key2] = ctr_b

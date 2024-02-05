@@ -5,27 +5,25 @@ from pathlib import Path
 
 file = Path(__file__).resolve()
 sys.path.append(str(file.parents[2]))
+
+import nibabel as nib
 import numpy as np
 import SimpleITK as sitk
 from joblib import Parallel, delayed
 
-from TPTBox import NII, Centroids, Image_Reference, calc_centroids, load_centroids, to_nii_seg
-from TPTBox.core import sitk_utils
-from TPTBox.core.bids_files import BIDS_FILE
-from TPTBox.core.sitk_utils import to_str_sitk
-from TPTBox.core import sitk_utils
-from joblib import Parallel, delayed
-import nibabel as nib
 from TPTBox import (
     NII,
     POI,
-    load_poi,
-    load_centroids,
-    calc_centroids,
+    Centroids,
     Image_Reference,
+    calc_centroids,
+    load_centroids,
+    load_poi,
     to_nii_seg,
 )
-from dataclasses import dataclass
+from TPTBox.core import sitk_utils
+from TPTBox.core.bids_files import BIDS_FILE
+from TPTBox.core.sitk_utils import to_str_sitk
 
 # import dcmstack
 
@@ -231,7 +229,7 @@ def post_processing(out_nii: NII, GT: NII):
     tmp3[tmp3 != 2] = 0
     x, y, z = np.where(tmp3 == 2)
     seeds = []
-    for x, y, z in zip(x, y, z):
+    for x, y, z in zip(x, y, z, strict=False):
         if _is_border(x, y, z, out_arr):
             seeds.append((x, y, z))
     next_seeds = []
@@ -472,9 +470,8 @@ def make_atlas_from_sample(
 
 
 def make_snap_og():
-    from TPTBox import Centroids
-    from TPTBox.snapshot2D.snapshot_templates import poi_snapshot
     from TPTBox import POI
+    from TPTBox.snapshot2D.snapshot_templates import poi_snapshot
 
     def make_snap(file):
         id = file.stem

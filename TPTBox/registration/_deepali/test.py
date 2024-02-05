@@ -1,6 +1,7 @@
 import os
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Optional, Tuple, Type, cast
+from typing import Any, Optional, Tuple, Type, cast
 
 import matplotlib.pyplot as plt
 import torch
@@ -15,7 +16,7 @@ try:
     from deepali.core.environ import cuda_visible_devices
 except ImportError:
     raise ModuleNotFoundError("git clone https://github.com/BioMedIA/deepali.git && pip install ./deepali")
-import deepali.spatial as spatial
+from deepali import spatial
 from deepali.core import functional as U
 from deepali.data import Image
 from deepali.losses import functional as L
@@ -23,10 +24,10 @@ from torchvision.transforms import ToTensor
 
 ImagePyramid = dict[int, Image]
 LossFunction = Callable[[Tensor, Tensor, spatial.SpatialTransform], Tensor | dict[str, Tensor]]
-TransformCls = str | Type[spatial.SpatialTransform]
-TransformArg = TransformCls | Tuple[TransformCls, dict[str, Any]]
-OptimizerCls = str | Type[optim.Optimizer]
-OptimizerArg = OptimizerCls | Tuple[OptimizerCls, dict[str, Any]]
+TransformCls = str | type[spatial.SpatialTransform]
+TransformArg = TransformCls | tuple[TransformCls, dict[str, Any]]
+OptimizerCls = str | type[optim.Optimizer]
+OptimizerArg = OptimizerCls | tuple[OptimizerCls, dict[str, Any]]
 from deepali.core import Grid
 from deepali.core.enum import PaddingMode, Sampling
 
@@ -154,8 +155,8 @@ def loss_fn(
 def image_pyramid(
     image: Tensor | Image | ImagePyramid,
     levels: int,
-    grid: Optional[Grid] = None,
-    device: Optional[torch.device] = None,
+    grid: Grid | None = None,
+    device: torch.device | None = None,
 ) -> ImagePyramid:
     r"""Consruct image pyramid from image tensor."""
     if isinstance(image, dict):
@@ -181,7 +182,7 @@ def image_pyramid(
     return pyramid
 
 
-def init_transform(transform: TransformArg, grid: Grid, device: Optional[torch.device] = None) -> spatial.SpatialTransform:
+def init_transform(transform: TransformArg, grid: Grid, device: torch.device | None = None) -> spatial.SpatialTransform:
     r"""Auxiliary functiont to create spatial transform."""
     if isinstance(transform, tuple):
         cls, args = transform
@@ -217,10 +218,12 @@ def multi_resolution_registration(
     optimizer: OptimizerArg,
     iterations: int | list[int] = 100,
     levels: int = 3,
-    device: Optional[str | int | torch.device] = None,
-    skip_levels=[],
+    device: str | int | torch.device | None = None,
+    skip_levels=None,
 ) -> spatial.SpatialTransform:
     r"""Multi-resolution pairwise image registration."""
+    if skip_levels is None:
+        skip_levels = []
     if device is None:
         if isinstance(target, dict):
             device = next(iter(target.values())).device
@@ -236,7 +239,7 @@ def multi_resolution_registration(
         iterations = [iterations]
     iterations = list(iterations)
     iterations += [iterations[-1]] * (levels - len(iterations))
-    for level, steps in zip(reversed(range(levels)), iterations):
+    for level, steps in zip(reversed(range(levels)), iterations, strict=False):
         model.grid_(target[level].grid())
         target_batch = target[level].batch().tensor()
         source_batch = source[level].batch().tensor()
@@ -248,7 +251,7 @@ def multi_resolution_registration(
             warped_batch: Tensor = transformer(source_batch)
             loss = loss_fn(warped_batch, target_batch, model)
             if isinstance(loss, Tensor):
-                loss = dict(loss=loss)
+                loss = {"loss": loss}
             pbar.set_description(f"Level {level}")
             pbar.set_postfix({k: v.item() for k, v in loss.items()})
             optim.zero_grad()
