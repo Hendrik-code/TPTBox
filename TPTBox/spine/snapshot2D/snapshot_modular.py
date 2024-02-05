@@ -27,7 +27,7 @@ from TPTBox import (
     calc_centroids,
     load_centroids,
     to_nii,
-    to_nii_optional,/
+    to_nii_optional,
     v_idx2name,
     v_idx_order,
 )
