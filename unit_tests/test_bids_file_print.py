@@ -2,21 +2,21 @@
 # coverage run -m unittest
 # coverage report
 # coverage html
-from pathlib import Path
-import unittest
-import sys
 import os
+import sys
+import unittest
+from pathlib import Path
 
 if not os.path.isdir("test"):
     sys.path.append("..")
 file = Path(__file__).resolve()
 sys.path.append(str(file.parents[2]))
+import io
+import unittest.mock
+
 import TPTBox.core.bids_files as bids
 from TPTBox import BIDS_FILE
-import io
-import unittest
-import unittest.mock
-from TPTBox.tests.test_utils import get_BIDS_test, a
+from TPTBox.tests.test_utils import a, get_BIDS_test
 
 
 class Test_bids_file(unittest.TestCase):

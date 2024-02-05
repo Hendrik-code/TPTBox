@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import sys
 from pathlib import Path
 
@@ -7,21 +8,21 @@ sys.path.append(str(file.parents[1]))
 
 import math
 import os
-
-from typing import List
-import SimpleITK as sitk
 import secrets
-import traceback
 import sys
+import traceback
+from typing import List
 
+import SimpleITK as sitk
 from sitk_utils import pad_same
 
 file = Path(__file__).resolve()
 sys.path.append(str(file.parents[1]))
 
 # sys.path.append("..")
-from TPTBox import BIDS_FILE, BIDS_Global_info, Subject_Container, BIDS_Family, calc_centroids_labeled_buffered
 import numpy as np
+
+from TPTBox import BIDS_FILE, BIDS_Family, BIDS_Global_info, Subject_Container, calc_centroids_labeled_buffered
 
 
 def crop_slice(msk, dist=20):
@@ -148,8 +149,8 @@ def ridged_point_registration(ctds: list[Path | BIDS_FILE | dict[str, BIDS_FILE]
                 #    img = nii_to_iso_sitk_img(bids, return_inter=False)
                 #    register_and_save_file(img, bids, False)
 
-            except BaseException as e:
-                print(f"[!] Failed \n\t{ctds}\n\t{files}\n\t{keys}\n\t {str(traceback.format_exc())}")
+            except BaseException:
+                print(f"[!] Failed \n\t{ctds}\n\t{files}\n\t{keys}\n\t {traceback.format_exc()!s}")
 
             finally:
                 import shutil
@@ -161,7 +162,7 @@ def extract_nii(d: BIDS_Family):
     out = []
     keys = []
     for k, v in d.items():
-        if isinstance(v, List):
+        if isinstance(v, list):
             for i, l in enumerate(v):
                 if "nii.gz" in l.file:
                     out.append(l)
@@ -182,9 +183,9 @@ def _parallelized_preprocess_scan(typ, subject: Subject_Container, force_overrid
         query.filter("format", "msk")
 
         for dict_A in query.loop_dict():
-            if not "ctd" in dict_A or ("msk" in dict_A and force_override_A):
+            if "ctd" not in dict_A or ("msk" in dict_A and force_override_A):
                 assert "msk" in dict_A, "No centroid file"
-                assert not isinstance(dict_A["msk"], List), f"{dict_A['msk']} contains more than one file"
+                assert not isinstance(dict_A["msk"], list), f"{dict_A['msk']} contains more than one file"
                 msk_bids: BIDS_FILE = dict_A["msk"][0]
                 cdt_file: Path = msk_bids.get_changed_path(file_type="json", format="ctd", info={"seg": "subreg"})
                 print(cdt_file)
@@ -223,14 +224,12 @@ def parallel_execution(n_jobs, force_override_A=False):
     print(f"Found {len(global_info.subjects)} subjects in {global_info.datasets}")
 
     if n_jobs > 1:
-        print("[*] Running {} parallel jobs. Note that stdout will not be sequential".format(n_jobs))
+        print(f"[*] Running {n_jobs} parallel jobs. Note that stdout will not be sequential")
 
     Parallel(n_jobs=n_jobs)(
         delayed(_parallelized_preprocess_scan)("dixon", subject, force_override_A)
         for subj_name, subject in global_info.enumerate_subjects()
     )
-
-    return None
 
 
 if __name__ == "__main__":

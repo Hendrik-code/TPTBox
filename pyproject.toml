@@ -27,6 +27,7 @@ fill-voids = "^2.0.6"
 pyvista = "^0.43.2"
 connected-components-3d = "^3.12.3"
 antspyx = "*"
+pre-commit = "*"
 
 [build-system]
 requires = ["poetry-core>=1.0.0", "poetry-dynamic-versioning>=1.0.0,<2.0.0"]
@@ -96,7 +97,7 @@ select = [
     "INT",
     "ARG",
     "PTH",
-    "TD",
+    "TD005",
     "FIX003",
     "FIX004",
     #"ERA", For clean up
@@ -116,6 +117,7 @@ select = [
 
 
 ignore = [
+    "F401",
     "BLE001",
     "E501",
     "N801",
@@ -132,6 +134,8 @@ ignore = [
     "TRY003",
     "UP038",
     "N999","E741",
+    "SIM118", # dictionay keys
+    "N802", # function name lowercase
 ]
 
 # Allow fix for all enabled rules (when `--fix`) is provided.
@@ -139,7 +143,7 @@ fixable = ["ALL"]
 unfixable = []
 ignore-init-module-imports = true
 extend-safe-fixes = ["RUF015", "C419", "C408", "B006"]
-#unnecessary-iterable-allocation-for-first-element = true 
+#unnecessary-iterable-allocation-for-first-element = true
 
 
 # Allow unused variables when underscore-prefixed.
@@ -168,7 +172,7 @@ docstring-code-format = true
 # Like Black, automatically detect the appropriate line ending.
 line-ending = "auto"
 # Add this to your setting.json (user)
-# Ctrl+shift+P settings json 
+# Ctrl+shift+P settings json
 #"[python]": {
 #        "editor.formatOnSave": true,
 #        "editor.defaultFormatter": "charliermarsh.ruff",

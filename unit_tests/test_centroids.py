@@ -25,7 +25,7 @@ from TPTBox.core.poi import (
     load_poi,
 )
 from TPTBox.core.vert_constants import *
-from TPTBox.tests.test_utils import overlap, repeats, get_nii, get_centroids, get_random_ax_code
+from TPTBox.tests.test_utils import get_centroids, get_nii, get_random_ax_code, overlap, repeats
 
 
 class Test_Centroids(unittest.TestCase):
@@ -78,7 +78,7 @@ class Test_Centroids(unittest.TestCase):
     #    p = get_centroids(num_point=33)
     #    vc = VertebraCentroids(p.centroids, p.orientation, (1, 1, 1)).sort()
     #    self.assertEqual(len(vc), len(p))
-    #    for (k1, k2, _), j in zip(vc.items(), v_idx_order, strict=False):  # noqa: F405
+    #    for (k1, k2, _), j in zip(vc.items(), v_idx_order, strict=False):
     #        self.assertEqual(k1, j)
     #    self.assertEqual(
     #        [a for a, b in list(vc)],

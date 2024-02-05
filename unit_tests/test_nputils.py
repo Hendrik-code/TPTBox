@@ -62,7 +62,7 @@ class Test_bids_file(unittest.TestCase):
             correct = {}
             for source, target in labelmap.items():
                 v = volume[source]
-                if target not in correct.keys():
+                if target not in correct:
                     correct[target] = 0
                 correct[target] += v
 

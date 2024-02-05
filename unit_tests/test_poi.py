@@ -11,9 +11,17 @@ import nibabel as nib
 import numpy as np
 
 from TPTBox.core.nii_wrapper import NII
-from TPTBox.core.poi import *
-from TPTBox.core.poi import LABEL_MAX, POI, _poi_to_dict_list, calc_centroids
-from TPTBox.tests.test_utils import overlap, sqr1d, repeats, get_centroids, extract_affine, get_random_ax_code, get_poi
+from TPTBox.core.poi import (
+    LABEL_MAX,
+    POI,
+    Location,
+    _poi_to_dict_list,
+    calc_centroids,
+    calc_centroids_from_subreg_vert,
+    calc_centroids_labeled_buffered,
+    load_poi,
+)
+from TPTBox.tests.test_utils import extract_affine, get_centroids, get_poi, get_random_ax_code, overlap, repeats, sqr1d
 
 
 def get_nii(x: tuple[int, int, int] | None = None, num_point=3, rotation=True):  # type: ignore
@@ -104,7 +112,7 @@ class Test_POI(unittest.TestCase):
                 msk, cent, order, sizes = get_nii(num_point=random.randint(1, 7))
                 poi = calc_centroids(msk)
                 msg = "\n\n"
-                for x, y in zip(cent, sizes):
+                for x, y in zip(cent, sizes, strict=True):
                     msg += f"{x} - {cent[x]},{y}\n"
                 self.assertEqual(cent, poi.centroids.pois, msg=msg)
                 self.assert_affine(poi, msk)
@@ -160,31 +168,6 @@ class Test_POI(unittest.TestCase):
         self.assert_affine(out, msk2)
         self.assertEqual(out, cent2)
         file.unlink(missing_ok=True)
-
-    # def test_calc_POI_labeled_bufferd2(self):
-    #    msk, cent, order, sizes = get_nii(num_point=random.randint(1, 7))
-    #    msk2, cent2, order2, sizes2 = get_nii(num_point=len(cent) - 1)
-    #    arr = msk.get_array()
-    #    arr[arr != 0] = 50
-    #    subreg = NII(nib.Nifti1Image(arr, msk.affine), True)
-    #    arr = msk2.get_array()
-    #    arr[arr != 0] = 50
-    #    subreg2 = NII(nib.Nifti1Image(arr, msk.affine), True)
-    #    cent = POI(cent, orientation=order, zoom=(1, 1, 1), **extract_affine(msk))  # TODO add rotation and origin
-    #    cent2 = POI(cent2, orientation=order2, zoom=(1, 1, 1), **extract_affine(msk2))  # TODO
-    #    file = Path(tempfile.gettempdir(), "test_save_load_POI.json")
-    #    file.unlink(missing_ok=True)
-    #    out = calc_centroids_labeled_buffered(msk, subreg, out_path=file, verbose=False)
-    #    self.assertEqual(out, cent)
-    #    self.assert_affine(out, cent)
-    #    out = calc_centroids_labeled_buffered(msk2, subreg2, out_path=file, verbose=False)
-    #    self.assertEqual(out, cent)
-    #    self.assert_affine(out, cent)
-    #    file.unlink(missing_ok=True)
-    #    out = calc_centroids_labeled_buffered(msk2, subreg2, out_path=file, verbose=False)
-    #    self.assertEqual(out, cent2)
-    #    self.assert_affine(out, cent2)
-    #    file.unlink(missing_ok=True)
 
     def test_calc_POI_from_subreg_vert(self):
         msk, cent, order, sizes = get_nii(num_point=random.randint(1, 7))
@@ -358,11 +341,11 @@ class Test_POI(unittest.TestCase):
             assert cdt2.shape is not None
             cdt2.shape = tuple(round(float(v), 0) for v in cdt2.shape)
             self.assert_affine(cdt, cdt2)
-            for (k, s, v), (k2, s2, v2) in zip(cdt.items(), cdt2.items()):
+            for (k, s, v), (k2, s2, v2) in zip(cdt.items(), cdt2.items(), strict=True):
                 self.assertEqual(k, k2)
                 self.assertEqual(s, s2)
-                for v, v2 in zip(v, v2):
-                    self.assertAlmostEqual(v, v2)
+                for v3, v4 in zip(v, v2, strict=True):
+                    self.assertAlmostEqual(v3, v4)
 
     def test_rescale_nii(self):
         for _ in range(repeats):
@@ -395,7 +378,7 @@ class Test_POI(unittest.TestCase):
                     not_in_list.append((a, b))
                 tries -= 1
                 assert tries != 0, (in_list, not_in_list)
-            mapping = {i: k for i, k in zip(in_list, not_in_list)}
+            mapping = dict(zip(in_list, not_in_list, strict=True))
             cdt2 = cdt.map_labels(label_map_full=mapping)
 
             for a in in_list:
@@ -410,7 +393,7 @@ class Test_POI(unittest.TestCase):
             num = random.randint(2, 98)
             cdt = get_poi(num_vert=num, num_subreg=random.randint(1, 5))
             a = random.sample(range(1, 99), num)
-            mapping = {i: k for i, k in enumerate(a, start=1)}
+            mapping = dict(enumerate(a, start=1))
             cdt2 = cdt.map_labels(label_map_region=mapping)  # type: ignore
             self.assertEqual(len(cdt), len(cdt2))
             self.assertNotEqual(cdt, cdt2)
@@ -454,21 +437,21 @@ class Test_POI(unittest.TestCase):
             poi.reorient_(axcodes_to=axcode)
             glob_ctd = poi.to_global()
             poi2 = glob_ctd.to_other_nii(msk)
-            for (k, s, v), (k2, s2, v2) in zip(poi.items(), poi2.items()):
+            for (k, s, v), (k2, s2, v2) in zip(poi.items(), poi2.items(), strict=True):
                 self.assertEqual(k, k2)
                 self.assertEqual(s, s2)
-                for v, v2 in zip(v, v2):
-                    self.assertAlmostEqual(v, v2, places=6)
+                for v3, v4 in zip(v, v2, strict=True):
+                    self.assertAlmostEqual(v3, v4, places=6)
 
             self.assert_affine(poi2, msk)
 
             glob_ctd = poi.to_global()
             poi2 = glob_ctd.to_other_poi(poi)
-            for (k, s, v), (k2, s2, v2) in zip(poi.items(), poi2.items()):
+            for (k, s, v), (k2, s2, v2) in zip(poi.items(), poi2.items(), strict=True):
                 self.assertEqual(k, k2)
                 self.assertEqual(s, s2)
-                for v, v2 in zip(v, v2):
-                    self.assertAlmostEqual(v, v2, places=6)
+                for v3, v4 in zip(v, v2, strict=True):
+                    self.assertAlmostEqual(v3, v4, places=6)
             self.assert_affine(poi2, msk)
 
     def test_poi_to_global(self):
@@ -501,16 +484,31 @@ class Test_POI(unittest.TestCase):
         self.assertEqual(cdt_res, cdt2, msg=f"'\n{cdt_res}, \n{cdt2}")
 
     def test_resample_from_to(self):
-        for _ in range(repeats):
+        for _ in range(repeats * 100):
             cdt = get_poi(num_vert=random.randint(1, 1), num_subreg=random.randint(1, 1), max_subreg=50)
             cdt2 = cdt.reorient(get_random_ax_code())
-            cdt2.rescale_((random.random() * 5 + 0.3, random.random() * 5 + 0.3, random.random() * 5 + 0.3)).round(2)
-            cdt_res = cdt.resample_from_to(cdt2).round(0)
-            self.assertEqual(cdt_res, cdt2.round_(0), msg=f"\n{cdt_res}, \n{cdt2}")
+            cdt2.rescale_((random.random() * 5 + 0.3, random.random() * 5 + 0.3, random.random() * 5 + 0.3))  # .round(2)
+            cdt_res = cdt.resample_from_to(cdt2)  # .round(1)
+            # self.assertEqual(cdt_res, cdt2.round_(1), msg=f"\n{cdt_res}, \n{cdt2}")
+            for idx, v in cdt_res.items_flatten():
+                for c in range(3):
+                    self.assertAlmostEqual(v[c], cdt2[idx][c], delta=1e-2)
 
 
 if __name__ == "__main__":
     unittest.main()
 
+    # @unittest.skipIf(condition, reason)
+    # with self.subTest(i=i):
+    # @unittest.skipIf(condition, reason)
+    # with self.subTest(i=i):
+    # @unittest.skipIf(condition, reason)
+    # with self.subTest(i=i):
+    unittest.main()
+
+# @unittest.skipIf(condition, reason)
+# with self.subTest(i=i):
+# @unittest.skipIf(condition, reason)
+# with self.subTest(i=i):
 # @unittest.skipIf(condition, reason)
 # with self.subTest(i=i):

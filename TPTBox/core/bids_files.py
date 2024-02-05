@@ -703,7 +703,7 @@ class BIDS_FILE:
             file_name += f"{key}-{value}_"
 
         file_name += f"{format if format is not None else same_format}"
-        return global_bids_list.get(file_name, None)
+        return global_bids_list.get(file_name)
 
     def insert_info_into_path(self, path):
         """Helper function. Automatically replaces {key} with  values from the self.info dict in a string. Like:

@@ -1,8 +1,9 @@
-from time import perf_counter
-from tqdm import tqdm
-from typing import Callable
+from collections.abc import Callable
 from copy import deepcopy
+from time import perf_counter
+
 import numpy as np
+from tqdm import tqdm
 
 
 def speed_test_input(input, functions: list[Callable], assert_equal_function: Callable | None = None, *args, **kwargs):
@@ -41,22 +42,24 @@ def speed_test(
 
 if __name__ == "__main__":
     # speed test dilation
-    from TPTBox.unit_tests.test_centroids import get_nii
+    import random
+    from time import perf_counter
+
+    import numpy as np
+    from tqdm import tqdm
+
     from TPTBox.core.np_utils import (
-        generate_binary_structure,
+        _binary_dilation,
         _binary_erosion,
-        binary_erosion,
         _unpad,
         binary_dilation,
-        _binary_dilation,
-        np_erode_msk,
+        binary_erosion,
+        generate_binary_structure,
         np_dilate_msk,
+        np_erode_msk,
         np_erode_msknew,
     )
-    from time import perf_counter
-    import numpy as np
-    import random
-    from tqdm import tqdm
+    from TPTBox.unit_tests.test_centroids import get_nii
 
     def get_nii_array():
         num_points = 0 if random.random() < 0.01 else 5

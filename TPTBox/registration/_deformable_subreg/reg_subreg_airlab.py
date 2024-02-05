@@ -1,5 +1,3 @@
-from __future__ import print_function
-
 import sys
 from pathlib import Path
 
@@ -16,14 +14,14 @@ if not Path(file, "BIDS").exists():
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    import TPTBox.airlab.airlab as airlab
+    from TPTBox.airlab import airlab
 
 else:
     try:
         import airlab
     except:
         try:
-            import BIDS.airlab.airlab as airlab
+            from BIDS.airlab import airlab
         except:
             from bids_utils import run_cmd
 
@@ -41,7 +39,7 @@ else:
             f = open(p, "w")
             f.write(s)
             f.close()
-            import BIDS.airlab.airlab as airlab
+            from BIDS.airlab import airlab
 
 import os
 
@@ -75,7 +73,7 @@ class Atlas:
 
 
 def command_iteration(method):
-    print("{0:3} = {1:10.5f}".format(method.GetOptimizerIteration(), method.GetMetricValue()))
+    print(f"{method.GetOptimizerIteration():3} = {method.GetMetricValue():10.5f}")
 
 
 def warp_image(image: airlab.Image, displacement, mode="nearest"):
@@ -151,7 +149,7 @@ def register_airlab(fixed: sitk.Image, moving: sitk.Image, subreg, poi: Centroid
 
 
 def register_affine_airlab(fixed: sitk.Image, moving: sitk.Image, subreg, poi: Centroids | None, device="cpu", verbose=False):
-    print(f"[*] Registration with airlab affine-type.")
+    print("[*] Registration with airlab affine-type.")
     old_stdout = sys.stdout  # backup current stdout
     old_stderr = sys.stdout
     if not verbose:
@@ -251,9 +249,9 @@ def register(fixed: sitk.Image, moving: sitk.Image, subreg, poi: Centroids | Non
         # outTx.TransformPoint(point)
         print("-------")
         print(outTx)
-        print("Optimizer stop condition: {0}".format(R.GetOptimizerStopConditionDescription()))
-        print(" Iteration: {0}".format(R.GetOptimizerIteration()))
-        print(" Metric value: {0}".format(R.GetMetricValue()))
+        print(f"Optimizer stop condition: {R.GetOptimizerStopConditionDescription()}")
+        print(f" Iteration: {R.GetOptimizerIteration()}")
+        print(f" Metric value: {R.GetMetricValue()}")
         # sys.stdout = open(os.devnull, "w")
         resampler = sitk.ResampleImageFilter()
         resampler.SetReferenceImage(fixed)
@@ -336,7 +334,7 @@ def post_processing_segmentation(out_nii: NII, GT: NII, inplace=False):
     tmp3[tmp3 != 2] = 0
     x, y, z = np.where(tmp3 == 2)
     seeds = []
-    for x, y, z in zip(x, y, z):
+    for x, y, z in zip(x, y, z, strict=False):
         if _is_border(x, y, z, out_arr):
             seeds.append((x, y, z))
     next_seeds = []
@@ -431,7 +429,6 @@ def __make_subreg_by_registration(
     fixed_sitk, moving_atlas, subreg_atlas, poi = register_affine_airlab(fixed_sitk, moving_atlas, subreg_atlas, poi, verbose=verbose)
     assert fixed_sitk.GetSize() == moving_atlas.GetSize()
     if reg_type == "deformable":
-        pass
         fixed_sitk, moving_atlas, subreg_atlas, poi = register_airlab(
             fixed_sitk, moving_atlas, subreg_atlas, poi, reg_type="deformable", verbose=verbose
         )
@@ -556,7 +553,7 @@ def make_atlas_from_sample(
     poi_out.rescale_(zoom_old)
     poi_out.reorient_(vert_nii.orientation)
     print(vert_nii)
-    vert_nii.save((str(out_file).replace(".json", ".nii.gz")))
+    vert_nii.save(str(out_file).replace(".json", ".nii.gz"))
     poi_out.save(str(out_file).replace(".nii.gz", ".json"), save_hint=2)
     return vert_nii, poi_out
 
