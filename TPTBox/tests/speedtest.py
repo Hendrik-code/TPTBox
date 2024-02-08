@@ -20,13 +20,22 @@ def speed_test_input(input, functions: list[Callable], assert_equal_function: Ca
     if assert_equal_function is not None:
         for oname, o in outs.items():
             assertion = assert_equal_function(o, outs[functions[0].__name__])
-            assert assertion, "speed_test: nonequal results given the assert_equal_function"
+            assert assertion, f"speed_test: nonequal results given the assert_equal_function, got {o, outs[functions[0].__name__]}"
     return time_measures
 
 
 def speed_test(
     get_input_func: Callable, functions: list[Callable], repeats: int = 20, assert_equal_function: Callable | None = None, *args, **kwargs
 ):
+    # print first iteration
+    print()
+    print("Print first speed test")
+    first_input = get_input_func()
+    for f in functions:
+        input_copy = deepcopy(first_input)
+        out = f(input_copy, *args, **kwargs)
+        print(f.__name__, out)
+
     time_sums = {}
     for i in tqdm(range(repeats)):
         input = get_input_func()
@@ -38,41 +47,3 @@ def speed_test(
 
     for k, v in time_sums.items():
         print(k, "\t", round(v / repeats, ndigits=6), "+-", round(np.std(v), ndigits=6))
-
-
-if __name__ == "__main__":
-    # speed test dilation
-    import random
-    from time import perf_counter
-
-    import numpy as np
-    from tqdm import tqdm
-
-    from TPTBox.core.np_utils import (
-        _binary_dilation,
-        _binary_erosion,
-        _unpad,
-        binary_dilation,
-        binary_erosion,
-        generate_binary_structure,
-        np_dilate_msk,
-        np_erode_msk,
-        np_erode_msknew,
-    )
-    from TPTBox.unit_tests.test_centroids import get_nii
-
-    def get_nii_array():
-        num_points = 0 if random.random() < 0.01 else 5
-        nii, points, orientation, sizes = get_nii(x=(300, 300, 50), num_point=num_points)
-        arr = nii.get_seg_array()
-        arr_r = arr.copy()
-        return arr_r
-
-    speed_test(
-        repeats=100,
-        get_input_func=get_nii_array,
-        functions=[np_erode_msk, np_erode_msknew],
-        assert_equal_function=lambda x, y: np.count_nonzero(x) == np.count_nonzero(y),
-        mm=10,
-    )
-    # print(time_measures)
