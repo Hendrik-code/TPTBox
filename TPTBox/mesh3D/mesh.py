@@ -11,7 +11,7 @@ from skimage.measure import marching_cubes
 
 from TPTBox import NII, POI, Log_Type
 from TPTBox.core import vert_constants as vc
-from TPTBox.core.np_utils import np_bbox_nd
+from TPTBox.core.np_utils import np_bbox_binary
 from TPTBox.core.poi import Coordinate
 
 log = vc.log
@@ -72,7 +72,7 @@ class SegmentationMesh(Mesh3D):
             int_arr.astype(np.uint16)
 
         # calculate bounding box cutout
-        bbox_crop = np_bbox_nd(int_arr, px_dist=2)
+        bbox_crop = np_bbox_binary(int_arr, px_dist=2)
         x1, y1, z1 = bbox_crop[0].start, bbox_crop[1].start, bbox_crop[2].start
         arr_cropped = int_arr[bbox_crop]
 

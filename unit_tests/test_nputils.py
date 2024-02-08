@@ -53,7 +53,7 @@ class Test_bids_file(unittest.TestCase):
     def test_maplabels(self):
         for value in range(repeats):
             nii, points, orientation, sizes = get_nii()
-            arr = nii.get_seg_array()
+            arr = nii.get_seg_array().astype(np.uint16)
             volume = np_utils.np_volume(arr)
             labelmap = {i: random.randint(0, 10) for i in volume.keys()}
             arr2 = np_utils.np_map_labels(arr, labelmap)
@@ -65,6 +65,9 @@ class Test_bids_file(unittest.TestCase):
                 if target not in correct:
                     correct[target] = 0
                 correct[target] += v
+
+            print(volume)
+            print(volume2)
 
             for k, v in volume2.items():
                 self.assertTrue(v == correct[k])
@@ -83,6 +86,77 @@ class Test_bids_file(unittest.TestCase):
             self.assertTrue(shp[0] == cutout_size[0], msg=f"{shp}, {cutout_size}")
             self.assertTrue(shp[1] == cutout_size[1], msg=f"{shp}, {cutout_size}")
             self.assertTrue(shp[2] == cutout_size[2], msg=f"{shp}, {cutout_size}")
+
+    def test_fillholes_2D_simple(self):
+        a = np.array(
+            [
+                [0, 1, 1, 1, 0],
+                [0, 1, 0, 1, 0],
+                [0, 1, 0, 1, 0],
+                [0, 1, 1, 1, 0],
+                [0, 0, 0, 0, 0],
+            ]
+        )
+        b = np.array(
+            [
+                [0, 1, 1, 1, 0],
+                [0, 1, 1, 1, 0],
+                [0, 1, 1, 1, 0],
+                [0, 1, 1, 1, 0],
+                [0, 0, 0, 0, 0],
+            ]
+        )
+        c = np_utils.np_fill_holes(a)
+        print(c)
+        self.assertTrue(np.all(b == c))
+
+    def test_fillholes_2D_border(self):
+        a = np.array(
+            [
+                [0, 1, 0, 1, 0],
+                [0, 1, 0, 1, 0],
+                [0, 1, 0, 1, 0],
+                [0, 1, 1, 1, 0],
+                [0, 0, 0, 0, 0],
+            ]
+        )
+        b = np.array(
+            [
+                [0, 1, 0, 1, 0],
+                [0, 1, 0, 1, 0],
+                [0, 1, 0, 1, 0],
+                [0, 1, 1, 1, 0],
+                [0, 0, 0, 0, 0],
+            ]
+        )
+        c = np_utils.np_fill_holes(a)
+        print(c)
+        self.assertTrue(np.all(b == c))
+
+    def test_fillholes_3D_slicewise(self):
+        a = np.array(
+            [
+                [0, 1, 1, 1, 0],
+                [0, 1, 0, 1, 0],
+                [0, 1, 0, 1, 0],
+                [0, 1, 1, 1, 0],
+                [0, 0, 0, 0, 0],
+            ]
+        )
+        b = np.array(
+            [
+                [0, 1, 1, 1, 0],
+                [0, 1, 1, 1, 0],
+                [0, 1, 1, 1, 0],
+                [0, 1, 1, 1, 0],
+                [0, 0, 0, 0, 0],
+            ]
+        )
+        for ax in [0, 1, 2]:
+            aa = np.expand_dims(a, axis=ax)
+            bb = np.expand_dims(b, axis=ax)
+            c = np_utils.np_fill_holes(aa, slice_wise_dim=ax)
+            self.assertTrue(np.all(bb == c))
 
     def test_fillholes(self):
         for value in range(repeats):
@@ -103,22 +177,26 @@ class Test_bids_file(unittest.TestCase):
             nii, points, orientation, sizes = get_nii(min_size=3)
             arr = nii.get_seg_array()
             volume = np_utils.np_volume(arr)
-            subreg_cc, subreg_cc_stats = np_utils.np_connected_components(arr)
+            subreg_cc, subreg_cc_N = np_utils.np_connected_components(arr)
             for label in [0, 1, 2, 3]:
-                self.assertTrue(volume[label], np.sum(subreg_cc_stats[label]["voxel_counts"]))
+                volume_cc = np_utils.np_volume(subreg_cc[label])
+                self.assertTrue(volume[label], np.sum(volume_cc.keys()))
 
                 # see if get center of masses match with stats centroids
                 coms = np_utils.np_get_connected_components_center_of_mass(arr, label)
-                n_coms = len(coms)
-                self.assertTrue(n_coms == subreg_cc_stats[label]["N"])
+                n_coms = len(np_utils.np_unique_withoutzero(subreg_cc[label]))
+                print(n_coms)
+                print(subreg_cc_N)
+                self.assertTrue(n_coms == subreg_cc_N[label])
                 if n_coms == 1:
+                    first_centroid = np_utils.np_center_of_mass(subreg_cc[label])[1]
                     self.assertTrue(
-                        abs(coms[0][0] - subreg_cc_stats[label]["centroids"][0][0]) <= 0.00001,
-                        msg=f"{coms[0][0]}, {subreg_cc_stats[label]['centroids'][0][0]}",
+                        abs(coms[0][0] - first_centroid[0]) <= 0.00001,
+                        msg=f"{coms[0][0]}, {first_centroid[0]}",
                     )
 
     def test_get_largest_k_connected_components(self):
-        a = np.zeros((50, 50))
+        a = np.zeros((50, 50), dtype=np.uint16)
         a[10:20, 10:20] = 5
         a[30:50, 30:50] = 7
         a[1:4, 1:4] = 1
