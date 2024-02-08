@@ -589,6 +589,7 @@ class NII(NII_Math):
             NII: A new NII object with the resampled image data.
         """
         if voxel_spacing in ((-1, -1, -1), self.zoom):
+            log.print(f"Image already resampled to voxel size {self.zoom}",verbose=verbose)
             return self.copy() if inplace else self
 
         c_val = self.get_c_val(c_val)
@@ -721,6 +722,17 @@ class NII(NII_Math):
         if convergence is None:
             convergence = {"iters": [50, 50, 50, 50], "tol": 1e-07}
         return self.n4_bias_field_correction(mask=mask,shrink_factor=shrink_factor,convergence=convergence,spline_param=spline_param,verbose=verbose,weight_mask=weight_mask,crop=crop,inplace=True,threshold = threshold)
+
+    def normalize_to_range_(self, min_value: int = 0, max_value: int = 1500, verbose:logging=True):
+        assert not self.seg
+        mi, ma = self.min(), self.max()
+        self += -mi + min_value  # min = 0
+        self_dtype = self.dtype
+        max_value2 = ma
+        if max_value2 > max_value:
+            self *= max_value / max_value2
+            self.set_dtype_(self_dtype)
+        log.print(f"Shifted from range {mi, ma} to range {self.min(), self.max()}", verbose=verbose)
 
     def match_histograms(self, reference:Image_Reference,c_val = 0,inplace=False):
         ref_nii = to_nii(reference)
@@ -1137,9 +1149,9 @@ class NII(NII_Math):
         log.print(out,verbose=verbose)
         return tuple(int(o) for o in out if o != 0)
 
-    def volumes(self, labels: vc.Label_Reference = None) -> dict[int, int]:
+    def volumes(self) -> dict[int, int]:
         '''Returns a dict stating how many pixels are present for each label (including zero!)'''
-        return np_volume(self.get_seg_array(), label_ref=labels)
+        return np_volume(self.get_seg_array())
 
     def assert_affine(
             self,
