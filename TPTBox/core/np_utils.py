@@ -1,12 +1,24 @@
 import itertools
 import warnings
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
+from typing import Any, TypeVar
 
 import numpy as np
-from scipy.ndimage import binary_erosion, binary_fill_holes, center_of_mass, generate_binary_structure
+from cc3d import connected_components, region_graph
+from cc3d import statistics as _cc3dstats
+from cc3d import voxel_connectivity_graph
+from fill_voids import fill
+from numpy.typing import NDArray
+from scipy.ndimage import binary_erosion, center_of_mass, generate_binary_structure
 from skimage.measure import euler_number, label
 
-from TPTBox.core.vert_constants import Label_Map, Label_Reference
+from TPTBox.core.vert_constants import Coordinate, Label_Map, Label_Reference, log
+from TPTBox.logger import Log_Type
+
+UINT = TypeVar("UINT", bound=np.unsignedinteger[Any])
+INT = TypeVar("INT", bound=np.signedinteger[Any])
+UINTARRAY = NDArray[UINT]
+INTARRAY = UINTARRAY | NDArray[INT]
 
 
 def np_extract_label(arr: np.ndarray, label: int, to_label: int = 1, inplace: bool = True) -> np.ndarray:
@@ -35,6 +47,91 @@ def np_extract_label(arr: np.ndarray, label: int, to_label: int = 1, inplace: bo
     arr[arr == 0] = to_label
     arr[arr != to_label] = 0
     return arr
+
+
+def cc3dstatistics(arr: UINTARRAY) -> dict:
+    assert np.issubdtype(arr.dtype, np.unsignedinteger), f"cc3dstatistics expects uint type, got {arr.dtype}"
+    return _cc3dstats(arr)
+
+
+def np_volume(arr: UINTARRAY) -> dict[int, int]:
+    """Returns a dictionary mapping array label to voxel_count
+
+    Args:
+        arr (np.ndarray): _description_
+
+    Returns:
+        dict[int, int]: _description_
+    """
+    return {idx: i for idx, i in dict(enumerate(cc3dstatistics(arr)["voxel_counts"])).items() if i > 0}
+
+
+def np_count_nonzero(arr: np.ndarray) -> int:
+    """Returns number of nonzero entries in the array
+
+    Args:
+        arr (np.ndarray): _description_
+
+    Returns:
+        int: _description_
+    """
+    return np.count_nonzero(arr)
+
+
+def np_unique(arr: np.ndarray) -> list[int]:
+    """Returns each existing label in the array (including zero!)
+
+    Args:
+        arr (np.ndarray): _description_
+
+    Returns:
+        list[int]: _description_
+    """
+    if not np.issubdtype(arr.dtype, np.unsignedinteger):
+        return np.unique(arr)
+    return [idx for idx, i in enumerate(cc3dstatistics(arr)["voxel_counts"]) if i > 0]
+
+
+def np_unique_withoutzero(arr: UINTARRAY) -> list[int]:
+    """Returns each existing label in the array (including zero!)
+
+    Args:
+        arr (np.ndarray): _description_
+
+    Returns:
+        list[int]: _description_
+    """
+    return [idx for idx, i in enumerate(cc3dstatistics(arr)["voxel_counts"]) if i > 0 and idx != 0]
+
+
+def np_center_of_mass(arr: UINTARRAY) -> dict[int, Coordinate]:
+    """Calculates center of mass, mapping label in array to a coordinate (float) (exluding zero)
+
+    Args:
+        arr (np.ndarray): _description_
+
+    Returns:
+        dict[int, Coordinate]: _description_
+    """
+    stats = cc3dstatistics(arr)
+    # Does not use the other calls for speed reasons
+    unique = [idx for idx, i in enumerate(stats["voxel_counts"]) if i > 0 and idx != 0]
+    return {idx: v for idx, v in enumerate(stats["centroids"]) if idx in unique}
+
+
+def np_bounding_boxes(arr: UINTARRAY) -> dict[int, tuple[slice, slice, slice]]:
+    """Calculates bounding boxes for each different label (not zero!) in the array, returning a mapping
+
+    Args:
+        arr (np.ndarray): _description_
+
+    Returns:
+        dict[int, tuple[slice, slice, slice]]: _description_
+    """
+    stats = cc3dstatistics(arr)
+    # Does not use the other calls for speed reasons
+    unique = [idx for idx, i in enumerate(stats["voxel_counts"]) if i > 0 and idx != 0]
+    return {idx: v for idx, v in enumerate(stats["bounding_boxes"]) if idx in unique}
 
 
 def np_dice(seg: np.ndarray, gt: np.ndarray, binary_compare: bool = False, label: int = 1):
@@ -84,7 +181,7 @@ def np_dilate_msk(
 
     """
     labels: list[int] = _to_labels(arr, label_ref)
-    present_labels = np.unique(arr)
+    present_labels = np_unique(arr)
 
     if mask is not None:
         mask[mask != 0] = 1
@@ -120,7 +217,7 @@ def np_erode_msk(arr: np.ndarray, label_ref: Label_Reference = None, mm: int = 5
         The method uses binary erosion with a 3D structuring element to erode the mask by the specified number of voxels.
     """
     labels: list[int] = _to_labels(arr, label_ref)
-    present_labels = np.unique(arr)
+    present_labels = np_unique(arr)
 
     struct = generate_binary_structure(arr.ndim, connectivity)
     msk_i_data = arr.copy()
@@ -136,7 +233,7 @@ def np_erode_msk(arr: np.ndarray, label_ref: Label_Reference = None, mm: int = 5
     return out
 
 
-def np_map_labels(arr: np.ndarray, label_map: Label_Map) -> np.ndarray:
+def np_map_labels(arr: UINTARRAY, label_map: Label_Map) -> np.ndarray:
     """Maps labels in the given array according to the label_map dictionary.
     Args:
         label_map (dict): A dictionary that maps the original label values (str or int) to the new label values (int).
@@ -205,7 +302,7 @@ def np_calc_crop_around_centerpoint(
     )
 
 
-def np_bbox_nd(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 0) -> tuple[slice, ...]:
+def np_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 0) -> tuple[slice, ...]:
     """calculates a bounding box in n dimensions given a image (factor ~2 times faster than compute_crop_slice)
 
     Args:
@@ -216,7 +313,7 @@ def np_bbox_nd(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 0) -
         list of boundary coordinates [x_min, x_max, y_min, y_max, z_min, z_max]
     """
     assert img is not None, "bbox_nd: received None as image"
-    assert np.count_nonzero(img) > 0, "bbox_nd: img is empty, cannot calculate a bbox"
+    assert np_count_nonzero(img) > 0, "bbox_nd: img is empty, cannot calculate a bbox"
     N = img.ndim
     shp = img.shape
     if isinstance(px_dist, int):
@@ -237,8 +334,8 @@ def np_bbox_nd(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 0) -
     return out
 
 
-def np_center_of_bbox_nd(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 0):
-    bbox_nd = np_bbox_nd(img, px_dist=px_dist)
+def np_center_of_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 0):
+    bbox_nd = np_bbox_binary(img, px_dist=px_dist)
     ctd_bbox = []
     for i in range(len(bbox_nd)):
         size_t = bbox_nd[i].stop - bbox_nd[i].start
@@ -247,13 +344,11 @@ def np_center_of_bbox_nd(img: np.ndarray, px_dist: int | Sequence[int] | np.ndar
     return ctd_bbox
 
 
-def np_approx_center_of_mass(seg: np.ndarray, label_ref: Label_Reference) -> dict[int, tuple[float, ...]]:
-    labels = _to_labels(seg, labels=label_ref)
-    coms: dict = {}
-    for l in labels:
-        arr_l = np_extract_label(seg, label=l, inplace=False)
-        coms[l] = np_center_of_bbox_nd(arr_l, 0)
-    return coms
+def np_approx_center_of_mass(seg: np.ndarray, label_ref: Label_Reference = None) -> dict[int, Coordinate]:
+    import warnings
+
+    warnings.warn("np_approx_center_of_mass deprecated use np_center_of_mass instead")  # TODO remove in version 1.0
+    return np_center_of_mass(seg)
 
 
 def _np_get_min_max_pad(pos: int, img_size: int, cutout_size: int, add_pad_size: int = 0) -> tuple[int, int, int, int]:
@@ -298,11 +393,11 @@ def np_find_index_of_k_max_values(arr: np.ndarray, k: int = 2) -> list[int]:
 
 
 def np_connected_components(
-    arr: np.ndarray,
+    arr: UINTARRAY,
     connectivity: int = 3,
     label_ref: Label_Reference = None,
     verbose: bool = False,
-) -> tuple[dict[int, np.ndarray], dict[int, dict]]:
+) -> tuple[dict[int, UINTARRAY], dict[int, int]]:
     """Calculates the connected components of a given array (works with zeros as well!)
 
     Args:
@@ -312,9 +407,8 @@ def np_connected_components(
         verbose: If true, will print out if the array does not have any CC
 
     Returns:
-        subreg_cc: dict[label, cc_idx, arr], subreg_cc_stats: dict[label, key, values]
+        subreg_cc: dict[label, cc_idx, arr], subreg_cc_N: dict[label, n_connected_components]
     """
-    import cc3d
 
     assert np.min(arr) == 0, f"min value of mask not zero, got {np.min(arr)}"
     assert np.max(arr) >= 1, f"wrong normalization, max value is not >= one, got {np.unique(arr)}"
@@ -322,36 +416,30 @@ def np_connected_components(
     assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
     connectivity = min(connectivity * 2, 8) if arr.ndim == 2 else 6 if connectivity == 1 else 18 if connectivity == 2 else 26
 
-    labels: list[int] = _to_labels(arr, label_ref)
+    labels: Sequence[int] = _to_labels(arr, label_ref)
 
     subreg_cc = {}
-    subreg_cc_stats = {}
+    subreg_cc_N = {}
     for subreg in labels:  # type:ignore
         img_subreg = np_extract_label(arr, subreg, inplace=False)
-        labels_out, N = cc3d.connected_components(img_subreg, connectivity=connectivity, return_N=True)
+        labels_out, N = connected_components(img_subreg, connectivity=connectivity, return_N=True)
         subreg_cc[subreg] = labels_out
-        stats = cc3d.statistics(labels_out)
-        # first entry is always skewed zero region, so delete them!
-        stats["voxel_counts"] = stats["voxel_counts"][1:]
-        stats["bounding_boxes"] = stats["bounding_boxes"][1:]
-        stats["centroids"] = stats["centroids"][1:]
-        stats["N"] = N
-        subreg_cc_stats[subreg] = stats
+        subreg_cc_N[subreg] = N
     if verbose:
         print(
             "Components founds (label,N): ",
-            {i: subreg_cc_stats[i]["N"] for i in labels},
+            {i: subreg_cc_N[i]["N"] for i in labels},
         )
-    return subreg_cc, subreg_cc_stats
+    return subreg_cc, subreg_cc_N
 
 
 def np_get_largest_k_connected_components(
-    arr: np.ndarray,
+    arr: UINTARRAY,
     k: int,
     label_ref: Label_Reference = None,
     connectivity: int = 3,
     return_original_labels: bool = True,
-) -> np.ndarray:
+) -> UINTARRAY:
     """finds the largest k connected components in a given array (does NOT work with zero as label!)
 
     Args:
@@ -364,24 +452,22 @@ def np_get_largest_k_connected_components(
     Returns:
         np.ndarray: array with the largest k connected components
     """
-    import cc3d
 
     assert k > 0
     assert 2 <= arr.ndim <= 3, f"expected 2D or 3D, but got {arr.ndim}"
     assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
-    if arr.ndim == 2:
+    if arr.ndim == 2:  # noqa: SIM108
         connectivity = min(connectivity * 2, 8)  # 1:4, 2:8, 3:8
     else:
         connectivity = 6 if connectivity == 1 else 18 if connectivity == 2 else 26
 
     arr2 = arr.copy()
-    labels: list[int] = _to_labels(arr, label_ref)
+    labels: Sequence[int] = _to_labels(arr, label_ref)
     arr2[np.isin(arr, labels, invert=True)] = 0  # type:ignore
 
-    labels_out, N = cc3d.connected_components(arr, connectivity=connectivity, return_N=True)
+    labels_out, N = connected_components(arr, connectivity=connectivity, return_N=True)
     k = min(k, N)  # if k > N, will return all N but still sorted
-    cts = cc3d.statistics(labels_out)["voxel_counts"]
-    label_volume_pairs = [(i, ct) for i, ct in enumerate(cts) if i > 0]
+    label_volume_pairs = [(i, ct) for i, ct in np_volume(labels_out).items() if ct > 0]
     label_volume_pairs.sort(key=lambda x: x[1], reverse=True)
     preserve: list[int] = [x[0] for x in label_volume_pairs[:k]]
 
@@ -394,7 +480,9 @@ def np_get_largest_k_connected_components(
     return cc_out
 
 
-def np_get_connected_components_center_of_mass(arr: np.ndarray, label: int, connectivity: int = 3, sort_by_axis: int | None = None):
+def np_get_connected_components_center_of_mass(
+    arr: UINTARRAY, label: int, connectivity: int = 3, sort_by_axis: int | None = None
+) -> list[Coordinate]:
     """Calculates the center of mass of the different connected components of a given label in an array
 
     Args:
@@ -408,17 +496,13 @@ def np_get_connected_components_center_of_mass(arr: np.ndarray, label: int, conn
     """
     if sort_by_axis is not None:
         assert 0 <= sort_by_axis <= len(arr.shape) - 1, f"sort_by_axis {sort_by_axis} invalid with an array of shape {arr.shape}"  # type:ignore
-    subreg_cc, subreg_cc_stats = np_connected_components(arr.copy(), connectivity=connectivity, label_ref=label, verbose=False)
-    cc = subreg_cc[label]
-    cc_label_set = np.unique(cc)
-    coms = []
-    for c in cc_label_set:
-        if c == 0:
-            continue
-        c_l = cc.copy()
-        c_l[c_l != c] = 0
-        com = center_of_mass(c_l)
-        coms.append(com)
+    subreg_cc, _ = np_connected_components(
+        arr.copy(),
+        connectivity=connectivity,
+        label_ref=label,
+        verbose=False,
+    )
+    coms = list(np_center_of_mass(subreg_cc[label]).values())
 
     if sort_by_axis is not None:
         coms.sort(key=lambda a: a[sort_by_axis])
@@ -481,29 +565,29 @@ def np_translate_arr(arr: np.ndarray, translation_vector: tuple[int, int] | tupl
     return arr_translated
 
 
-def np_fill_holes(arr: np.ndarray, label_ref: Label_Reference = None) -> np.ndarray:
+def np_fill_holes(arr: np.ndarray, label_ref: Label_Reference = None, slice_wise_dim: int | None = None) -> np.ndarray:
     """Fills holes in segmentations
 
     Args:
         arr (np.ndarray): Input segmentation array
         labels (int | list[int] | None, optional): Labels that the hole-filling should be applied to. If none, applies on all labels found in arr. Defaults to None.
+        slice_wise_dim (int | None, optional): If the input is 3D, the specified dimension here cna be used for 2D slice-wise filling. Defaults to None.
 
     Returns:
         np.ndarray: The array with holes filled
     """
-    func: Callable[[np.ndarray], np.ndarray] = binary_fill_holes  # type: ignore
-    try:
-        from fill_voids import fill
-
-        func = fill
-    except Exception:
-        print("use 'pip install fill-voids' to speed up the np_fill_holes() function")
-
-    labels: list[int] = _to_labels(arr, label_ref)
+    assert 2 <= arr.ndim <= 3
+    assert arr.ndim == 3 or slice_wise_dim is None, "slice_wise_dim set but array is 3D"
+    labels: Sequence[int] = _to_labels(arr, label_ref)
     for l in labels:  # type:ignore
         arr_l = arr.copy()
         arr_l = np_extract_label(arr_l, l)
-        filled = func(arr_l).astype(arr.dtype)
+        if slice_wise_dim is None:
+            filled = fill(arr_l).astype(arr.dtype)
+        else:
+            filled = np.swapaxes(arr_l.copy(), 0, slice_wise_dim)
+            filled = np.stack([fill(x) for x in filled])
+            filled = np.swapaxes(filled, 0, slice_wise_dim)
         filled[filled != 0] = l
         arr[arr == 0] = filled[arr == 0]
     return arr
@@ -578,25 +662,6 @@ def np_calc_boundary_mask(
     return boundary
 
 
-def np_volume(arr: np.ndarray, label_ref: Label_Reference = None) -> dict[int, int]:
-    """Returns the voxel_counts in an array for given labels
-
-    Args:
-        arr (np.ndarray): _description_
-        label_ref (Label_Reference, optional): _description_. Defaults to None.
-
-    Returns:
-        dict[int, int]: _description_
-    """
-    labels: list[int] = _to_labels(arr, label_ref)
-    result_volumes = {}
-    for l in labels:  # type:ignore
-        arr_l = arr.copy()
-        arr_l = np_extract_label(arr_l, l)
-        result_volumes[l] = np.count_nonzero(arr_l)
-    return result_volumes
-
-
 def np_betti_numbers(img: np.ndarray, verbose=False) -> tuple[int, int, int]:
     """
     calculates the Betti number B0, B1, and B2 for a 3D img
@@ -623,7 +688,7 @@ def np_betti_numbers(img: np.ndarray, verbose=False) -> tuple[int, int, int]:
     # pad the image with background (0) around the border!
     padded = np.pad(img, pad_width=1)
     # make sure the image is binary with
-    assert set(np.unique(padded)).issubset({0, 1})
+    assert set(np_unique(padded)).issubset({0, 1})
     # calculate the Betti numbers B0, B2
     # then use Euler characteristic to get B1
     # get the label connected regions for foreground
@@ -639,9 +704,9 @@ def np_betti_numbers(img: np.ndarray, verbose=False) -> tuple[int, int, int]:
     return b0, b1, b2
 
 
-def _to_labels(arr: np.ndarray, labels: Label_Reference) -> Sequence[int]:
+def _to_labels(arr: np.ndarray, labels: Label_Reference = None) -> Sequence[int]:
     if labels is None:
-        labels = list(np.unique(arr))
+        labels = list(np_unique(arr))
     if not isinstance(labels, Sequence):
         labels = [labels]
     return labels
@@ -835,18 +900,3 @@ def _generate_array_indices(selem_center, selem_radius, selem_length, result_len
     # Last index for the structuring element array
     selem_end = selem_length - (result_end - result_length) if result_end > result_length else selem_length
     return (result_begin, result_end), (selem_begin, selem_end)
-
-
-if __name__ == "__main__":
-    a = np.array(
-        [
-            [1, 1, 0, 0, 0],
-            [1, 1, 2, 2, 2],
-            [0, 0, 2, 2, 2],
-            [0, 0, 2, 2, 2],
-            [0, 0, 0, 0, 0],
-        ]
-    )
-
-    print(np_get_connected_components_center_of_mass(a, label=1))
-    print(np_get_connected_components_center_of_mass(a, label=2))

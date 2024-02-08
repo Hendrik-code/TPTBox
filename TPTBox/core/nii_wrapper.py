@@ -1149,9 +1149,9 @@ class NII(NII_Math):
         log.print(out,verbose=verbose)
         return tuple(int(o) for o in out if o != 0)
 
-    def volumes(self, labels: vc.Label_Reference = None) -> dict[int, int]:
+    def volumes(self) -> dict[int, int]:
         '''Returns a dict stating how many pixels are present for each label (including zero!)'''
-        return np_volume(self.get_seg_array(), label_ref=labels)
+        return np_volume(self.get_seg_array())
 
     def assert_affine(
             self,
