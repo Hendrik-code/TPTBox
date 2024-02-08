@@ -424,7 +424,9 @@ class TestNII(unittest.TestCase):
         unique_labels = nii.unique()
 
         # Check that the unique labels are correct
-        assert unique_labels == (1, 2)
+        assert unique_labels[0] == 1
+        assert unique_labels[1] == 2
+        assert len(unique_labels) == 2
 
     # Test that the volumes method returns the correct volumes for each label in the segmentation mask.
     def test_volumes_method(self):
@@ -435,6 +437,14 @@ class TestNII(unittest.TestCase):
 
         # Calculate the volumes of each label
         volumes = mask.volumes()
+        print(volumes)
+
+        # Check that the volumes are correct
+        assert volumes == {1: 3, 2: 2}, volumes
+
+        # Calculate the volumes of each label
+        volumes = mask.volumes(include_zero=True)
+        print(volumes)
 
         # Check that the volumes are correct
         assert volumes == {0: 11, 1: 3, 2: 2}, volumes
