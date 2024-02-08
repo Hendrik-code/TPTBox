@@ -54,8 +54,8 @@ def cc3dstatistics(arr: UINTARRAY) -> dict:
     return _cc3dstats(arr)
 
 
-def np_volume(arr: UINTARRAY) -> dict[int, int]:
-    """Returns a dictionary mapping array label to voxel_count
+def np_volume(arr: UINTARRAY, include_zero: bool = False) -> dict[int, int]:
+    """Returns a dictionary mapping array label to voxel_count (not including zero!)
 
     Args:
         arr (np.ndarray): _description_
@@ -63,7 +63,10 @@ def np_volume(arr: UINTARRAY) -> dict[int, int]:
     Returns:
         dict[int, int]: _description_
     """
-    return {idx: i for idx, i in dict(enumerate(cc3dstatistics(arr)["voxel_counts"])).items() if i > 0}
+    if include_zero:
+        return {idx: i for idx, i in dict(enumerate(cc3dstatistics(arr)["voxel_counts"])).items() if i > 0}
+    else:
+        return {idx: i for idx, i in dict(enumerate(cc3dstatistics(arr)["voxel_counts"])).items() if i > 0 and idx != 0}
 
 
 def np_count_nonzero(arr: np.ndarray) -> int:
@@ -89,7 +92,11 @@ def np_unique(arr: np.ndarray) -> list[int]:
     """
     if not np.issubdtype(arr.dtype, np.unsignedinteger):
         return np.unique(arr)
-    return [idx for idx, i in enumerate(cc3dstatistics(arr)["voxel_counts"]) if i > 0]
+    try:
+        return [idx for idx, i in enumerate(cc3dstatistics(arr)["voxel_counts"]) if i > 0]
+    except Exception:
+        pass
+    return np.unique(arr)
 
 
 def np_unique_withoutzero(arr: UINTARRAY) -> list[int]:
@@ -495,7 +502,9 @@ def np_get_connected_components_center_of_mass(
         _type_: _description_
     """
     if sort_by_axis is not None:
-        assert 0 <= sort_by_axis <= len(arr.shape) - 1, f"sort_by_axis {sort_by_axis} invalid with an array of shape {arr.shape}"  # type:ignore
+        assert (
+            0 <= sort_by_axis <= len(arr.shape) - 1
+        ), f"sort_by_axis {sort_by_axis} invalid with an array of shape {arr.shape}"  # type:ignore
     subreg_cc, _ = np_connected_components(
         arr.copy(),
         connectivity=connectivity,
