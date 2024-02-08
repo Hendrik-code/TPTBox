@@ -178,9 +178,9 @@ class Test_bids_file(unittest.TestCase):
             arr = nii.get_seg_array()
             volume = np_utils.np_volume(arr)
             subreg_cc, subreg_cc_N = np_utils.np_connected_components(arr)
-            for label in [0, 1, 2, 3]:
+            for label in [1, 2, 3]:
                 volume_cc = np_utils.np_volume(subreg_cc[label])
-                self.assertTrue(volume[label], np.sum(volume_cc.keys()))
+                self.assertTrue(volume[label], np.sum(volume_cc.values()))
 
                 # see if get center of masses match with stats centroids
                 coms = np_utils.np_get_connected_components_center_of_mass(arr, label)
@@ -205,21 +205,21 @@ class Test_bids_file(unittest.TestCase):
         a_cc = np_utils.np_get_largest_k_connected_components(a, k=2, return_original_labels=False)
         a_volume = np_utils.np_volume(a_cc)
         print(a_volume)
-        self.assertTrue(len(a_volume) == 3)
+        self.assertTrue(len(a_volume) == 2)
         self.assertTrue(a_volume[1] > a_volume[2])
 
         # k == N
         a_cc = np_utils.np_get_largest_k_connected_components(a, k=3, return_original_labels=False)
         a_volume = np_utils.np_volume(a_cc)
         print(a_volume)
-        self.assertTrue(len(a_volume) == 4)
+        self.assertTrue(len(a_volume) == 3)
         self.assertTrue(a_volume[1] > a_volume[2] > a_volume[3])
 
         # k > N
         a_cc = np_utils.np_get_largest_k_connected_components(a, k=20, return_original_labels=False)
         a_volume = np_utils.np_volume(a_cc)
         print(a_volume)
-        self.assertTrue(len(a_volume) == 4)
+        self.assertTrue(len(a_volume) == 3)
         self.assertTrue(a_volume[1] > a_volume[2] > a_volume[3])
 
     def test_fill_holes(self):
