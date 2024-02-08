@@ -17,12 +17,15 @@ from TPTBox.core.nii_wrapper_math import NII_Math
 from TPTBox.core.np_utils import (
     np_calc_boundary_mask,
     np_connected_components,
+    np_count_nonzero,
     np_dilate_msk,
     np_erode_msk,
     np_fill_holes,
     np_get_connected_components_center_of_mass,
     np_get_largest_k_connected_components,
     np_map_labels,
+    np_unique,
+    np_unique_withoutzero,
     np_volume,
 )
 
@@ -782,7 +785,7 @@ class NII(NII_Math):
         axc = np.array(nio.aff2axcodes(img.affine))
         zms = np.around(img.zoom, 1)
         ix_max = np.array(zms == np.amax(zms))
-        num_max = np.count_nonzero(ix_max)
+        num_max = np_count_nonzero(ix_max)
         if num_max == 2:
             plane = plane_dict[axc[~ix_max][0]]
         elif num_max == 1:
@@ -1010,7 +1013,7 @@ class NII(NII_Math):
             If inplace is True, returns the current NIfTI image object with mapped labels. Otherwise, returns a new NIfTI image object with mapped labels.
         """
         data_orig = self.get_seg_array()
-        labels_before = [v for v in np.unique(data_orig) if v > 0]
+        labels_before = [v for v in np_unique(data_orig) if v > 0]
         # enforce keys to be str to support both str and int
         label_map_ = {
             (v_name2idx[k] if k in v_name2idx else int(k)): (
@@ -1020,7 +1023,7 @@ class NII(NII_Math):
         }
         log.print("label_map_ =", label_map_, verbose=verbose)
         data = np_map_labels(data_orig, label_map_)
-        labels_after = [v for v in np.unique(data) if v > 0]
+        labels_after = [v for v in np_unique(data) if v > 0]
         log.print(
                 "N =",
                 len(label_map_),
@@ -1145,13 +1148,13 @@ class NII(NII_Math):
 
     def unique(self,verbose:logging=False):
         '''Returns all integer labels WITHOUT 0. Must be performed only on a segmentation nii'''
-        out = list(np.unique(self.get_seg_array()))
+        out = np_unique_withoutzero(self.get_seg_array())
         log.print(out,verbose=verbose)
-        return tuple(int(o) for o in out if o != 0)
+        return out
 
-    def volumes(self) -> dict[int, int]:
+    def volumes(self, include_zero: bool = False) -> dict[int, int]:
         '''Returns a dict stating how many pixels are present for each label (including zero!)'''
-        return np_volume(self.get_seg_array())
+        return np_volume(self.get_seg_array(), include_zero=include_zero)
 
     def assert_affine(
             self,
