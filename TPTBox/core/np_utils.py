@@ -11,7 +11,6 @@ from fill_voids import fill
 from numpy.typing import NDArray
 from scipy.ndimage import binary_erosion, center_of_mass, generate_binary_structure
 from skimage.measure import euler_number, label
-
 from TPTBox.core.vert_constants import Coordinate, Label_Map, Label_Reference, log
 from TPTBox.logger import Log_Type
 
@@ -305,7 +304,8 @@ def np_calc_crop_around_centerpoint(
     return (
         arr_cut,
         cutout_coords_slices,
-        tuple([slice(padding[i][0], padding[i][1]) for i in range(n_dim)]),
+        tuple(padding),
+        # tuple([slice(padding[i][0], padding[i][1]) for i in range(n_dim)]),
     )
 
 
@@ -502,9 +502,7 @@ def np_get_connected_components_center_of_mass(
         _type_: _description_
     """
     if sort_by_axis is not None:
-        assert (
-            0 <= sort_by_axis <= len(arr.shape) - 1
-        ), f"sort_by_axis {sort_by_axis} invalid with an array of shape {arr.shape}"  # type:ignore
+        assert 0 <= sort_by_axis <= len(arr.shape) - 1, f"sort_by_axis {sort_by_axis} invalid with an array of shape {arr.shape}"  # type:ignore
     subreg_cc, _ = np_connected_components(
         arr.copy(),
         connectivity=connectivity,
