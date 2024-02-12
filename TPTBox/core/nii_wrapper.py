@@ -642,7 +642,7 @@ class NII(NII_Math):
             return self
         else:
             return NII(nii,self.seg,self.c_val)
-    def resample_from_to_(self, to_vox_map, mode='constant', c_val:float|None=None,verbose:logging=True):
+    def resample_from_to_(self, to_vox_map:Image_Reference|Proxy, mode='constant', c_val:float|None=None,verbose:logging=True):
         return self.resample_from_to(to_vox_map,mode=mode,c_val=c_val,inplace=True,verbose=verbose)
 
     def n4_bias_field_correction(
@@ -1193,7 +1193,7 @@ class NII(NII_Math):
         # Make Checks
         if other is not None:
             other_data = other._extract_affine()
-            other_match = self.assert_affine(other=None, **other_data)
+            other_match = self.assert_affine(other=None, **other_data, raise_error=raise_error)
             if not other_match:
                 found_errors.append(f"object mismatch {self!s}, {other!s}")
         if affine is not None:
