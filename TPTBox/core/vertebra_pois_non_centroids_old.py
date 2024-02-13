@@ -1,4 +1,4 @@
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -28,103 +28,81 @@ def run_poi_pipeline(vert: NII, subreg: NII, poi_path: Path, logger: Logger_Inte
     # (b.set_array(np.clip(arr, 0, 1) + b.get_array())).save("subreg.nii.gz")
 
 
-all_poi_functions: dict[int, "Strategy_Pattern"] = {}
-
-
-class Strategy_Pattern:
-    def __init__(self, target: Location, strategy: Callable, prerequisite: set[Location] | None = None, **args) -> None:
-        self.target = target
-        self.args = args
-        if prerequisite is None:
-            prerequisite = set()
-        for i in args:
-            if isinstance(i, Location):
-                prerequisite.add(i)
-        self.prerequisite = prerequisite
-        self.strategy = strategy
-        all_poi_functions[target.value] = self
-
-    def __call__(self, poi: POI, current_vert: NII, current_subreg: NII, vert_id: int, bb, log: Logger_Interface = __log):
-        return self.strategy(
-            poi=poi,
-            current_vert=current_vert,
-            current_subreg=current_subreg,
-            location=self.target,
-            log=log,
-            vert_id=vert_id,
-            bb=bb,
-            **self.args,
-        )
-
-
-def strategy_extreme_points(
-    poi: POI, current_subreg: NII, location: Location, anti_point: Location, vert_id: int, subreg_id: Location, bb, log=__log
-):
-    region = current_subreg.extract_label(subreg_id)
-    if region.sum() == 0:
-        log.print(f"reg={vert_id},subreg={subreg_id} is missing (extreme_points)", ltype=Log_Type.FAIL)
-        return
-    # if legacy_code:
-    #    extreme_point = get_extreme_point_old(region, direction)
-    # else:
-    extreme_point = get_extreme_point(poi, region, vert_id, bb, anti_point)
-    if extreme_point is None:
-        return
-    poi[vert_id, location.value] = tuple(a.start + b for a, b in zip(bb, extreme_point, strict=True))
-
-
-def strategy_line_cast(
-    poi: POI,
-    vert_id: int,
-    current_subreg: NII,
-    location: Location,
-    start_point: Location,
-    regions_loc: list[Location] | Location,
-    normal_vector_points: tuple[Location, Location],
-    bb,
-    log: Logger_Interface = __log,
-):
-    region = current_subreg.extract_label(regions_loc)
-    # if legacy_code:
-    #    horizontal_plane_landmarks_old(poi, region, label_id, bb, log)
-    # else:
-    extreme_point = max_distance_ray_cast(poi, region, vert_id, bb, normal_vector_points, start_point, log=log)
-    if extreme_point is None:
-        return
-    poi[vert_id, location.value] = tuple(a.start + b for a, b in zip(bb, extreme_point, strict=True))
-
-
-# fmt: off
-L = Location
-S = strategy_extreme_points
-Strategy_Pattern(L.Muscle_Inserts_Spinosus_Process, strategy=S, subreg_id=L.Spinosus_Process, anti_point=L.Arcus_Vertebrae)  # 81
-Strategy_Pattern(L.Muscle_Inserts_Transverse_Process_right, strategy=S, subreg_id=L.Costal_Process_Right, anti_point=L.Arcus_Vertebrae)  # 82
-Strategy_Pattern(L.Muscle_Inserts_Transverse_Process_left, strategy=S, subreg_id=L.Costal_Process_Left, anti_point=L.Arcus_Vertebrae)  # 83
-Strategy_Pattern(L.Muscle_Inserts_Articulate_Process_Inferior_left, strategy=S, subreg_id=L.Inferior_Articular_Left, anti_point=L.Arcus_Vertebrae) # 86
-Strategy_Pattern(L.Muscle_Inserts_Articulate_Process_Inferior_right, strategy=S, subreg_id=L.Inferior_Articular_Right, anti_point=L.Arcus_Vertebrae) # 87
-#Next: Arcus_Vertebrae cause it to be behind not on top
-Strategy_Pattern(L.Muscle_Inserts_Articulate_Process_Superior_left, strategy=S, subreg_id=L.Superior_Articular_Left, anti_point=L.Spinosus_Process) # 88
-Strategy_Pattern(L.Muscle_Inserts_Articulate_Process_Superior_right, strategy=S, subreg_id=L.Superior_Articular_Right, anti_point=L.Spinosus_Process) # 89
-S = strategy_line_cast
-Strategy_Pattern(L.Muscle_Inserts_Vertebral_Body_right, strategy=S, regions_loc =[Location.Vertebra_Corpus, Location.Vertebra_Corpus_border],
-                 start_point = Location.Vertebra_Corpus, normal_vector_points =(Location.Superior_Articular_Left,Location.Superior_Articular_Right) ) # 84
-Strategy_Pattern(L.Muscle_Inserts_Vertebral_Body_left, strategy=S, regions_loc =[Location.Vertebra_Corpus, Location.Vertebra_Corpus_border],
-                 start_point = Location.Vertebra_Corpus, normal_vector_points =(Location.Superior_Articular_Right,Location.Superior_Articular_Left) ) # 85
-# fmt: on
-
+extreme_points: dict[int, tuple[Directions, int]] = {
+    Location.Muscle_Inserts_Spinosus_Process.value: (
+        "P",
+        Location.Spinosus_Process.value,
+    ),  # 81
+    Location.Muscle_Inserts_Transverse_Process_right.value: (
+        "R",
+        Location.Costal_Process_Right.value,
+    ),  # 82
+    Location.Muscle_Inserts_Transverse_Process_left.value: (
+        "L",
+        Location.Costal_Process_Left.value,
+    ),  # 83
+    Location.Muscle_Inserts_Articulate_Process_Inferior_left.value: (
+        "I",
+        Location.Inferior_Articular_Left.value,
+    ),  # 86
+    Location.Muscle_Inserts_Articulate_Process_Inferior_right.value: (
+        "I",
+        Location.Inferior_Articular_Right.value,
+    ),  # 87
+    Location.Muscle_Inserts_Articulate_Process_Superior_left.value: (
+        "S",
+        Location.Superior_Articular_Left.value,
+    ),  # 88
+    Location.Muscle_Inserts_Articulate_Process_Superior_right.value: (
+        "S",
+        Location.Superior_Articular_Right.value,
+    ),  # 89
+}
+extreme_points2: dict[int, Location] = {
+    Location.Muscle_Inserts_Spinosus_Process.value: Location.Arcus_Vertebrae,  # 81
+    Location.Muscle_Inserts_Transverse_Process_right.value: Location.Arcus_Vertebrae,  # 82
+    Location.Muscle_Inserts_Transverse_Process_left.value: Location.Arcus_Vertebrae,  # 83
+    Location.Muscle_Inserts_Articulate_Process_Inferior_left.value: Location.Arcus_Vertebrae,  # 86
+    Location.Muscle_Inserts_Articulate_Process_Inferior_right.value: Location.Arcus_Vertebrae,  # 87
+    Location.Muscle_Inserts_Articulate_Process_Superior_left.value: Location.Spinosus_Process,  # 88 #Arcus_Vertebrae cause it to be behind not on top
+    Location.Muscle_Inserts_Articulate_Process_Superior_right.value: Location.Spinosus_Process,  # 89 #Arcus_Vertebrae cause it to be behind not on top
+}
 # Special 125 127 Ligament_Attachment_Point_Flava_Superior_Median
 # 101 - 124 vertebra_body points
 # 84,85  horizontal_plane_landmarks (vertebra_body)
 
 
+line_cast: dict[int, tuple[list[Location], Location, Location, Location]] = {
+    Location.Muscle_Inserts_Vertebral_Body_right.value: (
+        [Location.Vertebra_Corpus, Location.Vertebra_Corpus_border],  # possible pixel
+        Location.Vertebra_Corpus,  # start point
+        Location.Superior_Articular_Left,  # norm point 2
+        Location.Superior_Articular_Right,  # norm point 1
+    ),
+    Location.Muscle_Inserts_Vertebral_Body_left.value: (
+        [Location.Vertebra_Corpus, Location.Vertebra_Corpus_border],
+        Location.Vertebra_Corpus,
+        Location.Superior_Articular_Right,
+        Location.Superior_Articular_Left,
+    ),
+    # Location.Muscle_Inserts_Spinosus_Process.value: (
+    #    [Location.Spinosus_Process],
+    #    Location.Arcus_Vertebrae,
+    #    Location.Arcus_Vertebrae,
+    #    Location.Spinosus_Process,
+    # ),  # 81
+}
+
+
 # TODO remove _old and legacy_code
-def compute_non_centroid_pois(
+def compute_non_centroid_pois(  # noqa: C901
     poi: POI,
     locations: Sequence[Location] | Location,
     vert: NII,
     subreg: NII,
     _vert_ids: tuple[int, ...] | None = None,
     log: Logger_Interface = __log,
+    legacy_code=False,
 ):
     # TODO Test if the cropping to the vert makes it slower or faster???
     if not isinstance(locations, Sequence):
@@ -137,10 +115,15 @@ def compute_non_centroid_pois(
             Location.Spinal_Canal.value in subregs_ids or Location.Spinal_Cord.value in subregs_ids
         ) and Location.Spinal_Canal.value not in poi.keys_subregion():
             calc_center_spinal_cord(poi, subreg)
+    if Location.Spinal_Canal_ivd_lvl in locations:
+        subregs_ids = subreg.unique()
+        v = Location.Spinal_Canal_ivd_lvl.value
+        if (v in subregs_ids or Location.Spinal_Cord.value in subregs_ids) and v not in poi.keys_subregion():
+            calc_center_spinal_cord(poi, subreg, source_subreg_point_id=Location.Vertebra_Disc, subreg_id=Location.Spinal_Canal_ivd_lvl)
     if _vert_ids is None:
         _vert_ids = vert.unique()
     for label_id in _vert_ids:
-        if label_id >= 39:
+        if label_id >= 26:
             continue
         current_vert = vert.extract_label(label_id)
         bb = current_vert.compute_crop()
@@ -151,10 +134,50 @@ def compute_non_centroid_pois(
                 continue
             if location.value == Location.Spinal_Canal.value:
                 continue
+            if location.value == Location.Spinal_Canal_ivd_lvl.value:
+                continue
             if (label_id, location.value) in poi:
                 continue
-            if location.value in all_poi_functions:  # 83
-                all_poi_functions[location.value](poi, current_vert, current_subreg, label_id, bb=bb, log=log)
+            if location.value in extreme_points:  # 83
+                direction, loc_id = extreme_points[location.value]  # TODO merge extreme_points and extreme_points2
+                region = current_subreg.extract_label(loc_id)
+                if region.sum() == 0:
+                    log.print(
+                        f"reg={label_id},subreg={loc_id} is missing (extreme_points)",
+                        ltype=Log_Type.FAIL,
+                    )
+                    continue
+
+                if legacy_code:
+                    extreme_point = get_extreme_point_old(region, direction)
+                else:
+                    extreme_point = get_extreme_point(poi, region, label_id, bb, extreme_points2[location.value])
+                    if extreme_point is None:
+                        continue
+                poi[label_id, location.value] = tuple(a.start + b for a, b in zip(bb, extreme_point, strict=True))
+            # elif location.value == Location.Vertebra_Disc_Posterior.value:
+            #    vert_arr = vert.extract_label(label_id + 100)
+            #    if vert_arr.sum() == 0:
+            #        continue
+            #    extreme_point = get_extreme_point_old(vert_arr, "P")
+            #    ids = [plane_dict[i] for i in vert_arr.orientation]
+            #    axis = ids.index(plane_dict["P"])
+            #    out = list(poi[label_id, 100])
+            #    out[axis] = extreme_point[axis]
+            #    poi[label_id, location.value] = tuple(out)  # tuple(a.start + b for a, b in zip(bb, extreme_point))
+            elif location.value in line_cast:
+                regions_loc, start_point, a, b = line_cast[location.value]
+                normal_vector_points = (a, b)
+                region = current_subreg.extract_label(regions_loc[0].value)
+                for r in regions_loc[1:]:
+                    region += current_subreg.extract_label(r.value)
+                if legacy_code:
+                    horizontal_plane_landmarks_old(poi, region, label_id, bb, log)
+                else:
+                    extreme_point = max_distance_ray_cast(poi, region, label_id, bb, normal_vector_points, start_point, log=log)
+                    if extreme_point is None:
+                        continue
+                    poi[label_id, location.value] = tuple(a.start + b for a, b in zip(bb, extreme_point, strict=True))
             elif (
                 location.value >= Location.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Median.value
                 and location.value <= Location.Ligament_Attachment_Point_Flava_Inferior_Median.value
@@ -401,28 +424,22 @@ def add_vertebra_body_points(
 
     # Compute a normal vector, that defines the plane direction
     if normal_vector_points is None:
-        normal_vector_points = (
-            Location.Costal_Process_Right,
-            Location.Costal_Process_Left,
-        )
+        normal_vector_points = (Location.Costal_Process_Right, Location.Costal_Process_Left)
 
     try:
         a = _to_local_np(normal_vector_points[0], bb, poi, reg_label, log=log)
         b = _to_local_np(normal_vector_points[1], bb, poi, reg_label, log=log)
         if a is None or b is None:
-            raise TypeError()
+            raise TypeError()  # noqa: TRY301
         normal_vector = a - b
     except TypeError:
         try:
-            normal_vector_points = (
-                Location.Superior_Articular_Right,
-                Location.Superior_Articular_Left,
-            )
+            normal_vector_points = (Location.Superior_Articular_Right, Location.Superior_Articular_Left)
             a = _to_local_np(normal_vector_points[0], bb, poi, reg_label, log=log)
             b = _to_local_np(normal_vector_points[1], bb, poi, reg_label, log=log)
 
             if a is None or b is None:
-                raise TypeError()
+                raise TypeError()  # noqa: TRY301
             normal_vector = a - b
         except TypeError:
             # raise e
@@ -432,8 +449,8 @@ def add_vertebra_body_points(
     normal_vector = normal_vector / norm(normal_vector)
     # The main axis will be treated differently
 
-    id = [plane_dict[i] for i in vert_region.orientation]
-    axis = id.index(plane_dict[direction])
+    idx = [plane_dict[i] for i in vert_region.orientation]
+    axis = idx.index(plane_dict[direction])
     assert axis == np.argmax(np.abs(normal_vector)).item()
     dims = [0, 1, 2]
     dims.remove(axis)
@@ -466,12 +483,7 @@ def add_vertebra_body_points(
     # vert_region.set_array(subregion).save("/media/data/robert/code/bids/BIDS/test/test_data/test.nii.gz")
 
     if plane.sum() == 0:
-        log.print(
-            reg_label,
-            101,
-            "add_vertebra_body_points, Plane empty",
-            ltype=Log_Type.STRANGE,
-        )
+        log.print(reg_label, 101, "add_vertebra_body_points, Plane empty", ltype=Log_Type.STRANGE)
         return
     # compute_corners_of_plane gives 8 points (1-4) are the corers of the Bounding-box that were made by intersecting the plane with the subregion
     # 5-8 are the center points of the lines of that bounding box
@@ -544,29 +556,19 @@ def compute_corners_of_plane(plane: np.ndarray, region_label=1):
         raise ValueError("len < 2 of simplified" + str(simplified.shape))
     fix_point0 = np.zeros_like(simplified)
     fix_point1 = np.zeros_like(simplified)
-    fix_point1[:, :] = (0, borders.shape[1])
     fix_point2 = np.zeros_like(simplified)
-    fix_point2[:, :] = (borders.shape[0], 0)
     fix_point3 = np.zeros_like(simplified)
+
+    fix_point1[:, :] = (0, borders.shape[1])
+    fix_point2[:, :] = (borders.shape[0], 0)
     fix_point3[:, :] = (borders.shape[0], borders.shape[1])
-
-    dist0 = np.sum(np.abs(fix_point0 - simplified), axis=1)
-    dist1 = np.sum(np.abs(fix_point1 - simplified), axis=1)
-    dist2 = np.sum(np.abs(fix_point2 - simplified), axis=1)
-    dist3 = np.sum(np.abs(fix_point3 - simplified), axis=1)
-
-    point0 = np.argmin(dist0)
-    point1 = np.argmin(dist1)
-    point2 = np.argmin(dist2)
-    point3 = np.argmin(dist3)
-
     simplified = simplified.astype(int)
-
     result = np.zeros_like(borders)
-    result[simplified[point0, 0], simplified[point0, 1]] = 1
-    result[simplified[point1, 0], simplified[point1, 1]] = 2
-    result[simplified[point2, 0], simplified[point2, 1]] = 3
-    result[simplified[point3, 0], simplified[point3, 1]] = 4
+    # index starting at 1 because 0 is background
+    for fix_point, idx in [(fix_point0, 1), (fix_point1, 2), (fix_point2, 3), (fix_point3, 4)]:
+        dist0 = np.sum(np.abs(fix_point - simplified), axis=1)
+        point0 = np.argmin(dist0)
+        result[simplified[point0, 0], simplified[point0, 1]] = idx
 
     out = []
     for i in range(1, 5):
@@ -575,7 +577,7 @@ def compute_corners_of_plane(plane: np.ndarray, region_label=1):
         # except ValueError:
         snapped_back_point = np.array(list(np.where(result == i))).reshape(-1)
         out.append(snapped_back_point)
-    for i, j in [(0, 1), (0, 2), (1, 3), (2, 3)]:
+    for i, j in [(0, 1), (1, 3), (2, 3), (0, 2)]:
         point = (out[i] + out[j]) // 2
         dist0 = np.sum(np.abs(point - border_coords), axis=1)
         point = np.argmin(dist0)
@@ -619,7 +621,13 @@ def calc_center_spinal_cord(
     ```python
     poi = POI(...)
     subreg = NII(...)
-    updated_poi = calc_center_spinal_cord(poi, subreg, spline_subreg_point_id=Location.Vertebra_Corpus, subreg_id=Location.Spinal_Canal, intersection_target=[Location.Spinal_Cord, Location.Spinal_Canal])
+    updated_poi = calc_center_spinal_cord(
+        poi,
+        subreg,
+        spline_subreg_point_id=Location.Vertebra_Corpus,
+        subreg_id=Location.Spinal_Canal,
+        intersection_target=[Location.Spinal_Cord, Location.Spinal_Canal],
+    )
     ```
     """
     from TPTBox import calc_centroids
@@ -627,8 +635,8 @@ def calc_center_spinal_cord(
     if intersection_target is None:
         intersection_target = [Location.Spinal_Cord, Location.Spinal_Canal]
     assert _fill_inplace is None or subreg == _fill_inplace
-    poi_iso = poi.rescale()
-    subreg_iso = subreg.rescale()
+    poi_iso = poi.reorient().rescale()
+    subreg_iso = subreg.reorient().rescale()
     body_spline, body_spline_der = poi_iso.fit_spline(location=spline_subreg_point_id, vertebra=True)
     target_labels = subreg_iso.extract_label(intersection_target).get_array()
     out = target_labels * 0
