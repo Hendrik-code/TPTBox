@@ -2,6 +2,7 @@ import functools
 import json
 import warnings
 from collections.abc import Sequence
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypedDict, TypeGuard, TypeVar, Union
@@ -195,6 +196,7 @@ class POI(Abstract_POI):
         """
         if isinstance(shape, tuple):
             shape = tuple(round(float(v), 7) for v in shape)  # type: ignore
+
         return POI(
             centroids=centroids.copy() if centroids is not None else self.centroids.copy(),
             orientation=orientation if orientation is not None else self.orientation,
@@ -202,7 +204,7 @@ class POI(Abstract_POI):
             shape=shape if not isinstance(shape, Sentinel) else self.shape,  # type: ignore
             rotation=rotation if not isinstance(rotation, Sentinel) else self.rotation,
             origin=origin if not isinstance(origin, Sentinel) else self.origin,
-            info=self.info,
+            info=deepcopy(self.info),
             format=self.format,
         )
 
@@ -416,14 +418,14 @@ class POI(Abstract_POI):
                 verbose=verbose if not isinstance(verbose, bool) else True,
                 ltype=log_file.Log_Type.WARNING,
             )
-            return self
+            return self if inplace else self.copy()
 
         ornt_fr = nio.axcodes2ornt(self.orientation)  # original centroid orientation
         ornt_to = nio.axcodes2ornt(axcodes_to)
 
         if (ornt_fr == ornt_to).all():
             log.print("ctd is already rotated to image with ", axcodes_to, verbose=verbose)
-            return self
+            return self if inplace else self.copy()
         trans = nio.ornt_transform(ornt_fr, ornt_to).astype(int)
         perm: list[int] = trans[:, 0].tolist()
 
@@ -837,7 +839,7 @@ format_key = {FORMAT_DOCKER: "docker", FORMAT_GRUBER: "guber", FORMAT_POI: "POI"
 format_key2value = {value: key for key, value in format_key.items()}
 
 
-def _poi_to_dict_list(ctd: POI, additional_info: dict | None, save_hint=0, verbose: logging = False):
+def _poi_to_dict_list(ctd: POI, additional_info: dict | None, save_hint=0, verbose: logging = False):  # noqa: C901
     ori: _Orientation = {"direction": ctd.orientation}
     print_out = ""
     # if hasattr(ctd, "location") and ctd.location != Location.Unknown:
@@ -903,7 +905,7 @@ def _poi_to_dict_list(ctd: POI, additional_info: dict | None, save_hint=0, verbo
 # Handling centroids #
 
 
-def load_poi(ctd_path: POI_Reference, verbose=True) -> POI:
+def load_poi(ctd_path: POI_Reference, verbose=True) -> POI:  # noqa: ARG001
     """
     Load centroids from a file or a BIDS file object.
 
@@ -935,7 +937,7 @@ def load_poi(ctd_path: POI_Reference, verbose=True) -> POI:
         ids: list[int | Location] = ctd_path[2]  # type: ignore
         return calc_centroids_from_subreg_vert(vert, subreg, subreg_id=ids)
     else:
-        assert False, f"{type(ctd_path)}\n{ctd_path}"
+        raise TypeError(f"{type(ctd_path)}\n{ctd_path}")
     ### format_POI_old has no META header
     if "direction" not in dict_list[0] and "vert_label" in dict_list[0]:
         return _load_format_POI_old(dict_list)  # This file if used in the old POI-pipeline and is deprecated
@@ -965,7 +967,7 @@ def load_poi(ctd_path: POI_Reference, verbose=True) -> POI:
     return POI(centroids, orientation=axcode, zoom=zoom, shape=shape, format=format_, info=info, origin=origin, rotation=rotation)
 
 
-def _load_docker_centroids(dict_list, centroids: POI_Descriptor, format):
+def _load_docker_centroids(dict_list, centroids: POI_Descriptor, format_):  # noqa: ARG001
     for d in dict_list[1:]:
         assert "direction" not in d, f'File format error: only first index can be a "direction" but got {dict_list[0]}'
         if "nan" in str(d):  # skipping NaN centroids
@@ -981,7 +983,7 @@ def _load_docker_centroids(dict_list, centroids: POI_Descriptor, format):
                     vert_id = v_name2idx[number]
                     subreg_id = conversion_poi[subreg]
                     centroids[vert_id, subreg_id] = (d["X"], d["Y"], d["Z"])
-                except:
+                except Exception:
                     print(f'Label {d["label"]} is not an integer and cannot be converted to an int')
                     centroids[0, d["label"]] = (d["X"], d["Y"], d["Z"])
         else:
@@ -1028,9 +1030,9 @@ def _load_POI_centroids(dict_list, centroids: POI_Descriptor):
     assert len(dict_list) == 2
     d: dict[int | str, dict[int | str, tuple[float, float, float]]] = dict_list[1]
     for vert_id, v in d.items():
-        vert_id = _to_int(vert_id)
+        vert_id = _to_int(vert_id)  # noqa: PLW2901
         for sub_id, t in v.items():
-            sub_id = _to_int(sub_id)
+            sub_id = _to_int(sub_id)  # noqa: PLW2901
             centroids[vert_id, sub_id] = tuple(t)
 
 
@@ -1118,9 +1120,8 @@ def calc_centroids_labeled_buffered(
 
     msk_nii = to_nii(msk_reference, True)
     sub_nii = to_nii_optional(subreg_reference, True)
-    if sub_nii is None or not check_every_point:
-        if out_path.exists():
-            return POI.load(out_path)
+    if (sub_nii is None or not check_every_point) and out_path.exists():
+        return POI.load(out_path)
     if sub_nii is not None:
         ctd = calc_centroids_from_subreg_vert(
             msk_nii,
@@ -1170,8 +1171,8 @@ def calc_centroids_from_subreg_vert(
     vert_msk: Image_Reference,
     subreg: Image_Reference,
     *,
-    buffer_file: str | Path | None = None,  # used by wrapper
-    save_buffer_file=False,  # used by wrapper
+    buffer_file: str | Path | None = None,  # used by wrapper  # noqa: ARG001
+    save_buffer_file=False,  # used by wrapper  # noqa: ARG001
     decimals=2,
     subreg_id: int | Location | Sequence[int | Location] | Sequence[Location] | Sequence[int] = 50,
     axcodes_to: Ax_Codes | None = None,
@@ -1221,7 +1222,7 @@ def calc_centroids_from_subreg_vert(
         print("list") if verbose else None
 
         for idx in subreg_id:
-            idx = loc2int(idx)
+            idx = loc2int(idx)  # noqa: PLW2901
             if not all((v, idx) in poi for v in _vert_ids):
                 poi = calc_centroids_from_subreg_vert(
                     vert_msk,
