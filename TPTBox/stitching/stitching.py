@@ -10,8 +10,6 @@ from scipy.ndimage import binary_opening, distance_transform_edt
 from scipy.spatial import ConvexHull
 from skimage.exposure import match_histograms
 
-np.set_printoptions(precision=2, floatmode="fixed")
-
 
 def get_rotation_and_spacing_from_affine(affine: np.ndarray):
     # From https://github.com/nipy/nibabel/blob/master/nibabel/orientations.py
@@ -238,7 +236,7 @@ buffer_references = {}
 def buffer_reference(path, bias_field: bool, crop=False):
     if path in buffer_references:
         return buffer_references[path]
-    reference = n4_bias_field_correction(nib.load(path), crop) if bias_field else get_array(nib.load(path))
+    reference = n4_bias_field_correction(nib.load(path), crop) if bias_field else get_array(nib.load(path))  # type: ignore
     buffer_references[path] = reference
     return reference
 
@@ -274,6 +272,7 @@ def main(  # noqa: C901
     dtype: type | str = float,
     save=True,
 ):
+    np.set_printoptions(precision=2, floatmode="fixed")
     if is_segmentation:
         bias_field = False
         crop_to_bias_field = False
@@ -291,7 +290,7 @@ def main(  # noqa: C901
         if isinstance(f_name, Path | str):
             print("Load ", f_name, Path(f_name)) if verbose else None
             # Load Nii
-            nii = nib.load(f_name)  # type: ignore
+            nii: nib.nifti1.Nifti1Image = nib.load(f_name)  # type: ignore
 
         else:
             nii = f_name
@@ -346,7 +345,7 @@ def main(  # noqa: C901
     nii_out = get_max_affine_and_shape(corners_current, affines, min_spacing=min_spacing, dtype=dtype2, verbose=verbose)
     target_list = []
     occupancy_list = []
-    # get resampeld arrays and occupancy
+    # get resampled arrays and occupancy
     print("### resample to new space ###") if verbose else None
     for i, nii in enumerate(niis, 1):
         print(f"{i:2}/{len(niis):2} resampled", end="\r") if verbose else None
@@ -379,14 +378,14 @@ def main(  # noqa: C901
             arr_1_ = (arr_1 > 0.0).astype(np.float32) - overlap
             arr_2_ = (arr_2 > 0.0).astype(np.float32) - overlap
             if ramp_edge_min_value == 0:
-                arr_1_opend: np.ndarray = arr_1_
-                arr_2_opend: np.ndarray = arr_2_
+                arr_1_opened: np.ndarray = arr_1_
+                arr_2_opened: np.ndarray = arr_2_
             else:
-                arr_1_opend: np.ndarray = binary_opening(arr_1_, structure=structure, iterations=1, brute_force=True)
-                arr_2_opend: np.ndarray = binary_opening(arr_2_, structure=structure, iterations=1, brute_force=True)
+                arr_1_opened: np.ndarray = binary_opening(arr_1_, structure=structure, iterations=1, brute_force=True)
+                arr_2_opened: np.ndarray = binary_opening(arr_2_, structure=structure, iterations=1, brute_force=True)
 
-            arr_1[overlap] = distance_transform_edt(1.0 - arr_2_opend)[overlap]  # type: ignore
-            arr_2[overlap] = distance_transform_edt(1.0 - arr_1_opend)[overlap]  # type: ignore
+            arr_1[overlap] = distance_transform_edt(1.0 - arr_2_opened)[overlap]  # type: ignore
+            arr_2[overlap] = distance_transform_edt(1.0 - arr_1_opened)[overlap]  # type: ignore
             arr_1_[overlap] = arr_1[overlap]
             arr_2_[overlap] = arr_2[overlap]
             sum_ = arr_1_ + arr_2_
@@ -566,13 +565,3 @@ if __name__ == "__main__":
         is_segmentation=args.is_segmentation,
         dtype=args.dtype,
     )
-    # python stitching.py -sr -v -i D:/data/rawdata/sub-101133/T2w/sub-101133_acq-sag_chunk-HWS_sequ-29_T2w.nii.gz D:/data/rawdata/sub-101133/T2w/sub-101133_acq-sag_chunk-BWS_sequ-8085_T2w.nii.gz D:/data/rawdata/sub-101133/T2w/sub-101133_acq-sag_chunk-LWS_sequ-31_T2w.nii.gz
-    #
-    # python stitching.py -sr -v -ms 1 -i /media/data/robert/datasets/dataset-spinegan_T2w_all/rawdata/spinegan0003/T2w/sub-spinegan0003_ses-20210724_sequ-*_part-inphase_dixon.nii.gz
-
-
-# python stitching.py -sr -v -hists -i /DATA/NAS/ongoing_projects/tanja/dataset-VR/rawdata/1111685221/T2w/sub-1111685221_sequ-4*_part-inphase_dixon.nii.gz
-
-# python stitching.py -sr -v -i D:/data/dataset-spineGAN/derivatives/spinegan0113/T2w/sub-spinegan0113_ses-20220504_sequ-302_part-inphase_mod-dixon_seg-vert_msk.nii.gz -i D:/data/dataset-spineGAN/derivatives/spinegan0113/T2w/sub-spinegan0113_ses-20220504_sequ-301_part-inphase_mod-dixon_seg-vert_msk.nii.gz -o text.nii.gz
-
-# python stitching.py -dtype uint16 -v -no_hists -ms 1 -i /DATA/NAS/datasets_processed/MRI_spine/dataset-DIXCTWS/translated/rawdata/sub-DIXCTWS160/*/*_T2w.nii.gz -o /DATA/NAS/ongoing_projects/robert/figure/sub-160_acq-iso_T2w.nii.gz
