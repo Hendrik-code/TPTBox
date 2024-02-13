@@ -259,10 +259,10 @@ type_mapping = {
 def main(  # noqa: C901
     images: list[str] | list[Path] | list[nib.nifti1.Nifti1Image],
     output: str | None,
-    match_histogram: bool,
-    store_ramp: bool,
-    verbose: bool,
-    min_value=0,
+    match_histogram: bool = False,
+    store_ramp: bool = False,
+    verbose: bool = False,
+    min_value: float = 0,
     bias_field: bool = True,
     crop_to_bias_field: bool = False,
     crop_empty: bool = False,
@@ -489,7 +489,7 @@ def main(  # noqa: C901
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Process some integers.")
+    parser = argparse.ArgumentParser(description="nii-stitching")
     parser.add_argument("-i", "--images", nargs="+", default=[], help="filenames of images")
     parser.add_argument(
         "-o",
@@ -566,7 +566,6 @@ if __name__ == "__main__":
         is_segmentation=args.is_segmentation,
         dtype=args.dtype,
     )
-
     # python stitching.py -sr -v -i D:/data/rawdata/sub-101133/T2w/sub-101133_acq-sag_chunk-HWS_sequ-29_T2w.nii.gz D:/data/rawdata/sub-101133/T2w/sub-101133_acq-sag_chunk-BWS_sequ-8085_T2w.nii.gz D:/data/rawdata/sub-101133/T2w/sub-101133_acq-sag_chunk-LWS_sequ-31_T2w.nii.gz
     #
     # python stitching.py -sr -v -ms 1 -i /media/data/robert/datasets/dataset-spinegan_T2w_all/rawdata/spinegan0003/T2w/sub-spinegan0003_ses-20210724_sequ-*_part-inphase_dixon.nii.gz
