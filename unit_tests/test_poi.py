@@ -21,7 +21,7 @@ from TPTBox.core.poi import (
     calc_poi_labeled_buffered,
     load_poi,
 )
-from TPTBox.tests.test_utils import extract_affine, get_centroids, get_poi, get_random_ax_code, overlap, repeats, sqr1d
+from TPTBox.tests.test_utils import extract_affine, get_poi, get_random_ax_code, overlap, repeats, sqr1d
 
 
 def get_nii(x: tuple[int, int, int] | None = None, num_point=3, rotation=True):  # type: ignore
