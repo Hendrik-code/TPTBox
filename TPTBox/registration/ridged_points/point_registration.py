@@ -16,7 +16,7 @@ from TPTBox import (
     Logger_Interface,
     No_Logger,
     POI_Reference,
-    calc_centroids_from_subreg_vert,
+    calc_poi_from_subreg_vert,
     to_nii,
 )
 from TPTBox.core.sitk_utils import nii_to_sitk, sitk_to_nii
@@ -180,7 +180,7 @@ def ridged_points_from_subreg_vert(
     instance_nii = to_nii(vert, True).copy()
     semantic_nii = to_nii(subreg, True).copy()
     target_poi = (
-        calc_centroids_from_subreg_vert(
+        calc_poi_from_subreg_vert(
             instance_nii, semantic_nii, subreg_id=subreg_id, buffer_file=poi_target_buffer, save_buffer_file=save_buffer_file
         )
         .copy()
