@@ -2,6 +2,7 @@ import json
 from collections.abc import Callable, MutableMapping, Sequence
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 
 import numpy as np
@@ -14,7 +15,7 @@ from . import vert_constants
 from .vert_constants import Coordinate, Location, POI_Dict, log, log_file, logging
 
 ROUNDING_LVL = 7
-POI_ID = tuple[int, int] | slice
+POI_ID = tuple[int, int] | slice | tuple[Location, Location] | tuple[Location, int] | tuple[int, Location]
 
 MAPPING = dict[int | str, int | str] | dict[int, int] | dict[int, int | None] | dict[int, None] | dict[int | str, int | str | None] | None
 DIMENSIONS = 3
@@ -53,11 +54,15 @@ def unpack_poi_id(key: POI_ID, definition: Abstract_POI_Definition) -> tuple[int
             region = int(region)
         except ValueError:
             region = definition.region_name2idx[region]
+    if isinstance(region, Enum):
+        region = region.value
     if isinstance(subregion, str):
         try:
             subregion = int(subregion)
         except ValueError:
             subregion = definition.subregion_name2idx[subregion]
+    if isinstance(subregion, Enum):
+        subregion = subregion.value
     return region, subregion
 
 
@@ -488,7 +493,7 @@ class Abstract_POI:
         self.sort()
         return self.centroids.items()
 
-    def items_2D(self):  # noqa: N802
+    def items_2D(self):
         self.sort()
         return self.centroids.items_2d()
 

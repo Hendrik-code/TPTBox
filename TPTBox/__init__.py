@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent))
 # packages
-from TPTBox import core
+from TPTBox import core  # noqa: I001
 from TPTBox.core import bids_files, np_utils
 
 # BIDS
@@ -26,11 +26,10 @@ from TPTBox.core.poi import (
     POI_Reference,
     VertebraCentroids,
     calc_centroids,
-    calc_centroids_from_subreg_vert,
-    calc_centroids_labeled_buffered,
-    load_poi,
+    calc_poi_from_subreg_vert,
+    calc_poi_labeled_buffered,
 )
-from TPTBox.core.poi import POI as Centroids
+from TPTBox.core.poi import load_poi
 from TPTBox.core.poi import load_poi as load_centroids
 from TPTBox.core.poi_global import POI_Global
 from TPTBox.core.vert_constants import Location, Zooms, v_idx2name, v_idx_order, v_name2idx

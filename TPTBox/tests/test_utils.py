@@ -1,33 +1,15 @@
 import os
-import sys
-import tempfile
-from pathlib import Path
-
-file = Path(__file__).resolve()
-sys.path.append(str(file.parents[2]))
 import random
+import sys
+from pathlib import Path
 
 import nibabel as nib
 import numpy as np
 
-from TPTBox import Centroids
-from TPTBox.core.nii_wrapper import NII
-from TPTBox.core.poi import (
-    LABEL_MAX,
-    POI,
-    VertebraCentroids,
-    _poi_to_dict_list,
-    calc_centroids_from_subreg_vert,
-    calc_centroids_labeled_buffered,
-    load_poi,
-)
-from TPTBox.core.vert_constants import Ax_Codes
-
-if not os.path.isdir("test"):
-    sys.path.append("..")
-file = Path(__file__).resolve()
-sys.path.append(str(file.parents[2]))
 import TPTBox.core.bids_files as bids
+from TPTBox import POI
+from TPTBox.core.nii_wrapper import NII
+from TPTBox.core.vert_constants import Ax_Codes
 
 repeats = 20
 
@@ -78,13 +60,13 @@ def get_random_ax_code() -> Ax_Codes:
     return tuple(directions[i][random.randint(0, 1)] for i in idx)  # type: ignore
 
 
-def get_centroids(x: tuple[int, int, int] = (50, 30, 40), num_point=3):
+def get_POI(x: tuple[int, int, int] = (50, 30, 40), num_point=3):
     out_points: dict[tuple[int, int], tuple[float, float, float]] = {}
 
     for idx in range(num_point):
         point = tuple(random.randint(1, a * 100) / 100.0 for a in x)
         out_points[idx + 1, 50] = point
-    return Centroids(out_points, orientation=("R", "A", "S"), zoom=(1, 1, 1))
+    return POI(out_points, orientation=("R", "A", "S"), zoom=(1, 1, 1))
 
 
 def get_poi(x: tuple[int, int, int] = (50, 30, 40), num_vert=3, num_subreg=1, rotation=True, min_subreg=1, max_subreg=255):
@@ -92,7 +74,7 @@ def get_poi(x: tuple[int, int, int] = (50, 30, 40), num_vert=3, num_subreg=1, ro
 
     for idx in range(num_vert):
         out_points[idx + 1] = {}
-        for idx2 in range(num_subreg):
+        for _ in range(num_subreg):
             point = tuple(random.randint(1, a * 100) / 100.0 for a in x)
             subregion = random.randint(min_subreg, max_subreg)
             out_points[idx + 1][subregion] = point
@@ -108,7 +90,7 @@ def get_poi(x: tuple[int, int, int] = (50, 30, 40), num_vert=3, num_subreg=1, ro
     return POI(out_points, orientation=("R", "A", "S"), zoom=(1, 1, 1), shape=x, origin=origin, rotation=r)
 
 
-def get_nii(x: tuple[int, int, int] = None, num_point=3, min_size: int = 1):  # type: ignore
+def get_nii(x: tuple[int, int, int] | None = None, num_point=3, min_size: int = 1):  # type: ignore
     if x is None:
         x = (random.randint(30, 70), random.randint(30, 70), random.randint(30, 70))
     a = np.zeros(x, dtype=np.uint16)

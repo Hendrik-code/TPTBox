@@ -274,6 +274,17 @@ class POI(Abstract_POI):
         warnings.warn("crop_centroids id deprecated use apply_crop instead", DeprecationWarning, stacklevel=4)
         return self.apply_crop(**qargs)
 
+    def apply_crop_reverse(
+        self: Self,
+        o_shift: tuple[slice, slice, slice] | Sequence[slice],
+        shape: tuple[int, int, int] | Sequence[int],
+        inplace=False,
+    ):
+        """A Poi crop can be trivially reversed with out any loss. See apply_crop for more information"""
+        return self.apply_crop(
+            tuple(slice(-shift.start, sh - shift.start) for shift, sh in zip(o_shift, shape, strict=True)), inplace=inplace
+        )
+
     def apply_crop(self: Self, o_shift: tuple[slice, slice, slice] | Sequence[slice], inplace=False):
         """When you crop an image, you have to also crop the centroids.
         There are actually no boundary to be moved, but the origin must be moved to the new 0,0,0
@@ -333,7 +344,6 @@ class POI(Abstract_POI):
                 shape: Triple | None = tuple(int(map_v(o_shift[i], i) - o_shift[i].start) for i in range(3))  # type: ignore
             if self.origin is not None:
                 origin = self.local_to_global(tuple(float(y.start) for y in o_shift))  # type: ignore
-                print(origin)
                 # origin = tuple(float(x + y.start) for x, y in zip(self.origin, o_shift))
 
         except AttributeError:
@@ -935,7 +945,7 @@ def load_poi(ctd_path: POI_Reference, verbose=True) -> POI:  # noqa: ARG001
         vert = ctd_path[0]
         subreg = ctd_path[1]
         ids: list[int | Location] = ctd_path[2]  # type: ignore
-        return calc_centroids_from_subreg_vert(vert, subreg, subreg_id=ids)
+        return calc_poi_from_subreg_vert(vert, subreg, subreg_id=ids)
     else:
         raise TypeError(f"{type(ctd_path)}\n{ctd_path}")
     ### format_POI_old has no META header
@@ -1042,6 +1052,14 @@ def loc2int(i: int | Location):
     return i.value
 
 
+def loc2int_list(i: int | Location | Sequence[int | Location]):
+    if isinstance(i, Sequence):
+        return [loc2int(j) for j in i]
+    if isinstance(i, int):
+        return [i]
+    return [i.value]
+
+
 def int2loc(
     i: int | Location | Sequence[int | Location] | Sequence[Location] | Sequence[int],
 ) -> Location | Sequence[Location]:
@@ -1055,7 +1073,7 @@ def int2loc(
     return i
 
 
-def calc_centroids_labeled_buffered(
+def calc_poi_labeled_buffered(
     msk_reference: Image_Reference,
     subreg_reference: Image_Reference | None,
     out_path: Path | str,
@@ -1065,7 +1083,7 @@ def calc_centroids_labeled_buffered(
     decimals=3,
     # additional_folder=False,
     check_every_point=True,
-    use_vertebra_special_action=True,
+    # use_vertebra_special_action=True,
 ) -> POI:
     """
     Computes the centroids of the given mask `msk_reference` with respect to the given subregion `subreg_reference`,
@@ -1123,14 +1141,13 @@ def calc_centroids_labeled_buffered(
     if (sub_nii is None or not check_every_point) and out_path.exists():
         return POI.load(out_path)
     if sub_nii is not None:
-        ctd = calc_centroids_from_subreg_vert(
+        ctd = calc_poi_from_subreg_vert(
             msk_nii,
             sub_nii,
             buffer_file=out_path,
             decimals=decimals,
             subreg_id=subreg_id,
             verbose=verbose,
-            use_vertebra_special_action=use_vertebra_special_action,
         )
     else:
         assert not isinstance(subreg_id, Sequence), "Missing instance+semantic map for multiple Values"
@@ -1166,24 +1183,150 @@ def _buffer_it(func):
     return wrap
 
 
+# @_buffer_it
+# def calc_centroids_from_subreg_vert(
+#    vert_msk: Image_Reference,
+#    subreg: Image_Reference,
+#    *,
+#    buffer_file: str | Path | None = None,  # used by wrapper
+#    save_buffer_file=False,  # used by wrapper
+#    decimals=2,
+#    subreg_id: int | Location | Sequence[int | Location] | Sequence[Location] | Sequence[int] = 50,
+#    axcodes_to: Ax_Codes | None = None,
+#    verbose: logging = True,
+#    extend_to: POI | None = None,
+#    use_vertebra_special_action=True,
+#    _vert_ids=None,
+# ) -> POI:
+#    """
+#    Calculates the centroids of a subregion within a vertebral mask.
+#
+#    Args:
+#        vert_msk (Image_Reference): A vertebral mask image reference.
+#        subreg (Image_Reference): An image reference for the subregion of interest.
+#        decimals (int, optional): Number of decimal places to round the output coordinates to. Defaults to 1.
+#        subreg_id (int | Location | list[int | Location], optional): The ID(s) of the subregion(s) to calculate centroids for. Defaults to 50.
+#        axcodes_to (Ax_Codes | None, optional): A tuple of axis codes indicating the target orientation of the images. Defaults to None.
+#        verbose (bool, optional): Whether to print progress messages. Defaults to False.
+#        fixed_offset (int, optional): A fixed offset value to add to the calculated centroid coordinates. Defaults to 0.
+#        extend_to (POI | None, optional): An existing POI object to extend with the new centroid values. Defaults to None.
+#
+#    Returns:
+#        POI: A POI object containing the calculated centroid coordinates.
+#    """
+#
+#    vert_msk = to_nii(vert_msk, seg=True)
+#    subreg_msk = to_nii(subreg, seg=True)
+#    assert vert_msk.origin == subreg_msk.origin, (vert_msk.origin, subreg_msk.origin)
+#    if _vert_ids is None:
+#        _vert_ids = vert_msk.unique()
+#    log.print("Calc centroids from subregion id", int2loc(subreg_id), vert_msk.shape, verbose=verbose)
+#
+#    if axcodes_to is not None:
+#        # Like: ("P","I","R")
+#        vert_msk = vert_msk.reorient(verbose=verbose, axcodes_to=axcodes_to, inplace=False)
+#        subreg_msk = subreg_msk.reorient(verbose=verbose, axcodes_to=axcodes_to, inplace=False)
+#    assert vert_msk.orientation == subreg_msk.orientation
+#    # Recursive call for multiple subregion ids
+#    if isinstance(subreg_id, Sequence):
+#        if extend_to is None:
+#            poi = POI({}, **vert_msk._extract_affine(), format=FORMAT_POI)
+#        else:
+#            extend_to.format = FORMAT_POI
+#            poi = extend_to
+#            assert poi.orientation == vert_msk.orientation, (poi.orientation, vert_msk.orientation)
+#
+#        print("list") if verbose else None
+#
+#        for idx in subreg_id:
+#            idx = loc2int(idx)
+#            if not all((v, idx) in poi for v in _vert_ids):
+#                poi = calc_centroids_from_subreg_vert(
+#                    vert_msk,
+#                    subreg_msk,
+#                    buffer_file=None,
+#                    subreg_id=loc2int(idx),
+#                    verbose=verbose,
+#                    extend_to=poi,
+#                    decimals=decimals,
+#                    _vert_ids=_vert_ids,
+#                )
+#        return poi
+#    # Prepare mask to binary mask
+#    vert_arr = vert_msk.get_seg_array()
+#    subreg_arr = subreg_msk.get_seg_array()
+#    assert subreg_msk.shape == vert_arr.shape, "Shape miss-match" + str(subreg_msk.shape) + str(vert_arr.shape)
+#    subreg_id = loc2int(subreg_id)
+#    if use_vertebra_special_action:
+#        mapping_vert = {
+#            Location.Vertebra_Disc.value: 100,
+#            Location.Vertebral_Body_Endplate_Superior.value: 200,
+#            Location.Vertebral_Body_Endplate_Inferior.value: 300,
+#        }
+#        if subreg_id == Location.Vertebra_Corpus.value:
+#            subreg_arr[subreg_arr == 49] = Location.Vertebra_Corpus.value
+#        elif subreg_id == Location.Vertebra_Full.value:
+#            subreg_arr = vert_arr.copy()
+#            subreg_arr[subreg_arr >= 26] = 0
+#            subreg_arr[subreg_arr != 0] = Location.Vertebra_Full.value
+#
+#        if subreg_id in mapping_vert:  # IVD / Endplates Superior / Endplate Inferior
+#            vert_arr[subreg_arr != subreg_id] = 0
+#            vert_arr[vert_arr >= mapping_vert[subreg_id] + 100] = 0
+#            vert_arr[vert_arr <= mapping_vert[subreg_id]] = 0
+#            vert_arr[vert_arr != 0] -= mapping_vert[subreg_id]
+#        else:
+#            vert_arr[subreg_arr >= 100] = 0
+#            subreg_arr[subreg_arr >= 100] = 0
+#            if use_vertebra_special_action and ((subreg_id in range(81, 128)) or subreg_id == Location.Spinal_Canal.value):
+#                from TPTBox.core.vertebra_pois_non_centroids import compute_non_centroid_pois
+#
+#                if extend_to is None:
+#                    extend_to = POI({}, **vert_msk._extract_affine(), format=FORMAT_POI)
+#                compute_non_centroid_pois(extend_to, int2loc(subreg_id), vert_msk, subreg_msk, _vert_ids=_vert_ids, log=log)
+#                return extend_to
+#            elif subreg_id < 40 or subreg_id > 50:
+#                raise NotImplementedError(
+#                    f"POI of subreg {subreg_id} - {Location(subreg_id) if subreg_id in Location else 'undefined'} is not a centroid. If you want the general Centroid computation use use_vertebra_special_action = False"
+#                )
+#    vert_arr[subreg_arr != subreg_id] = 0
+#    vert_arr[vert_arr >= 100] = 0
+#
+#    msk_data = vert_arr
+#    if extend_to is not None and subreg_id in extend_to.centroids.keys_subregion():
+#        missing = False
+#        for reg in np.unique(vert_arr):
+#            if reg == 0:
+#                continue
+#            if (reg, subreg_id) in extend_to:
+#                continue
+#            missing = True
+#            break
+#        if not missing:
+#            return extend_to
+#
+#    nii = nib.nifti1.Nifti1Image(msk_data, vert_msk.affine, vert_msk.header)
+#    poi = calc_centroids(nii, decimals=decimals, subreg_id=subreg_id, extend_to=extend_to)
+#    return poi
+#
+
+
 @_buffer_it
-def calc_centroids_from_subreg_vert(
-    vert_msk: Image_Reference,
+def calc_poi_from_subreg_vert(
+    vert: Image_Reference,
     subreg: Image_Reference,
     *,
     buffer_file: str | Path | None = None,  # used by wrapper  # noqa: ARG001
     save_buffer_file=False,  # used by wrapper  # noqa: ARG001
     decimals=2,
     subreg_id: int | Location | Sequence[int | Location] | Sequence[Location] | Sequence[int] = 50,
-    axcodes_to: Ax_Codes | None = None,
     verbose: logging = True,
     extend_to: POI | None = None,
-    use_vertebra_special_action=True,
+    # use_vertebra_special_action=True,
     _vert_ids=None,
 ) -> POI:
     """
-    Calculates the centroids of a subregion within a vertebral mask.
-
+    Calculates the centroids of a subregion within a vertebral mask. This function is spine opinionated, the general implementation is "calc_centroids_from_two_masks".
     Args:
         vert_msk (Image_Reference): A vertebral mask image reference.
         subreg (Image_Reference): An image reference for the subregion of interest.
@@ -1193,104 +1336,184 @@ def calc_centroids_from_subreg_vert(
         verbose (bool, optional): Whether to print progress messages. Defaults to False.
         fixed_offset (int, optional): A fixed offset value to add to the calculated centroid coordinates. Defaults to 0.
         extend_to (POI | None, optional): An existing POI object to extend with the new centroid values. Defaults to None.
+    Returns:
+        POI: A POI object containing the calculated centroid coordinates.
+    """
+    vert_msk = to_nii(vert, seg=True)
+    subreg_msk = to_nii(subreg, seg=True)
+    org_shape = subreg_msk.shape
+    try:
+        crop = vert_msk.compute_crop()
+        crop = subreg_msk.compute_crop(maximum_size=crop)
+    # crop = (slice(0, subreg_msk.shape[0]), slice(0, subreg_msk.shape[1]), slice(0, subreg_msk.shape[2]))
+    except ValueError:
+        return POI({}, **vert_msk._extract_affine(), format=FORMAT_POI) if extend_to is None else extend_to.copy()
+    vert_msk.assert_affine(subreg_msk)
+    vert_msk = vert_msk.apply_crop(crop)
+    subreg_msk = subreg_msk.apply_crop(crop)
+    extend_to = POI({}, **vert_msk._extract_affine(), format=FORMAT_POI) if extend_to is None else extend_to.apply_crop(crop)
+
+    if _vert_ids is None:
+        _vert_ids = vert_msk.unique()
+
+    from TPTBox.core.vertebra_pois_non_centroids import add_prerequisites, compute_non_centroid_pois
+
+    subreg_id = add_prerequisites(int2loc(subreg_id if isinstance(subreg_id, Sequence) else [subreg_id]))  # type: ignore
+    log.print("Calc centroids from subregion id", subreg_id, vert_msk.shape, verbose=verbose)
+    subreg_id_int = set(loc2int_list(subreg_id))
+    subreg_id_int_phase_1 = tuple(filter(lambda i: i < 80 and i not in [Location.Vertebra_Full.value], subreg_id_int))
+    # Step 1 get all required locations, crop vert/subreg
+    # Step 2 calc centroids
+
+    print("step 2", subreg_id_int)
+    if len(subreg_id_int_phase_1) != 0:
+        arr = vert_msk.get_array()
+        arr[arr >= 100] = 0
+        vert_only_bone = vert_msk.set_array(arr)
+        arr = subreg_msk.get_array()
+        # if use_vertebra_special_action:
+        arr[arr == 49] = Location.Vertebra_Corpus.value
+        subreg_msk = subreg_msk.set_array(arr)
+        extend_to = calc_centroids_from_two_masks(
+            vert_only_bone,
+            subreg_msk,
+            decimals=decimals,
+            limit_ids_of_lvl_2=subreg_id_int_phase_1,
+            verbose=verbose if isinstance(verbose, bool) else True,
+            extend_to=extend_to,
+        )
+        [subreg_id_int.remove(i) for i in subreg_id_int_phase_1]
+    # Step 3 Vertebra_Full
+    print("step 3", subreg_id_int)
+    if Location.Vertebra_Full.value in subreg_id_int:
+        log.print("Calc centroid from subregion id", "Vertebra_Full", verbose=verbose)
+        full = Location.Vertebra_Full.value
+        vert_arr = vert_msk.get_seg_array()
+        if _is_not_yet_computed((full,), extend_to, full):
+            arr = vert_arr.copy()
+            arr[arr <= full] = 0
+            arr[arr >= Location.Vertebra_Corpus.value] = 0
+            arr[arr != 0] = full
+            extend_to = calc_centroids(vert_msk.set_array(arr), decimals=decimals, subreg_id=full, extend_to=extend_to, inplace=True)
+        subreg_id_int.remove(full)
+    # Step 4 IVD / Endplates Superior / Endplate Inferior
+    print("step 4", subreg_id_int)
+    mapping_vert = {
+        Location.Vertebra_Disc.value: 100,
+        Location.Vertebral_Body_Endplate_Superior.value: 200,
+        Location.Vertebral_Body_Endplate_Inferior.value: 300,
+    }
+    for loc, v in mapping_vert.items():
+        if loc in subreg_id_int:
+            print(subreg_id)
+            log.print("Calc centroid from subregion id", Location(loc).name, verbose=verbose)
+            vert_arr = vert_msk.get_seg_array()
+            subreg_arr = subreg_msk.get_seg_array()
+            # IVD / Endplates Superior / Endplate Inferior
+            vert_arr[subreg_arr != loc] = 0
+            # remove a off set of 100/200/300 and remove other that are not of interest
+            vert_arr[vert_arr >= v + 100] = 0
+            vert_arr[vert_arr < v] = 0
+            vert_arr[vert_arr != 0] -= v
+            extend_to = calc_centroids(vert_msk.set_array(vert_arr), decimals=decimals, subreg_id=v, extend_to=extend_to, inplace=True)
+            subreg_id_int.remove(loc)
+    # Step 5 call non_centroid_pois
+    # Prepare mask to binary mask
+    print("step 5", subreg_id_int)
+    vert_arr = vert_msk.get_seg_array()
+    subreg_arr = subreg_msk.get_seg_array()
+    assert subreg_msk.shape == vert_arr.shape, "Shape miss-match" + str(subreg_msk.shape) + str(vert_arr.shape)
+    vert_arr[subreg_arr >= 100] = 0
+    subreg_arr[subreg_arr >= 100] = 0
+
+    if extend_to is None:
+        extend_to = POI({}, **vert_msk._extract_affine(), format=FORMAT_POI)
+    if len(subreg_id_int) != 0:
+        print("step 6", subreg_id_int)
+        compute_non_centroid_pois(extend_to, int2loc(list(subreg_id_int)), vert_msk, subreg_msk, _vert_ids=_vert_ids, log=log)
+    extend_to.apply_crop_reverse(crop, org_shape, inplace=True)
+    return extend_to
+
+
+def calc_centroids_from_two_masks(
+    lvl_1_msk: Image_Reference,
+    lvl_2_msk: Image_Reference,
+    decimals: int = 3,
+    limit_ids_of_lvl_2: int | Sequence[int] | None = None,
+    verbose: bool = True,
+    extend_to: POI | None = None,
+):
+    """
+    Calculates the centroids of two masks, representing a hierarchical relationship.
+
+    Args:
+        lvl_1_msk (Image_Reference): An image reference representing the higher-level mask (instance).
+        lvl_2_msk (Image_Reference): An image reference representing the lower-level mask (subregion).
+        decimals (int, optional): Number of decimal places to round the output coordinates to. Defaults to 3.
+        limit_ids_of_lvl_2 (int | Sequence[int] | None, optional): The ID(s) of the lower-level mask to calculate centroids for. Defaults to None.
+        verbose (bool, optional): Whether to print progress messages. Defaults to True.
+        extend_to (POI | None, optional): An existing POI object to extend with the new centroid values. Defaults to None.
 
     Returns:
         POI: A POI object containing the calculated centroid coordinates.
     """
+    vert_msk = to_nii(lvl_1_msk, seg=True)
+    subreg_msk = to_nii(lvl_2_msk, seg=True)
+    org_shape = subreg_msk.shape
+    # crop to mask to speed up the segmentation
+    crop = vert_msk.compute_crop()
+    crop = subreg_msk.compute_crop(maximum_size=crop)
+    # crop = (slice(0, subreg_msk.shape[0]), slice(0, subreg_msk.shape[1]), slice(0, subreg_msk.shape[2]))
 
-    vert_msk = to_nii(vert_msk, seg=True)
-    subreg_msk = to_nii(subreg, seg=True)
-    assert vert_msk.origin == subreg_msk.origin, (vert_msk.origin, subreg_msk.origin)
-    if _vert_ids is None:
-        _vert_ids = vert_msk.unique()
-    log.print("Calc centroids from subregion id", int2loc(subreg_id), vert_msk.shape, verbose=verbose)
-
-    if axcodes_to is not None:
-        # Like: ("P","I","R")
-        vert_msk = vert_msk.reorient(verbose=verbose, axcodes_to=axcodes_to, inplace=False)
-        subreg_msk = subreg_msk.reorient(verbose=verbose, axcodes_to=axcodes_to, inplace=False)
-    assert vert_msk.orientation == subreg_msk.orientation
+    vert_msk = vert_msk.apply_crop(crop)
+    subreg_msk = subreg_msk.apply_crop(crop)
+    _vert_ids = vert_msk.unique()
+    vert_msk.assert_affine(subreg_msk)
+    if isinstance(limit_ids_of_lvl_2, int):
+        limit_ids_of_lvl_2 = [limit_ids_of_lvl_2]
+    elif limit_ids_of_lvl_2 is None:
+        limit_ids_of_lvl_2 = subreg_msk.unique()
     # Recursive call for multiple subregion ids
-    if isinstance(subreg_id, Sequence):
-        if extend_to is None:
-            poi = POI({}, **vert_msk._extract_affine(), format=FORMAT_POI)
-        else:
-            extend_to.format = FORMAT_POI
-            poi = extend_to
-            assert poi.orientation == vert_msk.orientation, (poi.orientation, vert_msk.orientation)
+    if extend_to is None:
+        poi = POI({}, **vert_msk._extract_affine(), format=FORMAT_POI)
+    else:
+        poi = extend_to.apply_crop(crop)
+        vert_msk.assert_affine(poi)
+    loop = limit_ids_of_lvl_2
+    if verbose:
+        from tqdm import tqdm
 
-        print("list") if verbose else None
+        loop = tqdm(loop, total=len(loop), desc="calc centroids from two masks")
+    for subreg_id in loop:
+        subreg_id = loc2int(subreg_id)  # noqa: PLW2901
+        if not all((v, subreg_id) in poi for v in _vert_ids):
+            exclusive_mask = vert_msk.get_seg_array()
+            exclusive_mask[subreg_msk.get_seg_array() != subreg_id] = 0
+            # check if the point exists if extend_to is used
+            is_not_yet_computed = _is_not_yet_computed(np.unique(exclusive_mask), extend_to, subreg_id)  # type: ignore
+            if is_not_yet_computed:
+                # calc poi for individual subreg
+                nii = NII((exclusive_mask, vert_msk.affine, vert_msk.header), True)
+                poi = calc_centroids(nii, decimals=decimals, subreg_id=subreg_id, extend_to=poi)
+            else:
+                continue
+    # reverse crop
+    poi.apply_crop_reverse(crop, org_shape, inplace=True)
+    return poi
 
-        for idx in subreg_id:
-            idx = loc2int(idx)  # noqa: PLW2901
-            if not all((v, idx) in poi for v in _vert_ids):
-                poi = calc_centroids_from_subreg_vert(
-                    vert_msk,
-                    subreg_msk,
-                    buffer_file=None,
-                    subreg_id=loc2int(idx),
-                    verbose=verbose,
-                    extend_to=poi,
-                    decimals=decimals,
-                    _vert_ids=_vert_ids,
-                )
-        return poi
-    # Prepare mask to binary mask
-    vert_arr = vert_msk.get_seg_array()
-    subreg_arr = subreg_msk.get_seg_array()
-    assert subreg_msk.shape == vert_arr.shape, "Shape miss-match" + str(subreg_msk.shape) + str(vert_arr.shape)
-    subreg_id = loc2int(subreg_id)
-    if use_vertebra_special_action:
-        mapping_vert = {
-            Location.Vertebra_Disc.value: 100,
-            Location.Vertebral_Body_Endplate_Superior.value: 200,
-            Location.Vertebral_Body_Endplate_Inferior.value: 300,
-        }
-        if subreg_id == Location.Vertebra_Corpus.value:
-            subreg_arr[subreg_arr == 49] = Location.Vertebra_Corpus.value
-        elif subreg_id == Location.Vertebra_Full.value:
-            subreg_arr = vert_arr.copy()
-            subreg_arr[subreg_arr >= 26] = 0
-            subreg_arr[subreg_arr != 0] = Location.Vertebra_Full.value
 
-        if subreg_id in mapping_vert:  # IVD / Endplates Superior / Endplate Inferior
-            vert_arr[subreg_arr != subreg_id] = 0
-            vert_arr[vert_arr >= mapping_vert[subreg_id] + 100] = 0
-            vert_arr[vert_arr <= mapping_vert[subreg_id]] = 0
-            vert_arr[vert_arr != 0] -= mapping_vert[subreg_id]
-        else:
-            vert_arr[subreg_arr >= 100] = 0
-            subreg_arr[subreg_arr >= 100] = 0
-            if use_vertebra_special_action and ((subreg_id in range(81, 128)) or subreg_id == Location.Spinal_Canal.value):
-                from TPTBox.core.vertebra_pois_non_centroids import compute_non_centroid_pois
-
-                if extend_to is None:
-                    extend_to = POI({}, **vert_msk._extract_affine(), format=FORMAT_POI)
-                compute_non_centroid_pois(extend_to, int2loc(subreg_id), vert_msk, subreg_msk, _vert_ids=_vert_ids, log=log)
-                return extend_to
-            elif subreg_id < 40 or subreg_id > 50:
-                raise NotImplementedError(
-                    f"POI of subreg {subreg_id} - {Location(subreg_id) if subreg_id in Location else 'undefined'} is not a centroid. If you want the general Centroid computation use use_vertebra_special_action = False"
-                )
-    vert_arr[subreg_arr != subreg_id] = 0
-    vert_arr[vert_arr >= 100] = 0
-
-    msk_data = vert_arr
+def _is_not_yet_computed(ids_in_arr: Sequence[int], extend_to: POI | None, subreg_id: int):
+    is_not_yet_computed = True
     if extend_to is not None and subreg_id in extend_to.centroids.keys_subregion():
-        missing = False
-        for reg in np.unique(vert_arr):
+        is_not_yet_computed = False
+        for reg in ids_in_arr:  # type: ignore
             if reg == 0:
                 continue
             if (reg, subreg_id) in extend_to:
                 continue
-            missing = True
+            is_not_yet_computed = True
             break
-        if not missing:
-            return extend_to
-
-    nii = nib.nifti1.Nifti1Image(msk_data, vert_msk.affine, vert_msk.header)
-    poi = calc_centroids(nii, decimals=decimals, subreg_id=subreg_id, extend_to=extend_to)
-    return poi
+    return is_not_yet_computed
 
 
 def calc_centroids(
@@ -1323,17 +1546,18 @@ def calc_centroids(
     if isinstance(subreg_id, Location):
         subreg_id = subreg_id.value
     assert vert_id == -1 or subreg_id == -1, "first or second dimension must be fixed."
-    msk = to_nii(msk, seg=True)
-    msk_data = msk.get_seg_array()
+    msk_nii = to_nii(msk, seg=True)
+    msk_data = msk_nii.get_seg_array()
     axc: Ax_Codes = nio.aff2axcodes(msk.affine)  # type: ignore
     if extend_to is None:
         ctd_list = POI_Descriptor()
     else:
-        ctd_list = extend_to.centroids
         if not inplace:
-            ctd_list = ctd_list.copy()
-        extend_to.assert_affine(msk)
-    for i in msk.unique():
+            extend_to = extend_to.copy()
+        ctd_list = extend_to.centroids
+        extend_to.assert_affine(msk_nii)
+        # assert extend_to.orientation == axc, (extend_to.orientation, axc)
+    for i in msk_nii.unique():
         msk_temp = np.zeros(msk_data.shape, dtype=bool)
         msk_temp[msk_data == i] = True
         ctr_mass: Sequence[float] = center_of_mass(msk_temp)  # type: ignore
@@ -1341,4 +1565,4 @@ def calc_centroids(
             ctd_list[vert_id, int(i)] = tuple(round(x, decimals) for x in ctr_mass)
         else:
             ctd_list[int(i), subreg_id] = tuple(round(x, decimals) for x in ctr_mass)
-    return POI(ctd_list, orientation=axc, **msk._extract_affine(rm_key=["orientation"]))
+    return POI(ctd_list, orientation=axc, **msk_nii._extract_affine(rm_key=["orientation"]))

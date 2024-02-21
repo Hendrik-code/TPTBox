@@ -2,30 +2,21 @@
 # coverage run -m unittest
 # coverage report
 # coverage html
+import random
 import sys
 import tempfile
-from pathlib import Path
-
-file = Path(__file__).resolve()
-sys.path.append(str(file.parents[2]))
-import random
 import unittest
+from pathlib import Path
 
 import nibabel as nib
 import numpy as np
 
-from TPTBox import Centroids, calc_centroids
+from TPTBox import POI, calc_centroids
 from TPTBox.core.nii_wrapper import NII
-from TPTBox.core.poi import (
-    LABEL_MAX,
-    VertebraCentroids,
-    _poi_to_dict_list,
-    calc_centroids_from_subreg_vert,
-    calc_centroids_labeled_buffered,
-    load_poi,
-)
-from TPTBox.core.vert_constants import *
-from TPTBox.tests.test_utils import get_centroids, get_nii, get_random_ax_code, overlap, repeats
+from TPTBox.core.poi import LABEL_MAX, VertebraCentroids, _poi_to_dict_list, calc_poi_from_subreg_vert, calc_poi_labeled_buffered, load_poi
+from TPTBox.core.vert_constants import Location, v_idx2name
+from TPTBox.tests.test_utils import get_nii, get_poi, get_random_ax_code, overlap, repeats
+from unit_tests.test_centroids_save import get_centroids
 
 
 class Test_Centroids(unittest.TestCase):
@@ -46,7 +37,7 @@ class Test_Centroids(unittest.TestCase):
                 self.assertEqual(cent, centroid.centroids, msg=msg)
 
     def test_cdt_2_dict(self):
-        c = Centroids({(1, 50): (10, 11, 12), (32, 50): (23, 23, 23)}, orientation=("R", "I", "P"))
+        c = POI({(1, 50): (10, 11, 12), (32, 50): (23, 23, 23)}, orientation=("R", "I", "P"))
         c.info["Tested"] = "now"
         add_info = {"Tested": "now"}
         cl, format_str = _poi_to_dict_list(c, add_info)
@@ -89,38 +80,39 @@ class Test_Centroids(unittest.TestCase):
         msk, cent, order, sizes = get_nii(num_point=random.randint(1, 7))
         msk2, cent2, order2, sizes2 = get_nii(num_point=len(cent) - 1)
 
-        cent = Centroids(cent, **msk._extract_affine())
-        cent2 = Centroids(cent2, **msk2._extract_affine())
+        cent = POI(cent, **msk._extract_affine())
+        cent2 = POI(cent2, **msk2._extract_affine())
         file = Path(tempfile.gettempdir(), "test_save_load_centroids.json")
         file.unlink(missing_ok=True)
-        out = calc_centroids_labeled_buffered(msk, None, out_path=file, verbose=False)
+        out = calc_poi_labeled_buffered(msk, None, out_path=file, verbose=False)
         self.assertEqual(out, cent)
-        out = calc_centroids_labeled_buffered(msk2, None, out_path=file, verbose=False)
+        out = calc_poi_labeled_buffered(msk2, None, out_path=file, verbose=False)
         self.assertEqual(out, cent)
         file.unlink(missing_ok=True)
-        out = calc_centroids_labeled_buffered(msk2, None, out_path=file, verbose=False)
+        out = calc_poi_labeled_buffered(msk2, None, out_path=file, verbose=False)
         self.assertEqual(out, cent2)
         file.unlink(missing_ok=True)
 
     def test_calc_centroids_labeled_bufferd2(self):
         msk, cent, order, sizes = get_nii(num_point=random.randint(1, 7))
         msk2, cent2, order2, sizes2 = get_nii(num_point=len(cent) - 1)
+        msk2.origin = msk.origin
         arr = msk.get_array()
         arr[arr != 0] = 50
         subreg = NII(nib.nifti1.Nifti1Image(arr, msk.affine), True)
         arr = msk2.get_array()
         arr[arr != 0] = 50
         subreg2 = NII(nib.nifti1.Nifti1Image(arr, msk2.affine), True)
-        cent = Centroids(cent, **msk._extract_affine())
-        cent2 = Centroids(cent2, **msk2._extract_affine())
+        cent = POI(cent, **msk._extract_affine())
+        cent2 = POI(cent2, **msk2._extract_affine())
         file = Path(tempfile.gettempdir(), "test_save_load_centroids.json")
         file.unlink(missing_ok=True)
-        out = calc_centroids_labeled_buffered(msk, subreg, out_path=file, verbose=False)
+        out = calc_poi_labeled_buffered(msk, subreg, out_path=file, verbose=False)
         self.assertEqual(out, cent)
-        out = calc_centroids_labeled_buffered(msk2, subreg2, out_path=file, verbose=False)
+        out = calc_poi_labeled_buffered(msk2, subreg2, out_path=file, verbose=False)
         self.assertEqual(out, cent)
         file.unlink(missing_ok=True)
-        out = calc_centroids_labeled_buffered(msk2, subreg2, out_path=file, verbose=False)
+        out = calc_poi_labeled_buffered(msk2, subreg2, out_path=file, verbose=False)
         self.assertEqual(out, cent2)
         file.unlink(missing_ok=True)
 
@@ -129,19 +121,19 @@ class Test_Centroids(unittest.TestCase):
         arr = msk.get_array()
         arr[arr != 0] = 50
         subreg = NII(nib.nifti1.Nifti1Image(arr, msk.affine), True)
-        out = calc_centroids_from_subreg_vert(msk, subreg, decimals=3)
-        cent = Centroids(cent, **msk._extract_affine())
+        out = calc_poi_from_subreg_vert(msk, subreg, decimals=3)
+        cent = POI(cent, **msk._extract_affine())
         self.assertEqual(out, cent)
 
         msk, cent, order, sizes = get_nii(num_point=random.randint(1, 7))
         arr = msk.get_array()
         arr[arr != 0] += 40
         subreg = NII(nib.nifti1.Nifti1Image(arr, msk.affine), True)
-        out = calc_centroids_from_subreg_vert(msk, subreg, decimals=3, subreg_id=list(range(41, 50)))
+        out = calc_poi_from_subreg_vert(msk, subreg, decimals=3, subreg_id=list(range(41, 50)))
         cent_new = {}
         for idx, (k, v) in enumerate(cent.items(), 41):
             cent_new[k[0], idx] = v
-        cent = Centroids(cent_new, **msk._extract_affine())
+        cent = POI(cent_new, **msk._extract_affine())
         self.assertEqual(out, cent)
 
     ######## CLASS FUNCTIONS ############
@@ -162,7 +154,7 @@ class Test_Centroids(unittest.TestCase):
         for _ in range(repeats):
             msk, cent, order, sizes = get_nii(num_point=random.randint(1, 2))
             msk.seg = True
-            cdt = Centroids(cent, order)
+            cdt = POI(cent, order)
             ex_slice = msk.compute_crop()
             msk2 = msk.apply_crop(ex_slice)
             cdt2 = cdt.apply_crop(ex_slice)
@@ -172,7 +164,7 @@ class Test_Centroids(unittest.TestCase):
     def test_crop_centroids_(self):
         for _ in range(repeats):
             msk, cent, order, sizes = get_nii(num_point=random.randint(1, 7))
-            cdt = Centroids(cent, order, zoom=msk.zoom, shape=msk.shape)
+            cdt = POI(cent, order, zoom=msk.zoom, shape=msk.shape)
             ex_slice = msk.compute_crop()
             msk.apply_crop_(ex_slice)
             cdt.apply_crop_(ex_slice)
@@ -182,7 +174,7 @@ class Test_Centroids(unittest.TestCase):
     def test_crop_centroids_trival(self):
         for _ in range(repeats):
             msk, cent, order, sizes = get_nii(num_point=random.randint(1, 7))
-            cdt = Centroids(cent, order, zoom=msk.zoom, shape=msk.shape)
+            cdt = POI(cent, order, zoom=msk.zoom, shape=msk.shape)
             ex_slice = msk.compute_crop(minimum=-1)
             msk.apply_crop_(ex_slice)
             cdt.apply_crop_(ex_slice)
@@ -196,7 +188,7 @@ class Test_Centroids(unittest.TestCase):
     def test_reorient_centroids_to(self):
         for _ in range(repeats):
             msk, cent, order, sizes = get_nii(num_point=random.randint(1, 7))
-            cdt = Centroids(cent, orientation=order, zoom=msk.zoom, shape=msk.shape)
+            cdt = POI(cent, orientation=order, zoom=msk.zoom, shape=msk.shape)
             axcode = get_random_ax_code()
 
             msk.reorient_(axcodes_to=axcode)
@@ -219,7 +211,7 @@ class Test_Centroids(unittest.TestCase):
     def test_reorient(self):
         for _ in range(repeats):
             msk, cent, order, sizes = get_nii(num_point=random.randint(1, 7))
-            cdt = Centroids(cent, orientation=order, zoom=msk.zoom, shape=msk.shape)
+            cdt = POI(cent, orientation=order, zoom=msk.zoom, shape=msk.shape)
             axcode = get_random_ax_code()
 
             msk.reorient_(axcodes_to=axcode)
@@ -246,7 +238,7 @@ class Test_Centroids(unittest.TestCase):
         for _ in range(repeats):
             msk, cent, order, sizes = get_nii(num_point=random.randint(1, 7))
             msk.seg = True
-            cdt = Centroids(cent, orientation=order, zoom=msk.zoom)
+            cdt = POI(cent, orientation=order, zoom=msk.zoom)
             voxel_spacing = (random.random() * 3, random.random() * 3, random.random() * 3)
             voxel_spacing2 = (1, 1, 1)  # tuple(1 / i for i in voxel_spacing)
             cdt2 = cdt.rescale(voxel_spacing=voxel_spacing, verbose=False, decimals=10)
@@ -254,14 +246,14 @@ class Test_Centroids(unittest.TestCase):
             for (k1, k2, v), (k1_2, k2_2, v2) in zip(cdt.items(), cdt2.items(), strict=False):
                 self.assertEqual(k1, k1_2)
                 self.assertEqual(k2, k2_2)
-                for v, v2 in zip(v, v2, strict=False):
+                for v, v2 in zip(v, v2, strict=False):  # noqa: B020, PLW2901
                     self.assertAlmostEqual(v, v2, places=3)
 
     def test_map(self):
         for _ in range(repeats):
             cdt = get_centroids(num_point=random.randint(2, 98))
             a = random.sample(range(1, 99), len(cdt))
-            mapping = {i: k for i, k in enumerate(a, start=1)}
+            mapping = dict(enumerate(a, start=1))
             cdt2 = cdt.map_labels(label_map_region=mapping)  # type: ignore
             self.assertEqual(len(cdt), len(cdt2))
             self.assertNotEqual(cdt, cdt2)
