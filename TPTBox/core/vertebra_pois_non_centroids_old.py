@@ -5,14 +5,14 @@ import numpy as np
 from scipy.linalg import norm
 from scipy.spatial.distance import cdist
 
-from TPTBox import NII, POI, Log_Type, Logger_Interface, Print_Logger, calc_centroids_from_subreg_vert
+from TPTBox import NII, POI, Log_Type, Logger_Interface, Print_Logger, calc_poi_from_subreg_vert
 from TPTBox.core.vert_constants import Directions, Location, plane_dict
 
 __log = Print_Logger()
 
 
 def run_poi_pipeline(vert: NII, subreg: NII, poi_path: Path, logger: Logger_Interface = __log):
-    poi = calc_centroids_from_subreg_vert(
+    poi = calc_poi_from_subreg_vert(
         vert, subreg, buffer_file=poi_path, save_buffer_file=True, subreg_id=list(range(40, 51)), use_vertebra_special_action=True
     )
     compute_non_centroid_pois(poi, [Location(i) for i in range(61)], vert, subreg, log=logger)
@@ -33,39 +33,39 @@ extreme_points: dict[int, tuple[Directions, int]] = {
         "P",
         Location.Spinosus_Process.value,
     ),  # 81
-    Location.Muscle_Inserts_Transverse_Process_right.value: (
+    Location.Muscle_Inserts_Transverse_Process_Right.value: (
         "R",
         Location.Costal_Process_Right.value,
     ),  # 82
-    Location.Muscle_Inserts_Transverse_Process_left.value: (
+    Location.Muscle_Inserts_Transverse_Process_Left.value: (
         "L",
         Location.Costal_Process_Left.value,
     ),  # 83
-    Location.Muscle_Inserts_Articulate_Process_Inferior_left.value: (
+    Location.Muscle_Inserts_Articulate_Process_Inferior_Left.value: (
         "I",
         Location.Inferior_Articular_Left.value,
     ),  # 86
-    Location.Muscle_Inserts_Articulate_Process_Inferior_right.value: (
+    Location.Muscle_Inserts_Articulate_Process_Inferior_Right.value: (
         "I",
         Location.Inferior_Articular_Right.value,
     ),  # 87
-    Location.Muscle_Inserts_Articulate_Process_Superior_left.value: (
+    Location.Muscle_Inserts_Articulate_Process_Superior_Left.value: (
         "S",
         Location.Superior_Articular_Left.value,
     ),  # 88
-    Location.Muscle_Inserts_Articulate_Process_Superior_right.value: (
+    Location.Muscle_Inserts_Articulate_Process_Superior_Right.value: (
         "S",
         Location.Superior_Articular_Right.value,
     ),  # 89
 }
 extreme_points2: dict[int, Location] = {
     Location.Muscle_Inserts_Spinosus_Process.value: Location.Arcus_Vertebrae,  # 81
-    Location.Muscle_Inserts_Transverse_Process_right.value: Location.Arcus_Vertebrae,  # 82
-    Location.Muscle_Inserts_Transverse_Process_left.value: Location.Arcus_Vertebrae,  # 83
-    Location.Muscle_Inserts_Articulate_Process_Inferior_left.value: Location.Arcus_Vertebrae,  # 86
-    Location.Muscle_Inserts_Articulate_Process_Inferior_right.value: Location.Arcus_Vertebrae,  # 87
-    Location.Muscle_Inserts_Articulate_Process_Superior_left.value: Location.Spinosus_Process,  # 88 #Arcus_Vertebrae cause it to be behind not on top
-    Location.Muscle_Inserts_Articulate_Process_Superior_right.value: Location.Spinosus_Process,  # 89 #Arcus_Vertebrae cause it to be behind not on top
+    Location.Muscle_Inserts_Transverse_Process_Right.value: Location.Arcus_Vertebrae,  # 82
+    Location.Muscle_Inserts_Transverse_Process_Left.value: Location.Arcus_Vertebrae,  # 83
+    Location.Muscle_Inserts_Articulate_Process_Inferior_Left.value: Location.Arcus_Vertebrae,  # 86
+    Location.Muscle_Inserts_Articulate_Process_Inferior_Right.value: Location.Arcus_Vertebrae,  # 87
+    Location.Muscle_Inserts_Articulate_Process_Superior_Left.value: Location.Spinosus_Process,  # 88 #Arcus_Vertebrae cause it to be behind not on top
+    Location.Muscle_Inserts_Articulate_Process_Superior_Right.value: Location.Spinosus_Process,  # 89 #Arcus_Vertebrae cause it to be behind not on top
 }
 # Special 125 127 Ligament_Attachment_Point_Flava_Superior_Median
 # 101 - 124 vertebra_body points
@@ -73,13 +73,13 @@ extreme_points2: dict[int, Location] = {
 
 
 line_cast: dict[int, tuple[list[Location], Location, Location, Location]] = {
-    Location.Muscle_Inserts_Vertebral_Body_right.value: (
+    Location.Muscle_Inserts_Vertebral_Body_Right.value: (
         [Location.Vertebra_Corpus, Location.Vertebra_Corpus_border],  # possible pixel
         Location.Vertebra_Corpus,  # start point
         Location.Superior_Articular_Left,  # norm point 2
         Location.Superior_Articular_Right,  # norm point 1
     ),
-    Location.Muscle_Inserts_Vertebral_Body_left.value: (
+    Location.Muscle_Inserts_Vertebral_Body_Left.value: (
         [Location.Vertebra_Corpus, Location.Vertebra_Corpus_border],
         Location.Vertebra_Corpus,
         Location.Superior_Articular_Right,
@@ -257,8 +257,8 @@ def get_closets_point(
 def horizontal_plane_landmarks_old(poi: POI, region: NII, label, bb: tuple[slice, slice, slice], log: Logger_Interface = __log):
     # TODO rotation invariant ???
     """Taking the Vertebra Corpuse, we compute the most left/right point that is still in the segmentation. The given rotation makes the 2D Plane"""
-    a = (label, Location.Muscle_Inserts_Vertebral_Body_right.value) in poi
-    b = (label, Location.Muscle_Inserts_Vertebral_Body_left.value) in poi
+    a = (label, Location.Muscle_Inserts_Vertebral_Body_Right.value) in poi
+    b = (label, Location.Muscle_Inserts_Vertebral_Body_Left.value) in poi
     if a and b:
         return
     idx = [plane_dict[i] for i in region.orientation]
@@ -272,9 +272,9 @@ def horizontal_plane_landmarks_old(poi: POI, region: NII, label, bb: tuple[slice
     min_index = np.argmin(np.nonzero(line))
     out1 = [c + b.start for c, b in zip(centroid, bb, strict=True)]
     out1[axis] = np.nonzero(line)[0][min_index] + bb[axis].start
-    poi[label, Location.Muscle_Inserts_Vertebral_Body_right.value] = tuple(out1)
+    poi[label, Location.Muscle_Inserts_Vertebral_Body_Right.value] = tuple(out1)
     out1[axis] = np.nonzero(line)[0][max_index] + bb[axis].start
-    poi[label, Location.Muscle_Inserts_Vertebral_Body_left.value] = tuple(out1)
+    poi[label, Location.Muscle_Inserts_Vertebral_Body_Left.value] = tuple(out1)
 
 
 def max_distance_ray_cast(
