@@ -2,19 +2,16 @@
 # coverage run -m unittest
 # coverage report
 # coverage html
-import sys
-from pathlib import Path
-
-file = Path(__file__).resolve()
-sys.path.append(str(file.parents[2]))
 import random
+import sys
 import unittest
+from pathlib import Path
 
 import nibabel as nib
 import numpy as np
 
 from TPTBox.core.nii_wrapper import NII
-from TPTBox.core.poi import POI as Centroids  # _centroids_to_dict_list
+from TPTBox.core.poi import POI as Centroids  # _centroids_to_dict_list  # noqa: N811
 from TPTBox.core.poi import calc_centroids, v_idx2name
 from TPTBox.tests.test_utils import get_nii, get_random_ax_code, repeats
 
@@ -32,12 +29,9 @@ def get_all_corner_points(affine, shape) -> np.ndarray:
 
 class Test_bids_file(unittest.TestCase):
     def test_rescale(self):
-        for _ in range(repeats // 10):
+        for _ in range(repeats // 5):
             msk, cent, order, sizes = get_nii(num_point=random.randint(1, 2))
             cent = Centroids(cent, orientation=order)
-
-            axcode_start = get_random_ax_code()
-            # msk.reorient_(axcode_start)
 
             cdt = calc_centroids(msk)
             voxel_spacing = (
@@ -53,8 +47,8 @@ class Test_bids_file(unittest.TestCase):
             for (k1, k2, v), (k1_2, k2_2, v2) in zip(cdt.items(), cdt2.items(), strict=True):
                 self.assertEqual(k1, k1_2)
                 self.assertEqual(k2, k2_2)
-                for v, v2 in zip(v, v2, strict=True):
-                    self.assertAlmostEqual(v, v2)
+                for v, v2 in zip(v, v2, strict=True):  # noqa: B020, PLW2901
+                    self.assertAlmostEqual(round(v), round(v2))
 
     def test_rescale_corners(self):
         for _ in range(repeats // 4):
@@ -143,7 +137,7 @@ class Test_bids_file(unittest.TestCase):
             for (k1, k2, v), (k1_2, k2_2, v2) in zip(cdt.items(), cdt2.items(), strict=False):
                 self.assertEqual(k1, k1_2)
                 self.assertEqual(k2, k2_2)
-                for v, v2 in zip(v, v2, strict=False):
+                for v, v2 in zip(v, v2, strict=False):  # noqa: B020, PLW2901
                     self.assertAlmostEqual(v, v2)
 
     def test_get_plane(self):

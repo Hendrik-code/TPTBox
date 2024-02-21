@@ -32,6 +32,50 @@ from TPTBox.core.np_utils import (
 from . import bids_files
 from . import vert_constants as vc
 
+
+def resample_from_to(
+    from_img,
+    to_vox_map,
+    zoom,
+    order=3,
+    mode="constant",
+    cval=0.0,
+    out_class=Nifti1Image,
+):
+    # TODO FIND A HOME FOR THIS FUNCTION
+    # Replacement for nip.resample_from_to to aligned corners for segmentations
+    import numpy.linalg as npl
+    import scipy.ndimage as spnd
+    from nibabel.affines import AffineError, to_matvec
+    from nibabel.imageclasses import spatial_axes_first
+    from nibabel.processing import adapt_affine
+
+    # This check requires `shape` attribute of image
+    if not spatial_axes_first(from_img):
+        raise ValueError(f"Cannot predict position of spatial axes for Image type {type(from_img)}")
+    try:
+        to_shape, to_affine = to_vox_map.shape, to_vox_map.affine
+        zoom2 = to_vox_map.zoom
+
+    except AttributeError:
+        print(to_vox_map)
+        to_shape, to_affine, zoom2 = to_vox_map
+
+    a_to_affine = adapt_affine(to_affine, len(to_shape))
+    if out_class is None:
+        out_class = from_img.__class__
+    from_n_dim = len(from_img.shape)
+    if from_n_dim < 3:
+        raise AffineError("from_img must be at least 3D")
+    a_from_affine = adapt_affine(from_img.affine, from_n_dim)
+    to_vox2from_vox = npl.inv(a_from_affine).dot(a_to_affine)
+    rzs, trans = to_matvec(to_vox2from_vox)
+    if order == 0:
+        trans = np.array([t + (z - z2) / 2 for t, z, z2 in zip(trans, zoom, zoom2, strict=True)])
+    data = spnd.affine_transform(from_img.dataobj, rzs, trans, to_shape, order=order, mode=mode, cval=cval)
+    return out_class(data, to_affine, from_img.header)
+
+
 AFFINE = np.ndarray
 _unpacked_nii = tuple[np.ndarray, AFFINE, nib.nifti1.Nifti1Header]
 log = vc.log
@@ -604,7 +648,7 @@ class NII(NII_Math):
         new_shp = tuple(np.rint([shp[i] * zms[i] / voxel_spacing[i] for i in range(len(voxel_spacing))]).astype(int))
         new_aff = nib.affines.rescale_affine(aff, shp, voxel_spacing, new_shp)  # type: ignore
         new_aff[:3, 3] = nib.affines.apply_affine(aff, [0, 0, 0])# type: ignore
-        new_img = nip.resample_from_to(self.nii, (new_shp, new_aff), order=order, cval=c_val,mode=mode)
+        new_img = resample_from_to(self.nii, (new_shp, new_aff,voxel_spacing),zms, order=order, cval=c_val,mode=mode)
         log.print(f"Image resampled from {zms} to voxel size {voxel_spacing}",verbose=verbose)
         if inplace:
             self.nii = new_img
@@ -631,7 +675,7 @@ class NII(NII_Math):
         mapping = to_nii_optional(to_vox_map,seg=self.seg,default=to_vox_map)
         log.print(f"resample_from_to: {self} to {mapping}",verbose=verbose)
 
-        nii = nip.resample_from_to(self.nii, mapping, order=0 if self.seg else 3, mode=mode, cval=c_val)
+        nii = resample_from_to(self.nii, mapping,self.zoom, order=0 if self.seg else 3, mode=mode, cval=c_val)
         if inplace:
             self.nii = nii
             return self
