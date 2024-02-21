@@ -13,10 +13,12 @@ if TYPE_CHECKING:
     from nibabel.nifti1 import Nifti1Header
 
     from TPTBox import NII
-    class NII_Proxy(Protocol):  # noqa: F821
+    class NII_Proxy:
+        seg = True
+        c_val = 0
         def get_array(self) -> np.ndarray:
             ...
-        def set_array(self,arr:np.ndarray,inplace=False,verbose=True)->NII:
+        def set_array(self,arr:np.ndarray,inplace=False,verbose=True)->Self:
             ...
         @property
         def shape(self) -> tuple[int, int, int]:
@@ -39,7 +41,6 @@ else:
         pass
     C = Self|Number|np.ndarray
 class NII_Math(NII_Proxy):
-
     def _binary_opt(self, other:C, opt,inplace = False)-> Self:
         if isinstance(other,NII_Math):
             other = other.get_array()
@@ -150,6 +151,8 @@ class NII_Math(NII_Proxy):
         arr = self.clamp(min=-1024,max=1024,inplace=inplace)
         return arr.normalize(min_out = min_out, max_out = max_out, inplace=inplace)
     def pad_to(self,target_shape:list[int]|tuple[int,int,int] | NII_Proxy, mode="constant",inplace = False):
+        from warnings import warn
+        warn("This function does not update the affine correctly. Once use the array further.",stacklevel=3)
         if isinstance(target_shape, NII_Proxy):
             target_shape = target_shape.shape
         padding = []
@@ -208,7 +211,7 @@ class NII_Math(NII_Proxy):
         return ssim_value
 
 
-    def betti_numbers(self: "NII",verbose=False) -> dict[int, tuple[int, int, int]]:
+    def betti_numbers(self: "NII",verbose=False) -> dict[int, tuple[int, int, int]]: # type: ignore
         """
         Calculate Betti numbers for connected components in a 3D image.
 

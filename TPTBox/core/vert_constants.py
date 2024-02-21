@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from enum import Enum
-from typing import Literal
+from typing import Literal, NoReturn
 
 import numpy as np
 
@@ -30,6 +30,10 @@ plane_dict: dict[Directions, str] = {"S": "ax", "I": "ax", "L": "sag", "R": "sag
 same_direction: dict[Directions, Directions] = {"S": "I", "I": "S", "L": "R", "R": "L", "A": "P", "P": "A"}
 
 
+def never_called(args: NoReturn) -> NoReturn:  # noqa: ARG001
+    raise NotImplementedError()
+
+
 class Location(Enum):
     Unknown = 0
     # Vertebral subregions
@@ -47,10 +51,11 @@ class Location(Enum):
     Dens_axis = 51  # TODO Unused. Should be in C2
     Vertebral_Body_Endplate_Superior = 52
     Vertebral_Body_Endplate_Inferior = 53
-    Superior_Articulate_Process_Facet_Joint_Surface_Left = 54
-    Superior_Articulate_Process_Facet_Joint_Surface_Right = 55
-    Inferior_Articulate_Process_Facet_Joint_Surface_Left = 56
-    Inferior_Articulate_Process_Facet_Joint_Surface_Right = 57
+    # Articulate_Process_Facet_Joint (Used anywhere?)
+    # Superior_Articulate_Process_Facet_Joint_Surface_Left = 54
+    # Superior_Articulate_Process_Facet_Joint_Surface_Right = 55
+    # Inferior_Articulate_Process_Facet_Joint_Surface_Left = 56
+    # Inferior_Articulate_Process_Facet_Joint_Surface_Right = 57
     Vertebra_Disc_Superior = 58
     Vertebra_Disc_Inferior = 59
     Vertebra_Disc = 100
@@ -63,15 +68,15 @@ class Location(Enum):
     # https://www.frontiersin.org/articles/10.3389/fbioe.2022.862804/full
     # 81-91
     Muscle_Inserts_Spinosus_Process = 81
-    Muscle_Inserts_Transverse_Process_left = 83
-    Muscle_Inserts_Transverse_Process_right = 82
-    Muscle_Inserts_Vertebral_Body_left = 84
-    Muscle_Inserts_Vertebral_Body_right = 85
-    Muscle_Inserts_Articulate_Process_Inferior_left = 86
-    Muscle_Inserts_Articulate_Process_Inferior_right = 87
-    Muscle_Inserts_Articulate_Process_Superior_left = 88
-    Muscle_Inserts_Articulate_Process_Superior_right = 89
-    #
+    Muscle_Inserts_Transverse_Process_Left = 83
+    Muscle_Inserts_Transverse_Process_Right = 82
+    Muscle_Inserts_Vertebral_Body_Left = 84
+    Muscle_Inserts_Vertebral_Body_Right = 85
+    Muscle_Inserts_Articulate_Process_Inferior_Left = 86
+    Muscle_Inserts_Articulate_Process_Inferior_Right = 87
+    Muscle_Inserts_Articulate_Process_Superior_Left = 88
+    Muscle_Inserts_Articulate_Process_Superior_Right = 89
+    # Implants (No automatic generation)
     Implant_Entry_Left = 90
     Implant_Entry_Right = 91
     Implant_Target_Left = 92
@@ -88,31 +93,35 @@ class Location(Enum):
     Ligament_Attachment_Point_Posterior_Longitudinal_Superior_Median = 102
     Ligament_Attachment_Point_Anterior_Longitudinal_Inferior_Median = 103
     Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Median = 104
-    Additional_Vertebral_Body_Middle_Superior_median = 105
-    Additional_Vertebral_Body_Posterior_Central_median = 106
-    Additional_Vertebral_Body_Middle_Inferior_median = 107
-    Additional_Vertebral_Body_Anterior_Central_median = 108
+    Additional_Vertebral_Body_Middle_Superior_Median = 105
+    Additional_Vertebral_Body_Posterior_Central_Median = 106
+    Additional_Vertebral_Body_Middle_Inferior_Median = 107
+    Additional_Vertebral_Body_Anterior_Central_Median = 108
     # 109-116 Same but shifted to the left
     Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Left = 109
     Ligament_Attachment_Point_Posterior_Longitudinal_Superior_Left = 110
     Ligament_Attachment_Point_Anterior_Longitudinal_Inferior_Left = 111
     Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Left = 112
-    Additional_Vertebral_Body_Middle_Superior_left = 113
-    Additional_Vertebral_Body_Posterior_Central_left = 114
-    Additional_Vertebral_Body_Middle_Inferior_left = 115
-    Additional_Vertebral_Body_Anterior_Central_left = 116
+    Additional_Vertebral_Body_Middle_Superior_Left = 113
+    Additional_Vertebral_Body_Posterior_Central_Left = 114
+    Additional_Vertebral_Body_Middle_Inferior_Left = 115
+    Additional_Vertebral_Body_Anterior_Central_Left = 116
     # 117-124 Same but shifted to the right
     Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Right = 117
     Ligament_Attachment_Point_Posterior_Longitudinal_Superior_Right = 118
     Ligament_Attachment_Point_Anterior_Longitudinal_Inferior_Right = 119
     Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Right = 120
-    Additional_Vertebral_Body_Middle_Superior_right = 121
-    Additional_Vertebral_Body_Posterior_Central_right = 122
-    Additional_Vertebral_Body_Middle_Inferior_right = 123
-    Additional_Vertebral_Body_Anterior_Central_right = 124
+    Additional_Vertebral_Body_Middle_Superior_Right = 121
+    Additional_Vertebral_Body_Posterior_Central_Right = 122
+    Additional_Vertebral_Body_Middle_Inferior_Right = 123
+    Additional_Vertebral_Body_Anterior_Central_Right = 124
 
     Ligament_Attachment_Point_Flava_Superior_Median = 125
     Ligament_Attachment_Point_Flava_Inferior_Median = 127
+    # Vertebra orientation (compute Vertebra_Direction - Vertebra_Corpus)
+    Vertebra_Direction_Posterior = 128
+    Vertebra_Direction_Inferior = 129
+    Vertebra_Direction_Right = 130
 
     # Ligament_Attachment_Point_Flava_Superior_Right = 141
     # Ligament_Attachment_Point_Flava_Inferior_Right = 143
@@ -124,7 +133,7 @@ class Location(Enum):
     # Ligament_Attachment_Point_Interspinosa_Inferior_Left = 135
     # Ligament_Attachment_Point_Interspinosa_Inferior_Right = 136
 
-    Multi = 256
+    # Multi = 256
 
     def __repr__(self):
         return self.name
@@ -193,4 +202,6 @@ conversion_poi = {
     "ITL_S": 142,
     "ITL_D": 144,
 }
+vert_directions = [Location.Vertebra_Direction_Inferior, Location.Vertebra_Direction_Right, Location.Vertebra_Direction_Posterior]
+
 conversion_poi2text = {k: v for v, k in conversion_poi.items()}
