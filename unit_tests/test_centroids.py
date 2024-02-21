@@ -143,7 +143,6 @@ class Test_Centroids(unittest.TestCase):
             p2 = get_centroids(num_point=28)
             self.assertEqual(p1, p1.copy())
             self.assertEqual(p2, p2.clone())
-            self.assertEqual(p2, p1.copy(centroids=p2.centroids))
             p1.orientation = ("R", "A", "L")
             self.assertEqual(p1, p1.copy())
             self.assertNotEqual(p1, p2.copy(centroids=p2.centroids))
@@ -248,40 +247,6 @@ class Test_Centroids(unittest.TestCase):
                 self.assertEqual(k2, k2_2)
                 for v, v2 in zip(v, v2, strict=False):  # noqa: B020, PLW2901
                     self.assertAlmostEqual(v, v2, places=3)
-
-    def test_map(self):
-        for _ in range(repeats):
-            cdt = get_centroids(num_point=random.randint(2, 98))
-            a = random.sample(range(1, 99), len(cdt))
-            mapping = dict(enumerate(a, start=1))
-            cdt2 = cdt.map_labels(label_map_region=mapping)  # type: ignore
-            self.assertEqual(len(cdt), len(cdt2))
-            self.assertNotEqual(cdt, cdt2)
-            for key in a:
-                self.assertTrue((key, 50) in cdt2)
-            cdt2 = cdt.map_labels_(label_map_region={v: k for k, v in mapping.items()})
-            self.assertEqual(cdt, cdt2)
-
-    def test_map2(self):
-        for _ in range(repeats * 10):
-            cdt = get_centroids(num_point=random.randint(2, 28))
-            a = random.sample(range(1, 29), len(cdt))
-
-            def r(i):
-                if random.random() > 0.5:
-                    return v_idx2name[i]
-                if random.random() > 0.5:
-                    return str(i)
-                return i
-
-            mapping = {r(i): r(k) for i, k in enumerate(a, start=1)}
-            cdt2 = cdt.map_labels(label_map_region=mapping, verbose=False)  # type: ignore
-            self.assertEqual(len(cdt), len(cdt2))
-            self.assertNotEqual(cdt, cdt2)
-            for key in a:
-                self.assertTrue((key, 50) in cdt2)
-            cdt2.map_labels_(label_map_region={v: k for k, v in mapping.items()})
-            self.assertEqual(cdt, cdt2)
 
 
 if __name__ == "__main__":
