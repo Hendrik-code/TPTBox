@@ -150,3 +150,6 @@ test_*.ipynb
 .*DS_Store
 *tmp*.ipynb
 *.json
+*tmp*.py
+tmp
+tmp/*TrueTrue

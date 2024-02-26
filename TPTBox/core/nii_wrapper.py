@@ -32,50 +32,6 @@ from TPTBox.core.np_utils import (
 from . import bids_files
 from . import vert_constants as vc
 
-
-def resample_from_to(
-    from_img,
-    to_vox_map,
-    zoom,
-    order=3,
-    mode="constant",
-    cval=0.0,
-    out_class=Nifti1Image,
-):
-    # TODO FIND A HOME FOR THIS FUNCTION
-    # Replacement for nip.resample_from_to to aligned corners for segmentations
-    import numpy.linalg as npl
-    import scipy.ndimage as spnd
-    from nibabel.affines import AffineError, to_matvec
-    from nibabel.imageclasses import spatial_axes_first
-    from nibabel.processing import adapt_affine
-
-    # This check requires `shape` attribute of image
-    if not spatial_axes_first(from_img):
-        raise ValueError(f"Cannot predict position of spatial axes for Image type {type(from_img)}")
-    try:
-        to_shape, to_affine = to_vox_map.shape, to_vox_map.affine
-        zoom2 = to_vox_map.zoom
-
-    except AttributeError:
-        print(to_vox_map)
-        to_shape, to_affine, zoom2 = to_vox_map
-
-    a_to_affine = adapt_affine(to_affine, len(to_shape))
-    if out_class is None:
-        out_class = from_img.__class__
-    from_n_dim = len(from_img.shape)
-    if from_n_dim < 3:
-        raise AffineError("from_img must be at least 3D")
-    a_from_affine = adapt_affine(from_img.affine, from_n_dim)
-    to_vox2from_vox = npl.inv(a_from_affine).dot(a_to_affine)
-    rzs, trans = to_matvec(to_vox2from_vox)
-    if order == 0:
-        trans = np.array([t + (z - z2) / 2 for t, z, z2 in zip(trans, zoom, zoom2, strict=True)])
-    data = spnd.affine_transform(from_img.dataobj, rzs, trans, to_shape, order=order, mode=mode, cval=cval)
-    return out_class(data, to_affine, from_img.header)
-
-
 AFFINE = np.ndarray
 _unpacked_nii = tuple[np.ndarray, AFFINE, nib.nifti1.Nifti1Header]
 log = vc.log
@@ -648,7 +604,7 @@ class NII(NII_Math):
         new_shp = tuple(np.rint([shp[i] * zms[i] / voxel_spacing[i] for i in range(len(voxel_spacing))]).astype(int))
         new_aff = nib.affines.rescale_affine(aff, shp, voxel_spacing, new_shp)  # type: ignore
         new_aff[:3, 3] = nib.affines.apply_affine(aff, [0, 0, 0])# type: ignore
-        new_img = resample_from_to(self.nii, (new_shp, new_aff,voxel_spacing),zms, order=order, cval=c_val,mode=mode)
+        new_img = resample_from_to(self, (new_shp, new_aff,voxel_spacing), order=order, cval=c_val,mode=mode)
         log.print(f"Image resampled from {zms} to voxel size {voxel_spacing}",verbose=verbose)
         if inplace:
             self.nii = new_img
@@ -673,9 +629,9 @@ class NII(NII_Math):
         c_val = self.get_c_val(c_val)
 
         mapping = to_nii_optional(to_vox_map,seg=self.seg,default=to_vox_map)
+        assert mapping is not None
         log.print(f"resample_from_to: {self} to {mapping}",verbose=verbose)
-
-        nii = resample_from_to(self.nii, mapping,self.zoom, order=0 if self.seg else 3, mode=mode, cval=c_val)
+        nii = resample_from_to(self, mapping,order=0 if self.seg else 3, mode=mode, cval=c_val)
         if inplace:
             self.nii = nii
             return self
@@ -1307,3 +1263,80 @@ def to_nii_interpolateable(i_img:Interpolateable_Image_Reference) -> NII:
         return i_img.open_nii()
     else:
         raise TypeError("to_nii_interpolateable",i_img)
+
+
+def resample_from_to(
+    from_img:NII,
+    to_img:NII|tuple[SHAPE,AFFINE,Zooms],
+    order=3,
+    mode="constant",
+    cval=0.0
+):
+    # TODO FIND A HOME FOR THIS FUNCTION
+    # Replacement for nip.resample_from_to to aligned corners for segmentations
+    import numpy.linalg as npl
+    import scipy.ndimage as spnd
+    from nibabel.affines import AffineError, to_matvec
+    from nibabel.imageclasses import spatial_axes_first
+    from nibabel.processing import adapt_affine
+    zoom = from_img.zoom
+    # This check requires `shape` attribute of image
+    if not spatial_axes_first(from_img.nii):
+        raise ValueError(f"Cannot predict position of spatial axes for Image type {type(from_img)}")
+    orientation_to = None
+    if isinstance(to_img,tuple):
+        to_shape, to_affine, zoom_to = to_img
+    else:
+        assert to_img.affine is not None
+        assert to_img.zoom is not None
+        to_shape:SHAPE = to_img.shape
+        to_affine:AFFINE = to_img.affine
+        zoom_to = np.array(to_img.zoom)
+        orientation_to = to_img.orientation
+    from_n_dim = len(from_img.shape)
+    if from_n_dim < 3:
+        raise AffineError("from_img must be at least 3D")
+
+    #Flip zoom if needed
+    if orientation_to is not None and orientation_to != from_img.orientation:
+        ornt_fr = nio.axcodes2ornt(from_img.orientation)
+        ornt_to = nio.axcodes2ornt(orientation_to)
+        trans = nio.ornt_transform(ornt_fr, ornt_to).astype(int)
+        perm: list[int] = trans[:, 0].tolist()
+        zoom_i = np.array(zoom)
+        zoom_i[perm] = zoom_i.copy()
+        zoom: Zooms | None = tuple(zoom_i)
+    if order == 0:
+        #Simulate align_corner=True, by manipulating the affine
+        # Update zoom
+        # make the output by one voxel larger
+        # z_new = z * num_pixel/(num_pixel+1)
+        to_affine_new = to_affine.copy()
+        num_pixel = np.array(to_shape)
+        zoom_new = zoom_to*num_pixel/(1+num_pixel)
+        # Updated to matrix:
+        ## Set new zoom
+        rotation_zoom = to_affine[:3, :3]
+        to_affine_new[:3, :3] = rotation_zoom / np.array(zoom_to)*zoom_new
+        ## Shift origin to corner
+        corner = np.array([-0.5,-0.5,-0.5,0])
+        to_affine_new[:,3] -=to_affine_new@corner
+        # Update from matrix
+        ## Shift origin to corner
+        from_affine_new = from_img.affine.copy()
+        from_affine_new[:,3] +=from_affine_new@corner
+
+        a_to_affine = adapt_affine(to_affine_new, len(to_shape))
+        a_from_affine = adapt_affine(from_affine_new, from_n_dim)
+        to_vox2from_vox = npl.inv(a_from_affine).dot(a_to_affine)
+        rzs, trans = to_matvec(to_vox2from_vox)
+
+        data = spnd.affine_transform(from_img.get_array(), rzs, trans, to_shape, order=order, mode=mode, cval=cval) # type: ignore
+    else:
+        a_to_affine = adapt_affine(to_affine, len(to_shape))
+        a_from_affine = adapt_affine(from_img.affine, from_n_dim)
+        to_vox2from_vox = npl.inv(a_from_affine).dot(a_to_affine)
+        rzs, trans = to_matvec(to_vox2from_vox)
+
+        data = spnd.affine_transform(from_img.get_array(), rzs, trans, to_shape, order=order, mode=mode, cval=cval) # type: ignore
+    return data, to_affine, from_img.header
