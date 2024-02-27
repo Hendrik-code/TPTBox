@@ -4,9 +4,8 @@ from collections.abc import Sequence
 from typing import Any, TypeVar
 
 import numpy as np
-from cc3d import connected_components, region_graph
+from cc3d import connected_components, region_graph, voxel_connectivity_graph, contacts
 from cc3d import statistics as _cc3dstats
-from cc3d import voxel_connectivity_graph
 from fill_voids import fill
 from numpy.typing import NDArray
 from scipy.ndimage import binary_erosion, center_of_mass, generate_binary_structure
@@ -138,6 +137,54 @@ def np_bounding_boxes(arr: UINTARRAY) -> dict[int, tuple[slice, slice, slice]]:
     # Does not use the other calls for speed reasons
     unique = [idx for idx, i in enumerate(stats["voxel_counts"]) if i > 0 and idx != 0]
     return {idx: v for idx, v in enumerate(stats["bounding_boxes"]) if idx in unique}
+
+
+def np_contacts(arr: UINTARRAY, connectivity: int):
+    """Calculates the contacting labels and the amount of touching voxels based on connectivity
+
+    Args:
+        arr (UINTARRAY): _description_
+        connectivity (int): _description_
+
+    Returns:
+        dict[tuple[int,int], int]: mapping touching labels as tuple to number of touching voxels
+    """
+    assert 2 <= arr.ndim <= 3, f"expected 2D or 3D, but got {arr.ndim}"
+    assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
+    connectivity = min(connectivity * 4, 8) if arr.ndim == 2 else 6 if connectivity == 1 else 18 if connectivity == 2 else 26
+    return contacts(arr, connectivity=connectivity)
+
+
+def np_region_graph(arr: UINTARRAY, connectivity: int):
+    """Returns the unique tuples of different labels in the array touching each other
+
+    Args:
+        arr (UINTARRAY): _description_
+        connectivity (int): _description_
+
+    Returns:
+        set[tuple[int,int]]: touching labels in the array
+    """
+    assert 2 <= arr.ndim <= 3, f"expected 2D or 3D, but got {arr.ndim}"
+    assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
+    connectivity = min(connectivity * 4, 8) if arr.ndim == 2 else 6 if connectivity == 1 else 18 if connectivity == 2 else 26
+    return region_graph(arr, connectivity=connectivity)
+
+
+def np_voxel_connectivity_graph(arr: UINTARRAY, connectivity: int):
+    """Returns the unique tuples of different labels in the array touching each other
+
+    Args:
+        arr (UINTARRAY): _description_
+        connectivity (int): _description_
+
+    Returns:
+        set[tuple[int,int]]: touching labels in the array
+    """
+    assert 2 <= arr.ndim <= 3, f"expected 2D or 3D, but got {arr.ndim}"
+    assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
+    connectivity = min(connectivity * 4, 8) if arr.ndim == 2 else 6 if connectivity == 1 else 18 if connectivity == 2 else 26
+    return voxel_connectivity_graph(arr, connectivity=connectivity)
 
 
 def np_dice(seg: np.ndarray, gt: np.ndarray, binary_compare: bool = False, label: int = 1):
@@ -592,6 +639,7 @@ def np_fill_holes(arr: np.ndarray, label_ref: Label_Reference = None, slice_wise
         if slice_wise_dim is None:
             filled = fill(arr_l).astype(arr.dtype)
         else:
+            assert 0 <= slice_wise_dim <= arr.ndim - 1, f"slice_wise_dim needs to be in range [0, {arr.ndim -1}]"
             filled = np.swapaxes(arr_l.copy(), 0, slice_wise_dim)
             filled = np.stack([fill(x) for x in filled])
             filled = np.swapaxes(filled, 0, slice_wise_dim)
@@ -907,3 +955,16 @@ def _generate_array_indices(selem_center, selem_radius, selem_length, result_len
     # Last index for the structuring element array
     selem_end = selem_length - (result_end - result_length) if result_end > result_length else selem_length
     return (result_begin, result_end), (selem_begin, selem_end)
+
+
+if __name__ == "__main__":
+    array = np.array(
+        [
+            [0, 0, 2, 2, 0],
+            [1, 1, 2, 2, 0],
+            [1, 1, 0, 0, 0],
+        ]
+    )
+
+    print(array)
+    print(np_voxel_connectivity_graph(array, connectivity=1))
