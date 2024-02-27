@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import numpy as np
-
 from TPTBox import BIDS_FILE, NII, Centroids, Image_Reference, POI_Reference
 from TPTBox.spine.snapshot2D.snapshot_modular import Snapshot_Frame, Visualization_Type, create_snapshot
 
@@ -199,7 +198,7 @@ def mri_snapshot(
             centroids=subreg_ctd,
             mode="MRI",
             sagittal=True,
-            coronal=False,
+            coronal=True,
             axial=False,
             crop_msk=False,
             hide_segmentation=True,
