@@ -1315,7 +1315,7 @@ def _resample_from_to(
         rotation_zoom = from_img.affine[:3, :3]
         from_affine_new[:3, :3] = rotation_zoom / np.array(zoom_from)*zoom_new
         ## Shift origin to corner
-        from_affine_new[:,3] +=from_affine_new@corner
+        from_affine_new[:,3] -=from_affine_new@corner
 
         a_to_affine = nip.adapt_affine(to_affine_new, len(to_shape))
         a_from_affine = nip.adapt_affine(from_affine_new, from_n_dim)
