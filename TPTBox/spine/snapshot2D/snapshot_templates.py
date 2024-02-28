@@ -2,7 +2,7 @@ from pathlib import Path
 
 import numpy as np
 
-from TPTBox import BIDS_FILE, NII, Centroids, Image_Reference, POI_Reference
+from TPTBox import BIDS_FILE, NII, POI, Image_Reference, POI_Reference
 from TPTBox.spine.snapshot2D.snapshot_modular import Snapshot_Frame, Visualization_Type, create_snapshot
 
 
@@ -382,7 +382,7 @@ def poi_snapshot(
     #    "ITL_S": 142,
     #    "ITL_D": 144,
     # }
-    poi_all = Centroids.load(subreg_ctd)
+    poi_all = POI.load(subreg_ctd)
     sinister = {}
     median = {}
     dorsal = {}
