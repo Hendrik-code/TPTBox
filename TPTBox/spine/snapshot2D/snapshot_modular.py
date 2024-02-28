@@ -20,7 +20,7 @@ from scipy.signal import savgol_filter
 
 from TPTBox import (
     NII,
-    Centroids,
+    POI,
     Image_Reference,
     Location,
     POI_Reference,
@@ -133,9 +133,9 @@ LABEL_MAX = 256
 
 
 def sag_cor_curve_projection(
-    ctd_list: Centroids,
+    ctd_list: POI,
     img_data: np.ndarray,
-    ctd_fallback: Centroids,
+    ctd_fallback: POI,
     cor_savgol_filter: bool = False,
     curve_location: Location = Location.Vertebra_Corpus,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -447,7 +447,7 @@ def create_figure(dpi, planes: list):
 
 def plot_sag_centroids(
     axs,
-    ctd: Centroids,
+    ctd: POI,
     zms,
     poi_labelmap: dict[int, str],
     hide_centroid_labels: bool,
@@ -479,7 +479,7 @@ def plot_sag_centroids(
 
 def plot_cor_centroids(
     axs,
-    ctd: Centroids,
+    ctd: POI,
     zms,
     poi_labelmap: dict[int, str],
     hide_centroid_labels: bool,
@@ -510,11 +510,11 @@ def plot_cor_centroids(
 
 def make_2d_slice(
     img: Image_Reference,
-    ctd: Centroids,
+    ctd: POI,
     zms: tuple[float, float, float],
     msk: bool,
     visualization_type: Visualization_Type,
-    ctd_fallback: Centroids,
+    ctd_fallback: POI,
     cor_savgol_filter: bool = False,
     to_ax=("I", "P", "L"),
     curve_location: Location = Location.Vertebra_Corpus,
@@ -638,7 +638,7 @@ class Snapshot_Frame:
     curve_location: Location = Location.Vertebra_Corpus
 
 
-def to_cdt(ctd_bids: POI_Reference | None) -> Centroids | None:
+def to_cdt(ctd_bids: POI_Reference | None) -> POI | None:
     if ctd_bids is None:
         return None
     ctd = load_centroids(ctd_bids)
@@ -741,7 +741,7 @@ def create_snapshot(
 
         zms = img.zoom
         try:
-            ctd_fallback = Centroids(
+            ctd_fallback = POI(
                 centroids={
                     (1, 50): (0, 0, img.shape[-1] // 2),
                     (2, 50): [img.shape[0] - 1, img.shape[1] - 1, img.shape[2] // 2],
