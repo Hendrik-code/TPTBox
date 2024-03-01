@@ -916,12 +916,9 @@ def add_prerequisites(locs: Sequence[Location]):
                 for prereq in all_poi_functions[l.value].prerequisite:
                     if prereq not in locs:
                         addendum.add(prereq)
-        print(addendum)
         if len(addendum) == 0:
             break
-        xxxx = len(locs2)
         locs2 = addendum | locs2
-        print(len(locs2), len(addendum), xxxx)
         loop_var = addendum
         addendum = set()
         i += 1
