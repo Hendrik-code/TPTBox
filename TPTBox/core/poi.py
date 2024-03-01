@@ -1365,7 +1365,7 @@ def calc_poi_from_subreg_vert(
     # Step 1 get all required locations, crop vert/subreg
     # Step 2 calc centroids
 
-    print("step 2", subreg_id_int)
+    # print("step 2", subreg_id_int)
     if len(subreg_id_int_phase_1) != 0:
         arr = vert_msk.get_array()
         arr[arr >= 100] = 0
@@ -1384,7 +1384,7 @@ def calc_poi_from_subreg_vert(
         )
         [subreg_id_int.remove(i) for i in subreg_id_int_phase_1]
     # Step 3 Vertebra_Full
-    print("step 3", subreg_id_int)
+    # print("step 3", subreg_id_int)
     if Location.Vertebra_Full.value in subreg_id_int:
         log.print("Calc centroid from subregion id", "Vertebra_Full", verbose=verbose)
         full = Location.Vertebra_Full.value
@@ -1397,7 +1397,7 @@ def calc_poi_from_subreg_vert(
             extend_to = calc_centroids(vert_msk.set_array(arr), decimals=decimals, subreg_id=full, extend_to=extend_to, inplace=True)
         subreg_id_int.remove(full)
     # Step 4 IVD / Endplates Superior / Endplate Inferior
-    print("step 4", subreg_id_int)
+    # print("step 4", subreg_id_int)
     mapping_vert = {
         Location.Vertebra_Disc.value: 100,
         Location.Vertebral_Body_Endplate_Superior.value: 200,
@@ -1419,7 +1419,7 @@ def calc_poi_from_subreg_vert(
             subreg_id_int.remove(loc)
     # Step 5 call non_centroid_pois
     # Prepare mask to binary mask
-    print("step 5", subreg_id_int)
+    # print("step 5", subreg_id_int)
     vert_arr = vert_msk.get_seg_array()
     subreg_arr = subreg_msk.get_seg_array()
     assert subreg_msk.shape == vert_arr.shape, "Shape miss-match" + str(subreg_msk.shape) + str(vert_arr.shape)
@@ -1429,7 +1429,7 @@ def calc_poi_from_subreg_vert(
     if extend_to is None:
         extend_to = POI({}, **vert_msk._extract_affine(), format=FORMAT_POI)
     if len(subreg_id_int) != 0:
-        print("step 6", subreg_id_int)
+        # print("step 6", subreg_id_int)
         compute_non_centroid_pois(extend_to, int2loc(list(subreg_id_int)), vert_msk, subreg_msk, _vert_ids=_vert_ids, log=log)
     extend_to.apply_crop_reverse(crop, org_shape, inplace=True)
     return extend_to
