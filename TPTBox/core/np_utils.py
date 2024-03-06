@@ -4,12 +4,13 @@ from collections.abc import Sequence
 from typing import Any, TypeVar
 
 import numpy as np
-from cc3d import connected_components, region_graph, voxel_connectivity_graph, contacts
+from cc3d import connected_components, contacts, region_graph, voxel_connectivity_graph
 from cc3d import statistics as _cc3dstats
 from fill_voids import fill
 from numpy.typing import NDArray
 from scipy.ndimage import binary_erosion, center_of_mass, generate_binary_structure
 from skimage.measure import euler_number, label
+
 from TPTBox.core.vert_constants import Coordinate, Label_Map, Label_Reference, log
 from TPTBox.logger import Log_Type
 
@@ -172,14 +173,31 @@ def np_region_graph(arr: UINTARRAY, connectivity: int):
 
 
 def np_voxel_connectivity_graph(arr: UINTARRAY, connectivity: int):
-    """Returns the unique tuples of different labels in the array touching each other
+    """Returns a voxel connectivity graph of the input array
+
+    For 2D connectivity, the output is an 8-bit unsigned integer.
+
+    Bits 1-4: edges     (4,8 way)
+        5-8: corners   (8 way only, zeroed in 4 way)
+
+        8      7      6      5      4      3      2      1
+        ------ ------ ------ ------ ------ ------ ------ ------
+        -x-y    x-y    -xy     xy     -x     +y     -x     +x
+
+    For a 3D 26 and 18 connectivity, the output requires 32-bit unsigned integers,
+        for 6-way the output are 8-bit unsigned integers.
+
+    Bits 1-6: faces     (6,18,26 way)
+        7-19: edges     (18,26 way)
+        18-26: corners   (26 way)
+        26-32: unused (zeroed)
 
     Args:
         arr (UINTARRAY): _description_
         connectivity (int): _description_
 
     Returns:
-        set[tuple[int,int]]: touching labels in the array
+        uint8 or uint32 numpy array the same size as the input
     """
     assert 2 <= arr.ndim <= 3, f"expected 2D or 3D, but got {arr.ndim}"
     assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
@@ -368,14 +386,14 @@ def np_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 
     """
     assert img is not None, "bbox_nd: received None as image"
     assert np_count_nonzero(img) > 0, "bbox_nd: img is empty, cannot calculate a bbox"
-    N = img.ndim
+    n = img.ndim
     shp = img.shape
     if isinstance(px_dist, int):
-        px_dist = np.ones(N, dtype=np.uint8) * px_dist
-    assert len(px_dist) == N, f"dimension mismatch, got img shape {shp} and px_dist {px_dist}"
+        px_dist = np.ones(n, dtype=np.uint8) * px_dist
+    assert len(px_dist) == n, f"dimension mismatch, got img shape {shp} and px_dist {px_dist}"
 
     bbox: list[float] = []
-    for ax in itertools.combinations(reversed(range(N)), N - 1):
+    for ax in itertools.combinations(reversed(range(n)), n - 1):
         nonzero = np.any(a=img, axis=ax)
         bbox.extend(np.where(nonzero)[0][[0, -1]])  # type: ignore
     out: tuple[slice, ...] = tuple(
@@ -401,7 +419,8 @@ def np_center_of_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.
 def np_approx_center_of_mass(seg: np.ndarray, label_ref: Label_Reference = None) -> dict[int, Coordinate]:
     import warnings
 
-    warnings.warn("np_approx_center_of_mass deprecated use np_center_of_mass instead")  # TODO remove in version 1.0
+    warnings.warn("np_approx_center_of_mass deprecated use np_center_of_mass instead", stacklevel=3)  # TODO remove in version 1.0
+    assert label_ref is None, "the new function does not need a label_ref"
     return np_center_of_mass(seg)
 
 
@@ -473,18 +492,18 @@ def np_connected_components(
     labels: Sequence[int] = _to_labels(arr, label_ref)
 
     subreg_cc = {}
-    subreg_cc_N = {}
+    subreg_cc_n = {}
     for subreg in labels:  # type:ignore
         img_subreg = np_extract_label(arr, subreg, inplace=False)
-        labels_out, N = connected_components(img_subreg, connectivity=connectivity, return_N=True)
+        labels_out, n = connected_components(img_subreg, connectivity=connectivity, return_N=True)
         subreg_cc[subreg] = labels_out
-        subreg_cc_N[subreg] = N
+        subreg_cc_n[subreg] = n
     if verbose:
         print(
             "Components founds (label,N): ",
-            {i: subreg_cc_N[i]["N"] for i in labels},
+            {i: subreg_cc_n[i]["N"] for i in labels},
         )
-    return subreg_cc, subreg_cc_N
+    return subreg_cc, subreg_cc_n
 
 
 def np_get_largest_k_connected_components(
@@ -519,15 +538,15 @@ def np_get_largest_k_connected_components(
     labels: Sequence[int] = _to_labels(arr, label_ref)
     arr2[np.isin(arr, labels, invert=True)] = 0  # type:ignore
 
-    labels_out, N = connected_components(arr, connectivity=connectivity, return_N=True)
-    k = min(k, N)  # if k > N, will return all N but still sorted
+    labels_out, n = connected_components(arr, connectivity=connectivity, return_N=True)
+    k = min(k, n)  # if k > N, will return all N but still sorted
     label_volume_pairs = [(i, ct) for i, ct in np_volume(labels_out).items() if ct > 0]
     label_volume_pairs.sort(key=lambda x: x[1], reverse=True)
     preserve: list[int] = [x[0] for x in label_volume_pairs[:k]]
 
     cc_out = np.zeros(arr.shape, dtype=arr.dtype)
-    for i, label in enumerate(preserve):
-        cc_out[labels_out == label] = i + 1
+    for i, preserve_label in enumerate(preserve):
+        cc_out[labels_out == preserve_label] = i + 1
     if return_original_labels:
         arr *= cc_out > 0  # to get original labels
         return arr
@@ -600,7 +619,7 @@ def np_translate_arr(arr: np.ndarray, translation_vector: tuple[int, int] | tupl
     arr_translated = np.zeros_like(arr)
     if len(translation_vector) == 3:
         tx, ty, tz = translation_vector  # type:ignore
-        H, W, D = arr.shape
+        H, W, D = arr.shape  # noqa: N806
         arr_translated[
             max(tx, 0) : H + min(tx, 0),
             max(ty, 0) : W + min(ty, 0),
@@ -612,7 +631,7 @@ def np_translate_arr(arr: np.ndarray, translation_vector: tuple[int, int] | tupl
         ]
     else:
         tx, ty = translation_vector  # type:ignore
-        H, W = arr.shape
+        H, W = arr.shape  # noqa: N806
         arr_translated[max(tx, 0) : H + min(tx, 0), max(ty, 0) : W + min(ty, 0)] = arr[
             -min(tx, 0) : H - max(tx, 0), -min(ty, 0) : W - max(ty, 0)
         ]
@@ -737,8 +756,8 @@ def np_betti_numbers(img: np.ndarray, verbose=False) -> tuple[int, int, int]:
     # 6 or 26 neighborhoods are defined for 3D images,
     # (connectivity 1 and 3, respectively)
     # If foreground is 26-connected, then background is 6-connected, and conversely
-    N6 = 1
-    N26 = 3
+    N6 = 1  # noqa: N806
+    N26 = 3  # noqa: N806
     # important first step is to
     # pad the image with background (0) around the border!
     padded = np.pad(img, pad_width=1)
