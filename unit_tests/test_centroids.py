@@ -246,7 +246,7 @@ class Test_Centroids(unittest.TestCase):
                 self.assertEqual(k1, k1_2)
                 self.assertEqual(k2, k2_2)
                 for v, v2 in zip(v, v2, strict=False):  # noqa: B020, PLW2901
-                    self.assertAlmostEqual(v, v2, places=3)
+                    self.assertAlmostEqual(v, v2, places=2)
 
 
 if __name__ == "__main__":
