@@ -1,35 +1,45 @@
-import os
+import os  # noqa: INP001
 import sys
-import tempfile
 from pathlib import Path
 
-file = Path(__file__).resolve()
-sys.path.append(str(file.parents[2]))
-import random
-
-import nibabel as nib
-import numpy as np
-
-from TPTBox import Centroids
-from TPTBox.core.nii_wrapper import NII
-from TPTBox.core.poi import (
-    LABEL_MAX,
-    POI,
-    VertebraCentroids,
-    _poi_to_dict_list,
-    calc_centroids_from_subreg_vert,
-    calc_centroids_labeled_buffered,
-    load_poi,
-)
-from TPTBox.core.vert_constants import Ax_Codes
-
-if not os.path.isdir("test"):
+if not os.path.isdir("test"):  # noqa: PTH112
     sys.path.append("..")
 file = Path(__file__).resolve()
 sys.path.append(str(file.parents[2]))
-import TPTBox.core.bids_files as bids
+import random  # noqa: E402
+
+import nibabel as nib  # noqa: E402
+import numpy as np  # noqa: E402
+
+import TPTBox.core.bids_files as bids  # noqa: E402
+from TPTBox import Centroids  # noqa: E402
+from TPTBox.core.nii_wrapper import NII  # noqa: E402
+from TPTBox.core.poi import POI  # noqa: E402
+from TPTBox.core.vert_constants import Ax_Codes  # noqa: E402
 
 repeats = 20
+
+
+def get_tests_dir():
+    return Path(__file__).parent
+
+
+def get_test_ct() -> tuple[NII, NII, NII, int]:
+    tests_path = get_tests_dir()
+    ct_path = tests_path.joinpath("sample_ct")
+    ct = NII.load(ct_path.joinpath("sub-ct_label-22_ct.nii.gz"), seg=False)
+    subreg = NII.load(ct_path.joinpath("sub-ct_seg-subreg_label-22_msk.nii.gz"), seg=True)
+    vert = NII.load(ct_path.joinpath("sub-ct_seg-vert_label-22_msk.nii.gz"), seg=True)
+    return ct, subreg, vert, 22
+
+
+def get_test_mri() -> tuple[NII, NII, NII, int]:
+    tests_path = get_tests_dir()
+    mri_path = tests_path.joinpath("sample_mri")
+    mri = NII.load(mri_path.joinpath("sub-mri_label-6_T2w.nii.gz"), seg=False)
+    subreg = NII.load(mri_path.joinpath("sub-mri_seg-subreg_label-6_msk.nii.gz"), seg=True)
+    vert = NII.load(mri_path.joinpath("sub-mri_seg-vert_label-6_msk.nii.gz"), seg=True)
+    return mri, subreg, vert, 6
 
 
 def get_BIDS_test():
@@ -92,7 +102,7 @@ def get_poi(x: tuple[int, int, int] = (50, 30, 40), num_vert=3, num_subreg=1, ro
 
     for idx in range(num_vert):
         out_points[idx + 1] = {}
-        for idx2 in range(num_subreg):
+        for _idx2 in range(num_subreg):
             point = tuple(random.randint(1, a * 100) / 100.0 for a in x)
             subregion = random.randint(min_subreg, max_subreg)
             out_points[idx + 1][subregion] = point
@@ -108,7 +118,7 @@ def get_poi(x: tuple[int, int, int] = (50, 30, 40), num_vert=3, num_subreg=1, ro
     return POI(out_points, orientation=("R", "A", "S"), zoom=(1, 1, 1), shape=x, origin=origin, rotation=r)
 
 
-def get_nii(x: tuple[int, int, int] = None, num_point=3, min_size: int = 1):  # type: ignore
+def get_nii(x: tuple[int, int, int] | None = None, num_point=3, min_size: int = 1):  # type: ignore
     if x is None:
         x = (random.randint(30, 70), random.randint(30, 70), random.randint(30, 70))
     a = np.zeros(x, dtype=np.uint16)
