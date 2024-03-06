@@ -1,4 +1,4 @@
-import os  # noqa: INP001
+import os
 import sys
 from pathlib import Path
 
@@ -88,13 +88,13 @@ def get_random_ax_code() -> Ax_Codes:
     return tuple(directions[i][random.randint(0, 1)] for i in idx)  # type: ignore
 
 
-def get_centroids(x: tuple[int, int, int] = (50, 30, 40), num_point=3):
+def get_POI(x: tuple[int, int, int] = (50, 30, 40), num_point=3):
     out_points: dict[tuple[int, int], tuple[float, float, float]] = {}
 
     for idx in range(num_point):
         point = tuple(random.randint(1, a * 100) / 100.0 for a in x)
         out_points[idx + 1, 50] = point
-    return Centroids(out_points, orientation=("R", "A", "S"), zoom=(1, 1, 1))
+    return POI(out_points, orientation=("R", "A", "S"), zoom=(1, 1, 1))
 
 
 def get_poi(x: tuple[int, int, int] = (50, 30, 40), num_vert=3, num_subreg=1, rotation=True, min_subreg=1, max_subreg=255):
@@ -102,7 +102,7 @@ def get_poi(x: tuple[int, int, int] = (50, 30, 40), num_vert=3, num_subreg=1, ro
 
     for idx in range(num_vert):
         out_points[idx + 1] = {}
-        for _idx2 in range(num_subreg):
+        for _ in range(num_subreg):
             point = tuple(random.randint(1, a * 100) / 100.0 for a in x)
             subregion = random.randint(min_subreg, max_subreg)
             out_points[idx + 1][subregion] = point
