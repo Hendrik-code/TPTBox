@@ -17,11 +17,11 @@ from TPTBox.core.poi import (
     Location,
     _poi_to_dict_list,
     calc_centroids,
-    calc_centroids_from_subreg_vert,
-    calc_centroids_labeled_buffered,
+    calc_poi_from_subreg_vert,
+    calc_poi_labeled_buffered,
     load_poi,
 )
-from TPTBox.tests.test_utils import extract_affine, get_centroids, get_poi, get_random_ax_code, overlap, repeats, sqr1d
+from TPTBox.tests.test_utils import extract_affine, get_poi, get_random_ax_code, overlap, repeats, sqr1d
 
 
 def get_nii(x: tuple[int, int, int] | None = None, num_point=3, rotation=True):  # type: ignore
@@ -157,14 +157,14 @@ class Test_POI(unittest.TestCase):
         cent2 = POI(cent2, orientation=order2, zoom=(1, 1, 1), **extract_affine(msk2))
         file = Path(tempfile.gettempdir(), "test_save_load_POI.json")
         file.unlink(missing_ok=True)
-        out = calc_centroids_labeled_buffered(msk, None, out_path=file, verbose=False)
+        out = calc_poi_labeled_buffered(msk, None, out_path=file, verbose=False)
         self.assertEqual(out, cent)
         self.assert_affine(out, msk)
-        out = calc_centroids_labeled_buffered(msk2, None, out_path=file, verbose=False)
+        out = calc_poi_labeled_buffered(msk2, None, out_path=file, verbose=False)
         self.assertEqual(out, cent)
         self.assert_affine(out, msk)
         file.unlink(missing_ok=True)
-        out = calc_centroids_labeled_buffered(msk2, None, out_path=file, verbose=False)
+        out = calc_poi_labeled_buffered(msk2, None, out_path=file, verbose=False)
         self.assert_affine(out, msk2)
         self.assertEqual(out, cent2)
         file.unlink(missing_ok=True)
@@ -174,7 +174,7 @@ class Test_POI(unittest.TestCase):
         arr = msk.get_array()
         arr[arr != 0] = 50
         subreg = NII(nib.Nifti1Image(arr, msk.affine), True)  # type: ignore
-        out = calc_centroids_from_subreg_vert(msk, subreg, buffer_file=None, decimals=3)
+        out = calc_poi_from_subreg_vert(msk, subreg, buffer_file=None, decimals=3)
         cent = POI(cent, orientation=order, zoom=(1, 1, 1), **extract_affine(msk))
         self.assertEqual(out, cent)
         self.assert_affine(out, cent)
@@ -182,7 +182,7 @@ class Test_POI(unittest.TestCase):
         arr = msk.get_array()
         arr[arr != 0] += 40
         subreg = NII(nib.Nifti1Image(arr, msk.affine), True)
-        out = calc_centroids_from_subreg_vert(msk, subreg, buffer_file=None, decimals=3, subreg_id=list(range(41, 50)))
+        out = calc_poi_from_subreg_vert(msk, subreg, buffer_file=None, decimals=3, subreg_id=list(range(41, 50)))
         cent_new = {}
         for idx, (k, v) in enumerate(cent.items(), 41):
             cent_new[k, idx] = v[50]
