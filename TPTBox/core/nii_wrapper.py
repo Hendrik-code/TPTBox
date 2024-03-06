@@ -63,14 +63,9 @@ def formatwarning_tb(*args, **kwargs):
 warnings.formatwarning = formatwarning_tb
 
 N = TypeVar("N", bound="NII")
-Image_Reference = Union[bids_files.BIDS_FILE, Nifti1Image, Path, str, N]
-Interpolateable_Image_Reference = Union[
-    bids_files.BIDS_FILE,
-    tuple[Nifti1Image, bool],
-    tuple[Path, bool],
-    tuple[str, bool],
-    N,
-]
+Image_Reference = bids_files.BIDS_FILE | Nifti1Image | Path | str | N
+Interpolateable_Image_Reference = bids_files.BIDS_FILE | tuple[Nifti1Image, bool] | tuple[Path, bool] | tuple[str, bool] | N
+
 Proxy = tuple[tuple[int, int, int], np.ndarray]
 suppress_dtype_change_printout_in_set_array = False
 # fmt: off
@@ -314,7 +309,7 @@ class NII(NII_Math):
             return self.get_seg_array()
         self._unpack()
         return self._arr.copy()
-    def set_array(self,arr:np.ndarray, inplace=False,verbose:vc.logging=False)-> Self:
+    def set_array(self,arr:np.ndarray, inplace=False,verbose:vc.logging=False)-> Self:  # noqa: ARG002
         """Creates a NII where the array is replaces with the input array.
 
         Note: This function works "Out-of-place" by default, like all other methods.
@@ -346,7 +341,7 @@ class NII(NII_Math):
             self.nii = nii
             return self
         else:
-            return NII(nii,self.seg)
+            return NII(nii,self.seg) # type: ignore
 
     def set_array_(self,arr:np.ndarray,verbose:vc.logging=True):
         return self.set_array(arr,inplace=True,verbose=verbose)
@@ -425,10 +420,10 @@ class NII(NII_Math):
 
     def compute_crop_slice(self,**qargs):
         import warnings
-        warnings.warn("compute_crop_slice id deprecated use compute_crop instead") #TODO remove in version 1.0
+        warnings.warn("compute_crop_slice id deprecated use compute_crop instead",stacklevel=5) #TODO remove in version 1.0
         return self.compute_crop(**qargs)
 
-    def compute_crop(self,minimum: float=0, dist=0, other_crop:tuple[slice,...]|None=None, minimum_size:tuple[slice,...]|int|tuple[int,...]|None=None)->tuple[slice,slice,slice]:
+    def compute_crop(self,minimum: float=0, dist=0, other_crop:tuple[slice,...]|None=None, maximum_size:tuple[slice,...]|int|tuple[int,...]|None=None)->tuple[slice,slice,slice]:
         """
         Computes the minimum slice that removes unused space from the image and returns the corresponding slice tuple along with the origin shift required for centroids.
 
@@ -471,15 +466,15 @@ class NII(NII_Math):
         ex_slice = [slice(x0, x1+1), slice(y0, y1+1), slice(z0, z1+1)]
 
         if other_crop is not None:
-            assert all((a.step == None) for a in other_crop), 'Only None slice is supported for combining x'
+            assert all((a.step is None) for a in other_crop), 'Only None slice is supported for combining x'
             ex_slice = [slice(max(a.start, b.start), min(a.stop, b.stop)) for a, b in zip(ex_slice, other_crop, strict=False)]
 
-        if minimum_size is not None:
-            if isinstance(minimum_size,int):
-                minimum_size = (minimum_size,minimum_size,minimum_size)
-            for i, min_w in enumerate(minimum_size):
+        if maximum_size is not None:
+            if isinstance(maximum_size,int):
+                maximum_size = (maximum_size,maximum_size,maximum_size)
+            for i, min_w in enumerate(maximum_size):
                 if isinstance(min_w,slice):
-                    min_w = min_w.stop - min_w.start
+                    min_w = min_w.stop - min_w.start  # noqa: PLW2901
                 curr_w =  ex_slice[i].stop - ex_slice[i].start
                 dif = min_w - curr_w
                 if min_w > 0:
@@ -498,41 +493,41 @@ class NII(NII_Math):
         return tuple(ex_slice)# type: ignore
 
     def apply_center_crop(self, center_shape: tuple[int,int,int], verbose: bool = False):
-        shpX, shpY, shpZ = self.shape
-        cropX, cropY, cropZ = center_shape
+        shp_x, shp_y, shp_z = self.shape
+        crop_x, crop_y, crop_z = center_shape
 
-        if cropX > shpX or cropY > shpY or cropZ > shpZ:
+        if crop_x > shp_x or crop_y > shp_y or crop_z > shp_z:
             padding_ltrb = [
-                ((cropX - shpX +1) // 2 if cropX > shpX else 0,(cropX - shpX) // 2 if cropX > shpX else 0),
-                ((cropY - shpY +1) // 2 if cropY > shpY else 0,(cropY - shpY) // 2 if cropY > shpY else 0),
-                ((cropZ - shpZ +1) // 2 if cropZ > shpZ else 0,(cropZ - shpZ) // 2 if cropZ > shpZ else 0),
+                ((crop_x - shp_x +1) // 2 if crop_x > shp_x else 0,(crop_x - shp_x) // 2 if crop_x > shp_x else 0),
+                ((crop_y - shp_y +1) // 2 if crop_y > shp_y else 0,(crop_y - shp_y) // 2 if crop_y > shp_y else 0),
+                ((crop_z - shp_z +1) // 2 if crop_z > shp_z else 0,(crop_z - shp_z) // 2 if crop_z > shp_z else 0),
             ]
             arr = self.get_array()
             arr_padded = np.pad(arr, padding_ltrb, "constant", constant_values=0)  # PIL uses fill value 0
             log.print(f"Pad from {self.shape} to {arr_padded.shape}", verbose=verbose)
-            shpX, shpY, shpZ = arr_padded.shape
-            if cropX == shpX and cropY == shpY and cropZ == shpZ:
+            shp_x, shp_y, shp_z = arr_padded.shape
+            if crop_x == shp_x and crop_y == shp_y and crop_z == shp_z:
                 return self.set_array(arr_padded)
 
-        crop_relX = int(round((shpX - cropX) / 2.0))
-        crop_relY = int(round((shpY - cropY) / 2.0))
-        crop_relZ = int(round((shpZ - cropZ) / 2.0))
+        crop_rel_x = int(round((shp_x - crop_x) / 2.0))
+        crop_rel_y = int(round((shp_y - crop_y) / 2.0))
+        crop_rel_z = int(round((shp_z - crop_z) / 2.0))
 
-        crop_slices = (slice(crop_relX, crop_relX + cropX),slice(crop_relY, crop_relY + cropY),slice(crop_relZ, crop_relZ + cropZ))
+        crop_slices = (slice(crop_rel_x, crop_rel_x + crop_x),slice(crop_rel_y, crop_rel_y + crop_y),slice(crop_rel_z, crop_rel_z + crop_z))
         arr_cropped = arr_padded[crop_slices]
         log.print(f"Centercropped from {arr_padded.shape} to {arr_cropped.shape}", verbose=verbose)
-        shpX, shpY, shpZ = arr_cropped.shape
-        assert cropX == shpX and cropY == shpY and cropZ == shpZ
+        shp_x, shp_y, shp_z = arr_cropped.shape
+        assert crop_x == shp_x and crop_y == shp_y and crop_z == shp_z
         return self.set_array(arr_cropped)
 
     def apply_crop_slice(self,*args,**qargs):
         import warnings
-        warnings.warn("apply_crop_slice id deprecated use apply_crop instead") #TODO remove in version 1.0
+        warnings.warn("apply_crop_slice id deprecated use apply_crop instead",stacklevel=5) #TODO remove in version 1.0
         return self.apply_crop(*args,**qargs)
 
     def apply_crop_slice_(self,*args,**qargs):
         import warnings
-        warnings.warn("apply_crop_slice_ id deprecated use apply_crop_ instead") #TODO remove in version 1.0
+        warnings.warn("apply_crop_slice_ id deprecated use apply_crop_ instead",stacklevel=5) #TODO remove in version 1.0
         return self.apply_crop_(*args,**qargs)
 
     def apply_crop(self,ex_slice:tuple[slice,slice,slice]|tuple[slice,...] , inplace=False):
@@ -633,10 +628,10 @@ class NII(NII_Math):
         """        ''''''
         c_val = self.get_c_val(c_val)
 
-        map = to_nii_optional(to_vox_map,seg=self.seg,default=to_vox_map)
-        log.print(f"resample_from_to: {self} to {map}",verbose=verbose)
+        mapping = to_nii_optional(to_vox_map,seg=self.seg,default=to_vox_map)
+        log.print(f"resample_from_to: {self} to {mapping}",verbose=verbose)
 
-        nii = nip.resample_from_to(self.nii, map, order=0 if self.seg else 3, mode=mode, cval=c_val)
+        nii = nip.resample_from_to(self.nii, mapping, order=0 if self.seg else 3, mode=mode, cval=c_val)
         if inplace:
             self.nii = nii
             return self
@@ -675,7 +670,7 @@ class NII(NII_Math):
         """
         if convergence is None:
             convergence = {"iters": [50, 50, 50, 50], "tol": 1e-07}
-        assert self.seg == False, "n4 bias field correction on a segmentation doesnt make any sense"
+        assert self.seg is False, "n4 bias field correction on a segmentation doesnt make any sense"
         # install antspyx not ants!
         import ants
         import ants.utils.bias_correction as bc  # install antspyx not ants!
@@ -684,14 +679,14 @@ class NII(NII_Math):
         dtype = self.dtype
         input_ants:ants.ANTsImage = from_nibabel(nib.nifti1.Nifti1Image(self.get_array(),self.affine))
         if threshold != 0:
-            mask = self.get_array()
-            mask[mask < threshold] = 0
-            mask[mask != 0] = 1
-            mask = mask.astype(np.uint8)
+            mask_arr = self.get_array()
+            mask_arr[mask_arr < threshold] = 0
+            mask_arr[mask_arr != 0] = 1
+            mask_arr = mask_arr.astype(np.uint8)
             struct = generate_binary_structure(3, 3)
-            mask = binary_dilation(mask.copy(), structure=struct, iterations=3)
-            mask = mask.astype(np.uint8)
-            mask:ants.ANTsImage = from_nibabel(nib.nifti1.Nifti1Image(mask,self.affine))#self.set_array(mask,verbose=False).nii
+            mask_arr = binary_dilation(mask_arr.copy(), structure=struct, iterations=3)
+            mask_arr = mask_arr.astype(np.uint8)
+            mask:ants.ANTsImage = from_nibabel(nib.nifti1.Nifti1Image(mask_arr,self.affine))#self.set_array(mask,verbose=False).nii
             mask = mask.set_spacing(input_ants.spacing)
         out = bc.n4_bias_field_correction(
             input_ants,
@@ -724,7 +719,7 @@ class NII(NII_Math):
     def n4_bias_field_correction_(self,threshold = 60,mask=None,shrink_factor=4,convergence=None,spline_param=200,verbose=False,weight_mask=None,crop=False):
         if convergence is None:
             convergence = {"iters": [50, 50, 50, 50], "tol": 1e-07}
-        return self.n4_bias_field_correction(mask=mask,shrink_factor=shrink_factor,convergence=convergence,spline_param=spline_param,verbose=verbose,weight_mask=weight_mask,crop=crop,inplace=True,threshold = threshold)
+        return self.n4_bias_field_correction(mask_arr=mask,shrink_factor=shrink_factor,convergence=convergence,spline_param=spline_param,verbose=verbose,weight_mask=weight_mask,crop=crop,inplace=True,threshold = threshold)
 
     def normalize_to_range_(self, min_value: int = 0, max_value: int = 1500, verbose:logging=True):
         assert not self.seg
@@ -739,8 +734,8 @@ class NII(NII_Math):
 
     def match_histograms(self, reference:Image_Reference,c_val = 0,inplace=False):
         ref_nii = to_nii(reference)
-        assert ref_nii.seg == False
-        assert self.seg == False
+        assert ref_nii.seg is False
+        assert self.seg is False
         c_val = self.get_c_val(c_val)
         if c_val <= -999:
             raise ValueError('match_histograms only functions on MRI, which have a minimum 0.')
@@ -755,7 +750,7 @@ class NII(NII_Math):
         return self.match_histograms(reference,c_val = c_val,inplace=True)
 
     def smooth_gaussian(self, sigma:float|list[float]|tuple[float],truncate:float=4.0,nth_derivative=0,inplace=False):
-        assert self.seg == False, "You really want to smooth a segmentation?"
+        assert self.seg is False, "You really want to smooth a segmentation?"
         from scipy.ndimage import gaussian_filter
         arr = gaussian_filter(self.get_array(), sigma, order=nth_derivative,cval=self.get_c_val(), truncate=truncate)# radius=None, axes=None
         return self.set_array(arr,inplace,verbose=False)
@@ -855,10 +850,7 @@ class NII(NII_Math):
         if labels is None:
             labels = self.unique()
         msk_i_data = self.get_seg_array()
-        if mask is not None:
-            mask_ = mask.get_seg_array()
-        else:
-            mask_ = None
+        mask_ = mask.get_seg_array() if mask is not None else None
         out = np_dilate_msk(arr=msk_i_data, label_ref=labels, mm=mm, mask=mask_, connectivity=connectivity)
         msk_e = out.astype(np.uint16), self.affine,self.header
         log.print("Mask dilated by", mm, "voxels",verbose=verbose)
@@ -968,7 +960,7 @@ class NII(NII_Math):
         return self.set_array(np_get_largest_k_connected_components(self.get_seg_array(), k=k, label_ref=labels, connectivity=connectivity, return_original_labels=return_original_labels))
 
 
-    def get_segmentation_difference_to(self, mask_gt: Self, ignore_background_TP: bool = False) -> Self:
+    def get_segmentation_difference_to(self, mask_gt: Self, ignore_background_tp: bool = False) -> Self:
         """Calculates an NII that represents the segmentation difference between self and given groundtruth mask
 
         Args:
@@ -993,7 +985,7 @@ class NII(NII_Math):
         # Wrong label
         diff_arr[(diff_arr == 0) & (gt != arr)] = 4
 
-        if ignore_background_TP:
+        if ignore_background_tp:
             diff_arr[(gt == 0) & (arr == 0)] = 0
 
         return self.set_array(diff_arr)

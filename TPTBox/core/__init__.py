@@ -13,8 +13,8 @@ from .poi import (
     POI_Reference,
     VertebraCentroids,
     calc_centroids,
-    calc_centroids_from_subreg_vert,
-    calc_centroids_labeled_buffered,
+    calc_poi_from_subreg_vert,
+    calc_poi_labeled_buffered,
     load_poi,
 )
 from .poi_global import POI_Global

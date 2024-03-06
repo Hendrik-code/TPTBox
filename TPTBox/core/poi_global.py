@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 from typing_extensions import Self
 
 from TPTBox.core import poi
@@ -84,5 +86,5 @@ class POI_Global(Abstract_POI):
             centroids = self.centroids.copy()
         p = POI_Global(centroids)
         p.format = self.format
-        p.info = self.info.copy()
-        return p
+        p.info = deepcopy(self.info)
+        return p  # type: ignore
