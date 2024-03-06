@@ -298,14 +298,12 @@ class Abstract_POI:
         return self.copy(ctd)
 
     @property
-    def is_global(self) -> bool:
-        ...
+    def is_global(self) -> bool: ...
 
     def clone(self, **qargs):
         return self.copy(**qargs)
 
-    def copy(self, centroids: POI_Descriptor | None = None, **qargs) -> Self:
-        ...
+    def copy(self, centroids: POI_Descriptor | None = None, **qargs) -> Self: ...
 
     def map_labels(
         self,
@@ -450,9 +448,9 @@ class Abstract_POI:
 
         # Extract coordinates for interpolation
         x_sample, y_sample, z_sample = centroids_coords[:, 0], centroids_coords[:, 1], centroids_coords[:, 2]
-
+        assert len(x_sample) != 0, x_sample.shape
         # Perform cubic spline interpolation
-        tck, u = interpolate.splprep([x_sample, y_sample, z_sample], k=3, s=smoothness)
+        tck, u = interpolate.splprep([x_sample, y_sample, z_sample], k=3 if len(x_sample) > 3 else len(x_sample) - 1, s=smoothness)
         u_fine = np.linspace(0, 1, num_sample_pts)
         x_fine, y_fine, z_fine = interpolate.splev(u_fine, tck)
 
