@@ -298,12 +298,14 @@ class Abstract_POI:
         return self.copy(ctd)
 
     @property
-    def is_global(self) -> bool: ...
+    def is_global(self) -> bool:
+        ...
 
     def clone(self, **qargs):
         return self.copy(**qargs)
 
-    def copy(self, centroids: POI_Descriptor | None = None, **qargs) -> Self: ...
+    def copy(self, centroids: POI_Descriptor | None = None, **qargs) -> Self:
+        ...
 
     def map_labels(
         self,
