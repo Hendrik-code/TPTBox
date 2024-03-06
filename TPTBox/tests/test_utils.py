@@ -1,17 +1,45 @@
 import os
-import random
 import sys
 from pathlib import Path
 
-import nibabel as nib
-import numpy as np
+if not os.path.isdir("test"):  # noqa: PTH112
+    sys.path.append("..")
+file = Path(__file__).resolve()
+sys.path.append(str(file.parents[2]))
+import random  # noqa: E402
 
-import TPTBox.core.bids_files as bids
-from TPTBox import POI
-from TPTBox.core.nii_wrapper import NII
-from TPTBox.core.vert_constants import Ax_Codes
+import nibabel as nib  # noqa: E402
+import numpy as np  # noqa: E402
+
+import TPTBox.core.bids_files as bids  # noqa: E402
+from TPTBox import Centroids  # noqa: E402
+from TPTBox.core.nii_wrapper import NII  # noqa: E402
+from TPTBox.core.poi import POI  # noqa: E402
+from TPTBox.core.vert_constants import Ax_Codes  # noqa: E402
 
 repeats = 20
+
+
+def get_tests_dir():
+    return Path(__file__).parent
+
+
+def get_test_ct() -> tuple[NII, NII, NII, int]:
+    tests_path = get_tests_dir()
+    ct_path = tests_path.joinpath("sample_ct")
+    ct = NII.load(ct_path.joinpath("sub-ct_label-22_ct.nii.gz"), seg=False)
+    subreg = NII.load(ct_path.joinpath("sub-ct_seg-subreg_label-22_msk.nii.gz"), seg=True)
+    vert = NII.load(ct_path.joinpath("sub-ct_seg-vert_label-22_msk.nii.gz"), seg=True)
+    return ct, subreg, vert, 22
+
+
+def get_test_mri() -> tuple[NII, NII, NII, int]:
+    tests_path = get_tests_dir()
+    mri_path = tests_path.joinpath("sample_mri")
+    mri = NII.load(mri_path.joinpath("sub-mri_label-6_T2w.nii.gz"), seg=False)
+    subreg = NII.load(mri_path.joinpath("sub-mri_seg-subreg_label-6_msk.nii.gz"), seg=True)
+    vert = NII.load(mri_path.joinpath("sub-mri_seg-vert_label-6_msk.nii.gz"), seg=True)
+    return mri, subreg, vert, 6
 
 
 def get_BIDS_test():
