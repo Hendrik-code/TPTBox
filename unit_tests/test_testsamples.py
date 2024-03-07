@@ -35,7 +35,7 @@ class Test_testsamples(unittest.TestCase):
         l3_subreg = subreg_nii.apply_mask(l3, inplace=False)
         self.assertEqual(l3.volumes()[1], sum(l3_subreg.volumes(include_zero=False).values()))
 
-    def test_make_snapshot_both(self, keep_images=True):
+    def test_make_snapshot_both(self, keep_images=False):
         from TPTBox.spine.snapshot2D import Snapshot_Frame, create_snapshot
 
         mri_nii, subreg_nii, vert_nii, label = get_test_mri()
@@ -131,3 +131,15 @@ class Test_testsamples(unittest.TestCase):
             Location.Vertebral_Body_Endplate_Inferior,
         ]
         self.make_POIs(vert_nii, subreg_nii, label, ignore_list)
+
+    def test_pad_crop(self):
+        for _, _, vert_nii, label in [get_test_mri(), get_test_ct()]:
+            vert_nii.extract_label_(label, keep_label=False)
+            crop = vert_nii.compute_crop()
+            cropped = vert_nii.apply_crop(crop)
+            assert cropped.shape != vert_nii.shape
+            assert cropped.origin != vert_nii.origin
+            returned = cropped.pad_to(vert_nii)
+            assert returned.origin == vert_nii.origin
+            assert (returned.affine == vert_nii.affine).all()
+            assert (returned.get_array() == vert_nii.get_array()).all()
