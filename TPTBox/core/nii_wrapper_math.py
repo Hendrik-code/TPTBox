@@ -150,27 +150,7 @@ class NII_Math(NII_Proxy):
     def normalize_ct(self,min_out = 0, max_out = 1,inplace=False):
         arr = self.clamp(min=-1024,max=1024,inplace=inplace)
         return arr.normalize(min_out = min_out, max_out = max_out, inplace=inplace)
-    def pad_to(self,target_shape:list[int]|tuple[int,int,int] | NII_Proxy, mode="constant",inplace = False):
-        from warnings import warn
-        warn("This function does not update the affine correctly. Once use the array further.",stacklevel=3)
-        if isinstance(target_shape, NII_Proxy):
-            target_shape = target_shape.shape
-        padding = []
-        crop = []
-        for in_size, out_size in zip(self.shape[-3:], target_shape[-3:],strict=True):
-            to_pad_size = max(0, out_size - in_size) / 2.0
-            to_crop_size = -min(0, out_size - in_size) / 2.0
-            padding.extend([(ceil(to_pad_size), floor(to_pad_size))])
-            if to_crop_size == 0:
-                crop.append(slice(None))
-            else:
-                end = -floor(to_crop_size)
-                if end == 0:
-                    end = None
-                crop.append(slice(ceil(to_crop_size), end))
-        assert len(self.shape) == 3, f"TODO add >3 dim support: {self.shape}"
-        x_ = np.pad(self.get_array()[tuple(crop)],padding,mode=mode,constant_values=self.get_c_val()) # type: ignore
-        return self.set_array(x_,inplace=inplace)
+
     def sum(self,axis = None,keepdims=False,where = np._NoValue)->float:  # type: ignore
         if hasattr(where,"get_array"):
             where=where.get_array().astype(bool)
