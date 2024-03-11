@@ -193,7 +193,7 @@ def n4_bias_field_correction(
     weight_mask=None,
     crop=False,
 ):
-    import ants.utils.bias_correction as bc
+    import ants.utils.bias_correction as bc  # pip install antspyx
     from ants.utils.convert_nibabel import from_nibabel
 
     if convergence is None:
