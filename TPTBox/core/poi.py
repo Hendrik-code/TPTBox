@@ -1358,9 +1358,9 @@ def calc_poi_from_subreg_vert(
 
     from TPTBox.core.vertebra_pois_non_centroids import add_prerequisites, compute_non_centroid_pois
 
-    print(subreg_id)
+    # print(subreg_id)
     subreg_id = add_prerequisites(int2loc(subreg_id if isinstance(subreg_id, Sequence) else [subreg_id]))  # type: ignore
-    print(subreg_id)
+    # print(subreg_id)
 
     log.print("Calc centroids from subregion id", subreg_id, vert_msk.shape, verbose=verbose)
     subreg_id_int = set(loc2int_list(subreg_id))
