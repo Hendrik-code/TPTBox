@@ -84,6 +84,11 @@ class Strategy_Pattern_Side_Effect(Strategy_Pattern):
         pois_computed_by_side_effect[target.value] = prerequisite
 
 
+class Strategy_Computed_Before(Strategy_Pattern):
+    def __init__(self, target: Location, *prerequisite: Location, **args) -> None:
+        super().__init__(target, _strategy_side_effect, set(prerequisite), **args)
+
+
 #### Vertebra Direction ###
 
 
@@ -662,8 +667,8 @@ Strategy_Pattern_Side_Effect(L.Vertebra_Direction_Right,L.Vertebra_Direction_Inf
 Strategy_Pattern_Side_Effect(L.Vertebra_Direction_Inferior,L.Vertebra_Corpus)
 S = strategy_extreme_points
 Strategy_Pattern(L.Muscle_Inserts_Spinosus_Process, strategy=S, subreg_id=L.Spinosus_Process, direction=("P","I"))  # 81
-Strategy_Pattern(L.Muscle_Inserts_Transverse_Process_Right, strategy=S, subreg_id=L.Costal_Process_Right, direction=("P"))  # 82
-Strategy_Pattern(L.Muscle_Inserts_Transverse_Process_Left, strategy=S, subreg_id=L.Costal_Process_Left, direction=("P"))  # 83
+Strategy_Pattern(L.Muscle_Inserts_Transverse_Process_Right, strategy=S, subreg_id=L.Costal_Process_Right, direction=("P","R"))  # 82
+Strategy_Pattern(L.Muscle_Inserts_Transverse_Process_Left, strategy=S, subreg_id=L.Costal_Process_Left, direction=("P","L"))  # 83
 Strategy_Pattern(L.Muscle_Inserts_Articulate_Process_Inferior_Left, strategy=S, subreg_id=L.Inferior_Articular_Left, direction=("I")) # 86
 Strategy_Pattern(L.Muscle_Inserts_Articulate_Process_Inferior_Right, strategy=S, subreg_id=L.Inferior_Articular_Right, direction=("I")) # 87
 Strategy_Pattern(L.Muscle_Inserts_Articulate_Process_Superior_Left, strategy=S, subreg_id=L.Superior_Articular_Left, direction=("S")) # 88
@@ -721,6 +726,9 @@ Strategy_Pattern_Side_Effect(L.Additional_Vertebral_Body_Middle_Superior_Left,L.
 Strategy_Pattern_Side_Effect(L.Additional_Vertebral_Body_Posterior_Central_Left,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Left)
 Strategy_Pattern_Side_Effect(L.Additional_Vertebral_Body_Middle_Inferior_Left,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Left)
 Strategy_Pattern_Side_Effect(L.Additional_Vertebral_Body_Anterior_Central_Left,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Left)
+
+Strategy_Computed_Before(L.Spinal_Canal_ivd_lvl,L.Vertebra_Disc,L.Vertebra_Corpus)
+Strategy_Computed_Before(L.Spinal_Canal,L.Vertebra_Corpus)
 # fmt: on
 def compute_non_centroid_pois(
     poi: POI,
@@ -741,6 +749,7 @@ def compute_non_centroid_pois(
             for i in vert_directions:
                 if i in locations:
                     locations.remove(i)
+
     locations = [pois_computed_by_side_effect.get(l.value, l) for l in locations]
     locations = sorted(list(set(locations)), key=lambda x: x.value)  # type: ignore # noqa: C414
     log.print("Calc pois from subregion id", {l.name for l in locations})
@@ -749,14 +758,16 @@ def compute_non_centroid_pois(
         locations.remove(Location.Spinal_Canal)
         subregs_ids = subreg.unique()
         _a = Location.Spinal_Canal.value in subregs_ids or Location.Spinal_Cord.value in subregs_ids
-        if _a and Location.Spinal_Canal.value not in sub_regions:
-            calc_center_spinal_cord(poi, subreg)
+        if _a and Location.Spinal_Canal.value not in poi.keys_subregion():
+            poi = calc_center_spinal_cord(poi, subreg)
     if Location.Spinal_Canal_ivd_lvl in locations:
         locations.remove(Location.Spinal_Canal_ivd_lvl)
         subregs_ids = subreg.unique()
         v = Location.Spinal_Canal_ivd_lvl.value
         if (v in subregs_ids or Location.Spinal_Cord.value in subregs_ids) and v not in poi.keys_subregion():
-            calc_center_spinal_cord(poi, subreg, source_subreg_point_id=Location.Vertebra_Disc, subreg_id=Location.Spinal_Canal_ivd_lvl)
+            poi = calc_center_spinal_cord(
+                poi, subreg, source_subreg_point_id=Location.Vertebra_Disc, subreg_id=Location.Spinal_Canal_ivd_lvl
+            )
 
     if _vert_ids is None:
         _vert_ids = vert.unique()
@@ -875,6 +886,7 @@ def calc_center_spinal_cord(
         select = subreg_iso.get_array() * 0
         select[plane_coords[:, :, 0], plane_coords[:, :, 1], plane_coords[:, :, 2]] = 1
         out += target_labels * select * reg_label
+
         if fill_back is not None:
             fill_back[select == 1] = reg_label
 
