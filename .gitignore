@@ -144,7 +144,7 @@ logs_*
 */mokeups/*
 Conventional_Registration_Tutorial.ipynb
 airlab
-/BIDS/registation/mokeups/*
+/TPTBox/registation/mokeups/*
 *.pyc
 test_*.ipynb
 .*DS_Store
@@ -152,4 +152,6 @@ test_*.ipynb
 *.json
 *tmp*.py
 tmp
-tmp/*TrueTrue
+tmp/*
+!/TPTBox/tests/sample_mri/*
+!/TPTBox/tests/sample_ct/*

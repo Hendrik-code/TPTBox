@@ -544,10 +544,47 @@ class NII(NII_Math):
         if inplace:
             self.nii = nii
             return self
-        return NII(nii,self.seg)
+        return self.copy(nii)
 
     def apply_crop_(self,ex_slice:tuple[slice,slice,slice]|tuple[slice,...]):
         return self.apply_crop(ex_slice=ex_slice,inplace=True)
+
+    def pad_to(self,target_shape:list[int]|tuple[int,int,int] | Self, mode="constant",crop=False,inplace = False):
+        if isinstance(target_shape, NII):
+            target_shape = target_shape.shape
+        padding = []
+        crop = []
+        requires_crop = False
+        for in_size, out_size in zip(self.shape[-3:], target_shape[-3:],strict=True):
+            to_pad_size = max(0, out_size - in_size) / 2.0
+            to_crop_size = -min(0, out_size - in_size) / 2.0
+            padding.extend([(ceil(to_pad_size), floor(to_pad_size))])
+            if to_crop_size == 0:
+                crop.append(slice(None))
+            else:
+                end = -floor(to_crop_size)
+                if end == 0:
+                    end = None
+                crop.append(slice(ceil(to_crop_size), end))
+                requires_crop = True
+
+        s = self
+        if crop and requires_crop:
+            s = s.apply_crop(tuple(crop),inplace=inplace)
+        return s.apply_pad(padding,inplace=inplace,mode=mode)
+
+    def apply_pad(self,padd:Sequence[tuple[int|None,int]],mode="constant",inplace = False):
+        transform = np.eye(4, dtype=int)
+        for i, (before,_) in enumerate(padd):
+            #transform[i, i] = pad_slice.step if pad_slice.step is not None else 1
+            transform[i, 3] = -before  if before is not None else 0
+        affine = self.affine.dot(transform)
+        arr = np.pad(self.get_array(),padd,mode=mode,constant_values=self.get_c_val()) # type: ignore
+        nii:_unpacked_nii = (arr,affine,self.header)
+        if inplace:
+            self.nii = nii
+            return self
+        return self.copy(nii)
 
     def rescale_and_reorient(self, axcodes_to=None, voxel_spacing=(-1, -1, -1), verbose:vc.logging=True, inplace=False,c_val:float|None=None,mode='constant'):
 
@@ -714,7 +751,7 @@ class NII(NII_Math):
             self.nii = out_nib
             self.set_dtype_(dtype)
             return self
-        return NII(out_nib).set_dtype_(dtype)
+        return self.copy(out_nib).set_dtype_(dtype)
 
     def n4_bias_field_correction_(self,threshold = 60,mask=None,shrink_factor=4,convergence=None,spline_param=200,verbose=False,weight_mask=None,crop=False):
         if convergence is None:
@@ -1032,8 +1069,11 @@ class NII(NII_Math):
 
     def map_labels_(self, label_map: Label_Map, verbose:logging=True):
         return self.map_labels(label_map,verbose=verbose,inplace=True)
-    def copy(self):
-        return NII(Nifti1Image(self.get_array(), self.affine, self.header),seg=self.seg,c_val = self.c_val)
+    def copy(self, nib:Nifti1Image|_unpacked_nii|None = None):
+        if nib is None:
+            return NII((self.get_array(), self.affine.copy(), self.header.copy()),seg=self.seg,c_val = self.c_val)
+        else:
+            return NII(nib,seg=self.seg,c_val = self.c_val)
     def clone(self):
         return self.copy()
     def save(self,file:str|Path|bids_files.BIDS_FILE,make_parents=True,verbose:logging=True, dtype = None):
@@ -1100,7 +1140,7 @@ class NII(NII_Math):
         b = b.resample_from_to(self,c_val=0,verbose=False)
         return b.get_array().sum()
 
-    def extract_label(self,label:int|vc.Location|list[int]|list[vc.Location], inplace=False):
+    def extract_label(self,label:int|vc.Location|list[int]|list[vc.Location], keep_label=False,inplace=False):
         '''If this NII is a segmentation you can single out one label with [0,1].'''
         seg_arr = self.get_seg_array()
 
@@ -1117,7 +1157,11 @@ class NII(NII_Math):
             assert label != 0, 'Zero label does not make sens. This is the background'
             seg_arr[seg_arr != label] = 0
             seg_arr[seg_arr == label] = 1
+        if keep_label:
+            seg_arr = seg_arr * self.get_seg_array()
         return self.set_array(seg_arr,inplace=inplace)
+    def extract_label_(self,label:int|vc.Location|list[int]|list[vc.Location], keep_label=False):
+        self.extract_label(label,keep_label,inplace=True)
     def remove_labels(self,*label:int | list[int], inplace=False, verbose:logging=True):
         '''If this NII is a segmentation you can single out one label.'''
         assert label != 0, 'Zero label does not make sens.  This is the background'
