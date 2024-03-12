@@ -150,6 +150,7 @@ test_*.ipynb
 .*DS_Store
 *tmp*.ipynb
 *.json
-
+tmp_*.py
+*.cache
 !/TPTBox/tests/sample_mri/*
 !/TPTBox/tests/sample_ct/*

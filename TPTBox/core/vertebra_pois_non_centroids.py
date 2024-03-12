@@ -356,7 +356,7 @@ def strategy_extreme_points(
     location: Location,
     direction: Sequence[Directions] | Directions,
     vert_id: int,
-    subreg_id: Location,
+    subreg_id: Location | list[Location],
     bb,
     log=_log,
 ):
@@ -372,6 +372,7 @@ def strategy_extreme_points(
         bb: The bounding box.
         log (Logger_Interface, optional): The logger interface. Defaults to _log.
     """
+
     region = current_subreg.extract_label(subreg_id)
     if region.sum() == 0:
         log.print(f"reg={vert_id},subreg={subreg_id} is missing (extreme_points)", ltype=Log_Type.FAIL)
@@ -727,10 +728,13 @@ Strategy_Pattern_Side_Effect(L.Additional_Vertebral_Body_Posterior_Central_Left,
 Strategy_Pattern_Side_Effect(L.Additional_Vertebral_Body_Middle_Inferior_Left,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Left)
 Strategy_Pattern_Side_Effect(L.Additional_Vertebral_Body_Anterior_Central_Left,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Left)
 
-Strategy_Computed_Before(L.Spinal_Canal_ivd_lvl,L.Vertebra_Disc,L.Vertebra_Corpus)
+Strategy_Computed_Before(L.Dens_axis,L.Vertebra_Direction_Inferior)
+Strategy_Computed_Before(L.Spinal_Canal_ivd_lvl,L.Vertebra_Disc,L.Vertebra_Corpus,L.Dens_axis)
+Strategy_Computed_Before(L.Spinal_Cord,L.Vertebra_Disc,L.Vertebra_Corpus,L.Dens_axis)
 Strategy_Computed_Before(L.Spinal_Canal,L.Vertebra_Corpus)
+
 # fmt: on
-def compute_non_centroid_pois(
+def compute_non_centroid_pois(  # noqa: C901
     poi: POI,
     locations: Sequence[Location] | Location,
     vert: NII,
@@ -738,6 +742,9 @@ def compute_non_centroid_pois(
     _vert_ids: Sequence[int] | None = None,
     log: Logger_Interface = _log,
 ):
+    if _vert_ids is None:
+        _vert_ids = vert.unique()
+
     locations = list(locations) if isinstance(locations, Sequence) else [locations]
     ### STEP 1 Vert Direction###
     if Location.Vertebra_Direction_Inferior in locations:
@@ -753,24 +760,45 @@ def compute_non_centroid_pois(
     locations = [pois_computed_by_side_effect.get(l.value, l) for l in locations]
     locations = sorted(list(set(locations)), key=lambda x: x.value)  # type: ignore # noqa: C414
     log.print("Calc pois from subregion id", {l.name for l in locations})
+    ### DENSE###
+    if Location.Dens_axis in locations and 2 in _vert_ids and (2, Location.Dens_axis.value) not in poi:
+        a = subreg * vert.extract_label(2)
+        bb = a.compute_crop()
+        a = a.apply_crop(bb)
+        s = [Location.Vertebra_Corpus, Location.Vertebra_Corpus_border]
+        if a.sum() != 0:
+            strategy_extreme_points(poi, a, location=Location.Dens_axis, direction=["S", "P"], vert_id=2, subreg_id=s, bb=bb)
     ### STEP 2 (Other global non centroid poi; Spinal heights ###
+
     if Location.Spinal_Canal in locations:
         locations.remove(Location.Spinal_Canal)
         subregs_ids = subreg.unique()
         _a = Location.Spinal_Canal.value in subregs_ids or Location.Spinal_Cord.value in subregs_ids
         if _a and Location.Spinal_Canal.value not in poi.keys_subregion():
-            poi = calc_center_spinal_cord(poi, subreg)
+            poi = calc_center_spinal_cord(poi, subreg, add_dense=True)
+    if Location.Spinal_Cord in locations:
+        locations.remove(Location.Spinal_Cord)
+        subregs_ids = subreg.unique()
+        v = Location.Spinal_Cord.value
+        if (v in subregs_ids or Location.Spinal_Cord.value in subregs_ids) and v not in poi.keys_subregion():
+            poi = calc_center_spinal_cord(
+                poi,
+                subreg,
+                source_subreg_point_id=Location.Vertebra_Disc,
+                subreg_id=Location.Spinal_Cord,
+                add_dense=True,
+                intersection_target=[Location.Spinal_Cord],
+            )
+
     if Location.Spinal_Canal_ivd_lvl in locations:
         locations.remove(Location.Spinal_Canal_ivd_lvl)
         subregs_ids = subreg.unique()
         v = Location.Spinal_Canal_ivd_lvl.value
         if (v in subregs_ids or Location.Spinal_Cord.value in subregs_ids) and v not in poi.keys_subregion():
             poi = calc_center_spinal_cord(
-                poi, subreg, source_subreg_point_id=Location.Vertebra_Disc, subreg_id=Location.Spinal_Canal_ivd_lvl
+                poi, subreg, source_subreg_point_id=Location.Vertebra_Disc, subreg_id=Location.Spinal_Canal_ivd_lvl, add_dense=True
             )
 
-    if _vert_ids is None:
-        _vert_ids = vert.unique()
     # Step 3 Compute on individual Vertebras
     for vert_id in _vert_ids:
         if vert_id >= 39:
@@ -801,11 +829,12 @@ def compute_non_centroid_pois(
 def calc_center_spinal_cord(
     poi: POI,
     subreg: NII,
-    spline_subreg_point_id=Location.Vertebra_Corpus,
-    source_subreg_point_id=Location.Vertebra_Corpus,
+    spline_subreg_point_id: Location = Location.Vertebra_Corpus,
+    source_subreg_point_id: Location = Location.Vertebra_Corpus,
     subreg_id=Location.Spinal_Canal,
     intersection_target: list[Location] | None = None,
     _fill_inplace: NII | None = None,
+    add_dense=False,
 ) -> POI:
     """
     Calculate the center of the spinal cord within a specified region.
@@ -849,6 +878,9 @@ def calc_center_spinal_cord(
         intersection_target = [Location.Spinal_Cord, Location.Spinal_Canal]
     assert _fill_inplace is None or subreg == _fill_inplace
     poi_iso = poi.rescale()
+    if add_dense and (2, Location.Dens_axis) in poi_iso:
+        poi_iso[1, spline_subreg_point_id] = poi_iso[2, Location.Dens_axis]
+        poi_iso[1, source_subreg_point_id] = poi_iso[2, Location.Dens_axis]
     subreg_iso = subreg.rescale()
     body_spline, body_spline_der = poi_iso.fit_spline(location=spline_subreg_point_id, vertebra=True)
     target_labels = subreg_iso.extract_label(intersection_target).get_array()
