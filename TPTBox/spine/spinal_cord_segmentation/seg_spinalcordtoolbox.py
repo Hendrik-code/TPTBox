@@ -10,8 +10,9 @@ from pathlib import Path
 import nibabel as nib
 import numpy as np
 
-from TPTBox import BIDS_FILE, NII, BIDS_Global_info, Subject_Container, to_nii_seg
+from TPTBox import BIDS_FILE, NII, BIDS_Global_info, Log_Type, Print_Logger, Subject_Container, to_nii_seg
 
+logger = Print_Logger()
 SEGMENTATION_TO_SMALL_THRESHOLD = 3000
 
 
@@ -31,7 +32,14 @@ def __test_seg_file(spinal_cord_file: Path):
 ignore_list = ["No properties for slice"]
 
 
-def run_cmd(cmd_ex: list[str], ouf_file: Path | None = None, print_ignore_list: list[str] | None = None, verbose=True) -> int:
+def run_cmd(
+    cmd_ex: list[str],
+    out_file: Path | None = None,
+    print_ignore_list: list[str] | None = None,
+    verbose=True,
+    override=False,
+    logger=logger,
+) -> int:
     """Runs the command in the list
 
     Args:
@@ -41,7 +49,9 @@ def run_cmd(cmd_ex: list[str], ouf_file: Path | None = None, print_ignore_list: 
     Returns:
         int: Error-Code
     """
-
+    if not override and out_file is not None and out_file.exists():
+        logger.print(f"[#] Exist; Skip {out_file!s}", Log_Type.OK)
+        return 0
     if print_ignore_list is None:
         print_ignore_list = []
     process = subprocess.Popen(cmd_ex, stdout=subprocess.PIPE, universal_newlines=True)
@@ -50,7 +60,7 @@ def run_cmd(cmd_ex: list[str], ouf_file: Path | None = None, print_ignore_list: 
         assert process.stdout is not None
         output = process.stdout.readline()
         if output != "":
-            print("[S]", output.strip()) if verbose else None
+            logger.print("[SCT]", output.strip()) if verbose else None
         # Do something else
         return_code = process.poll()
         if return_code is not None:
@@ -58,9 +68,9 @@ def run_cmd(cmd_ex: list[str], ouf_file: Path | None = None, print_ignore_list: 
             for output in process.stdout.readlines():
                 time.sleep(0.001)
                 print(output.strip(), print_ignore_list) if verbose else None
-            print("[#] RETURN CODE", return_code) if verbose else None
-            if ouf_file is not None:
-                print(f"[#] Saved to {ouf_file!s}") if verbose else None
+            logger.print("[#] RETURN CODE", return_code, Log_Type.OK) if verbose else None
+            if out_file is not None and return_code == 0:
+                logger.print(f"[#] Saved to {out_file!s}", Log_Type.SAVE) if verbose else None
             break
     return return_code
 
@@ -113,7 +123,7 @@ def compute_spinal_cord_with_cut_sacrum(
     mri_file: BIDS_FILE,
     msk_file: BIDS_FILE,
     parent_folder_name="derivatives",
-    verbos=True,
+    verbose=True,
     **args,
 ):
     """Runs the spinalcord file, but before it uses a point msk or vertebra segmentation to remove the sacrum.
@@ -131,27 +141,27 @@ def compute_spinal_cord_with_cut_sacrum(
     Returns:
         bool: if the function tried to compute it.
     """
-    if verbos:
+    if verbose:
         print("[*] Try to segment spinalcord by cutting away the vertebra.")
     # Check if the mask is applicable
     msk_nii = msk_file.open_nii_reorient(axcodes_to=("A", "S", "R"))
     msk_arr = msk_nii.get_array()
     loc = np.where(msk_arr == 23)  # L4
     if len(loc) == 0 or len(loc[0]) == 0:
-        if verbos:
+        if verbose:
             print("[?] No L4 Vertebra")
         return False
     # -1 is to remove the 0 (Background)
     num_vertebras = len(np.unique(msk_arr[:, loc[1][1] :])) - 1
     if num_vertebras < 4:
-        if verbos:
+        if verbose:
             print(f"[?] Not enough Vertebras. Ids:{np.unique(msk_arr[:, loc[1][1] :])}")
         return False
     # Load MRI and cut
     mri_nii = mri_file.open_nii_reorient(axcodes_to=("A", "S", "R"))
     mri_arr = mri_nii.get_array()
     out_cut = mri_arr[:, loc[1][1] :].copy()
-    tmp = os.path.join("/tmp", f"temp_{secrets.token_urlsafe(21)}_cord")
+    tmp = Path("/tmp", f"temp_{secrets.token_urlsafe(21)}_cord")
     try:
         if not Path(tmp).exists():
             Path(tmp).mkdir()
@@ -162,7 +172,7 @@ def compute_spinal_cord_with_cut_sacrum(
         cmd_ex_cord, spinal_cord_file = get_cmd_ex_spinal_cord(mri_path, out_file=out_file, **args)
         run_cmd(cmd_ex_cord, print_ignore_list=ignore_list)
         # revert padding
-        if verbos:
+        if verbose:
             print("[*] revert padding")
         arr = NII(nib.load(spinal_cord_file), seg=True).get_seg_array()
         out = mri_arr.copy()
@@ -172,8 +182,8 @@ def compute_spinal_cord_with_cut_sacrum(
             print(f"[?] Failed. There are only {out.sum()} pixel.")
             return False
         out_nib = NII(nib.Nifti1Image(out, mri_nii.affine, mri_nii.header))
-        out_nib.reorient_same_as_(mri_file.open_nii(), verbose=verbos)
-        out_nib.save(spinal_cord_file, verbose=verbos)
+        out_nib.reorient_same_as_(mri_file.open_nii(), verbose=verbose)
+        out_nib.save(spinal_cord_file, verbose=verbose)
     except Exception:  # noqa: TRY302
         raise
     finally:
@@ -282,10 +292,7 @@ def get_cmd_ex_spinal_cord(
         out_file = __bids2spinalcord(bids_file, parent_folder_name=parent_folder_name)
     if not override and out_file.exists():
         return ["echo", f"[?] the spinalcord already exists {out_file.name}."], out_file
-    if isinstance(bids_file, Path | str):
-        in_file = str(bids_file)
-    else:
-        in_file = bids_file.file["nii.gz"]
+    in_file = str(bids_file) if isinstance(bids_file, Path | str) else bids_file.file["nii.gz"]
     # sct_deepseg_sc -i sub-spinegan0008_ses-20210204_sequ-302_e-1_dixon.nii.gz -c t2 -brain 0 -o text.nii.gz
     cmd_ex = ["sct_deepseg_sc", "-i", in_file, "-c", domain, "-brain", "0", "-o", str(out_file)]
     if threshold != -1:
@@ -319,7 +326,7 @@ def get_cmd_ex_label(
     out_file: Path | None = None,
     parent_folder_name: str = "derivatives",
     override=False,
-    **args,
+    **args,  # noqa: ARG001
 ) -> tuple[list[str], Path]:
     """Defines the output file and the run command to split the spinal cord segmentation into vertebrae-label with spinalcordtoolbox
     The output is a folder, for easier use there is a rapping function 'run_get_cmd_ex_label'
@@ -369,10 +376,10 @@ def run_get_cmd_ex_label(bids_file: BIDS_FILE, spinal_cord_file: Path, **args) -
         print("[!] the temporary output files are missing")
         return
     file1 = Path(cmd_ex[-1], name + "_labeled.nii.gz")  # Seg same as spinalcord but with vertebrae-label
-    file2 = Path(cmd_ex[-1], name + "_labeled_discs.nii.gz")  # source points of the labels (points where the vertebra-label changes)
-    file3 = Path(cmd_ex[-1], "straight_ref.nii.gz")  # The spine straightened
-    file4 = Path(cmd_ex[-1], "warp_curve2straight.nii.gz")  # Distortion field
-    file5 = Path(cmd_ex[-1], "warp_straight2curve.nii.gz")  # Distortion field
+    # file2 = Path(cmd_ex[-1], name + "_labeled_discs.nii.gz")  # source points of the labels (points where the vertebra-label changes)
+    # file3 = Path(cmd_ex[-1], "straight_ref.nii.gz")  # The spine straightened
+    # file4 = Path(cmd_ex[-1], "warp_curve2straight.nii.gz")  # Distortion field
+    # file5 = Path(cmd_ex[-1], "warp_straight2curve.nii.gz")  # Distortion field
     import shutil
 
     # /tmp/sub-spinegan0042_ses-20220517_sequ-301_e-1_label-cord_label_msk
