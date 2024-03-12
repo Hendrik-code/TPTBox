@@ -40,3 +40,5 @@ from TPTBox.docker.docker import run_docker
 # Logger
 from TPTBox.logger import Log_Type, Logger, Logger_Interface, Print_Logger, String_Logger
 from TPTBox.logger.log_file import No_Logger
+
+Centroids = POI
