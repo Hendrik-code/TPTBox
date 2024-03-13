@@ -1234,26 +1234,26 @@ class NII(NII_Math):
                 found_errors.append(f"object mismatch {self!s}, {other!s}")
         if affine is not None:
             affine_diff = self.affine - affine
-            affine_match = np.all([a <= error_tolerance for a in affine_diff.flatten()])
+            affine_match = np.all([abs(a) <= error_tolerance for a in affine_diff.flatten()])
             found_errors.append(f"affine mismatch {self.affine}, {affine}") if not affine_match else None
         if rotation is not None:
             rotation_diff = self.rotation - rotation
-            rotation_match = np.all([a <= error_tolerance for a in rotation_diff.flatten()])
+            rotation_match = np.all([abs(a) <= error_tolerance for a in rotation_diff.flatten()])
             found_errors.append(f"rotation mismatch {self.rotation}, {rotation}") if not rotation_match else None
         if zoom is not None:
             zms_diff = (self.zoom[i] - zoom[i] for i in range(3))
-            zms_match = np.all([a <= error_tolerance for a in zms_diff])
+            zms_match = np.all([abs(a) <= error_tolerance for a in zms_diff])
             found_errors.append(f"zoom mismatch {self.zoom}, {zoom}") if not zms_match else None
         if orientation is not None:
             orientation_match = np.all([i == orientation[idx] for idx, i in enumerate(self.orientation)])
             found_errors.append(f"orientation mismatch {self.orientation}, {orientation}") if not orientation_match else None
         if origin is not None:
             origin_diff = (self.origin[i] - origin[i] for i in range(3))
-            origin_match = np.all([a <= error_tolerance for a in origin_diff])
+            origin_match = np.all([abs(a) <= error_tolerance for a in origin_diff])
             found_errors.append(f"origin mismatch {self.origin}, {origin}") if not origin_match else None
         if shape is not None:
             shape_diff = (self.shape[i] - shape[i] for i in range(3))
-            shape_match = np.all([a <= error_tolerance for a in shape_diff])
+            shape_match = np.all([abs(a) <= error_tolerance for a in shape_diff])
             found_errors.append(f"shape mismatch {self.shape}, {shape}") if not shape_match else None
 
         # Print errors
