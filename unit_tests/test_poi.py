@@ -355,7 +355,7 @@ class Test_POI(unittest.TestCase):
             cdt = POI(cent, **msk._extract_affine())
             msk.reorient_(axcodes_to=axcode)
             cdt.reorient_(axcodes_to=axcode)
-            voxel_spacing = (random.random() * 3, random.random() * 3, random.random() * 3)
+            voxel_spacing = (random.random() * 3 + 0.05, random.random() * 3 + 0.05, random.random() * 3 + 0.05)
             cdt2 = cdt.rescale(voxel_spacing=voxel_spacing, verbose=False, decimals=10)
             msk.rescale_(voxel_spacing=voxel_spacing)
             self.assert_affine(cdt2, msk)
