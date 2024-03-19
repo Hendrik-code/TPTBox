@@ -155,3 +155,4 @@ tmp
 tmp/*
 !/TPTBox/tests/sample_mri/*
 !/TPTBox/tests/sample_ct/*
+poetry.lock

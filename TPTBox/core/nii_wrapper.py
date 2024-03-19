@@ -605,7 +605,7 @@ class NII(NII_Math):
         return self.reorient(axcodes_to=axcodes_to, verbose=verbose, inplace=inplace)
     def reorient_same_as_(self, img_as: Nifti1Image | Self, verbose:vc.logging=False) -> Self:
         return self.reorient_same_as(img_as=img_as,verbose=verbose,inplace=True)
-    def rescale(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:vc.logging=False, inplace=False,mode='constant',aline_corners:bool|Sentinel=Sentinel()):  # noqa: B008
+    def rescale(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:vc.logging=False, inplace=False,mode='constant',aline_corners:bool=False):  # noqa: B008
         """
         Rescales the NIfTI image to a new voxel spacing.
 
@@ -651,7 +651,7 @@ class NII(NII_Math):
     def rescale_(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:vc.logging=False,mode='constant'):
         return self.rescale( voxel_spacing=voxel_spacing, c_val=c_val, verbose=verbose,mode=mode, inplace=True)
 
-    def resample_from_to(self, to_vox_map:Image_Reference|Proxy, mode='constant', c_val=None, inplace = False,verbose:vc.logging=True,aline_corners:bool|Sentinel=Sentinel()):  # noqa: B008
+    def resample_from_to(self, to_vox_map:Image_Reference|Proxy, mode='constant', c_val=None, inplace = False,verbose:vc.logging=True,aline_corners:bool=False):  # noqa: B008
         """self will be resampled in coordinate of given other image. Adheres to global space not to local pixel space
         Args:
             to_vox_map (Image_Reference|Proxy): If object, has attributes shape giving input voxel shape, and affine giving mapping of input voxels to output space. If length 2 sequence, elements are (shape, affine) with same meaning as above. The affine is a (4, 4) array-like.\n
