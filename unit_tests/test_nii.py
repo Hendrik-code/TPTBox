@@ -203,6 +203,14 @@ class Test_bids_file(unittest.TestCase):
             msk2 = msk.erode_msk(verbose=False)
             self.assertNotEqual(msk.get_array().sum(), msk2.get_array().sum())
 
+    def test_apply_center_crop(self):
+        for _ in range(repeats):
+            crop_sizes = (random.randint(10, 200), random.randint(10, 200), random.randint(10, 200))
+            msk, cent, order, sizes = get_nii(num_point=random.randint(3, 10))
+            msk2 = msk.apply_center_crop(crop_sizes, verbose=random.randint(0, 1) == 0)
+            self.assertEqual(msk2.shape, crop_sizes)
+            self.assertTrue(msk2.assert_affine(shape=crop_sizes))
+
     def test_assert_affine(self):
         # asserts with itself
         for _ in range(repeats):
