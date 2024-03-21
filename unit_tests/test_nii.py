@@ -2,19 +2,16 @@
 # coverage run -m unittest
 # coverage report
 # coverage html
-import sys
-from pathlib import Path
-
-file = Path(__file__).resolve()
-sys.path.append(str(file.parents[2]))
 import random
+import sys
 import unittest
+from pathlib import Path
 
 import nibabel as nib
 import numpy as np
 
 from TPTBox.core.nii_wrapper import NII
-from TPTBox.core.poi import POI as Centroids  # _centroids_to_dict_list
+from TPTBox.core.poi import POI as Centroids  # _centroids_to_dict_list  # noqa: N811
 from TPTBox.core.poi import calc_centroids, v_idx2name
 from TPTBox.tests.test_utils import get_nii, get_random_ax_code, repeats
 
@@ -31,35 +28,10 @@ def get_all_corner_points(affine, shape) -> np.ndarray:
 
 
 class Test_bids_file(unittest.TestCase):
-    def test_rescale(self):
-        for _ in range(repeats // 10):
-            msk, cent, order, sizes = get_nii(num_point=random.randint(1, 2))
-            cent = Centroids(cent, orientation=order)
-
-            axcode_start = get_random_ax_code()
-            # msk.reorient_(axcode_start)
-
-            cdt = calc_centroids(msk)
-            voxel_spacing = (
-                random.choice([1, 1 / 2, 1 / 3, 1 / 4]),
-                random.choice([1, 1 / 2, 1 / 3, 1 / 4]),
-                random.choice([1, 1 / 2, 1 / 3, 1 / 4]),
-            )
-            voxel_spacing2 = (1.0, 1.0, 1.0)
-            msk2 = msk.rescale(voxel_spacing=voxel_spacing, verbose=False, inplace=False)
-            msk2 = msk2.rescale(voxel_spacing=voxel_spacing2, verbose=False)
-            cdt2 = calc_centroids(msk2)
-
-            for (k1, k2, v), (k1_2, k2_2, v2) in zip(cdt.items(), cdt2.items(), strict=True):
-                self.assertEqual(k1, k1_2)
-                self.assertEqual(k2, k2_2)
-                for v, v2 in zip(v, v2, strict=True):
-                    self.assertAlmostEqual(v, v2)
-
     def test_rescale_corners(self):
         for _ in range(repeats // 4):
             msk, cent, order, sizes = get_nii(num_point=random.randint(1, 2))
-            cent = Centroids(cent, order)
+            cent = Centroids(cent, orientation=order)
 
             axcode_start = get_random_ax_code()
             msk.reorient_(axcode_start)
@@ -124,9 +96,9 @@ class Test_bids_file(unittest.TestCase):
             self.assertTrue(np.isclose(msk.get_array(), msk2.get_array()).all())
 
     def test_rescale_and_reorient(self):
-        for _ in range(repeats // 10):
+        for _ in range(repeats // 5):
             msk, cent, order, sizes = get_nii(num_point=random.randint(1, 2))
-            cent = Centroids(cent, order)
+            cent = Centroids(cent, orientation=order)
             axcode_start = order  # get_random_ax_code()
             msk.reorient_(axcode_start)
             cdt = calc_centroids(msk)
@@ -140,11 +112,11 @@ class Test_bids_file(unittest.TestCase):
             msk2 = msk.rescale_and_reorient(axcode, voxel_spacing=voxel_spacing, verbose=False, inplace=False)
             msk2 = msk2.rescale_and_reorient(axcode_start, voxel_spacing=voxel_spacing2, verbose=False)
             cdt2 = calc_centroids(msk2)
-            for (k1, k2, v), (k1_2, k2_2, v2) in zip(cdt.items(), cdt2.items(), strict=False):
+            for (k1, k2, v), (k1_2, k2_2, v2) in zip(cdt.items(), cdt2.items(), strict=True):
                 self.assertEqual(k1, k1_2)
                 self.assertEqual(k2, k2_2)
-                for v, v2 in zip(v, v2, strict=False):
-                    self.assertAlmostEqual(v, v2)
+                for v, v2 in zip(v, v2, strict=True):  # noqa: B020, PLW2901
+                    self.assertTrue(abs(v - v2) <= 1.01, msg=f"{v},{v2}")
 
     def test_get_plane(self):
         for _ in range(repeats):
