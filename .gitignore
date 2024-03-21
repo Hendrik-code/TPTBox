@@ -150,6 +150,9 @@ test_*.ipynb
 .*DS_Store
 *tmp*.ipynb
 *.json
-
+*tmp*.py
+tmp
+tmp/*
 !/TPTBox/tests/sample_mri/*
 !/TPTBox/tests/sample_ct/*
+poetry.lock
