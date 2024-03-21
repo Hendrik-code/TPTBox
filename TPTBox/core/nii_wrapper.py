@@ -495,6 +495,7 @@ class NII(NII_Math):
     def apply_center_crop(self, center_shape: tuple[int,int,int], verbose: bool = False):
         shp_x, shp_y, shp_z = self.shape
         crop_x, crop_y, crop_z = center_shape
+        arr = self.get_array()
 
         if crop_x > shp_x or crop_y > shp_y or crop_z > shp_z:
             padding_ltrb = [
@@ -502,12 +503,13 @@ class NII(NII_Math):
                 ((crop_y - shp_y +1) // 2 if crop_y > shp_y else 0,(crop_y - shp_y) // 2 if crop_y > shp_y else 0),
                 ((crop_z - shp_z +1) // 2 if crop_z > shp_z else 0,(crop_z - shp_z) // 2 if crop_z > shp_z else 0),
             ]
-            arr = self.get_array()
             arr_padded = np.pad(arr, padding_ltrb, "constant", constant_values=0)  # PIL uses fill value 0
             log.print(f"Pad from {self.shape} to {arr_padded.shape}", verbose=verbose)
             shp_x, shp_y, shp_z = arr_padded.shape
             if crop_x == shp_x and crop_y == shp_y and crop_z == shp_z:
                 return self.set_array(arr_padded)
+        else:
+            arr_padded = arr
 
         crop_rel_x = int(round((shp_x - crop_x) / 2.0))
         crop_rel_y = int(round((shp_y - crop_y) / 2.0))
