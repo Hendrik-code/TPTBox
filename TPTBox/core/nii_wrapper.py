@@ -495,6 +495,7 @@ class NII(NII_Math):
     def apply_center_crop(self, center_shape: tuple[int,int,int], verbose: bool = False):
         shp_x, shp_y, shp_z = self.shape
         crop_x, crop_y, crop_z = center_shape
+        arr = self.get_array()
 
         if crop_x > shp_x or crop_y > shp_y or crop_z > shp_z:
             padding_ltrb = [
@@ -502,12 +503,13 @@ class NII(NII_Math):
                 ((crop_y - shp_y +1) // 2 if crop_y > shp_y else 0,(crop_y - shp_y) // 2 if crop_y > shp_y else 0),
                 ((crop_z - shp_z +1) // 2 if crop_z > shp_z else 0,(crop_z - shp_z) // 2 if crop_z > shp_z else 0),
             ]
-            arr = self.get_array()
             arr_padded = np.pad(arr, padding_ltrb, "constant", constant_values=0)  # PIL uses fill value 0
             log.print(f"Pad from {self.shape} to {arr_padded.shape}", verbose=verbose)
             shp_x, shp_y, shp_z = arr_padded.shape
             if crop_x == shp_x and crop_y == shp_y and crop_z == shp_z:
                 return self.set_array(arr_padded)
+        else:
+            arr_padded = arr
 
         crop_rel_x = int(round((shp_x - crop_x) / 2.0))
         crop_rel_y = int(round((shp_y - crop_y) / 2.0))
@@ -605,7 +607,7 @@ class NII(NII_Math):
         return self.reorient(axcodes_to=axcodes_to, verbose=verbose, inplace=inplace)
     def reorient_same_as_(self, img_as: Nifti1Image | Self, verbose:vc.logging=False) -> Self:
         return self.reorient_same_as(img_as=img_as,verbose=verbose,inplace=True)
-    def rescale(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:vc.logging=False, inplace=False,mode='constant',aline_corners:bool=False):  # noqa: B008
+    def rescale(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:vc.logging=False, inplace=False,mode='constant',aline_corners:bool=False):
         """
         Rescales the NIfTI image to a new voxel spacing.
 
@@ -651,7 +653,7 @@ class NII(NII_Math):
     def rescale_(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:vc.logging=False,mode='constant'):
         return self.rescale( voxel_spacing=voxel_spacing, c_val=c_val, verbose=verbose,mode=mode, inplace=True)
 
-    def resample_from_to(self, to_vox_map:Image_Reference|Proxy, mode='constant', c_val=None, inplace = False,verbose:vc.logging=True,aline_corners:bool=False):  # noqa: B008
+    def resample_from_to(self, to_vox_map:Image_Reference|Proxy, mode='constant', c_val=None, inplace = False,verbose:vc.logging=True,aline_corners:bool=False):
         """self will be resampled in coordinate of given other image. Adheres to global space not to local pixel space
         Args:
             to_vox_map (Image_Reference|Proxy): If object, has attributes shape giving input voxel shape, and affine giving mapping of input voxels to output space. If length 2 sequence, elements are (shape, affine) with same meaning as above. The affine is a (4, 4) array-like.\n
