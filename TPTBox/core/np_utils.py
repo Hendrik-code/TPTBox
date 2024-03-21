@@ -501,7 +501,7 @@ def np_connected_components(
     if verbose:
         print(
             "Components founds (label,N): ",
-            {i: subreg_cc_n[i]["N"] for i in labels},
+            {i: subreg_cc_n[i] for i in labels},
         )
     return subreg_cc, subreg_cc_n
 

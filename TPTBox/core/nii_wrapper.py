@@ -965,9 +965,7 @@ class NII(NII_Math):
             connectivity (int, optional): Connectivity for the connected components. Defaults to 3.
 
         Returns:
-            cc: dict[label, cc_idx, arr], cc_stats: dict[label, key, values]
-            keys:
-                "voxel_counts","bounding_boxes","centroids","N"
+            cc: dict[label, cc_idx, arr], cc_n: dict[label, int]
         """
         arr = self.get_seg_array()
         return np_connected_components(arr, connectivity=connectivity, label_ref=labels, verbose=verbose)
