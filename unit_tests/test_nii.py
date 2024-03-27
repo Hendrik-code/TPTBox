@@ -246,6 +246,26 @@ class Test_bids_file(unittest.TestCase):
 
         # TODO cases where it should return False
 
+    def test_center_of_masses(self):
+        # asserts with itself
+        for _ in range(repeats):
+            msk, cent, order, sizes = get_nii(num_point=random.randint(3, 10))
+
+            coms = msk.center_of_masses()
+            np_coms = np_utils.np_center_of_mass(msk.get_seg_array())
+
+            print("coms", coms)
+            print("np_coms", np_coms)
+            print("cent", cent)
+
+            for i, g in coms.items():
+                self.assertTrue(i in np_coms)
+                self.assertTrue(np.all([g[idx] == np_coms[i][idx] for idx in range(3)]))
+                #
+                self.assertTrue((i, 50) in cent)
+                self.assertTrue(np.all([g[idx] == cent[i, 50][idx] for idx in range(3)]))
+            # self.assertEqual(coms, np_coms)
+
 
 if __name__ == "__main__":
     unittest.main()
