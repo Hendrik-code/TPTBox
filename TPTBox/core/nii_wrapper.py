@@ -16,6 +16,7 @@ from typing_extensions import Self
 from TPTBox.core.nii_wrapper_math import NII_Math
 from TPTBox.core.np_utils import (
     np_calc_boundary_mask,
+    np_center_of_mass,
     np_connected_components,
     np_count_nonzero,
     np_dilate_msk,
@@ -28,6 +29,7 @@ from TPTBox.core.np_utils import (
     np_unique_withoutzero,
     np_volume,
 )
+from TPTBox.core.vert_constants import Coordinate
 
 from . import bids_files
 from . import vert_constants as vc
@@ -1189,8 +1191,12 @@ class NII(NII_Math):
         return out
 
     def volumes(self, include_zero: bool = False) -> dict[int, int]:
-        '''Returns a dict stating how many pixels are present for each label (including zero!)'''
+        '''Returns a dict stating how many pixels are present for each label'''
         return np_volume(self.get_seg_array(), include_zero=include_zero)
+
+    def center_of_masses(self) -> dict[int, Coordinate]:
+        '''Returns a dict stating the center of mass for each present label (not including zero!)'''
+        return np_center_of_mass(self.get_seg_array())
 
     def assert_affine(
             self,
