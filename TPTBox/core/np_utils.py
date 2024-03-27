@@ -107,7 +107,11 @@ def np_unique_withoutzero(arr: UINTARRAY) -> list[int]:
     Returns:
         list[int]: _description_
     """
-    return [idx for idx, i in enumerate(cc3dstatistics(arr)["voxel_counts"]) if i > 0 and idx != 0]
+    try:
+        return [idx for idx, i in enumerate(cc3dstatistics(arr)["voxel_counts"]) if i > 0 and idx != 0]
+    except Exception:
+        pass
+    return [i for i in np.unique(arr) if i != 0]
 
 
 def np_center_of_mass(arr: UINTARRAY) -> dict[int, Coordinate]:
