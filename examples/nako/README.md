@@ -2,7 +2,7 @@
 
 This folder contains sample scrips to export the subset of NAKO files to a BIDS compliant filenames and a folder simplified folder structure.
 
-We decided on a fixed naming schema for_
+We decided on a fixed naming schema for:
 - 3D_GRE (vibe / " point dixon)
 - ME_vibe (Multi echo Vibe)
 - TSE SAG LWS/BWS/HWS (Sagittal spine images)
