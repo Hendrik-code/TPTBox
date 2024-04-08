@@ -7,6 +7,8 @@ import weakref
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+import numpy as np
+
 from TPTBox.logger.log_constants import (
     Log_Type,
     _clean_all_color_from_text,
@@ -95,7 +97,7 @@ class Logger_Interface(Protocol):
         Returns:
             str: indentantion string
         """
-        global indentation_level
+        global indentation_level  # noqa: PLW0602
         string = ""
         if indentation_level == 0:
             return string
@@ -116,17 +118,13 @@ class Logger_Interface(Protocol):
             return indent + f"[{self.override_prefix}]"
         return indent + type2bcolors[ltype][1]
 
-    def _log(self, text: str, end: str = "\n", ltype=Log_Type.TEXT):
-        ...
+    def _log(self, text: str, end: str = "\n", ltype=Log_Type.TEXT): ...
 
-    def close(self):
-        ...
+    def close(self): ...
 
-    def flush(self):
-        ...
+    def flush(self): ...
 
-    def flush_sub_logger(self, sublogger: String_Logger, closed=False):
-        ...
+    def flush_sub_logger(self, sublogger: String_Logger, closed=False): ...
 
     def add_sub_logger(self, name: str, default_verbose: bool = False) -> String_Logger | No_Logger:
         """Creates a sub-logger that only logs to string. Will be appended in this loggers log file as sub-logger.
@@ -153,6 +151,60 @@ class Logger_Interface(Protocol):
 
     def print_error(self, **args):
         self.print(traceback.format_exc(), ltype=Log_Type.FAIL, **args)
+
+    logging_state = None
+
+    def log_statistic(self, key, value, key2=None, verbose=True, round_print: int | None = 5):
+        if self.logging_state is None:
+            self.logging_state = {}
+        if key not in self.logging_state:
+            self.logging_state[key] = {}
+        if key2 is None:
+            key2 = len(self.logging_state[key])
+
+        self.logging_state[key][key2] = value
+        if round_print is not None and isinstance(value, (float, np.floating)):
+            value = np.round(value, decimals=round_print)
+        self.on_neutral(f"{key2:10}: {key:17} = {value}", verbose=verbose)
+
+    def _print_by_logger(self, *text, end="\n", verbose: bool | None = None, **qargs):
+        self.print(*text, end=end, ltype=Log_Type.LOG, verbose=verbose, **qargs)
+
+    def print_statistic(self):
+        if self.logging_state is None:
+            self._print_by_logger("??? No Accumulated Statistics ???")
+            return
+        self._print_by_logger("############## Accumulated Statistics ##############")
+        self._print_by_logger(f"{'key':17} {'mean':8}{'std':9} {'median':8} {'  count':7}")
+        for k, v in self.logging_state.items():
+            values = np.array(list(v.values()))
+            mean = f"{np.mean(values):.3}"
+            std = f"{np.std(values):.3}"
+            median = f"{np.median(values):.3}"
+            count = len(values)
+            self._print_by_logger(f"{k:17} {mean:8}±{std:8} {median:8} {count:7}")
+        self._print_by_logger("####################################################")
+
+    def on_fail(self, *text, end="\n", verbose: bool | None = None, **qargs):
+        self.print(*text, end=end, ltype=Log_Type.FAIL, verbose=verbose, **qargs)
+
+    def on_save(self, *text, end="\n", verbose: bool | None = None, **qargs):
+        self.print(*text, end=end, ltype=Log_Type.SAVE, verbose=verbose, **qargs)
+
+    def on_debug(self, *text, end="\n", verbose: bool | None = None, **qargs):
+        self.print(*text, end=end, ltype=Log_Type.STRANGE, verbose=verbose, **qargs)
+
+    def on_ok(self, *text, end="\n", verbose: bool | None = None, **qargs):
+        self.print(*text, end=end, ltype=Log_Type.OK, verbose=verbose, **qargs)
+
+    def on_neutral(self, *text, end="\n", verbose: bool | None = None, **qargs):
+        self.print(*text, end=end, ltype=Log_Type.NEUTRAL, verbose=verbose, **qargs)
+
+    def on_warning(self, *text, end="\n", verbose: bool | None = None, **qargs):
+        self.print(*text, end=end, ltype=Log_Type.WARNING, verbose=verbose, **qargs)
+
+    def on_text(self, *text, end="\n", verbose: bool | None = None, **qargs):
+        self.print(*text, end=end, ltype=Log_Type.TEXT, verbose=verbose, **qargs)
 
 
 class Logger(Logger_Interface):
@@ -194,7 +246,7 @@ class Logger(Logger_Interface):
         if not Path.exists(log_path):
             Path.mkdir(log_path)
         # Open log file
-        self.f = open(log_path.joinpath(log_filename_full), "w")
+        self.f = open(log_path.joinpath(log_filename_full), "w")  # noqa: SIM115
         # calls close() if program terminates
         self._finalizer = weakref.finalize(self.f, self.close)
         self.default_verbose = default_verbose
@@ -421,7 +473,7 @@ def _set_indent(indent_change: int | bool):
     Args:
         indent_change (int | bool): If bool, true/false == +1/-1, if int, sets to that int
     """
-    global indentation_level
+    global indentation_level  # noqa: PLW0603
     if isinstance(indent_change, bool):
         indentation_level = indentation_level + 1 if indent_change else max(0, indentation_level - 1)
     else:

@@ -609,14 +609,17 @@ def strategy_ligament_attachment(
             (1, Location.Ligament_Attachment_Point_Flava_Superior_Median.value),
             (3, Location.Ligament_Attachment_Point_Flava_Inferior_Median.value),
         ]:
-            loc102 = out_points[in_id]
-            # Transform 3D Point in 2D point of plane
-            arr_poi = arcus.copy() * 0
-            arr_poi[loc102[0], loc102[1], loc102[2]] = 1
-            loc102 = np.concatenate(np.where(arr_poi[plane_coords[:, :, 0], plane_coords[:, :, 1], plane_coords[:, :, 2]]))
-            loc125 = get_nearest_neighbor(loc102, plane_arcus, 1)  # 41
-            cords = plane_coords[loc125[0], loc125[1], :]
-            poi[vert_id, out_id] = tuple(x + y.start for x, y in zip(cords, bb, strict=False))
+            try:
+                loc102 = out_points[in_id]
+                # Transform 3D Point in 2D point of plane
+                arr_poi = arcus.copy() * 0
+                arr_poi[loc102[0], loc102[1], loc102[2]] = 1
+                loc102 = np.concatenate(np.where(arr_poi[plane_coords[:, :, 0], plane_coords[:, :, 1], plane_coords[:, :, 2]]))
+                loc125 = get_nearest_neighbor(loc102, plane_arcus, 1)  # 41
+                cords = plane_coords[loc125[0], loc125[1], :]
+                poi[vert_id, out_id] = tuple(x + y.start for x, y in zip(cords, bb, strict=False))
+            except ValueError:
+                log.on_fail("102 plane_arcus missed the arcus", loc102.sum(), plane_arcus.sum(), np.unique(plane_arcus))
 
 
 def _compute_vert_corners_in_reference_frame(poi: POI, vert_id: int, plane_coords: np.ndarray, subregion: np.ndarray):
@@ -795,7 +798,7 @@ def compute_non_centroid_pois(
             if location.value in all_poi_functions:
                 all_poi_functions[location.value](poi, current_subreg, vert_id, bb=bb, log=log)
             else:
-                raise NotImplementedError(location.value)
+                raise NotImplementedError(location, location.value)
 
 
 def calc_center_spinal_cord(
