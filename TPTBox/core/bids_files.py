@@ -103,8 +103,8 @@ def validate_entities(key: str, value: str, name: str, verbose: bool):
         if key in entity_parts and value not in parts:
             print(f'[!] value for {key} must be in {parts}. This name "{name}" is invalid, with value {value}')
             return False
-
-        return True
+        else:
+            return True
     except Exception as e:
         print(e)
         return False
@@ -112,13 +112,13 @@ def validate_entities(key: str, value: str, name: str, verbose: bool):
 
 def get_values_from_name(path: Path | str, verbose) -> tuple[str, dict[str, str], str, str]:
     name = Path(path).name
-    BIDS_key, file_type = name.split(".", maxsplit=1)
+    bids_key, file_type = name.split(".", maxsplit=1)
 
-    keys = BIDS_key.split("_")
-    format = keys[-1]
-    if format not in formats_relaxed and verbose:
-        print(f"[!] Unknown format {format} in file {name}", formats)
-        formats_relaxed.append(format)
+    keys = bids_key.split("_")
+    bids_format = keys[-1]
+    if bids_format not in formats_relaxed and verbose:
+        print(f"[!] Unknown format {bids_format} in file {name}", formats)
+        formats_relaxed.append(bids_format)
     if file_type not in file_types and verbose:
         print(f"[!] Unknown file_type {file_type} in file {name}")
 
@@ -132,17 +132,14 @@ def get_values_from_name(path: Path | str, verbose) -> tuple[str, dict[str, str]
                 print(f"[!] Session must be second key. This name '{name}' is invalid")
 
             if key in dic and verbose:
-                print(f"[!] {BIDS_key} contains copies of the same key twice. This name '{name}' is invalid")
+                print(f"[!] {bids_key} contains copies of the same key twice. This name '{name}' is invalid")
 
             validate_entities(key, value, name, verbose)
             dic[key] = value
-        except:
+        except Exception:
             if verbose:
                 print(f'[!] "{s}" is not a valid key/value pair. Expected "KEY-VALUE" in {name}')
-    return format, dic, BIDS_key, file_type
-
-
-global_bids_list: dict = {}
+    return bids_format, dic, bids_key, file_type
 
 
 class BIDS_Global_info:
@@ -151,8 +148,7 @@ class BIDS_Global_info:
         datasets: Sequence[Path] | Sequence[str],
         parents: Sequence[str] = ["rawdata", "derivatives"],
         additional_key: Sequence[str] = ["sequ", "seg", "ovl"],
-        verbose=True,
-        clear=True,
+        verbose: bool = True,
         file_name_manipulation: typing.Callable[[str], str] | None = None,
     ):
         """This Objects creates a datastructures reflecting BIDS-folders.
@@ -164,14 +160,14 @@ class BIDS_Global_info:
         """
         assert isinstance(datasets, Sequence), "datasets is not a list"
         assert isinstance(parents, Sequence), "parents is not a list"
+        self.__bids_list: dict = {}
 
         self.file_name_manipulation = file_name_manipulation
-        if clear:
-            global_bids_list.clear()
         # Validate
         for ds in datasets:
-            if not os.path.basename(ds).startswith("dataset-"):
-                print(f"[!] Dataset {os.path.basename(ds)} does not start with 'dataset-'")
+            ds_path = Path(ds) if isinstance(ds, str) else ds
+            if not ds_path.name.startswith("dataset-"):
+                print(f"[!] Dataset {ds_path.name} does not start with 'dataset-'")
         for ps in parents:
             if not any(ps.startswith(lp) for lp in parents):
                 print(f"[!] Parentfolder {ps} is not a legal name")
@@ -218,17 +214,17 @@ class BIDS_Global_info:
             if isinstance(bids, BIDS_FILE):
                 ds = bids.dataset
             else:
-                assert False, "Dataset-path required"
+                raise AssertionError("Dataset-path required")
         if isinstance(bids, Path):
             try:
-                BIDS_key, file_type = bids.name.split(".", maxsplit=1)
+                bids_key, file_type = bids.name.split(".", maxsplit=1)
             except Exception:
                 print("[!] skip file with out a type declaration:", bids.name)
                 # raise e
                 return
 
-            if BIDS_key in global_bids_list:
-                global_bids_list[BIDS_key].add_file(bids)
+            if bids_key in self._global_bids_list:
+                self._global_bids_list[bids_key].add_file(bids)
                 return
             bids = BIDS_FILE(
                 bids,
@@ -259,8 +255,9 @@ class BIDS_Global_info:
     def __str__(self):
         return "BIDS_Global_info: parents=" + str(self.parents) + f"\nDatasets = {self.datasets}"
 
+    @property
     def _global_bids_list(self):
-        return global_bids_list
+        return self.__bids_list
 
 
 class Subject_Container:
@@ -365,6 +362,7 @@ class BIDS_FILE:
         file: Path | str,
         dataset: Path | str,
         verbose=True,
+        bids_ds: BIDS_Global_info | None = None,
         file_name_manipulation: typing.Callable[[str], str] | None = None,
     ):
         """A multi-file representation. It holds the path to Bids-files with the same identifier (filename excluding the file type).
@@ -396,18 +394,19 @@ class BIDS_FILE:
             name = file.name
         self.format, self.info, self.BIDS_key, file_type = get_values_from_name(name, verbose)
 
-        global_bids_list[self.BIDS_key] = self
+        if bids_ds is not None:
+            bids_ds.add_file_2_subject(bids=self, ds=self.dataset)
         self.file = {
             file_type: Path(file),
         }
-        BIDS_key, _ = Path(file).name.split(".", maxsplit=1)
+        bids_key, _ = Path(file).name.split(".", maxsplit=1)
         for file_type in ["nii.gz", "json", "png"]:
             if file_type in self.file:
                 continue
-            p = Path(Path(file).parent, BIDS_key + "." + file_type)
+            p = Path(Path(file).parent, bids_key + "." + file_type)
             if p.exists():
                 self.file[file_type] = p
-        self.file = {key: value for key, value in sorted(self.file.items())}
+        self.file = dict(sorted(self.file.items()))
 
     def __str__(self) -> str:
         s = f"{self.BIDS_key}.{list(self.file.keys())}\t parent = {self.get_parent()}"
@@ -445,7 +444,7 @@ class BIDS_FILE:
         validate_entities(key, value, f"..._{key}-{value}_...", self.verbose)
         self.info[key] = value
 
-    def get(self, key, default: str | None = None) -> str:
+    def get(self, key, default: str | None = None) -> str | None:
         if key in self.info:
             return self.info[key]
         return default
@@ -457,15 +456,20 @@ class BIDS_FILE:
         assert key != "sub", "not allowed to remove subject name"
         return self.info.pop(key)
 
-    def add_file(self, path: Path):
-        BIDS_key, file_type = Path(path).name.split(".", maxsplit=1)
+    def add_file(
+        self,
+        path: Path,
+        bids_ds: BIDS_Global_info | None = None,
+    ):
+        bids_key, file_type = Path(path).name.split(".", maxsplit=1)
 
-        assert BIDS_key == self.BIDS_key, f"only aligned data aka same name different file type: {BIDS_key} != {self.BIDS_key}"
+        assert bids_key == self.BIDS_key, f"only aligned data aka same name different file type: {bids_key} != {self.BIDS_key}"
         bids_dic_file = self.file
         if file_type not in self.file:
             bids_dic_file[file_type] = path
-            global_bids_list[BIDS_key].file = {key: value for key, value in sorted(bids_dic_file.items())}
-        self.file = {key: value for key, value in sorted(bids_dic_file.items())}
+            if bids_ds is not None:
+                bids_ds._global_bids_list[bids_key].file = dict(sorted(bids_dic_file.items()))
+        self.file = dict(sorted(bids_dic_file.items()))
 
     def rename_files(self, path: Path | str, ending=".nii.gz"):
         path = str(path)
@@ -491,7 +495,7 @@ class BIDS_FILE:
     def get_changed_bids(
         self,
         file_type: str | None = "nii.gz",
-        format: str | None = None,
+        bids_format: str | None = None,
         parent: str = "derivatives",
         path: str | None = None,
         info: dict | None = None,
@@ -501,14 +505,11 @@ class BIDS_FILE:
         dataset_path: str | None = None,
         make_parent=True,
     ):
-        if dataset_path is not None:
-            ds = dataset_path
-        else:
-            ds = self.get_path_decomposed()[0]
+        ds = dataset_path if dataset_path is not None else self.get_path_decomposed()[0]
         return BIDS_FILE(
             self.get_changed_path(
                 file_type=file_type,
-                format=format,
+                bids_format=bids_format,
                 parent=parent,
                 path=path,
                 info=info,
@@ -524,7 +525,7 @@ class BIDS_FILE:
     def get_changed_path(
         self,
         file_type: str | None = "nii.gz",
-        format: str | None = None,
+        bids_format: str | None = None,
         parent: str = "derivatives",
         path: str | None = None,
         info: dict | None = None,
@@ -583,7 +584,7 @@ class BIDS_FILE:
             final_info = {}
             for key, value in same_info.items():
                 if key in info:
-                    value = info[key]
+                    value = info[key]  # noqa: PLW2901
                 if value is not None:
                     # file_name += f"{key}-{value}_"
                     if non_strict_mode:
@@ -594,9 +595,13 @@ class BIDS_FILE:
             for key, value in info.items():
                 # New Keys are getting checked!
                 if non_strict_mode:
-                    print(
-                        f"[!] {key} is not in list of legal keys. This name '{key}' is invalid. Legal keys are: {list(entities_keys.keys())}. \nFor use see https://bids-specification.readthedocs.io/en/stable/99-appendices/09-entities.html"
-                    ) if key not in entities_keys else None
+                    (
+                        print(
+                            f"[!] {key} is not in list of legal keys. This name '{key}' is invalid. Legal keys are: {list(entities_keys.keys())}. \nFor use see https://bids-specification.readthedocs.io/en/stable/99-appendices/09-entities.html"
+                        )
+                        if key not in entities_keys
+                        else None
+                    )
                 else:
                     assert (
                         key in entities_keys
@@ -617,16 +622,16 @@ class BIDS_FILE:
             for key in keys_sorted:
                 file_name += f"{key}-{final_info[key]}_"
             # End Info
-            format = format if format is not None else same_format
+            bids_format = bids_format if bids_format is not None else same_format
             file_type = file_type if file_type is not None else same_filetype
             assert (
                 file_type in file_types
             ), f"[!] {file_type} is not in list of file types. Legal file types are: {list(file_types)}. \nFor use see https://bids-specification.readthedocs.io/en/stable/99-appendices/09-entities.html"
-            if format not in formats:
+            if bids_format not in formats:
                 raise ValueError(
-                    f"[!] {format} is not in list of formats. Legal formats are: {list(formats)}. \nFor use see https://bids-specification.readthedocs.io/en/stable/99-appendices/09-entities.html"
+                    f"[!] {bids_format} is not in list of formats. Legal formats are: {list(formats)}. \nFor use see https://bids-specification.readthedocs.io/en/stable/99-appendices/09-entities.html"
                 )
-            file_name += f"{format}.{file_type}"
+            file_name += f"{bids_format}.{file_type}"
 
             out_path = Path(
                 dataset_path if dataset_path is not None else ds_path,
@@ -648,7 +653,7 @@ class BIDS_FILE:
 
     def save_changed_path(
         self,
-        format: str | None = None,
+        bids_format: str | None = None,
         parent: str = "derivatives",
         path: str | None = None,
         info: dict | None = None,
@@ -663,7 +668,7 @@ class BIDS_FILE:
         for key, value in self.file.items():
             out = self.get_changed_path(
                 key,
-                format=format,
+                bids_format=bids_format,
                 parent=parent,
                 path=path,
                 from_info=from_info,
@@ -678,7 +683,8 @@ class BIDS_FILE:
 
     def find_changed_path(
         self,
-        format: str | None = None,
+        bids_ds: BIDS_Global_info,
+        bids_format: str | None = None,
         info: dict | None = None,
         from_info=False,
     ) -> BIDS_FILE | None:
@@ -694,7 +700,7 @@ class BIDS_FILE:
         file_name = ""
         for key, value in same_info.items():
             if key in info:
-                value = info[key]
+                value = info[key]  # noqa: PLW2901
             file_name += f"{key}-{value}_"
         for key, value in info.items():
             validate_entities(key, value, f"..._{key}-{value}_...", self.verbose)
@@ -702,8 +708,8 @@ class BIDS_FILE:
                 continue
             file_name += f"{key}-{value}_"
 
-        file_name += f"{format if format is not None else same_format}"
-        return global_bids_list.get(file_name)
+        file_name += f"{bids_format if bids_format is not None else same_format}"
+        return bids_ds._global_bids_list.get(file_name)
 
     def insert_info_into_path(self, path):
         """Helper function. Automatically replaces {key} with  values from the self.info dict in a string. Like:
@@ -716,9 +722,9 @@ class BIDS_FILE:
         while "{" in path:
             left, right = path.split("{", maxsplit=1)
             middle, right = right.split("}", maxsplit=1)
-            a = self.info[middle] if middle in self.info else None
+            a = self.info.get(middle, None)
             if a is None:
-                warn(f"{middle} not found in {self}")
+                warn(f"{middle} not found in {self}", stacklevel=3)
                 a = middle
             path = left + a + right
         return path
@@ -765,6 +771,7 @@ class BIDS_FILE:
                     nii is not None
                 ), "This file has no zoom info. Use open_ctd(self, nii) with a image reference (BIDS_FILE/PATH) with the same nii"
                 nii = TPTBox.to_nii(nii)
+                assert isinstance(nii, TPTBox.NII)
                 cdt.zoom = nii.zoom
                 cdt.shape = nii.shape
                 cdt.rotation = nii.rotation
@@ -900,10 +907,10 @@ class Searchquery:
         self.unflatten()
         dic = fam.data_dict
         any_file = dic[next(iter(dic.keys()))][0]
-        id = any_file.subject.get_sequence_name(any_file)
+        subject_id = any_file.subject.get_sequence_name(any_file)
         c = self.candidates
         self.candidates = {}
-        self.candidates[id] = c[id]
+        self.candidates[subject_id] = c[subject_id]  # type: ignore
 
     def copy(self):
         copy = Searchquery(self.subject, self._flatten)
@@ -918,9 +925,9 @@ class Searchquery:
             return
         a: list[BIDS_FILE] = []
         assert isinstance(self.candidates, dict)
-        for _, value_lists in self.candidates.items():
+        for value_lists in self.candidates.values():
             for value in value_lists:
-                a.append(value)
+                a.append(value)  # noqa: PERF402
         self.candidates = a
         self._flatten = True
 
@@ -989,7 +996,7 @@ class Searchquery:
     def filter_non_existence(
         self,
         key: str,
-        filter_fun: str | typing.Callable[[str | object], bool] = lambda x: True,
+        filter_fun: str | typing.Callable[[str | object], bool] = lambda x: True,  # noqa: ARG005
         required=True,
     ) -> None:
         """Remove family/file from the Searchquery if:
@@ -1022,22 +1029,27 @@ class Searchquery:
                     self.candidates.pop(sequences)
 
     def filter_dixon_only_inphase(self):
-        json_filter = lambda x: "ImageType" not in x or (
-            "W" not in x["ImageType"]
-            and "F" not in x["ImageType"]
-            and "FAT" not in x["ImageType"]
-            and "WATER" not in x["ImageType"]
-            and "OP" not in x["ImageType"]
-        )
-        lam_filter = (
-            lambda x: x.upper() != "W"
-            and x.upper() != "F"
-            and x.upper() != "FAT"
-            and x.upper() != "WATER"
-            and x.upper() != "OP"
-            and x.upper() != "OPP"
-            and x.upper() != "OUTPHASE"
-        )
+        def json_filter(x):
+            return (
+                "ImageType" not in x
+                or "W" not in x["ImageType"]
+                and "F" not in x["ImageType"]
+                and "FAT" not in x["ImageType"]
+                and "WATER" not in x["ImageType"]
+                and "OP" not in x["ImageType"]
+            )
+
+        def lam_filter(x):
+            return (
+                x.upper() != "W"
+                and x.upper() != "F"
+                and x.upper() != "FAT"
+                and x.upper() != "WATER"
+                and x.upper() != "OP"
+                and x.upper() != "OPP"
+                and x.upper() != "OUTPHASE"
+            )
+
         self.filter_json(json_filter, required=False)
         self.filter("rec", lam_filter, required=False)  # type: ignore DEPRECATED
         self.filter("part", lam_filter, required=False)  # type: ignore
@@ -1047,9 +1059,13 @@ class Searchquery:
         if _keys is None:
             _keys = ["W", "WATER"]
         assert self._flatten
-        json_filter = lambda x: "ImageType" not in x or all(k in x["ImageType"] for k in _keys)
 
-        lam_filter = lambda x: any(k == x.upper() for k in _keys)
+        def json_filter(x):
+            return "ImageType" not in x or all(k in x["ImageType"] for k in _keys)
+
+        def lam_filter(x):
+            return any(k == x.upper() for k in _keys)
+
         self.filter_json(json_filter, required=False)
         self.filter("rec", lam_filter, required=False)  # type: ignore
         self.filter("part", lam_filter, required=False)  # type: ignore
@@ -1063,7 +1079,7 @@ class Searchquery:
     def action(
         self,
         action_fun: typing.Callable[[BIDS_FILE], None],
-        filter_fun: str | typing.Callable[[str | object], bool] = lambda x: True,
+        filter_fun: str | typing.Callable[[str | object], bool] = lambda x: True,  # noqa: ARG005
         key: str = "",
         required: bool = True,
         all_in_sequence=False,
@@ -1088,8 +1104,8 @@ class Searchquery:
                     action_fun(bids_file)
         else:
             assert isinstance(self.candidates, dict)
-            for sequences, bids_files in self.candidates.copy().items():
-                if all_in_sequence:
+            for bids_files in self.candidates.copy().values():
+                if all_in_sequence:  # noqa: SIM102
                     if any(bids_file.do_filter(key, filter_fun, required=required) for bids_file in bids_files):
                         for bids_file in bids_files:
                             action_fun(bids_file)
@@ -1128,13 +1144,13 @@ class Searchquery:
         """
         assert isinstance(self.candidates, list), "call flatten() before looping as a list"
         if sort:
-            return sorted(list(self.candidates.__iter__()))  # type: ignore
+            return sorted(self.candidates.__iter__())  # type: ignore
         return self.candidates.__iter__()
 
     def loop_dict(
         self,
         sort=False,
-        key_transform: typing.Callable[[BIDS_FILE], str | None] = None,
+        key_transform: typing.Callable[[BIDS_FILE], str | None] | None = None,
         key_addendum: list[str] | None = None,  # type: ignore
     ) -> typing.Iterator[BIDS_Family]:
         """Returns an iterator. Flatten must be False: it iterates over all families, where the return is the dict from the get_sequence_files function
@@ -1238,12 +1254,12 @@ class BIDS_Family:
     def get_format_len(self):
         format_len = {}
         for k, v in self:
-            format = k.split("_")[0]
-            if format not in format_len:
-                format_len[format] = (0, 0)
-            format_len[format] = (
-                format_len[format][0] + 1,
-                format_len[format][1] + len(v),
+            bids_format = k.split("_")[0]
+            if bids_format not in format_len:
+                format_len[bids_format] = (0, 0)
+            format_len[bids_format] = (
+                format_len[bids_format][0] + 1,
+                format_len[bids_format][1] + len(v),
             )
         return format_len
 
@@ -1291,7 +1307,7 @@ if __name__ == "__main__":
         ["/media/robert/Expansion/dataset-Testset"],
         ["sourcedata", "rawdata", "rawdata_ct", "rawdata_dixon", "derivatives"],  #
     )
-    for subj_name, subject in global_info.enumerate_subjects():
+    for _, subject in global_info.enumerate_subjects():
         query = subject.new_query()
         # It must exist a dixon and a msk
         query.filter("format", "dixon")

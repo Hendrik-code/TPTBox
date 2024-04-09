@@ -89,15 +89,15 @@ def compute_spinal_cord(file: BIDS_FILE, override=False, hot=True, do_label=True
 
             spinal_cord_file.unlink(missing_ok=True)
             # compute_spinal_cord_with_cut_sacrum
-            msk_file = file.find_changed_path(format="msk")
+            msk_file = file.find_changed_path(bids_format="msk")
             if msk_file is None:
-                msk_file = file.find_changed_path(format="msk", info={"seg": "vert"})
+                msk_file = file.find_changed_path(bids_format="msk", info={"seg": "vert"})
             suc = False
             if msk_file is not None:
                 suc = compute_spinal_cord_with_cut_sacrum(file, msk_file, **args)
             if not suc:
                 spinal_cord_file.unlink(missing_ok=True)
-                file.get_changed_path(file_type="nii.gz", format="msk", info={"label": "spinalcord"})
+                file.get_changed_path(file_type="nii.gz", bids_format="msk", info={"label": "spinalcord"})
                 run_cmd([*cmd_ex_cord, "-centerline", "cnn"], print_ignore_list=ignore_list)
                 if not __test_seg_file(spinal_cord_file):
                     print("[!] The tool failed to segment the spinalcord.Program gives up.")
@@ -255,7 +255,7 @@ def _parallelized_preprocess_dixon(subj_name: str, subject: Subject_Container, h
 def __bids2spinalcord(bids_file: BIDS_FILE | Path | str, parent_folder_name: str):
     assert not isinstance(bids_file, Path), "out_file must be set, if a Path is provided instead of a BIDS_FILE"
     assert not isinstance(bids_file, str), "out_file must be set, if a Path is provided instead of a BIDS_FILE"
-    return bids_file.get_changed_path(file_type="nii.gz", format="msk", info={"label": "spinalcord"}, parent=parent_folder_name)
+    return bids_file.get_changed_path(file_type="nii.gz", bids_format="msk", info={"label": "spinalcord"}, parent=parent_folder_name)
 
 
 def get_cmd_ex_spinal_cord(
@@ -302,7 +302,7 @@ def get_cmd_ex_deepseg(bids_file: BIDS_FILE):
     Returns:
         _type_: _description_
     """
-    out_file = bids_file.get_changed_path(file_type="nii.gz", format="msk", info={"label": "sct_deepseg"})
+    out_file = bids_file.get_changed_path(file_type="nii.gz", bids_format="msk", info={"label": "sct_deepseg"})
     in_file = bids_file.file["nii.gz"]
     # This ting took ages for a single file because it did not work on gpu
     cmd_ex = ["sct_deepseg", "-i", in_file, "-c", "t2", "-o", out_file, "-task", "seg_exvivo_gm-wm_t2"]
@@ -337,7 +337,7 @@ def get_cmd_ex_label(
     """
     if out_file is None:
         out_file = bids_file.get_changed_path(
-            file_type="nii.gz", format="msk", info={"label": "spinalcordlabel"}, parent=parent_folder_name
+            file_type="nii.gz", bids_format="msk", info={"label": "spinalcordlabel"}, parent=parent_folder_name
         )
     if not override and out_file.exists():
         return ["echo", f"[?] the spinalcord already exists {out_file.name}."], out_file
