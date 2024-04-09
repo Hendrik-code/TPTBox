@@ -987,12 +987,12 @@ class NII(NII_Math):
         return np_get_connected_components_center_of_mass(arr, label=label, connectivity=connectivity, sort_by_axis=sort_by_axis)
 
 
-    def get_largest_k_segmentation_connected_components(self, k: int, labels: int | list[int] | None = None, connectivity: int = 1, return_original_labels: bool = True):
+    def get_largest_k_segmentation_connected_components(self, k: int | None, labels: int | list[int] | None = None, connectivity: int = 1, return_original_labels: bool = True):
         """Finds the largest k connected components in a given array (does NOT work with zero as label!)
 
         Args:
             arr (np.ndarray): input array
-            k (int): finds the k-largest components
+            k (int | None): finds the k-largest components. If k is None, will find all connected components and still sort them by size
             labels (int | list[int] | None, optional): Labels that the algorithm should be applied to. If none, applies on all labels found in this NII. Defaults to None.
             return_original_labels (bool): If set to False, will label the components from 1 to k. Defaults to True
         """

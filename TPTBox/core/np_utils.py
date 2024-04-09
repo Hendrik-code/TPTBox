@@ -512,7 +512,7 @@ def np_connected_components(
 
 def np_get_largest_k_connected_components(
     arr: UINTARRAY,
-    k: int,
+    k: int | None = None,
     label_ref: Label_Reference = None,
     connectivity: int = 3,
     return_original_labels: bool = True,
@@ -521,7 +521,7 @@ def np_get_largest_k_connected_components(
 
     Args:
         arr (np.ndarray): input array
-        k (int): finds the k-largest components
+        k (int | None): finds the k-largest components. If k is None, will find all connected components and still sort them by size
         labels (int | list[int] | None, optional): Labels that the algorithm should be applied to. If none, applies on all labels found in arr. Defaults to None.
         connectivity: in range [1,3]. For 2D images, 2 and 3 is the same.
         return_original_labels (bool): If set to False, will label the components from 1 to k. Defaults to True
@@ -530,7 +530,7 @@ def np_get_largest_k_connected_components(
         np.ndarray: array with the largest k connected components
     """
 
-    assert k > 0
+    assert k is None or k > 0
     assert 2 <= arr.ndim <= 3, f"expected 2D or 3D, but got {arr.ndim}"
     assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
     if arr.ndim == 2:  # noqa: SIM108
@@ -543,6 +543,8 @@ def np_get_largest_k_connected_components(
     arr2[np.isin(arr, labels, invert=True)] = 0  # type:ignore
 
     labels_out, n = connected_components(arr, connectivity=connectivity, return_N=True)
+    if k is None:
+        k = n
     k = min(k, n)  # if k > N, will return all N but still sorted
     label_volume_pairs = [(i, ct) for i, ct in np_volume(labels_out).items() if ct > 0]
     label_volume_pairs.sort(key=lambda x: x[1], reverse=True)
