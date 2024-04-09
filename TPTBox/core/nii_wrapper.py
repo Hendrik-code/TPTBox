@@ -16,6 +16,7 @@ from typing_extensions import Self
 from TPTBox.core.nii_wrapper_math import NII_Math
 from TPTBox.core.np_utils import (
     np_calc_boundary_mask,
+    np_center_of_mass,
     np_connected_components,
     np_count_nonzero,
     np_dilate_msk,
@@ -28,6 +29,7 @@ from TPTBox.core.np_utils import (
     np_unique_withoutzero,
     np_volume,
 )
+from TPTBox.core.vert_constants import Coordinate
 
 from . import bids_files
 from . import vert_constants as vc
@@ -985,12 +987,12 @@ class NII(NII_Math):
         return np_get_connected_components_center_of_mass(arr, label=label, connectivity=connectivity, sort_by_axis=sort_by_axis)
 
 
-    def get_largest_k_segmentation_connected_components(self, k: int, labels: int | list[int] | None = None, connectivity: int = 1, return_original_labels: bool = True):
+    def get_largest_k_segmentation_connected_components(self, k: int | None, labels: int | list[int] | None = None, connectivity: int = 1, return_original_labels: bool = True):
         """Finds the largest k connected components in a given array (does NOT work with zero as label!)
 
         Args:
             arr (np.ndarray): input array
-            k (int): finds the k-largest components
+            k (int | None): finds the k-largest components. If k is None, will find all connected components and still sort them by size
             labels (int | list[int] | None, optional): Labels that the algorithm should be applied to. If none, applies on all labels found in this NII. Defaults to None.
             return_original_labels (bool): If set to False, will label the components from 1 to k. Defaults to True
         """
@@ -1189,8 +1191,12 @@ class NII(NII_Math):
         return out
 
     def volumes(self, include_zero: bool = False) -> dict[int, int]:
-        '''Returns a dict stating how many pixels are present for each label (including zero!)'''
+        '''Returns a dict stating how many pixels are present for each label'''
         return np_volume(self.get_seg_array(), include_zero=include_zero)
+
+    def center_of_masses(self) -> dict[int, Coordinate]:
+        '''Returns a dict stating the center of mass for each present label (not including zero!)'''
+        return np_center_of_mass(self.get_seg_array())
 
     def assert_affine(
             self,
