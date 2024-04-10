@@ -16,6 +16,7 @@ from typing_extensions import Self
 from TPTBox.core.nii_wrapper_math import NII_Math
 from TPTBox.core.np_utils import (
     np_calc_boundary_mask,
+    np_center_of_mass,
     np_connected_components,
     np_count_nonzero,
     np_dilate_msk,
@@ -28,6 +29,7 @@ from TPTBox.core.np_utils import (
     np_unique_withoutzero,
     np_volume,
 )
+from TPTBox.core.vert_constants import Coordinate
 
 from . import bids_files
 from . import vert_constants as vc
@@ -495,6 +497,7 @@ class NII(NII_Math):
     def apply_center_crop(self, center_shape: tuple[int,int,int], verbose: bool = False):
         shp_x, shp_y, shp_z = self.shape
         crop_x, crop_y, crop_z = center_shape
+        arr = self.get_array()
 
         if crop_x > shp_x or crop_y > shp_y or crop_z > shp_z:
             padding_ltrb = [
@@ -502,12 +505,13 @@ class NII(NII_Math):
                 ((crop_y - shp_y +1) // 2 if crop_y > shp_y else 0,(crop_y - shp_y) // 2 if crop_y > shp_y else 0),
                 ((crop_z - shp_z +1) // 2 if crop_z > shp_z else 0,(crop_z - shp_z) // 2 if crop_z > shp_z else 0),
             ]
-            arr = self.get_array()
             arr_padded = np.pad(arr, padding_ltrb, "constant", constant_values=0)  # PIL uses fill value 0
             log.print(f"Pad from {self.shape} to {arr_padded.shape}", verbose=verbose)
             shp_x, shp_y, shp_z = arr_padded.shape
             if crop_x == shp_x and crop_y == shp_y and crop_z == shp_z:
                 return self.set_array(arr_padded)
+        else:
+            arr_padded = arr
 
         crop_rel_x = int(round((shp_x - crop_x) / 2.0))
         crop_rel_y = int(round((shp_y - crop_y) / 2.0))
@@ -605,7 +609,7 @@ class NII(NII_Math):
         return self.reorient(axcodes_to=axcodes_to, verbose=verbose, inplace=inplace)
     def reorient_same_as_(self, img_as: Nifti1Image | Self, verbose:vc.logging=False) -> Self:
         return self.reorient_same_as(img_as=img_as,verbose=verbose,inplace=True)
-    def rescale(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:vc.logging=False, inplace=False,mode='constant',aline_corners:bool=False):  # noqa: B008
+    def rescale(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:vc.logging=False, inplace=False,mode='constant',aline_corners:bool=False):
         """
         Rescales the NIfTI image to a new voxel spacing.
 
@@ -651,7 +655,7 @@ class NII(NII_Math):
     def rescale_(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:vc.logging=False,mode='constant'):
         return self.rescale( voxel_spacing=voxel_spacing, c_val=c_val, verbose=verbose,mode=mode, inplace=True)
 
-    def resample_from_to(self, to_vox_map:Image_Reference|Proxy, mode='constant', c_val=None, inplace = False,verbose:vc.logging=True,aline_corners:bool=False):  # noqa: B008
+    def resample_from_to(self, to_vox_map:Image_Reference|Proxy, mode='constant', c_val=None, inplace = False,verbose:vc.logging=True,aline_corners:bool=False):
         """self will be resampled in coordinate of given other image. Adheres to global space not to local pixel space
         Args:
             to_vox_map (Image_Reference|Proxy): If object, has attributes shape giving input voxel shape, and affine giving mapping of input voxels to output space. If length 2 sequence, elements are (shape, affine) with same meaning as above. The affine is a (4, 4) array-like.\n
@@ -963,9 +967,7 @@ class NII(NII_Math):
             connectivity (int, optional): Connectivity for the connected components. Defaults to 3.
 
         Returns:
-            cc: dict[label, cc_idx, arr], cc_stats: dict[label, key, values]
-            keys:
-                "voxel_counts","bounding_boxes","centroids","N"
+            cc: dict[label, cc_idx, arr], cc_n: dict[label, int]
         """
         arr = self.get_seg_array()
         return np_connected_components(arr, connectivity=connectivity, label_ref=labels, verbose=verbose)
@@ -985,12 +987,12 @@ class NII(NII_Math):
         return np_get_connected_components_center_of_mass(arr, label=label, connectivity=connectivity, sort_by_axis=sort_by_axis)
 
 
-    def get_largest_k_segmentation_connected_components(self, k: int, labels: int | list[int] | None = None, connectivity: int = 1, return_original_labels: bool = True):
+    def get_largest_k_segmentation_connected_components(self, k: int | None, labels: int | list[int] | None = None, connectivity: int = 1, return_original_labels: bool = True):
         """Finds the largest k connected components in a given array (does NOT work with zero as label!)
 
         Args:
             arr (np.ndarray): input array
-            k (int): finds the k-largest components
+            k (int | None): finds the k-largest components. If k is None, will find all connected components and still sort them by size
             labels (int | list[int] | None, optional): Labels that the algorithm should be applied to. If none, applies on all labels found in this NII. Defaults to None.
             return_original_labels (bool): If set to False, will label the components from 1 to k. Defaults to True
         """
@@ -1189,8 +1191,12 @@ class NII(NII_Math):
         return out
 
     def volumes(self, include_zero: bool = False) -> dict[int, int]:
-        '''Returns a dict stating how many pixels are present for each label (including zero!)'''
+        '''Returns a dict stating how many pixels are present for each label'''
         return np_volume(self.get_seg_array(), include_zero=include_zero)
+
+    def center_of_masses(self) -> dict[int, Coordinate]:
+        '''Returns a dict stating the center of mass for each present label (not including zero!)'''
+        return np_center_of_mass(self.get_seg_array())
 
     def assert_affine(
             self,
@@ -1234,26 +1240,26 @@ class NII(NII_Math):
                 found_errors.append(f"object mismatch {self!s}, {other!s}")
         if affine is not None:
             affine_diff = self.affine - affine
-            affine_match = np.all([a <= error_tolerance for a in affine_diff.flatten()])
+            affine_match = np.all([abs(a) <= error_tolerance for a in affine_diff.flatten()])
             found_errors.append(f"affine mismatch {self.affine}, {affine}") if not affine_match else None
         if rotation is not None:
             rotation_diff = self.rotation - rotation
-            rotation_match = np.all([a <= error_tolerance for a in rotation_diff.flatten()])
+            rotation_match = np.all([abs(a) <= error_tolerance for a in rotation_diff.flatten()])
             found_errors.append(f"rotation mismatch {self.rotation}, {rotation}") if not rotation_match else None
         if zoom is not None:
             zms_diff = (self.zoom[i] - zoom[i] for i in range(3))
-            zms_match = np.all([a <= error_tolerance for a in zms_diff])
+            zms_match = np.all([abs(a) <= error_tolerance for a in zms_diff])
             found_errors.append(f"zoom mismatch {self.zoom}, {zoom}") if not zms_match else None
         if orientation is not None:
             orientation_match = np.all([i == orientation[idx] for idx, i in enumerate(self.orientation)])
             found_errors.append(f"orientation mismatch {self.orientation}, {orientation}") if not orientation_match else None
         if origin is not None:
             origin_diff = (self.origin[i] - origin[i] for i in range(3))
-            origin_match = np.all([a <= error_tolerance for a in origin_diff])
+            origin_match = np.all([abs(a) <= error_tolerance for a in origin_diff])
             found_errors.append(f"origin mismatch {self.origin}, {origin}") if not origin_match else None
         if shape is not None:
             shape_diff = (self.shape[i] - shape[i] for i in range(3))
-            shape_match = np.all([a <= error_tolerance for a in shape_diff])
+            shape_match = np.all([abs(a) <= error_tolerance for a in shape_diff])
             found_errors.append(f"shape mismatch {self.shape}, {shape}") if not shape_match else None
 
         # Print errors
