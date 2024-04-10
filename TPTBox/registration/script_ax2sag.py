@@ -47,12 +47,12 @@ def register_ax_and_stich_both(sub: Subject_Container, out_folder, buffer_path, 
             out_ax_cord = ax_files[0].get_changed_path(
                 parent=out_folder,
                 info={"sequ": "stitched", "seg": "spinalcord", "chunk": None},
-                format="msk",
+                bids_format="msk",
             )
             out_ax_ms = ax_files[0].get_changed_path(
                 parent=out_folder,
                 info={"sequ": "stitched", "label": "lesions", "chunk": None},
-                format="msk",
+                bids_format="msk",
             )
 
             # out_ax2 = ax_files[0].get_changed_path(parent=out_folder, info={"sequ": "stitchedxxx", "chunk": None})

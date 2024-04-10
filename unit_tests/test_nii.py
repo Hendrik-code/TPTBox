@@ -10,6 +10,7 @@ from pathlib import Path
 import nibabel as nib
 import numpy as np
 
+from TPTBox.core import np_utils
 from TPTBox.core.nii_wrapper import NII
 from TPTBox.core.poi import POI as Centroids  # _centroids_to_dict_list  # noqa: N811
 from TPTBox.core.poi import calc_centroids, v_idx2name
@@ -203,6 +204,36 @@ class Test_bids_file(unittest.TestCase):
             msk2 = msk.erode_msk(verbose=False)
             self.assertNotEqual(msk.get_array().sum(), msk2.get_array().sum())
 
+    def test_get_segmentation_connected_components(self):
+        for _ in range(repeats):
+            msk, cent, order, sizes = get_nii(num_point=random.randint(3, 10))
+            label = 1
+            subreg_cc, subreg_cc_n = msk.get_segmentation_connected_components(labels=label)
+            volume = msk.volumes()
+            volume_cc = np_utils.np_volume(subreg_cc[label])
+            self.assertTrue(volume[label], np.sum(volume_cc.values()))
+
+            # see if get center of masses match with stats centroids
+            coms = msk.get_segmentation_connected_components_center_of_mass(label=label)
+            n_coms = len(np_utils.np_unique_withoutzero(subreg_cc[label]))
+            print(n_coms)
+            print(subreg_cc_n)
+            self.assertTrue(n_coms == subreg_cc_n[label])
+            if n_coms == 1:
+                first_centroid = np_utils.np_center_of_mass(subreg_cc[label])[1]
+                self.assertTrue(
+                    abs(coms[0][0] - first_centroid[0]) <= 0.00001,
+                    msg=f"{coms[0][0]}, {first_centroid[0]}",
+                )
+
+    def test_apply_center_crop(self):
+        for _ in range(repeats):
+            crop_sizes = (random.randint(10, 200), random.randint(10, 200), random.randint(10, 200))
+            msk, cent, order, sizes = get_nii(num_point=random.randint(3, 10))
+            msk2 = msk.apply_center_crop(crop_sizes, verbose=random.randint(0, 1) == 0)
+            self.assertEqual(msk2.shape, crop_sizes)
+            self.assertTrue(msk2.assert_affine(shape=crop_sizes))
+
     def test_assert_affine(self):
         # asserts with itself
         for _ in range(repeats):
@@ -214,6 +245,26 @@ class Test_bids_file(unittest.TestCase):
             )
 
         # TODO cases where it should return False
+
+    def test_center_of_masses(self):
+        # asserts with itself
+        for _ in range(repeats):
+            msk, cent, order, sizes = get_nii(num_point=random.randint(3, 10))
+
+            coms = msk.center_of_masses()
+            np_coms = np_utils.np_center_of_mass(msk.get_seg_array())
+
+            print("coms", coms)
+            print("np_coms", np_coms)
+            print("cent", cent)
+
+            for i, g in coms.items():
+                self.assertTrue(i in np_coms)
+                self.assertTrue(np.all([g[idx] == np_coms[i][idx] for idx in range(3)]))
+                #
+                self.assertTrue((i, 50) in cent)
+                self.assertTrue(np.all([g[idx] == cent[i, 50][idx] for idx in range(3)]))
+            # self.assertEqual(coms, np_coms)
 
 
 if __name__ == "__main__":
