@@ -21,6 +21,8 @@ print("args.rawdata=%s" % args.rawdata)
 bgi = BIDS_Global_info(datasets=[Path(args.inputfolder)], parents=[args.rawdata])
 print()
 skipped = []
+skipped_no_t2w = []
+skipped_to_many = []
 already_stitched = 0
 new_stitched = 0
 for name, subj in bgi.enumerate_subjects(sort=True):
@@ -29,19 +31,23 @@ for name, subj in bgi.enumerate_subjects(sort=True):
     q.filter("chunk", lambda x: str(x) in ["HWS", "BWS", "LWS"])
     q.flatten()
     files: dict[str, BIDS_FILE] = {}
-    to_many = False
+    to_few = False
     c = 0
     for chunk in ["HWS", "BWS", "LWS"]:
         q_tmp = q.copy()
         q_tmp.filter("chunk", chunk)
         l_t2w = list(q_tmp.loop_list())
         c += len(l_t2w)
+        if len(l_t2w) > 1:
+            l_t2w = sorted(l_t2w, key=lambda x: x.get("sequ", -1))[-1]  # type: ignore
+            skipped_to_many.append(name)
         if len(l_t2w) != 1:
-            to_many = True
+            to_few = True
             continue
         files[chunk] = l_t2w[0]
-    if to_many:
-        if c != 0:
+    if to_few:
+        if c == 0:
+            skipped_no_t2w.append(name)
             continue
         skipped.append((name, c))
         continue
@@ -64,6 +70,14 @@ for name, subj in bgi.enumerate_subjects(sort=True):
         out.unlink(missing_ok=True)
         skipped.append(name + "_FAIL")
         # raise
+print("These subject have no T2w images:", len(skipped_no_t2w), skipped_no_t2w)
+if len(skipped_to_many) != 0:
+    logger.on_warning(
+        "These subject have redundant T2w images:",
+        len(skipped_to_many),
+        skipped_to_many,
+        "May be they have low quality data. Will use the highest sequence id, which is most likely the best.",
+    )
 print("These subject where skipped, because there are to many or to few files:", skipped)
 print("Subject skipped:", len(skipped))
 print("Subject already stitched:", already_stitched)
