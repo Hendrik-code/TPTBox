@@ -47,22 +47,28 @@ def get_json(data):
     return data1
 
 
+def test_name_conflict(json_ob, file):
+    if Path(file).exists():
+        js = load_json(file)
+        return js != json_ob
+    return False
+
+
 def save_json(json_ob, file):
     """
-    receives a json object and a path and saves the object as a json file
+    recieves a json object and a path and saves the object as a json file
     """
 
     def convert(obj):
-        if isinstance(obj, np.int64):  # type: ignore
+        if isinstance(obj, np.int64):
             return int(obj)
         raise TypeError
 
-    if Path(file).exists():
-        js = load_json(file)
-        if js == json_ob:
-            return True
-        else:
-            raise FileExistsError(file)
+    if test_name_conflict(json_ob, file):
+        print(load_json(file))
+        print(json_ob)
+        raise FileExistsError(file)
+
     with open(file, "w") as file:
         json.dump(json_ob, file, indent=4, default=convert)
     return False

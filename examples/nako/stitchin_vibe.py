@@ -27,6 +27,17 @@ for name, subj in bgi.enumerate_subjects():
         for v in fam.values():
             part = v[0].get("part")
             out = v[0].get_changed_path(parent=args.outparant, info={"chunk": None, "sequ": "stitched"})
+            # Check if there are multiple scans
+            ids = {}
+            skip = True
+            for b in v:
+                ids.setdefault(b.get("chunk"), 0)
+                ids[b.get("chunk")] += 1
+                if ids[b.get("chunk")] >= 2:
+                    skip = True
+            if skip:
+                skipped.append(name)
+                continue
             try:
                 if out.exists():
                     print(name, "exist", end="\r")
@@ -37,6 +48,8 @@ for name, subj in bgi.enumerate_subjects():
             except BaseException:
                 out.unlink(missing_ok=True)
                 raise
-print("These subject where skipped, because there are to many or to few files:", skipped)
+skipped = set(skipped)
+print("These subject where skipped, because there multiple scans:", skipped)
+print("Subject skipped:", len(skipped))
 print("Subject already stitched:", already_stitched)
 print("Subject stitched:", new_stitched)
