@@ -8,12 +8,13 @@ from TPTBox import BIDS_FILE, BIDS_Global_info
 arg_parser = argparse.ArgumentParser()
 arg_parser.add_argument("-i", "--inputfolder", help="input folder (where the rawdata folder is located)", required=True)
 arg_parser.add_argument("-p", "--outparant", help="input folder (where the rawdata folder is located)", default="rawdata_stitched")
-
+arg_parser.add_argument("-r", "--rawdata", type=str, default="rawdata", help="the rawdata folder to be searched")
 args = arg_parser.parse_args()
 print("args=%s" % args)
 print("args.inputfolder=%s" % args.inputfolder)
+print("args.rawdata=%s" % args.rawdata)
 BIDS_Global_info.remove_splitting_key("chunk")
-bgi = BIDS_Global_info(datasets=[Path(args.inputfolder)])
+bgi = BIDS_Global_info(datasets=[Path(args.inputfolder)], parents=[args.rawdata])
 print()
 skipped = []
 already_stitched = 0
@@ -29,12 +30,14 @@ for name, subj in bgi.enumerate_subjects():
             out = v[0].get_changed_path(parent=args.outparant, info={"chunk": None, "sequ": "stitched"})
             # Check if there are multiple scans
             ids = {}
-            skip = True
+            skip = False
             for b in v:
-                ids.setdefault(b.get("chunk"), 0)
-                ids[b.get("chunk")] += 1
-                if ids[b.get("chunk")] >= 2:
+                key = str(b.get("chunk")) + "-" + str(b.get("part"))
+                ids.setdefault(key, 0)
+                ids[key] += 1
+                if ids[key] >= 2:
                     skip = True
+            print(ids)
             if skip:
                 skipped.append(name)
                 continue
