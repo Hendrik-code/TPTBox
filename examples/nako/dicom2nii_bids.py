@@ -159,7 +159,7 @@ def generate_general_name(
         parent="rawdata",
         make_parent=False,
         additional_folder=mri_format,
-        format=mri_format,
+        bids_format=mri_format,
         non_strict_mode=True,
     )
     if test_name_conflict(simp_json, fname):
@@ -304,13 +304,13 @@ def from_dicom_json_to_extracting_nii(  # noqa: C901
             pprint.pprint(simp_json)
             raise NotImplementedError(series_description)
         fname = BIDS_FILE(Path(p, "sub-000_ct.nii.gz"), nifti_dir).get_changed_path(
-            info=keys, file_type="json", parent="rawdata", make_parent=True, additional_folder=mri_format, format=mri_format
+            info=keys, file_type="json", parent="rawdata", make_parent=True, additional_folder=mri_format, bids_format=mri_format
         )
         while test_name_conflict(simp_json, fname):
             logger.print("Name conflict inclement a value by one", keys, Log_Type.FAIL)
             _inc_key(keys)
             fname = BIDS_FILE(Path(p, "sub-000_ct.nii.gz"), nifti_dir).get_changed_path(
-                info=keys, file_type="json", parent="rawdata", make_parent=True, additional_folder=mri_format, format=mri_format
+                info=keys, file_type="json", parent="rawdata", make_parent=True, additional_folder=mri_format, bids_format=mri_format
             )
     else:
         if len(dcm_data_l) == 1:
