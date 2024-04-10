@@ -23,23 +23,27 @@ print()
 skipped = []
 already_stitched = 0
 new_stitched = 0
-for name, subj in bgi.enumerate_subjects():
+for name, subj in bgi.enumerate_subjects(sort=True):
     q = subj.new_query()
     q.filter_format("T2w")
     q.filter("chunk", lambda x: str(x) in ["HWS", "BWS", "LWS"])
     q.flatten()
     files: dict[str, BIDS_FILE] = {}
     to_many = False
+    c = 0
     for chunk in ["HWS", "BWS", "LWS"]:
         q_tmp = q.copy()
         q_tmp.filter("chunk", chunk)
         l_t2w = list(q_tmp.loop_list())
+        c += len(l_t2w)
         if len(l_t2w) != 1:
             to_many = True
             continue
         files[chunk] = l_t2w[0]
     if to_many:
-        skipped.append(name)
+        if c != 0:
+            continue
+        skipped.append((name, c))
         continue
     out = files["HWS"].get_changed_path(info={"chunk": None, "sequ": "stitched"}, parent=args.outparant)
     try:
@@ -61,5 +65,6 @@ for name, subj in bgi.enumerate_subjects():
         skipped.append(name + "_FAIL")
         # raise
 print("These subject where skipped, because there are to many or to few files:", skipped)
+print("Subject skipped:", len(skipped))
 print("Subject already stitched:", already_stitched)
 print("Subject stitched:", new_stitched)

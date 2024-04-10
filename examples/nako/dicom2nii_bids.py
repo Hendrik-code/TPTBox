@@ -26,7 +26,7 @@ from TPTBox.core.bids_constants import formats
 
 sys.path.append(str(Path(__file__).parent))
 
-from dicom2nii_utils import get_json, save_json
+from dicom2nii_utils import get_json, save_json, test_name_conflict
 
 logger = No_Logger()
 
@@ -88,6 +88,14 @@ def get_plane(dicoms: list[pydicom.FileDataset]) -> str | None:
         return None
 
 
+def _inc_key(keys, inc=1):
+    k = "nameconflict"
+    if k not in keys:
+        keys[k] = 0
+    v = int(keys[k])
+    keys[k] = str(v + int(inc))
+
+
 def generate_general_name(
     mri_format,
     template: dict[str, str | tuple[str, Callable]],
@@ -96,6 +104,7 @@ def generate_general_name(
     acq=None,
     make_subject_chunks=0,
     root: Path | None = None,
+    _increment_id=0,
 ):
     if acq is None:
         acq = get_plane(dcm_data_l)
@@ -132,6 +141,8 @@ def generate_general_name(
                 # raise ValueError(SeriesDescription)
         else:
             keys[key] = str(simp_json[value]).replace("_", "-")
+    if _increment_id != 0:
+        _inc_key(keys, inc=_increment_id)
 
     if make_subject_chunks != 0:
         p = Path(nifti_dir, "rawdata", str(keys["sub"][:make_subject_chunks]), keys["sub"])
@@ -151,6 +162,11 @@ def generate_general_name(
         format=mri_format,
         non_strict_mode=True,
     )
+    if test_name_conflict(simp_json, fname):
+        logger.print("Name conflict inclement a value by one")
+        fname = generate_general_name(
+            format, template, dcm_data_l, nifti_dir, make_subject_chunks=make_subject_chunks, root=root, _increment_id=_increment_id + 1
+        )
     return fname
 
 
@@ -290,6 +306,12 @@ def from_dicom_json_to_extracting_nii(  # noqa: C901
         fname = BIDS_FILE(Path(p, "sub-000_ct.nii.gz"), nifti_dir).get_changed_path(
             info=keys, file_type="json", parent="rawdata", make_parent=True, additional_folder=mri_format, format=mri_format
         )
+        while test_name_conflict(simp_json, fname):
+            logger.print("Name conflict inclement a value by one", keys, Log_Type.FAIL)
+            _inc_key(keys)
+            fname = BIDS_FILE(Path(p, "sub-000_ct.nii.gz"), nifti_dir).get_changed_path(
+                info=keys, file_type="json", parent="rawdata", make_parent=True, additional_folder=mri_format, format=mri_format
+            )
     else:
         if len(dcm_data_l) == 1:
             return
