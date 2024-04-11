@@ -7,13 +7,13 @@ from pathlib import Path
 
 file = Path(__file__).resolve()
 sys.path.append(str(file.parents[2]))
-import random
-import unittest
+import random  # noqa: E402
+import unittest  # noqa: E402
 
-import numpy as np
+import numpy as np  # noqa: E402
 
-from TPTBox.core import np_utils
-from TPTBox.tests.test_utils import get_nii, repeats
+from TPTBox.core import np_utils  # noqa: E402
+from TPTBox.tests.test_utils import get_nii, repeats  # noqa: E402
 
 
 class Test_bids_file(unittest.TestCase):
@@ -51,7 +51,7 @@ class Test_bids_file(unittest.TestCase):
                     )
 
     def test_maplabels(self):
-        for value in range(repeats):
+        for _value in range(repeats):
             nii, points, orientation, sizes = get_nii()
             arr = nii.get_seg_array().astype(np.uint16)
             volume = np_utils.np_volume(arr)
@@ -73,7 +73,7 @@ class Test_bids_file(unittest.TestCase):
                 self.assertTrue(v == correct[k])
 
     def test_cutout(self):
-        for value in range(repeats):
+        for _value in range(repeats):
             nii, points, orientation, sizes = get_nii()
             arr = nii.get_seg_array()
             shape = arr.shape
@@ -159,11 +159,11 @@ class Test_bids_file(unittest.TestCase):
             self.assertTrue(np.all(bb == c))
 
     def test_fillholes(self):
-        for value in range(repeats):
+        for _value in range(repeats):
             nii, points, orientation, sizes = get_nii(min_size=3)
             arr = nii.get_seg_array()
             volume = np_utils.np_volume(arr)
-            for (p1, p2), com in points.items():
+            for (p1, _p2), com in points.items():
                 rand_point_in_cube = tuple(
                     int(c) + random.randint(-sizes[p1 - 1][idx] // 2, sizes[p1 - 1][idx] // 2) for idx, c in enumerate(com)
                 )
@@ -173,21 +173,21 @@ class Test_bids_file(unittest.TestCase):
                 self.assertTrue(volume[p1] == volume_filled[p1])
 
     def test_connected_components(self):
-        for value in range(repeats):
+        for _value in range(repeats):
             nii, points, orientation, sizes = get_nii(min_size=3)
             arr = nii.get_seg_array()
             volume = np_utils.np_volume(arr)
-            subreg_cc, subreg_cc_N = np_utils.np_connected_components(arr)
+            subreg_cc, subreg_cc_n = np_utils.np_connected_components(arr, verbose=np.random.random() < 0.5)
             for label in [1, 2, 3]:
                 volume_cc = np_utils.np_volume(subreg_cc[label])
-                self.assertTrue(volume[label], np.sum(volume_cc.values()))
+                self.assertTrue(volume[label], np.sum(volume_cc.values()))  # type: ignore
 
                 # see if get center of masses match with stats centroids
                 coms = np_utils.np_get_connected_components_center_of_mass(arr, label)
                 n_coms = len(np_utils.np_unique_withoutzero(subreg_cc[label]))
                 print(n_coms)
-                print(subreg_cc_N)
-                self.assertTrue(n_coms == subreg_cc_N[label])
+                print(subreg_cc_n)
+                self.assertTrue(n_coms == subreg_cc_n[label])
                 if n_coms == 1:
                     first_centroid = np_utils.np_center_of_mass(subreg_cc[label])[1]
                     self.assertTrue(

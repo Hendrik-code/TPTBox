@@ -152,5 +152,9 @@ test_*.ipynb
 *.json
 tmp_*.py
 *.cache
+*tmp*.py
+tmp
+tmp/*
 !/TPTBox/tests/sample_mri/*
 !/TPTBox/tests/sample_ct/*
+poetry.lock

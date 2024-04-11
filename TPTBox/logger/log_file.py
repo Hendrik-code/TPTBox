@@ -27,7 +27,7 @@ indentation_level: int = 0
 class Logger_Interface(Protocol):
     """General Logger Interface"""
 
-    override_prefix: str | None = None
+    prefix: str | None = None
 
     def print(
         self,
@@ -95,7 +95,7 @@ class Logger_Interface(Protocol):
         Returns:
             str: indentantion string
         """
-        global indentation_level
+        global indentation_level  # noqa: PLW0602
         string = ""
         if indentation_level == 0:
             return string
@@ -112,8 +112,8 @@ class Logger_Interface(Protocol):
             _type_: _description_
         """
         indent: str = self._prefix_indentation_level()
-        if self.override_prefix is not None:
-            return indent + f"[{self.override_prefix}]"
+        if self.prefix is not None:
+            return indent + f"[{self.prefix}]"
         return indent + type2bcolors[ltype][1]
 
     def _log(self, text: str, end: str = "\n", ltype=Log_Type.TEXT):
@@ -166,6 +166,7 @@ class Logger(Logger_Interface):
         log_filename: str | dict[str, str],
         default_verbose: bool = False,
         log_arguments=None,
+        prefix: str | None = None,
     ):
         """
 
@@ -174,11 +175,14 @@ class Logger(Logger_Interface):
             log_filename: the filename or the bids-conform key-value pairs as dict
             default_verbose: default verbose behavior of not specified in calls
             log_arguments: if set, will print the contents in a "run with arguments" section
+            prefix: if set, will use this string as prefix instead of the automatically chosen one based on log_type
         """
         path = Path(path)  # ensure pathlib object
         # Get Start time
         self.start_time = get_time()
         start_time_short = format_time_short(self.start_time)
+
+        self.prefix = prefix
 
         # Processes log_filename
         log_filename_processed = ""
@@ -194,7 +198,7 @@ class Logger(Logger_Interface):
         if not Path.exists(log_path):
             Path.mkdir(log_path)
         # Open log file
-        self.f = open(log_path.joinpath(log_filename_full), "w")
+        self.f = open(log_path.joinpath(log_filename_full), "w")  # noqa: SIM115
         # calls close() if program terminates
         self._finalizer = weakref.finalize(self.f, self.close)
         self.default_verbose = default_verbose
@@ -219,6 +223,7 @@ class Logger(Logger_Interface):
         bids_file: BIDS_FILE,
         log_filename: str | dict[str, str],
         default_verbose: bool = False,
+        override_prefix: str | None = None,
     ):
         """Creates a logger object based on metadata from a BIDS_FILE
 
@@ -231,7 +236,7 @@ class Logger(Logger_Interface):
             _type_: _description_
         """
         path = bids_file.dataset
-        return Logger(path, log_filename, default_verbose=default_verbose)
+        return Logger(path, log_filename, default_verbose=default_verbose, prefix=override_prefix)
 
     def _log(self, text: str, end: str = "\n", ltype=Log_Type.TEXT):  # noqa: ARG002
         self.f.write(str(text))
@@ -286,8 +291,13 @@ class No_Logger(Logger_Interface):
     Does not create any logs, but instead verbose defaults to true, printing calls to the terminal
     """
 
-    def __init__(self, print_log_started: bool = False):
+    def __init__(
+        self,
+        print_log_started: bool = False,
+        prefix: str | None = None,
+    ):
         self.default_verbose = True
+        self.prefix = prefix
 
         if print_log_started:
             self.start_time = get_time()
@@ -345,8 +355,14 @@ class String_Logger(Logger_Interface):
     Logger that logs only to a string object "log_content".
     """
 
-    def __init__(self, default_verbose: bool = False, finalize: bool = True):
+    def __init__(
+        self,
+        default_verbose: bool = False,
+        finalize: bool = True,
+        prefix: str | None = None,
+    ):
         self.default_verbose = default_verbose
+        self.prefix = prefix
         self.log_content = ""
         self.log_content_colored = ""
         self.sub_loggers: list[String_Logger] = []
@@ -421,7 +437,7 @@ def _set_indent(indent_change: int | bool):
     Args:
         indent_change (int | bool): If bool, true/false == +1/-1, if int, sets to that int
     """
-    global indentation_level
+    global indentation_level  # noqa: PLW0603
     if isinstance(indent_change, bool):
         indentation_level = indentation_level + 1 if indent_change else max(0, indentation_level - 1)
     else:

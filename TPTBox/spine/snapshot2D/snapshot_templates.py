@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import numpy as np
-from TPTBox import BIDS_FILE, NII, Centroids, Image_Reference, POI_Reference
+from TPTBox import BIDS_FILE, NII, POI, Image_Reference, POI_Reference
 from TPTBox.spine.snapshot2D.snapshot_modular import Snapshot_Frame, Visualization_Type, create_snapshot
 
 
@@ -75,7 +75,7 @@ def mip_shot(
         )
 
     if out_path is None:
-        out_path = ct_ref.get_changed_path(file_type="png", format="snp", info={"desc": "mip"})
+        out_path = ct_ref.get_changed_path(file_type="png", bids_format="snp", info={"desc": "mip"})
     create_snapshot(snp_path=[out_path], frames=frames)
     # print("[ ]saved snapshot into:", out_path)
 
@@ -140,7 +140,7 @@ def sacrum_shot(
             )
         )
     if out_path is None:
-        out_path = ct_ref.get_changed_path(file_type="png", format="snp", info={"desc": "sacrum"})
+        out_path = ct_ref.get_changed_path(file_type="png", bids_format="snp", info={"desc": "sacrum"})
     create_snapshot(snp_path=[out_path], frames=frames)
     # print("[ ]saved snapshot into:", out_path)
 
@@ -177,7 +177,7 @@ def spline_shot(
     if out_path is None:
         out_path = ct_ref.get_changed_path(
             file_type="png",
-            format="snp",
+            bids_format="snp",
             info={"desc": f"spline-interpolation-{add_info}"},
         )
     create_snapshot(snp_path=[out_path], frames=frames)
@@ -228,7 +228,7 @@ def mri_snapshot(
             )
         )
     if out_path is None:
-        out_path = mrt_ref.get_changed_path(file_type="png", format="snp", info={"desc": "vert"})
+        out_path = mrt_ref.get_changed_path(file_type="png", bids_format="snp", info={"desc": "vert"})
     if not isinstance(out_path, list):
         out_path = [out_path]
     create_snapshot(snp_path=out_path, frames=frames)
@@ -307,7 +307,7 @@ def vibe_snapshot(
             )
         )
     if out_path is None:
-        out_path = mrt_ref[0].get_changed_path(file_type="png", format="snp", info={"desc": "vibe"})
+        out_path = mrt_ref[0].get_changed_path(file_type="png", bids_format="snp", info={"desc": "vibe"})
     create_snapshot(snp_path=[out_path], frames=frames, verbose=verbose)
     return out_path
 
@@ -345,7 +345,7 @@ def ct_mri_snapshot(
     ]
     if out_path is None:
         assert isinstance(mrt_ref, BIDS_FILE)
-        out_path = mrt_ref.get_changed_path(file_type="png", format="snp", info={"desc": "vert-ct-mri"})
+        out_path = mrt_ref.get_changed_path(file_type="png", bids_format="snp", info={"desc": "vert-ct-mri"})
     create_snapshot(snp_path=[out_path], frames=frames)
     return out_path
 
@@ -381,7 +381,7 @@ def poi_snapshot(
     #    "ITL_S": 142,
     #    "ITL_D": 144,
     # }
-    poi_all = Centroids.load(subreg_ctd)
+    poi_all = POI.load(subreg_ctd)
     sinister = {}
     median = {}
     dorsal = {}
@@ -468,7 +468,7 @@ def poi_snapshot(
         ),
     ]
     if out_path is None:
-        out_path = ct_nii.get_changed_path(file_type="png", format="snp", info={"desc": "poi"})
+        out_path = ct_nii.get_changed_path(file_type="png", bids_format="snp", info={"desc": "poi"})
     create_snapshot(snp_path=[out_path], frames=frames)
     # print("[ ]saved snapshot into:", out_path)
 
