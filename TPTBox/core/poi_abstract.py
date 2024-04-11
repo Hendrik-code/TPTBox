@@ -12,7 +12,7 @@ from typing_extensions import Self
 from TPTBox.core.nii_wrapper import NII
 
 from . import vert_constants
-from .vert_constants import Coordinate, Location, POI_Dict, log, log_file, logging
+from .vert_constants import Coordinate, Location, POI_Dict, Sentinel, log, log_file, logging
 
 ROUNDING_LVL = 7
 POI_ID = tuple[int, int] | slice | tuple[Location, Location] | tuple[Location, int] | tuple[int, Location]
@@ -64,10 +64,6 @@ def unpack_poi_id(key: POI_ID, definition: Abstract_POI_Definition) -> tuple[int
     if isinstance(subregion, Enum):
         subregion = subregion.value
     return region, subregion
-
-
-class Sentinel:
-    pass
 
 
 class POI_Descriptor(AbstractSet, MutableMapping):

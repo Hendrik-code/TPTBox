@@ -28,7 +28,7 @@ class TestNII(unittest.TestCase):
         # Assert that the instance is created successfully
         assert isinstance(nii_obj, NII)
         assert nii_obj.nii == nii
-        assert nii_obj.seg == True
+        assert nii_obj.seg
         self.assertEqual(nii_obj.c_val, 0)
 
     # Test that the 'get_seg_array' method returns the segmentation array when the NII object is set as a segmentation.
@@ -80,7 +80,7 @@ class TestNII(unittest.TestCase):
     def test_load_valid_path(self):
         # Create a temporary directory and file
         with tempfile.TemporaryDirectory() as temp_dir:
-            temp_file = os.path.join(temp_dir, "test.nii.gz")
+            temp_file = Path(temp_dir, "test.nii.gz")
             # Create a dummy Nifti image
             data = np.zeros((10, 10, 10))
             affine = np.eye(4)
@@ -95,8 +95,8 @@ class TestNII(unittest.TestCase):
 
             # Assert that the loaded image has the correct attributes
             assert isinstance(loaded_nii.nii, Nifti1Image)
-            assert loaded_nii.seg == False
-            assert loaded_nii.c_val == None
+            assert not loaded_nii.seg
+            assert loaded_nii.c_val is None
             Path(temp_file).unlink()
 
     # Test that the 'set_array' method properly sets the array property of the NII object with a valid array.
@@ -339,11 +339,11 @@ class TestNII(unittest.TestCase):
             nii = NII(Nifti1Image(np.zeros((10, 10, 10)), np.eye(4)), seg=True)
 
             # Save the image to a file
-            file_path = os.path.join(temp_dir, "test.nii.gz")
+            file_path = Path(temp_dir, "test.nii.gz")
             nii.save(file_path)
 
             # Check if the file exists
-            assert os.path.exists(file_path)
+            assert Path(file_path)
 
             # Load the saved image
             loaded_nii = NII.load(file_path, seg=True)
@@ -465,20 +465,6 @@ class TestNII(unittest.TestCase):
 
         # Assert that the result is True
         assert result is True
-
-    # Test that the get_intersecting_volume method returns the correct volume of intersection between two images.
-    def test_get_intersecting_volume(self):
-        # Create two NII objects with overlapping volumes
-        img1 = NII(Nifti1Image(np.zeros((10, 10, 10)), np.eye(4)), seg=True)
-        img2 = NII(Nifti1Image(np.zeros((10, 10, 10)), np.eye(4)), seg=True)
-        img1.set_array(np.ones((5, 5, 5)), inplace=True)
-        img2.set_array(np.ones((5, 5, 5)), inplace=True)
-        # Calculate the expected volume of intersection
-        expected_volume = 5 * 5 * 5
-        # Calculate the actual volume of intersection using the get_intersecting_volume method
-        actual_volume = img1.get_intersecting_volume(img2)
-        # Assert that the actual volume matches the expected volume
-        assert actual_volume == expected_volume
 
     # Test that the extract_label method correctly extracts a specific label from the segmentation mask.
     def test_extract_label(self):

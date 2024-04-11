@@ -153,7 +153,7 @@ class Test_Centroids(unittest.TestCase):
         for _ in range(repeats):
             msk, cent, order, sizes = get_nii(num_point=random.randint(1, 2))
             msk.seg = True
-            cdt = POI(cent, order)
+            cdt = POI(cent, orientation=order)
             ex_slice = msk.compute_crop()
             msk2 = msk.apply_crop(ex_slice)
             cdt2 = cdt.apply_crop(ex_slice)
@@ -163,7 +163,7 @@ class Test_Centroids(unittest.TestCase):
     def test_crop_centroids_(self):
         for _ in range(repeats):
             msk, cent, order, sizes = get_nii(num_point=random.randint(1, 7))
-            cdt = POI(cent, order, zoom=msk.zoom, shape=msk.shape)
+            cdt = POI(cent, orientation=order, zoom=msk.zoom, shape=msk.shape)
             ex_slice = msk.compute_crop()
             msk.apply_crop_(ex_slice)
             cdt.apply_crop_(ex_slice)
@@ -173,7 +173,7 @@ class Test_Centroids(unittest.TestCase):
     def test_crop_centroids_trival(self):
         for _ in range(repeats):
             msk, cent, order, sizes = get_nii(num_point=random.randint(1, 7))
-            cdt = POI(cent, order, zoom=msk.zoom, shape=msk.shape)
+            cdt = POI(cent, orientation=order, zoom=msk.zoom, shape=msk.shape)
             ex_slice = msk.compute_crop(minimum=-1)
             msk.apply_crop_(ex_slice)
             cdt.apply_crop_(ex_slice)

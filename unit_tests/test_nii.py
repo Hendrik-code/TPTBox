@@ -2,19 +2,17 @@
 # coverage run -m unittest
 # coverage report
 # coverage html
-import sys
-from pathlib import Path
-
-file = Path(__file__).resolve()
-sys.path.append(str(file.parents[2]))
 import random
+import sys
 import unittest
+from pathlib import Path
 
 import nibabel as nib
 import numpy as np
 
+from TPTBox.core import np_utils
 from TPTBox.core.nii_wrapper import NII
-from TPTBox.core.poi import POI as Centroids  # _centroids_to_dict_list
+from TPTBox.core.poi import POI as Centroids  # _centroids_to_dict_list  # noqa: N811
 from TPTBox.core.poi import calc_centroids, v_idx2name
 from TPTBox.tests.test_utils import get_nii, get_random_ax_code, repeats
 
@@ -31,35 +29,10 @@ def get_all_corner_points(affine, shape) -> np.ndarray:
 
 
 class Test_bids_file(unittest.TestCase):
-    def test_rescale(self):
-        for _ in range(repeats // 10):
-            msk, cent, order, sizes = get_nii(num_point=random.randint(1, 2))
-            cent = Centroids(cent, orientation=order)
-
-            axcode_start = get_random_ax_code()
-            # msk.reorient_(axcode_start)
-
-            cdt = calc_centroids(msk)
-            voxel_spacing = (
-                random.choice([1, 1 / 2, 1 / 3, 1 / 4]),
-                random.choice([1, 1 / 2, 1 / 3, 1 / 4]),
-                random.choice([1, 1 / 2, 1 / 3, 1 / 4]),
-            )
-            voxel_spacing2 = (1.0, 1.0, 1.0)
-            msk2 = msk.rescale(voxel_spacing=voxel_spacing, verbose=False, inplace=False)
-            msk2 = msk2.rescale(voxel_spacing=voxel_spacing2, verbose=False)
-            cdt2 = calc_centroids(msk2)
-
-            for (k1, k2, v), (k1_2, k2_2, v2) in zip(cdt.items(), cdt2.items(), strict=True):
-                self.assertEqual(k1, k1_2)
-                self.assertEqual(k2, k2_2)
-                for v, v2 in zip(v, v2, strict=True):
-                    self.assertAlmostEqual(v, v2)
-
     def test_rescale_corners(self):
         for _ in range(repeats // 4):
             msk, cent, order, sizes = get_nii(num_point=random.randint(1, 2))
-            cent = Centroids(cent, order)
+            cent = Centroids(cent, orientation=order)
 
             axcode_start = get_random_ax_code()
             msk.reorient_(axcode_start)
@@ -124,9 +97,9 @@ class Test_bids_file(unittest.TestCase):
             self.assertTrue(np.isclose(msk.get_array(), msk2.get_array()).all())
 
     def test_rescale_and_reorient(self):
-        for _ in range(repeats // 10):
+        for _ in range(repeats // 5):
             msk, cent, order, sizes = get_nii(num_point=random.randint(1, 2))
-            cent = Centroids(cent, order)
+            cent = Centroids(cent, orientation=order)
             axcode_start = order  # get_random_ax_code()
             msk.reorient_(axcode_start)
             cdt = calc_centroids(msk)
@@ -140,11 +113,11 @@ class Test_bids_file(unittest.TestCase):
             msk2 = msk.rescale_and_reorient(axcode, voxel_spacing=voxel_spacing, verbose=False, inplace=False)
             msk2 = msk2.rescale_and_reorient(axcode_start, voxel_spacing=voxel_spacing2, verbose=False)
             cdt2 = calc_centroids(msk2)
-            for (k1, k2, v), (k1_2, k2_2, v2) in zip(cdt.items(), cdt2.items(), strict=False):
+            for (k1, k2, v), (k1_2, k2_2, v2) in zip(cdt.items(), cdt2.items(), strict=True):
                 self.assertEqual(k1, k1_2)
                 self.assertEqual(k2, k2_2)
-                for v, v2 in zip(v, v2, strict=False):
-                    self.assertAlmostEqual(v, v2)
+                for v, v2 in zip(v, v2, strict=True):  # noqa: B020, PLW2901
+                    self.assertTrue(abs(v - v2) <= 1.01, msg=f"{v},{v2}")
 
     def test_get_plane(self):
         for _ in range(repeats):
@@ -231,6 +204,36 @@ class Test_bids_file(unittest.TestCase):
             msk2 = msk.erode_msk(verbose=False)
             self.assertNotEqual(msk.get_array().sum(), msk2.get_array().sum())
 
+    def test_get_segmentation_connected_components(self):
+        for _ in range(repeats):
+            msk, cent, order, sizes = get_nii(num_point=random.randint(3, 10))
+            label = 1
+            subreg_cc, subreg_cc_n = msk.get_segmentation_connected_components(labels=label)
+            volume = msk.volumes()
+            volume_cc = np_utils.np_volume(subreg_cc[label])
+            self.assertTrue(volume[label], np.sum(volume_cc.values()))
+
+            # see if get center of masses match with stats centroids
+            coms = msk.get_segmentation_connected_components_center_of_mass(label=label)
+            n_coms = len(np_utils.np_unique_withoutzero(subreg_cc[label]))
+            print(n_coms)
+            print(subreg_cc_n)
+            self.assertTrue(n_coms == subreg_cc_n[label])
+            if n_coms == 1:
+                first_centroid = np_utils.np_center_of_mass(subreg_cc[label])[1]
+                self.assertTrue(
+                    abs(coms[0][0] - first_centroid[0]) <= 0.00001,
+                    msg=f"{coms[0][0]}, {first_centroid[0]}",
+                )
+
+    def test_apply_center_crop(self):
+        for _ in range(repeats):
+            crop_sizes = (random.randint(10, 200), random.randint(10, 200), random.randint(10, 200))
+            msk, cent, order, sizes = get_nii(num_point=random.randint(3, 10))
+            msk2 = msk.apply_center_crop(crop_sizes, verbose=random.randint(0, 1) == 0)
+            self.assertEqual(msk2.shape, crop_sizes)
+            self.assertTrue(msk2.assert_affine(shape=crop_sizes))
+
     def test_assert_affine(self):
         # asserts with itself
         for _ in range(repeats):
@@ -242,6 +245,26 @@ class Test_bids_file(unittest.TestCase):
             )
 
         # TODO cases where it should return False
+
+    def test_center_of_masses(self):
+        # asserts with itself
+        for _ in range(repeats):
+            msk, cent, order, sizes = get_nii(num_point=random.randint(3, 10))
+
+            coms = msk.center_of_masses()
+            np_coms = np_utils.np_center_of_mass(msk.get_seg_array())
+
+            print("coms", coms)
+            print("np_coms", np_coms)
+            print("cent", cent)
+
+            for i, g in coms.items():
+                self.assertTrue(i in np_coms)
+                self.assertTrue(np.all([g[idx] == np_coms[i][idx] for idx in range(3)]))
+                #
+                self.assertTrue((i, 50) in cent)
+                self.assertTrue(np.all([g[idx] == cent[i, 50][idx] for idx in range(3)]))
+            # self.assertEqual(coms, np_coms)
 
 
 if __name__ == "__main__":

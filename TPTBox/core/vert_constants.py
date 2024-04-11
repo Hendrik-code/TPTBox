@@ -34,6 +34,10 @@ def never_called(args: NoReturn) -> NoReturn:  # noqa: ARG001
     raise NotImplementedError()
 
 
+class Sentinel:
+    pass
+
+
 class Location(Enum):
     Unknown = 0
     # Vertebral subregions

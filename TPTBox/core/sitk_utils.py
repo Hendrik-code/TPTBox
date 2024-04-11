@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING
 
 import numpy as np
-import SimpleITK as sitk
+import SimpleITK as sitk  # noqa: N813
 
 if TYPE_CHECKING:
     from nibabel import Nifti1Image
@@ -88,8 +88,8 @@ def resize_image_itk(ori_img: sitk.Image, target_img: sitk.Image, resample_metho
     :param resample_method: itk interpolation method : sitk.sitkLinear-linear  sitk.sitkNearestNeighbor-Nearest neighbor
     :return:img_res_itk: Resampling okay itk image
     """
-    target_Size = target_img.GetSize()  # Target image size [x,y,z]
-    target_Spacing = target_img.GetSpacing()  # Voxel block size of the target [x,y,z]
+    target_size = target_img.GetSize()  # Target image size [x,y,z]
+    target_spacing = target_img.GetSpacing()  # Voxel block size of the target [x,y,z]
     target_origin = target_img.GetOrigin()  # Starting point of target [x,y,z]
     target_direction = target_img.GetDirection()  # Target direction [crown, sagittal, transverse] = [z,y,x]
 
@@ -97,10 +97,10 @@ def resize_image_itk(ori_img: sitk.Image, target_img: sitk.Image, resample_metho
     resampler = sitk.ResampleImageFilter()
     resampler.SetReferenceImage(ori_img)  # Target image to resample
     # Set the information of the target image
-    resampler.SetSize(target_Size)  # Target image size
+    resampler.SetSize(target_size)  # Target image size
     resampler.SetOutputOrigin(target_origin)
     resampler.SetOutputDirection(target_direction)
-    resampler.SetOutputSpacing(target_Spacing)
+    resampler.SetOutputSpacing(target_spacing)
     # Set different type according to the need to resample the image
     if resample_method == sitk.sitkNearestNeighbor:
         resampler.SetOutputPixelType(sitk.sitkUInt16)  # Nearest neighbor interpolation is used for mask, and uint16 is saved
@@ -123,37 +123,37 @@ def pad_same(image: sitk.Image, ref_img: sitk.Image, default_value=-1) -> sitk.I
         lower.append(int((image0_min_extent - min_extent) / image.GetSpacing()[index] + 1))
         upper.append(int((max_extent - image0_max_extent) / image.GetSpacing()[index] + 1))
 
-    filter = sitk.ConstantPadImageFilter()
+    sitk_filter = sitk.ConstantPadImageFilter()
     #  filter->SetInput(input);
     print(lower, upper)
-    filter.SetPadLowerBound(lower)
-    filter.SetPadUpperBound(upper)
-    filter.SetConstant(default_value)
-    return filter.Execute(image)
+    sitk_filter.SetPadLowerBound(lower)
+    sitk_filter.SetPadUpperBound(upper)
+    sitk_filter.SetConstant(default_value)
+    return sitk_filter.Execute(image)
 
 
 def padZ(image: sitk.Image, pad_min_z, pad_max_z, unique_value) -> sitk.Image:
-    filter = sitk.ConstantPadImageFilter()
+    sitk_filter = sitk.ConstantPadImageFilter()
     #  filter->SetInput(input);
-    filter.SetPadLowerBound([0, 0, pad_min_z])
-    filter.SetPadUpperBound([0, 0, pad_max_z])
-    filter.SetConstant(unique_value)
-    return filter.Execute(image)
+    sitk_filter.SetPadLowerBound([0, 0, pad_min_z])
+    sitk_filter.SetPadUpperBound([0, 0, pad_max_z])
+    sitk_filter.SetConstant(unique_value)
+    return sitk_filter.Execute(image)
 
 
 def cropZ(image: sitk.Image, pad_min_z, pad_max_z, verbose=True, z_index=2) -> sitk.Image:
     if verbose:
         print("[*] crop ", pad_min_z, abs(pad_max_z), "pixels")
-    filter = sitk.CropImageFilter()
-    filter.SetLowerBoundaryCropSize([abs(pad_min_z) if i == z_index else 0 for i in range(3)])
-    filter.SetUpperBoundaryCropSize([abs(pad_max_z) if i == z_index else 0 for i in range(3)])
-    return filter.Execute(image)
+    sitk_filter = sitk.CropImageFilter()
+    sitk_filter.SetLowerBoundaryCropSize([abs(pad_min_z) if i == z_index else 0 for i in range(3)])
+    sitk_filter.SetUpperBoundaryCropSize([abs(pad_max_z) if i == z_index else 0 for i in range(3)])
+    return sitk_filter.Execute(image)
 
 
 def divide_by_max(img: sitk.Image) -> sitk.Image:
-    filter = sitk.MinimumMaximumImageFilter()
-    filter.Execute(img)
-    maximum = filter.GetMaximum()
+    sitk_filter = sitk.MinimumMaximumImageFilter()
+    sitk_filter.Execute(img)
+    maximum = sitk_filter.GetMaximum()
     if maximum == 0:
         print("[!] Warning the max of this image is 0. It is probably empty ")
         return img
