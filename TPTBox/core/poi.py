@@ -124,6 +124,7 @@ class POI(Abstract_POI):
     origin: Coordinate | None = None
     # internal
     _zoom: None | Zooms = field(init=False, default=None, repr=False, compare=False)
+    _vert_orientation_pir = {}  # Elusive; will not be saved; will not be copied. For Buffering results  # noqa: RUF012
 
     @property
     def shape_int(self):
