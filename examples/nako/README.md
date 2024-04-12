@@ -23,13 +23,14 @@ pip install func_timeout
 pip install TPTBox
 ```
 
-Making the data folder
+Making the data folder. Use -c to run multiple parallel export processes (halve of you cpu-core count recommended)
 ```bash
-dicom2nii_bids.py -i [Path to the dicom folder]
+dicom2nii_bids.py -i [Path to the dicom folder] 
 ```
 Than we provide scrips to stich T2w and Vibe images.
 ```bash
 stitching_T2w.py -i [Path to the bids folder (dataset-nako)]
 stitching_vibe.py -i [Path to the bids folder (dataset-nako)]
 ```
-The stiched images are than under [dataset-nako]/rawdata_stiched
+The stiched images are than under [dataset-nako]/rawdata_stiched.
+Note doing this for 30000 scans my take a while. You can start multiple scripts at the same time in different consols (google tmux).

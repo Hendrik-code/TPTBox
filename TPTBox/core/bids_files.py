@@ -425,6 +425,10 @@ class BIDS_FILE:
         else:
             return self.file[next(iter(self.file.keys()))].exists()
 
+    def unlink(self, missing_ok=True):
+        for f in self.file.values():
+            f.unlink(missing_ok=missing_ok)
+
     def __lt__(self, other):
         return self.BIDS_key < other.BIDS_key
 
