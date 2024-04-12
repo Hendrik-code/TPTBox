@@ -70,7 +70,7 @@ for name, subj in bgi.enumerate_subjects(sort=True):
         out.unlink(missing_ok=True)
         skipped.append(name + "_FAIL")
         # raise
-print("These subject have no T2w images:", len(skipped_no_t2w), skipped_no_t2w)
+print("These subject have no T2w images:", len(skipped_no_t2w), skipped_no_t2w) if len(skipped_no_t2w) != 0 else None
 if len(skipped_to_many) != 0:
     logger.on_warning(
         "These subject have redundant T2w images:",
@@ -78,7 +78,7 @@ if len(skipped_to_many) != 0:
         skipped_to_many,
         "May be they have low quality data. Will use the highest sequence id, which is most likely the best.",
     )
-print("These subject where skipped, because there are to many or to few files:", skipped)
-print("Subject skipped:", len(skipped))
-print("Subject already stitched:", already_stitched)
+logger.on_warning("These subject where skipped, because there are to few files or raised an error:", skipped) if len(skipped) != 0 else None
+print("Subject skipped:", len(skipped)) if len(skipped) != 0 else None
+print("Subject already stitched:", already_stitched) if (already_stitched) != 0 else None
 print("Subject stitched:", new_stitched)
