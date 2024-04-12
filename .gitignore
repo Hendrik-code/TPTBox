@@ -150,6 +150,8 @@ test_*.ipynb
 .*DS_Store
 *tmp*.ipynb
 *.json
+tmp_*.py
+*.cache
 *tmp*.py
 tmp
 tmp/*
