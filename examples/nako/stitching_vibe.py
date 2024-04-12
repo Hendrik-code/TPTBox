@@ -38,6 +38,7 @@ def split_multi_scans(v: list[BIDS_FILE], out: BIDS_FILE):
         chunk = bids.get("chunk")
         if chunk in curr_id:
             splits.append(curr)
+            splits_c.append(curr_id)
             curr = []
             curr_id = []
         curr.append(bids)
@@ -49,7 +50,6 @@ def split_multi_scans(v: list[BIDS_FILE], out: BIDS_FILE):
     multiple_full_scans = True
     for c in splits_c:
         if c != [str(s + 1) for s in list(range(len(c)))]:
-            print(c, [str(s + 1) for s in list(range(len(c)))])
             multiple_full_scans = False
             break
     if not multiple_full_scans:
@@ -57,6 +57,7 @@ def split_multi_scans(v: list[BIDS_FILE], out: BIDS_FILE):
             "[",
             v[0],
             "]; is patched with multiple partial scans. Some scans will probably have movement errors. Delete those duplicated files",
+            splits_c,
         )
         return False
     else:
