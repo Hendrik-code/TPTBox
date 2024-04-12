@@ -425,7 +425,7 @@ class Abstract_POI:
         if location not in self.keys_subregion() or isinstance(location, (list, tuple)):
             raise ValueError(f"The location {location} is not computed in this POI class")
         # Extract subregion based on the provided location
-        poi = self.extract_subregion(location)
+        poi = self.extract_subregion(*location) if isinstance(location, Sequence) else self.extract_subregion(location)
 
         # If vertebra sorting is requested, perform it
         if vertebra:
