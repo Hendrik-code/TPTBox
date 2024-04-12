@@ -124,6 +124,7 @@ class POI(Abstract_POI):
     origin: Coordinate | None = None
     # internal
     _zoom: None | Zooms = field(init=False, default=None, repr=False, compare=False)
+    _vert_orientation_pir = {}  # Elusive; will not be saved; will not be copied. For Buffering results  # noqa: RUF012
 
     @property
     def shape_int(self):
@@ -1364,7 +1365,9 @@ def calc_poi_from_subreg_vert(
 
     log.print("Calc centroids from subregion id", subreg_id, vert_msk.shape, verbose=verbose)
     subreg_id_int = set(loc2int_list(subreg_id))
-    subreg_id_int_phase_1 = tuple(filter(lambda i: i < 60 and i not in [Location.Vertebra_Full.value], subreg_id_int))
+    subreg_id_int_phase_1 = tuple(
+        filter(lambda i: i < 60 and i not in [Location.Vertebra_Full.value, Location.Dens_axis.value], subreg_id_int)
+    )
     # Step 1 get all required locations, crop vert/subreg
     # Step 2 calc centroids
 
@@ -1431,7 +1434,7 @@ def calc_poi_from_subreg_vert(
     if extend_to is None:
         extend_to = POI({}, **vert_msk._extract_affine(), format=FORMAT_POI)
     if len(subreg_id_int) != 0:
-        # sprint("step 6", subreg_id_int)
+        # print("step 6", subreg_id_int)
         compute_non_centroid_pois(extend_to, int2loc(list(subreg_id_int)), vert_msk, subreg_msk, _vert_ids=_vert_ids, log=log)
     extend_to.apply_crop_reverse(crop, org_shape, inplace=True)
     return extend_to
