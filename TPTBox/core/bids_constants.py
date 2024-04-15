@@ -98,11 +98,12 @@ entities = {
     "Split": "split",
     "Density": "den",
     "Description": "desc",
+    "nameconflict": "nameconflict",
 }
 entities_keys = {v: k for k, v in entities.items()}
 
 entity_alphanumeric = [entities[i] for i in ["Task", "Reconstruction Direction"]]
-entity_decimal = [entities[i] for i in ["Run/ID", "Echo", "Flip Angle", "Inversion Time"]]
+entity_decimal = [entities[i] for i in ["Run/ID", "Echo", "Flip Angle", "Inversion Time", "nameconflict"]]
 entity_format = [entities[i] for i in ["Corresponding Modality"]]
 entity_on_off = [entities[i] for i in ["Magnetization Transfer"]]
 entity_left_right = [entities[i] for i in ["Hemisphere"]]

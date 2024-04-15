@@ -289,7 +289,8 @@ class Subject_Container:
     def add(self, bids: BIDS_FILE) -> None:
         sequ = self.get_sequence_name(bids)
         self.sequences.setdefault(sequ, [])
-        self.sequences[sequ].append(bids)
+        if bids not in self.sequences[sequ]:
+            self.sequences[sequ].append(bids)
         bids.set_subject(self)
 
     def new_query(self, flatten=False) -> Searchquery:
@@ -424,6 +425,10 @@ class BIDS_FILE:
         else:
             return self.file[next(iter(self.file.keys()))].exists()
 
+    def unlink(self, missing_ok=True):
+        for f in self.file.values():
+            f.unlink(missing_ok=missing_ok)
+
     def __lt__(self, other):
         return self.BIDS_key < other.BIDS_key
 
@@ -436,6 +441,12 @@ class BIDS_FILE:
 
     def __iter__(self):
         return iter((self,))
+
+    def __eq__(self, key):
+        if hasattr(key, "BIDS_key"):
+            return self.BIDS_key == key.BIDS_key
+        else:
+            return False
 
     def set_subject(self, sub: Subject_Container):
         self.subject = sub
@@ -1179,6 +1190,12 @@ class Searchquery:
 
 class BIDS_Family:
     def __init__(self, family_data: dict[str, list[BIDS_FILE]]):
+        k = []
+        for x in family_data.values():
+            for y in x:
+                assert y.BIDS_key not in k, family_data
+                k.append(y.BIDS_key)
+
         self.data_dict = family_data.copy()
         self.family_id = self.get_identifier()
 
