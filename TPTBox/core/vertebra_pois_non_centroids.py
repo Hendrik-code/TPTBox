@@ -630,7 +630,8 @@ def strategy_ligament_attachment(
                 cords = plane_coords[loc125[0], loc125[1], :]
                 poi[vert_id, out_id] = tuple(x + y.start for x, y in zip(cords, bb, strict=False))
             except Exception:
-                print(vert_id, out_id, "missed its target. Skipped")
+                print(vert_id, out_id, "missed its target. Skipped",loc102.sum(), plane_arcus.sum(), np.unique(plane_arcus))
+
 
 
 def _compute_vert_corners_in_reference_frame(poi: POI, vert_id: int, plane_coords: np.ndarray, subregion: np.ndarray):
@@ -837,7 +838,7 @@ def compute_non_centroid_pois(  # noqa: C901
             if location.value in all_poi_functions:
                 all_poi_functions[location.value](poi, current_subreg, vert_id, bb=bb, log=log)
             else:
-                raise NotImplementedError(location.value)
+                raise NotImplementedError(location, location.value)
 
 
 def calc_center_spinal_cord(
