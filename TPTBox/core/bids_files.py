@@ -541,7 +541,7 @@ class BIDS_FILE:
         dataset_path: str | None = None,
         make_parent=True,
         non_strict_mode: bool = False,
-    ):
+    ) -> Path:
         """
         Changes part of the path to generate new flies. The new parent will be derivatives as a default.
         Examples:
