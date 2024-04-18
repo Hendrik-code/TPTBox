@@ -1,4 +1,4 @@
-import numpy as np
+import numpy as np  # noqa: INP001
 
 from TPTBox import v_idx2name
 from TPTBox.mesh3D.mesh_colors import Mesh_Color_List, _color_dict

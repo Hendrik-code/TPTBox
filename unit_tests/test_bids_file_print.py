@@ -7,10 +7,7 @@ import sys
 import unittest
 from pathlib import Path
 
-if not os.path.isdir("test"):
-    sys.path.append("..")
-file = Path(__file__).resolve()
-sys.path.append(str(file.parents[2]))
+sys.path.append(str(Path(__file__).resolve().parents[2]))
 import io
 import unittest.mock
 

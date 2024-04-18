@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import numpy as np
+
 from TPTBox import BIDS_FILE, NII, POI, Image_Reference, POI_Reference
 from TPTBox.spine.snapshot2D.snapshot_modular import Snapshot_Frame, Visualization_Type, create_snapshot
 
@@ -106,7 +107,7 @@ def sacrum_shot(
     ]
     if add_ctd is not None:
         for c in add_ctd:
-            frames.append(
+            frames.append(  # noqa: PERF401
                 Snapshot_Frame(
                     image=ct_ref,
                     segmentation=vert_msk,
@@ -385,7 +386,7 @@ def poi_snapshot(
     sinister = {}
     median = {}
     dorsal = {}
-    all = {}
+    all_ = {}
     pll = {}
     fl = {}
     # isl = {}
@@ -401,7 +402,7 @@ def poi_snapshot(
         else:
             median[k] = v
         if "ALL" in conversion_poi2text[s]:
-            all[k] = v
+            all_[k] = v
         elif "PLL" in conversion_poi2text[s]:
             pll[k] = v
         elif "FL" in conversion_poi2text[s]:
@@ -432,7 +433,7 @@ def poi_snapshot(
         Snapshot_Frame(
             image=ct_nii,
             segmentation=vert_msk,
-            centroids=poi_all.copy(all),
+            centroids=poi_all.copy(all_),
             mode="CT",
             coronal=True,
             curve_location=Location.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Median,
@@ -485,12 +486,12 @@ if __name__ == "__main__":
     from pathlib import Path
 
     def make_snap(file):
-        id = file.stem
-        if id != "63":
+        idx = file.stem
+        if idx != "63":
             return
         # print(id)
         try:
-            base_path = f"/media/data/robert/datasets/dataset-poi/derivatives/WS_{id}"
+            base_path = f"/media/data/robert/datasets/dataset-poi/derivatives/WS_{idx}"
 
             ct_file = BIDS_FILE(
                 next(Path(base_path).glob("ses-*/sub-WS_*_ses-*_seq-*_space-aligASL_ct.nii.gz")),
@@ -498,15 +499,15 @@ if __name__ == "__main__":
                 verbose=False,
             )
             f = next(Path(base_path).glob("ses-*/sub-WS_*_ses-*_seq-*_seg-subreg_space-aligASL_msk.nii.gz"))
-            g = next(Path(base_path).glob("ses-*/sub-WS_*_ses-*_seq-*_seg-subreg_space-aligASL_msk.nii.gz"))
+            # g = next(Path(base_path).glob("ses-*/sub-WS_*_ses-*_seq-*_seg-subreg_space-aligASL_msk.nii.gz"))
             poi_snapshot(
                 ct_file,
                 f,
                 file,
-                out_path=f"/media/data/robert/datasets/dataset-poi/snapshot/{id}.png",
+                out_path=f"/media/data/robert/datasets/dataset-poi/snapshot/{idx}.png",
             )
         except StopIteration:
-            print(id, "stopIteration")
+            print(idx, "stopIteration")
 
     from joblib import Parallel, delayed
 

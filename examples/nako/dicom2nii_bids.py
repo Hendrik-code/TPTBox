@@ -544,8 +544,6 @@ def extract_folder(  # noqa: C901
                 Path(dicom_zip_path).unlink()
             if is_temp:
                 try:
-                    # pass
-                    # TODO
                     shutil.rmtree(dicom_out_path)
                 except Exception:
                     logger.print_error()
