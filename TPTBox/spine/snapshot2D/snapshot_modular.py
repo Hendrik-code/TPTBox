@@ -1,10 +1,6 @@
 import copy
 import sys
 import warnings
-from pathlib import Path
-
-file = Path(__file__).resolve()
-sys.path.append(str(file.parents[1]))
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
@@ -154,20 +150,19 @@ def sag_cor_curve_projection(
 
     if 26 in ctd_list.centroids.keys_region() and cor_savgol_filter:
         warnings.warn(
-            "Sacrum centroid present with cor_savgol_filter might overshadow the sacrum in coronal view",
-            UserWarning,
+            "Sacrum centroid present with cor_savgol_filter might overshadow the sacrum in coronal view", UserWarning, stacklevel=4
         )
     # Sagittal and coronal projections of a curved plane defined by centroids
     # Note: Will assume IPL orientation!
     # if x-direction (=S/I) is not fully incremental, a straight, not an interpolated plane will be returned
     order = v_idx_order
     order += [i for i in range(256) if i not in v_idx_order]
-    ctd_list.sorting_list = v_idx_order
+    # ctd_list.sorting_list = v_idx_order
     ctd_list.round_(3)
 
     ctd_list.sort()
     if curve_location == Location.Vertebra_Corpus:
-        l = [v for k1, k2, v in ctd_list.items() if k2 == 0 or k2 == 50 or k2 == 40]
+        l = [v for k1, k2, v in ctd_list.items() if k2 in (0, 50, 40)]
     else:
         l = [v for k1, k2, v in ctd_list.items() if k2 == curve_location.value]
 
@@ -184,10 +179,7 @@ def sag_cor_curve_projection(
             x_cur = c[0]
         else:
             throw_idx.append(idx)
-    if len(l) - len(throw_idx) >= 3:
-        l = [i for idx, i in enumerate(l) if idx not in throw_idx]
-    else:
-        l = sorted(l, key=lambda x: x[0])
+    l = [i for idx, i in enumerate(l) if idx not in throw_idx] if len(l) - len(throw_idx) >= 3 else sorted(l, key=lambda x: x[0])
 
     ctd_arr = np.transpose(np.asarray(l))
     shp = img_data.shape
@@ -198,7 +190,7 @@ def sag_cor_curve_projection(
     try:
         f_sag = interp1d(x_ctd, y_ctd, kind="quadratic")
         f_cor = interp1d(x_ctd, z_ctd, kind="quadratic")
-    except:
+    except Exception:
         f_sag = interp1d(x_ctd, y_ctd, kind="linear")
         f_cor = interp1d(x_ctd, z_ctd, kind="linear")
         # print("quadratic", l, x_ctd, len(l), len(throw_idx))
@@ -250,7 +242,7 @@ def curve_projected_mean(
     cor_plane = np.zeros((shp[0], shp[2]))
     sag_plane = np.zeros((shp[0], shp[1]))
     y_zoom = zms[1]  # 0.9 = 1px = 0.9 mm # 10cm = 112px
-    thick = thick_t + ()
+    thick = (*thick_t,)
 
     for x in range(shp[0] - 1):
         if x < min(x_ctd):  # higher
@@ -273,7 +265,7 @@ def curve_projected_mean(
         plane_bool[cor_cut > 0] = True
         sag = np.nansum(img_data[x, :, :], 1, where=img_data[x, :, :] > 0)
         sag_plane[x, :] = div0(sag, np.count_nonzero(img_data[x, :, :], 1), fill=0)
-        cor = np.nansum(cor_cut, 0, where=plane_bool == True)
+        cor = np.nansum(cor_cut, 0, where=plane_bool)
         cor_plane[x, :] = div0(cor, np.count_nonzero(plane_bool, 0), fill=0)
     return sag_plane, cor_plane, curve_projection_axial_fallback(img_data, x_ctd)
 
@@ -283,7 +275,7 @@ def curve_projected_mip(
     zms: tuple[float, float, float],
     x_ctd,
     y_cord,
-    ctd_list,
+    ctd_list,  # noqa: ARG001
     thick_t: tuple[int, int] = (100, 300),
     make_colored_depth: bool = False,
 ):
@@ -293,7 +285,7 @@ def curve_projected_mip(
     sag_plane = np.zeros((shp[0], shp[1]))
     sag_depth_plane = np.zeros((shp[0], shp[1]))
     y_zoom = zms[1]  # 0.9 = 1px = 0.9 mm # 10cm = 112px
-    thick = thick_t + ()
+    thick = (*thick_t,)
 
     for x in range(shp[0] - 1):
         if x < min(x_ctd):  # higher
@@ -311,21 +303,18 @@ def curve_projected_mip(
             thicke = [int(i // y_zoom) + int(i % y_zoom > 0) for i in thick]
         except Exception:
             print("thick infinity bug", y_zoom, thick_t, thick)
-            thicke = thick_t + ()
+            thicke = (*thick_t,)
         thick = thicke
         y_post_rel_to_border = y_ref + int(0.4 * (shp[1] - 1 - y_ref))  # one-third distance to border
         y_range_low = int(max(0, y_ref - thick[1]))  # sagittal left
         y_range_high = int(min(y_ref + thick[0], y_post_rel_to_border))  # sagittal right
         # print("range", y_range_low, y_range_high)
         cor_cut = img_data[x, y_range_low:y_range_high, :]
-        cut_shp = cor_cut.shape
 
         cor_plane[x, :] = np.max(cor_cut, axis=0)  # arr[x, mip_i, :]
         cor_depth_plane[x, :] = np.argmax(cor_cut, axis=0)
-        cor_max_depth = cut_shp[0]
         sag_plane[x, :] = np.max(img_data[x, :, :], axis=1)  # img_data[x, :, z_ref]
         sag_depth_plane[x, :] = np.argmax(img_data[x, :, :], axis=1)
-        sag_max_depth = shp[1]
 
     if make_colored_depth:
         cor_depth_plane = normalize_image(cor_depth_plane)
@@ -339,33 +328,22 @@ def curve_projected_mip(
         cor_m_plane = normalize_image(cor_m_plane)
         sag_m_plane = normalize_image(sag_m_plane)
 
-        # print("cor shape", cor_plane.shape)
         # convert to color image
         cmap = plt.get_cmap("inferno")
-        # cmap2 = plt.get_cmap("viridis")
         cor_plane = cmap(cor_m_plane)[..., :3]
-        # cor_plane_c = cmap2(cor_plane)[..., :3]
-        # cor_depth_c = cmap(cor_depth_plane)[..., :3]
-        # cor_plane = (cor_depth_c + cor_plane_c) / 2
-
         sag_plane = cmap(sag_m_plane)[..., :3]
-
-        # cor_r = cor_plane * 2
-        # cor_b = cor_depth_plane
-        # cor_g = cor_m_plane
-        # cor_plane = np.stack([cor_r, cor_g, cor_b], axis=-1)
 
     return sag_plane, cor_plane, curve_projection_axial_fallback(img_data, x_ctd)
 
 
-def normalize_image(img, range: tuple[float, float] | None = None):
-    if range is None:
-        min = np.min(img)
-        max = np.max(img)
+def normalize_image(img, v_range: tuple[float, float] | None = None):
+    if v_range is None:
+        min_v = np.min(img)
+        max_v = np.max(img)
     else:
-        min = range[0]
-        max = range[1]
-    return (img - min) / (max - min)
+        min_v = v_range[0]
+        max_v = v_range[1]
+    return (img - min_v) / (max_v - min_v)
 
 
 def curve_projection_axial_fallback(img_data, x_ctd):
@@ -389,10 +367,10 @@ def curve_projection_axial_fallback(img_data, x_ctd):
 
 
 def make_isotropic2d(arr2d: np.ndarray, zms2d, msk=False) -> np.ndarray:
-    if arr2d.dtype == np.float64 or arr2d.dtype == np.float16 or arr2d.dtype == np.float32:
+    if arr2d.dtype in (np.float64, np.float16, np.float32):
         arr2d = arr2d.astype(int)
-    xs = [x for x in range(arr2d.shape[0])]
-    ys = [y for y in range(arr2d.shape[1])]
+    xs = list(range(arr2d.shape[0]))
+    ys = list(range(arr2d.shape[1]))
     if msk:
         interpolator = RegularGridInterpolator((xs, ys), arr2d, method="nearest")
     else:
@@ -405,7 +383,7 @@ def make_isotropic2d(arr2d: np.ndarray, zms2d, msk=False) -> np.ndarray:
     try:
         lt = interpolator(pts)
     except Exception:
-        raise ValueError(f"Needs to be casted into a other type: arr2d {arr2d.dtype}")
+        raise ValueError(f"Needs to be casted into a other type: arr2d {arr2d.dtype}")  # noqa: B904
     img = np.reshape(lt, new_shp, order="F")
     return img
 
@@ -458,21 +436,9 @@ def plot_sag_centroids(
     for k1, k2, v in ctd.items():
         # print(k, v, (v[1] * zms[1], v[0] * zms[0]), zms)
         try:
-            axs.add_patch(
-                Circle(
-                    (v[1] * zms[1], v[0] * zms[0]),
-                    2,
-                    color=cmap((k1 - 1) % LABEL_MAX % cmap.N),
-                )
-            )
-            if not hide_centroid_labels:
-                if k2 == curve_location.value and k1 in poi_labelmap:
-                    axs.text(
-                        4,
-                        v[0] * zms[0],
-                        poi_labelmap[k1],
-                        fontdict={"color": cmap(k1 - 1), "weight": "bold"},
-                    )
+            axs.add_patch(Circle((v[1] * zms[1], v[0] * zms[0]), 2, color=cmap((k1 - 1) % LABEL_MAX % cmap.N)))
+            if not hide_centroid_labels and k2 == curve_location.value and k1 in poi_labelmap:
+                axs.text(4, v[0] * zms[0], poi_labelmap[k1], fontdict={"color": cmap(k1 - 1), "weight": "bold"})
         except Exception as e:
             print(e)
 
@@ -489,21 +455,9 @@ def plot_cor_centroids(
     # requires v_dict = dictionary of mask labels
     for k1, k2, v in ctd.items():
         try:
-            axs.add_patch(
-                Circle(
-                    (v[2] * zms[2], v[0] * zms[0]),
-                    2,
-                    color=cmap((k1 - 1) % LABEL_MAX % cmap.N),
-                )
-            )
-            if not hide_centroid_labels:
-                if k2 == curve_location.value and k1 in poi_labelmap:
-                    axs.text(
-                        4,
-                        v[0] * zms[0],
-                        poi_labelmap[k1],
-                        fontdict={"color": cmap(k1 - 1), "weight": "bold"},
-                    )
+            axs.add_patch(Circle((v[2] * zms[2], v[0] * zms[0]), 2, color=cmap((k1 - 1) % LABEL_MAX % cmap.N)))
+            if not hide_centroid_labels and k2 == curve_location.value and k1 in poi_labelmap:
+                axs.text(4, v[0] * zms[0], poi_labelmap[k1], fontdict={"color": cmap(k1 - 1), "weight": "bold"})
         except Exception:
             pass
 
@@ -520,8 +474,8 @@ def make_2d_slice(
     curve_location: Location = Location.Vertebra_Corpus,
     rescale_to_iso: bool = True,
 ):
-    img = to_nii(img)
-    img_reo = img.reorient_(to_ax)
+    img_nii = to_nii(img)
+    img_reo = img_nii.reorient_(to_ax)
     ctd_reo = ctd.reorient_centroids_to(img_reo)
     img_data = img_reo.get_array()
 
@@ -573,7 +527,7 @@ def make_2d_slice(
             cor = make_isotropic2dpluscolor(cor, (zms[0], zms[2]), msk=msk)
             axl = make_isotropic2dpluscolor(axl, (zms[1], zms[1]), msk=msk)
         else:
-            assert False, f"make_2d_slice: expected sag to be ndim 2 or 3, but got shape {sag.shape}"
+            raise ValueError(f"make_2d_slice: expected sag to be ndim 2 or 3, but got shape {sag.shape}")
 
     sag = sag.astype(float)
     cor = cor.astype(float)
@@ -648,7 +602,7 @@ def to_cdt(ctd_bids: POI_Reference | None) -> POI | None:
     return None
 
 
-def create_snapshot(
+def create_snapshot(  # noqa: C901
     snp_path: str | Path | list[str | Path] | list[str] | list[Path],
     frames: list[Snapshot_Frame],
     crop=False,
@@ -679,7 +633,7 @@ def create_snapshot(
     for frame in frames:
         # PRE-PROCESSING
         img = to_nii(frame.image)
-        assert img != None
+        assert img is not None
         seg = to_nii_optional(frame.segmentation, seg=True)  # can be None
         ctd = copy.deepcopy(to_cdt(frame.centroids))
         if (crop or frame.crop_msk) and seg is not None:  # crop to segmentation
@@ -720,7 +674,7 @@ def create_snapshot(
 
             try:
                 t_arr = torch.from_numpy(img_data.copy()).unsqueeze(0).to(torch.float32)
-            except:
+            except Exception:
                 # can't handel uint16
                 t_arr = torch.from_numpy(img_data.astype(np.int32).copy()).unsqueeze(0).to(torch.float32)
 
@@ -763,9 +717,9 @@ def create_snapshot(
                     ctd = ctd_tmp
             else:
                 ctd_tmp = ctd
-        except Exception as e:
+        except Exception:
             print("did not manage to calc ctd_tmp\n", frame)
-            raise e
+            raise
         try:
             sag_img, cor_img, axl_img = make_2d_slice(
                 img,
@@ -794,9 +748,9 @@ def create_snapshot(
                 )
             else:
                 sag_seg, cor_seg, axl_seg = (None, None, None)
-        except Exception as e:
+        except Exception:
             print(frame)
-            raise e
+            raise
         # Conversion to 2D image done, now normalization
         try:
             max_sag = np.percentile(sag_img[sag_img != 0], 99)

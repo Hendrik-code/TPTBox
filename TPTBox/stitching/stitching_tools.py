@@ -44,9 +44,9 @@ def _crop_borders(nii: NII, chunk_info: str, cut: dict[str, tuple[slice, slice, 
 
 
 def GNC_stitch_T2w(
-    HWS: Image_Reference,
-    BWS: Image_Reference,
-    LWS: Image_Reference,
+    HWS: Image_Reference,  # noqa: N803
+    BWS: Image_Reference,  # noqa: N803
+    LWS: Image_Reference,  # noqa: N803
     n4_after_stitch: bool = False,
     # cut={
     #    "HWS": (slice(None), slice(0, 400), slice(None)),

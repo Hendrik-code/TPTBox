@@ -94,7 +94,7 @@ if __name__ == "__main__":
         repeats=50,
         get_input_func=get_nii_array,
         functions=[np_unique, np.unique],
-        assert_equal_function=lambda x, y: True,  # np.all([x[i] == y[i] for i in range(len(x))]),
+        assert_equal_function=lambda x, y: True,  # np.all([x[i] == y[i] for i in range(len(x))]),  # noqa: ARG005
         # np.all([x[i] == y[i] for i in range(len(x))])
     )
     # print(time_measures)

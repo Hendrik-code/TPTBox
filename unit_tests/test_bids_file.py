@@ -8,10 +8,7 @@ import sys
 import unittest
 from pathlib import Path
 
-if not os.path.isdir("test"):
-    sys.path.append("..")
-file = Path(__file__).resolve()
-sys.path.append(str(file.parents[2]))
+sys.path.append(str(Path(__file__).resolve().parents[2]))
 import TPTBox
 import TPTBox.core.bids_files as bids
 from TPTBox.tests.test_utils import a, get_BIDS_test
@@ -62,7 +59,7 @@ class Test_bids_file(unittest.TestCase):
     @unittest.skipIf(not Path("/media/robert/Expansion/dataset-Testset").exists(), "requires real data to be opened")
     def test_get_sequence_files(self):
         global_info = get_BIDS_test()
-        for subj_name, subject in global_info.enumerate_subjects():
+        for _, subject in global_info.enumerate_subjects():
             if "20210111_301" in subject.sequences.keys():
                 sequences = subject.get_sequence_files("20210111_301")
                 self.assertIsInstance(sequences, TPTBox.BIDS_Family)
@@ -77,9 +74,8 @@ class Test_bids_file(unittest.TestCase):
             else:
 
                 def mapping(x: bids.BIDS_FILE):
-                    if x.format == "ctd":
-                        if x.info["seg"] == "subreg":
-                            return "other_key_word"
+                    if x.format == "ctd" and x.info["seg"] == "subreg":
+                        return "other_key_word"
                     return None
 
                 sequences = subject.get_sequence_files("20220517_406", key_transform=mapping)
