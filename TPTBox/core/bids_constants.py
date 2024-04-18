@@ -1,4 +1,5 @@
 ### Legal formats ###
+# https://flexikon.doccheck.com/de/MRT-Sequenz
 formats = [
     "ct",
     "dixon",
@@ -9,13 +10,13 @@ formats = [
     "T2c",
     "T1c",
     "pd",
-    "mevibe",
-    "vibe",
+    "mevibe",  # Multi Echo Volume Interpolated Breathhold Examination
+    "vibe",  # Volume Interpolated Breathhold Examination
     "T1w",
-    "T2w",
+    "T2w",  # TSE/FSE
     "T2star",
-    "TIRM",
-    "STIR",
+    "TIRM",  # (Turbo-Inversion Recovery-Magnitude)
+    "STIR",  # (Short-Tau Inversion Recovery)
     "model",
     "poi",
     "uncertainty",
@@ -24,7 +25,13 @@ formats = [
     "T2haste",
     "logit",
     "flair",
-    "DWI",
+    "DWI",  # Diffusion weighted imaging
+    "IR",  # Inversion recovery
+    "SE",  # Spine ech
+    "SE-SAT",  # Spin-Echo fat saturation, Synonyme: FAT SAT, FRF-SE, SPIR, CHESS, SPECIAL)
+    "GRE",  # Gradient-Echo
+    "PWI",  # Perfusion weighted imaging
+    "DTI",  # Diffusion tensor imaging
 ]
 formats_relaxed = [*formats, "t2", "t1", "t2c", "t1c", "cta", "mr", "snapshot", "t1dixon"]
 # Recommended writing style: T1c, T2c; This list is not official and can be extended.
