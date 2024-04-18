@@ -65,8 +65,6 @@ def save_json(json_ob, file):
         raise TypeError
 
     if test_name_conflict(json_ob, file):
-        print(load_json(file))
-        print(json_ob)
         raise FileExistsError(file)
     if Path(file).exists():
         return True

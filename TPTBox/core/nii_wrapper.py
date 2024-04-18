@@ -306,6 +306,9 @@ class NII(NII_Math):
         for k in rm_key:
             out.pop(k)
         return out
+    def get_empty_POI(self):
+        from TPTBox import POI
+        return POI({},orientation=self.orientation,zoom = self.zoom,shape=self.shape,rotation=self.rotation,origin=self.origin)
     def get_array(self) -> np.ndarray:
         if self.seg:
             return self.get_seg_array()

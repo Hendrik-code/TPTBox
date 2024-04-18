@@ -226,12 +226,7 @@ class BIDS_Global_info:
             if bids_key in self._global_bids_list:
                 self._global_bids_list[bids_key].add_file(bids)
                 return
-            bids = BIDS_FILE(
-                bids,
-                ds,
-                verbose=self.verbose,
-                file_name_manipulation=self.file_name_manipulation,
-            )
+            bids = BIDS_FILE(bids, ds, verbose=self.verbose, file_name_manipulation=self.file_name_manipulation)
         subject = bids.info.get("sub", "unsorted")
         if subject not in self.subjects:
             self.subjects[subject] = Subject_Container(subject)
