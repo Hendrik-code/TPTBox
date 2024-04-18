@@ -43,7 +43,11 @@ def registrate_ants(moving: NII, fixed: NII, type_of_transform="DenseRigid", ver
 
 
 def registrate_nipy(
-    moving: NII, fixed: NII, similarity: Similarity_Measures = "cc", optimizer: Affine_Transforms = "rigid", other_moving: list[NII] = None
+    moving: NII,
+    fixed: NII,
+    similarity: Similarity_Measures = "cc",
+    optimizer: Affine_Transforms = "rigid",
+    other_moving: list[NII] | None = None,
 ):
     if other_moving is None:
         other_moving = []
