@@ -25,8 +25,9 @@ from TPTBox.core.bids_constants import (
     formats,
     formats_relaxed,
     sequence_naming_keys,
-    sequence_splitting_keys,
 )
+
+# ,
 
 file = Path(__file__).resolve()
 sys.path.append(str(file.parents[1]))
@@ -145,11 +146,12 @@ def get_values_from_name(path: Path | str, verbose) -> tuple[str, dict[str, str]
 class BIDS_Global_info:
     def __init__(
         self,
-        datasets: Sequence[Path] | Sequence[str],
-        parents: Sequence[str] = ["rawdata", "derivatives"],
+        datasets: Sequence[Path] | Sequence[str] | str | Path,
+        parents: Sequence[str] | str = ["rawdata", "derivatives"],
         additional_key: Sequence[str] = ["sequ", "seg", "ovl"],
         verbose: bool = True,
         file_name_manipulation: typing.Callable[[str], str] | None = None,
+        sequence_splitting_keys: list[str] | None = None,
     ):
         """This Objects creates a datastructures reflecting BIDS-folders.
 
@@ -158,6 +160,16 @@ class BIDS_Global_info:
             parents (typing.List[str]): List of parents (like ["rawdata","sourcedata","derivatives"])
             additional_key (list, optional): Additional keys that are not in the default BIDS but should not raise a warning. Defaults to ["sequ", "seg", "ovl"].
         """
+        if sequence_splitting_keys is None:
+            from TPTBox.core.bids_constants import sequence_splitting_keys
+
+            self.sequence_splitting_keys = sequence_splitting_keys
+
+        self.sequence_splitting_keys = sequence_splitting_keys
+        if isinstance(datasets, Path | str):
+            datasets = [datasets]  # type: ignore
+        if isinstance(parents, str):
+            parents = [parents]
         assert isinstance(datasets, Sequence), "datasets is not a list"
         assert isinstance(parents, Sequence), "parents is not a list"
         self.__bids_list: dict = {}
@@ -198,15 +210,6 @@ class BIDS_Global_info:
             if w.is_file():
                 self.add_file_2_subject(w, ds)
 
-    @classmethod
-    def add_splitting_key(cls, key):
-        sequence_splitting_keys.append(key)
-
-    @classmethod
-    def remove_splitting_key(cls, key):
-        if key in sequence_splitting_keys:
-            sequence_splitting_keys.remove(key)
-
     def add_file_2_subject(self, bids: BIDS_FILE | Path, ds=None) -> None:
         if isinstance(bids, Path) and "DS_Store" in bids.name:
             return
@@ -229,7 +232,7 @@ class BIDS_Global_info:
             bids = BIDS_FILE(bids, ds, verbose=self.verbose, file_name_manipulation=self.file_name_manipulation)
         subject = bids.info.get("sub", "unsorted")
         if subject not in self.subjects:
-            self.subjects[subject] = Subject_Container(subject)
+            self.subjects[subject] = Subject_Container(subject, self.sequence_splitting_keys)
         print("Found:", subject, "  total=", len(self.subjects), "    ", end="\r")
         self.subjects[subject].add(bids)
 
@@ -256,13 +259,14 @@ class BIDS_Global_info:
 
 
 class Subject_Container:
-    def __init__(self, name) -> None:
+    def __init__(self, name, sequence_splitting_keys: list[str]) -> None:
         self.name = name
         self.sequences: dict[str, list[BIDS_FILE]] = {}
+        self.sequence_splitting_keys = sequence_splitting_keys.copy()
 
     def get_sequence_name(self, bids: BIDS_FILE):
         key_values = []
-        for key in sequence_splitting_keys:
+        for key in self.sequence_splitting_keys:
             key_values.append(bids.info[key]) if key in bids.info else None
         key = str.join("_", key_values)
         # sequence_names are only unique in the same session
@@ -349,7 +353,7 @@ class Subject_Container:
                 s1.append(s)
             else:
                 out_dict[key] = [s]
-        return BIDS_Family(out_dict)
+        return BIDS_Family(out_dict, self.sequence_splitting_keys)
 
 
 class BIDS_FILE:
@@ -1184,13 +1188,13 @@ class Searchquery:
 
 
 class BIDS_Family:
-    def __init__(self, family_data: dict[str, list[BIDS_FILE]]):
+    def __init__(self, family_data: dict[str, list[BIDS_FILE]], sequence_splitting_keys: list[str]):
         k = []
         for x in family_data.values():
             for y in x:
                 assert y.BIDS_key not in k, family_data
                 k.append(y.BIDS_key)
-
+        self.sequence_splitting_keys = sequence_splitting_keys.copy()
         self.data_dict = family_data.copy()
         self.family_id = self.get_identifier()
 
@@ -1238,7 +1242,7 @@ class BIDS_Family:
         else:
             identifier = "sub-" + first_e.info["sub"]
         for s in first_e.info.keys():
-            if s in sequence_splitting_keys:
+            if s in self.sequence_splitting_keys:
                 identifier += "_" + s + "-" + first_e.info[s]
         return identifier
 
