@@ -1,6 +1,7 @@
 """
 This script assumes that there are aligned Sagittal data and poorly aligned axial data.
 """
+
 import pickle
 from pathlib import Path
 
@@ -13,20 +14,18 @@ from TPTBox.stitching import stitching
 
 
 def register_ax_and_stich_both(sub: Subject_Container, out_folder, buffer_path, verbose_stitching=True):
-    if Path(buffer_path).exists():
-        registration_buffer = pickle.load(open(buffer_path, "rb"))
-    else:
-        registration_buffer = {}
+    with open(buffer_path, "rb") as f:
+        registration_buffer = pickle.load(f) if Path(buffer_path).exists() else {}
     new_reg_buffer = {}
     q = sub.new_query(flatten=True)
     q.filter_non_existence("seg")
     q.filter_non_existence("lesions")
     sag_q = q.copy()
     sag_q.filter("acq", "sag")
-    sag_q.filter("chunk", lambda x: True)
+    sag_q.filter("chunk", lambda _: True)
     q.filter("acq", "ax")
     sag_files = list(sag_q.loop_list())
-    sessions = list(set([s.get("ses") for s in sag_files]))
+    sessions = list({s.get("ses") for s in sag_files})
     for session in sessions:
         try:
             sag_q2 = sag_q.copy()
@@ -62,16 +61,16 @@ def register_ax_and_stich_both(sub: Subject_Container, out_folder, buffer_path, 
                 for ax_f in ax_files:
                     ax_nii = to_nii(ax_f)
                     if ax_f.file["nii.gz"] in registration_buffer:
-                        T = registration_buffer[ax_f.file["nii.gz"]]
+                        transform = registration_buffer[ax_f.file["nii.gz"]]
                     else:
                         a = ax_nii.reorient().rescale() / ax_nii.max()
                         b = stitched_sag.resample_from_to(a) / stitched_sag.max()
                         if b.sum() == 0:
                             b = stitched_sag.resample_from_to(a)  # prevent error, when we do not intersect
-                        aligned_img, T, out_arr = registrate_nipy(a, b, similarity="cc", optimizer="rigid")
-                    new_reg_buffer[ax_f.file["nii.gz"]] = T
+                        aligned_img, transform, out_arr = registrate_nipy(a, b, similarity="cc", optimizer="rigid")
+                    new_reg_buffer[ax_f.file["nii.gz"]] = transform
 
-                    aligned_img = only_change_affine(ax_nii, T)
+                    aligned_img = only_change_affine(ax_nii, transform)
                     reg_ax_files.append(aligned_img)
 
                 stitching(*reg_ax_files, out=out_ax, bias_field=True, verbose_stitching=verbose_stitching)
@@ -83,10 +82,10 @@ def register_ax_and_stich_both(sub: Subject_Container, out_folder, buffer_path, 
                     ax_nii = to_nii(seg, seg=True)
                     ax_nii.seg = True
                     if ax_f.file["nii.gz"] in new_reg_buffer:
-                        T = new_reg_buffer[ax_f.file["nii.gz"]]
-                        aligned_img = only_change_affine(ax_nii, T)
+                        transform = new_reg_buffer[ax_f.file["nii.gz"]]
+                        aligned_img = only_change_affine(ax_nii, transform)
                     else:
-                        assert False, out_ax
+                        raise FileNotFoundError(out_ax)  # noqa: TRY301
                         aff = to_nii(ax_f).affine
                         aligned_img = NII(nib.nifti1.Nifti1Image(ax_nii.get_array(), aff), ax_nii.seg)
 
@@ -101,10 +100,10 @@ def register_ax_and_stich_both(sub: Subject_Container, out_folder, buffer_path, 
                     ax_nii = to_nii(seg, seg=True)
                     ax_nii.seg = True
                     if ax_f.file["nii.gz"] in new_reg_buffer:
-                        T = new_reg_buffer[ax_f.file["nii.gz"]]
-                        aligned_img = only_change_affine(ax_nii, T)
+                        transform = new_reg_buffer[ax_f.file["nii.gz"]]
+                        aligned_img = only_change_affine(ax_nii, transform)
                     else:
-                        assert False, out_ax
+                        raise FileNotFoundError(out_ax)  # noqa: TRY301
                         aff = to_nii(ax_f).affine
                         aligned_img = NII(nib.nifti1.Nifti1Image(ax_nii.get_array(), aff), ax_nii.seg)
 
@@ -117,7 +116,7 @@ def register_ax_and_stich_both(sub: Subject_Container, out_folder, buffer_path, 
             No_Logger().print_error()
             try:
                 print(ax_files)
-            except:
+            except Exception:
                 pass
 
     return new_reg_buffer
@@ -130,7 +129,8 @@ def save_registration_buffer(buffers: dict | list[dict], registration_buffer, bu
     for new_buffer in buffers:
         for key, value in new_buffer.items():
             registration_buffer[key] = value
-    pickle.dump(registration_buffer, open(buffer_path, "wb"))
+    with open(buffer_path, "wb") as x:
+        pickle.dump(registration_buffer, x)
 
 
 def run(root="/media/data/robert/datasets/dataset-McGinnes/", out_folder="rawdata_new", n_jobs=1, chunks=16):

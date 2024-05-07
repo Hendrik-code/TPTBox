@@ -8,14 +8,7 @@ import sys
 import unittest
 from pathlib import Path
 
-file = Path(__file__).resolve()
-sys.path.append(str(file.parents[2]))
-
-# TODO OUTDATED
-# from TPTBox.registration.ridged_points.reg_segmentation import ridged_segmentation_from_seg
-
-file = Path(__file__).resolve()
-sys.path.append(str(file.parents[1]))
+sys.path.append(str(Path(__file__).resolve().parents[2]))
 import nibabel as nib
 
 from TPTBox import to_nii

@@ -34,9 +34,6 @@ from TPTBox.core.poi import load_poi as load_centroids
 from TPTBox.core.poi_global import POI_Global
 from TPTBox.core.vert_constants import Location, Zooms, v_idx2name, v_idx_order, v_name2idx
 
-# segmentation
-from TPTBox.docker.docker import run_docker
-
 # Logger
 from TPTBox.logger import Log_Type, Logger, Logger_Interface, Print_Logger, String_Logger
 from TPTBox.logger.log_file import No_Logger

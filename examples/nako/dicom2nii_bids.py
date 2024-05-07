@@ -12,6 +12,7 @@ from copy import deepcopy
 from pathlib import Path
 
 import dicom2nifti
+import dicom2nifti.exceptions
 import dill as pickle
 import nibabel.orientations as nio
 import numpy as np
@@ -121,11 +122,20 @@ def generate_general_name(
     # print(simp_json)
     #
     keys: dict[str, str] = {}
-    keys["sub"] = str(simp_json["PatientID"]).split("_")[0]
+    try:
+        keys["sub"] = str(simp_json["PatientID"]).split("_")[0]
+    except KeyError:
+        assert root is not None
+        assert "study" in Path(root).parent.name, "No Patient ID" + str(root)
+        keys["sub"] = Path(root).parent.name
+
     for key, value in template.items():
         if isinstance(value, tuple):
             v, fun = value
-            v = fun(root) if v == "path" else fun(str(simp_json[v]))
+            if v == "path":
+                v = fun(root)
+            elif v in simp_json:
+                v = fun(str(simp_json[v]))
             keys[key] = str(v).replace("_", "-")
         elif value.lower() == "acq":
             keys[key] = acq  # type: ignore
@@ -139,7 +149,7 @@ def generate_general_name(
                 pass
                 # keys[key] = None  # type: ignore
                 # raise ValueError(SeriesDescription)
-        else:
+        elif value in simp_json:
             keys[key] = str(simp_json[value]).replace("_", "-")
     if _increment_id != 0:
         _inc_key(keys, inc=_increment_id)
@@ -173,46 +183,58 @@ def generate_general_name(
 file_mapping = {
     "formats": {
         ".*t2w?_tse.*": "T2w",
+        "t2w?_fse.*": "T2w",
         ".*t1w?_tse.*": "T1w",
         ".*t1w?_vibe_tra.*": "vibe",
         ".*flair.*": "flair",
+        ".*stir.*": "STIR",
+        ".*dti.*": "DTI",
         ".*dwi.*": "DWI",
         ".*dir.*": "DIR",
-        # ".*swip.*": "SWIP",
-        # ".*dadc.*": "DADC",
-        ".*t2.*": "T2w",
-        ".*t1.*": "T1w",
+        "se": "SE",  # Spine echo
+        ".* fir .*": "IR",  # fast inversion recovery
+        ".*irfse.*": "IR",  # fast inversion recovery
+        "ir_.*": "IR",  # inversion recovery
         ".*mp?ra?ge?.*": "MPRAGE",
-        # ".*hasta.*": "mr",
-        # ".*medic.*": "mr",
         ".*mip.*": "MIP",
         "b0map": "b0map",
-        # "ax 2d merge filter a": "mr",
-        # "orig: .*": "mr",
-        ".*dti.*": "DTI",
-        # ".*loc.*": "mr",
-        # "rsi_distcorr": "mr",
-        # "mag": "mr",
-        # ".*qsm.*": "mr",
-        # "rsfmri": "mr",
-        # "SWI": "mr",
+        ".*t2.*": "T2w",
+        ".*t1.*": "T1w",
+        # others
+        "shim2d": "mr",
+        "3-plane loc": "mr",
+        "fgr": "mr",  # Fetal growth restriction (FGR) ????
+        "screen save": "mr",
+        ".*¶.*": "mr",
+        ".*scout": "mr",
+        "localizer": "mr",
+        ".*pilot.*": "mr",
+        ".*2d.*": "mr",
+        ".*scno.*": "mr",
+        ".*scano.*": "mr",
+        "sys2dcard": "mr",
+        "3-pl loc gr": "mr",
+        re.escape("?") + "*": "mr",
         ".*": "mr",
     },
     # "templates_map": {},  # "T2w": "default", "T1w": "default", "vibe": "dixon_no_sequ"
     "templates_map": {
-        "flair": "by_zip_path",
-        "T2w": "by_zip_path",
-        "T1w": "by_zip_path",
-        "DWI": "by_zip_path",
-        "DIR": "by_zip_path",
-        "SWIP": "by_zip_path",
-        "DADC": "by_zip_path",
-        "mr": "by_zip_path",
-        "MPRAGE": "by_zip_path",
-        "Hast": "by_zip_path",
-        "MIP": "by_zip_path",
-        "b0map": "by_zip_path",
-        "DTI": "by_zip_path",
+        "flair": "default",
+        "T2w": "default",
+        "T1w": "default",
+        "DWI": "default",
+        "DIR": "default",
+        "SWIP": "default",
+        "DADC": "default",
+        "mr": "default",
+        "MPRAGE": "default",
+        "Hast": "default",
+        "MIP": "default",
+        "b0map": "default",
+        "DTI": "default",
+        "STIR": "default",
+        "IR": "default",
+        "SE": "default",
     },
     "templates": {
         "default": {
@@ -260,6 +282,8 @@ def from_dicom_json_to_extracting_nii(  # noqa: C901
     dcm_data = dcm_data_l[0]
 
     py_dataset = deepcopy(dcm_data)
+    if not hasattr(py_dataset, "PixelData"):
+        return
     del py_dataset.PixelData  # = None
     py_dict = py_dataset.to_json_dict()
     if "00291010" in py_dict and "InlineBinary" in py_dict["00291010"]:
@@ -268,7 +292,7 @@ def from_dicom_json_to_extracting_nii(  # noqa: C901
     if "00291020" in py_dict and "InlineBinary" in py_dict["00291020"]:
         del py_dict["00291020"]["InlineBinary"]
     simp_json = get_json(py_dict)
-    if "nako" in str(simp_json["StudyDescription"]).lower():
+    if "StudyDescription" in simp_json and "nako" in str(simp_json["StudyDescription"]).lower():
         keys = {}
         keys["sub"] = str(simp_json["PatientID"]).split("_")[0]
         p = Path(nifti_dir, "rawdata", str(keys["sub"][:3]), keys["sub"])
@@ -315,12 +339,32 @@ def from_dicom_json_to_extracting_nii(  # noqa: C901
     else:
         if len(dcm_data_l) == 1:
             return
+        if "SeriesDescription" not in simp_json:
+            return
         series_description = str(simp_json["SeriesDescription"]).lower()
         mri_format = None
+        #################### Understand sequence by given times ####################
+        try:
+            a, b = None, None
+            if series_description.startswith("fse ") and "/" in series_description:
+                # FSE [TR]/[TE] *
+                a, b = series_description[4:].split(" ")[0].split("/")
+                tr = float(a)
+                te = float(b)
+                if tr >= 2000 and (te < 150 and te > 80):
+                    mri_format = "T2w"
+                print(series_description, "Tr", tr, "te", te, "format", mri_format, tr >= 2000)
+        except Exception:
+            pass
+        #################### Understand sequence by given times ####################
         for key in file_mapping["formats"].keys():
+            if mri_format is not None:
+                break
             regex = re.compile(key)
+
             if re.match(regex, series_description):
                 mri_format = file_mapping["formats"][key]
+
         if mri_format is None:
             if series_description in file_mapping["formats"]:
                 mri_format = file_mapping["formats"][series_description]
@@ -336,7 +380,7 @@ def from_dicom_json_to_extracting_nii(  # noqa: C901
                         formats.append(mri_format)
                     if mri_format in formats:
                         break
-                file_mapping["formats"][series_description] = mri_format
+                file_mapping["formats"][re.escape(series_description)] = mri_format
         if series_description in file_mapping["templates_map"]:
             template_name = file_mapping["templates_map"][series_description]
             template = file_mapping["templates"][template_name]
@@ -364,7 +408,6 @@ def from_dicom_json_to_extracting_nii(  # noqa: C901
                 file_mapping["templates_map"][mri_format] = template_name
             else:
                 file_mapping["templates_map"][mri_format] = series_description
-
         fname = generate_general_name(mri_format, template, dcm_data_l, nifti_dir, make_subject_chunks=make_subject_chunks, root=root)
         fname.parent.mkdir(exist_ok=True, parents=True)
         # raise NotImplementedError(simp_json)
@@ -377,10 +420,16 @@ def from_dicom_json_to_extracting_nii(  # noqa: C901
         logger.print("already exists:", fname, ltype=Log_Type.STRANGE)
         return
 
-    # /media/data/NAKO/MRT/NAKO-732_MRT/3D_GRE_TRA_F/
-    # exit()
     if isinstance(dicom_out_path, list):
-        convert_dicom.dicom_array_to_nifti(dicom_out_path, nii_path, True)
+        try:
+            convert_dicom.dicom_array_to_nifti(dicom_out_path, nii_path, True)
+        except dicom2nifti.exceptions.ConversionValidationError as e:
+            if "TOO_FEW_SLICES/LOCALIZER" in e.args[0]:
+                return
+            if "IMAGE_ORIENTATION_INCONSISTENT" in e.args[0]:
+                return
+            else:
+                raise
     else:
         try:
             func_timeout(10, dicom2nifti.dicom_series_to_nifti, (dicom_out_path, nii_path, True))
@@ -403,6 +452,9 @@ def find_all_files(l: list, curr_path: Path):
     else:
         l.append(str(curr_path))
     return l
+
+
+already_run = []
 
 
 def extract_folder(  # noqa: C901
@@ -432,7 +484,7 @@ def extract_folder(  # noqa: C901
         if str(dicom_zip_path).endswith(".pkl"):
             continue
         try:
-            logger.print("Start", dicom_zip_path)
+            logger.print("Start", dicom_zip_path) if not str(dicom_zip_path).endswith(".dcm") else None
             # try:
             # Step 1 unzip files
             if str(dicom_zip_path).endswith(".zip"):
@@ -442,6 +494,13 @@ def extract_folder(  # noqa: C901
                 with zipfile.ZipFile(dicom_zip_path, "r") as zip_ref:
                     dicom_out_path = Path(zip_dir, os.path.basename(dicom_zip_path)[:-4])  # noqa: PTH119
                     zip_ref.extractall(dicom_out_path)
+            elif str(dicom_zip_path).endswith(".dcm"):
+                is_temp = False
+                dicom_out_path = Path(dicom_zip_path).parent
+                if dicom_out_path in already_run:
+                    continue
+                else:
+                    already_run.append(dicom_out_path)
             else:
                 is_temp = False
                 dicom_out_path = dicom_zip_path
@@ -455,7 +514,10 @@ def extract_folder(  # noqa: C901
                 if a.is_file():
                     try:
                         dcm_data = pydicom.dcmread(a, defer_size="1 KB", force=True)
-                        typ = str(dcm_data.get_item((0x0008, 0x0008)).value).split("\\")[2]
+                        try:
+                            typ = str(dcm_data.get_item((0x0008, 0x0008)).value).split("\\")[2]
+                        except Exception:
+                            typ = ""
                         key = f"{dcm_data.SeriesInstanceUID}_{typ}"
                         if key not in dicom_files:
                             dicom_files[key] = []
@@ -482,14 +544,13 @@ def extract_folder(  # noqa: C901
                 Path(dicom_zip_path).unlink()
             if is_temp:
                 try:
-                    # pass
                     shutil.rmtree(dicom_out_path)
                 except Exception:
                     logger.print_error()
         except Exception:
             try:
-                # pass
-                shutil.rmtree(dicom_out_path)
+                if is_temp:
+                    shutil.rmtree(dicom_out_path)
             except Exception:
                 pass
             logger.print_error()
@@ -510,6 +571,7 @@ if __name__ == "__main__":
     arg_parser.add_argument(
         "-nn", "--nonako", help="use this export script for something else or export all nako folder", action="store_true", default=False
     )
+    arg_parser.add_argument("-sc", "--subjectchunks", default=3, type=int)
     args = arg_parser.parse_args()
     print("args=%s" % args)
     print("args.inputfolder=%s" % args.inputfolder)
@@ -564,5 +626,5 @@ if __name__ == "__main__":
     import os
 
     Parallel(n_jobs=min(os.cpu_count(), args.cpus))(
-        delayed(extract_folder)(Path(path), Path(args.outfolder, f"dataset-{args.name}"), False, 3) for path in dcm_dir
+        delayed(extract_folder)(Path(path), Path(args.outfolder, f"dataset-{args.name}"), False, args.subjectchunks) for path in dcm_dir
     )
