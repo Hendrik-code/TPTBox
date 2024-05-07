@@ -6,19 +6,19 @@ import numpy as np
 from tqdm import tqdm
 
 
-def speed_test_input(input, functions: list[Callable], assert_equal_function: Callable | None = None, *args, **kwargs):
+def speed_test_input(inp, functions: list[Callable], assert_equal_function: Callable | None = None, *args, **kwargs):
     time_measures = {}
     outs = {}
     for f in functions:
         start = perf_counter()
-        input_copy = deepcopy(input)
+        input_copy = deepcopy(inp)
         out = f(input_copy, *args, **kwargs)
         time = perf_counter() - start
         outs[f.__name__] = out
         time_measures[f.__name__] = time
 
     if assert_equal_function is not None:
-        for oname, o in outs.items():
+        for o in outs.values():
             assertion = assert_equal_function(o, outs[functions[0].__name__])
             assert assertion, f"speed_test: nonequal results given the assert_equal_function, got {o, outs[functions[0].__name__]}"
     return time_measures
@@ -37,9 +37,9 @@ def speed_test(
         print(f.__name__, out)
 
     time_sums = {}
-    for i in tqdm(range(repeats)):
-        input = get_input_func()
-        time_measures = speed_test_input(input, functions=functions, assert_equal_function=assert_equal_function, *args, **kwargs)
+    for _ in tqdm(range(repeats)):
+        inp = get_input_func()
+        time_measures = speed_test_input(inp, *args, functions=functions, assert_equal_function=assert_equal_function, **kwargs)
         for k, v in time_measures.items():
             if k not in time_sums:
                 time_sums[k] = 0

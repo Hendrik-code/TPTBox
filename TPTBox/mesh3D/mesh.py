@@ -43,8 +43,7 @@ class Mesh3D:
 
     @classmethod
     def load(cls, filepath: str | Path):
-        filepath = str(filepath)
-        assert os.path.exists(filepath), f"loading mesh from {filepath}, filepath does not exist"
+        assert Path(filepath).exists(), f"loading mesh from {filepath}, filepath does not exist"
         reader = pv.get_reader(str(filepath))
         mesh = reader.read()
         return Mesh3D(mesh)

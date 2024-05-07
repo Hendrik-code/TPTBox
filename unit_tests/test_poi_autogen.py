@@ -110,7 +110,7 @@ class TestPOI(unittest.TestCase):
             f = Path(temp_dir, "poi.json")
             poi.save(f)
             # Check if the file exists
-            assert os.path.exists(f)
+            assert f.exists()
             assert POI.load(f) == poi
             Path(f).unlink()
 
@@ -345,7 +345,7 @@ class TestPOI(unittest.TestCase):
     def test_affine_property_without_attributes(self):
         poi = POI()
         with self.assertRaises(AssertionError):
-            poi.affine
+            _ = poi.affine
 
     # Test that creating an instance of the 'POI' class with None values for all attributes initializes the attributes correctly.
     def test_create_instance_with_none_values(self):
@@ -359,7 +359,7 @@ class TestPOI(unittest.TestCase):
         assert poi.rotation is None
         assert poi.origin is None
         assert poi._zoom is None
-        assert poi.is_global == False
+        assert not poi.is_global
 
     # Test that the 'origin' attribute is properly set to None when assigned the value of None.
     def test_origin_attribute_set_to_none(self):
@@ -464,7 +464,7 @@ class TestPOI(unittest.TestCase):
         poi.shape = None
         with self.assertRaises(ValueError):
             # Call the 'filter_points_inside_shape' method
-            filtered_poi = poi.filter_points_inside_shape()
+            _ = poi.filter_points_inside_shape()
 
     # Test that the 'round' method of the 'POI' class correctly rounds the coordinates
     def test_round_ndigits(self):
@@ -487,7 +487,7 @@ class TestPOI(unittest.TestCase):
     # Test that the 'is_global' property returns the correct value for an instance of the 'POI' class.
     def test_is_global_property(self):
         poi = POI()
-        assert poi.is_global == False
+        assert not poi.is_global
 
     # Test that iterating over a 'POI' instance using a for loop correctly iterates over the centroids.
     def test_iterating_over_poi_instance(self):
