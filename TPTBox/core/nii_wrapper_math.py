@@ -151,11 +151,11 @@ class NII_Math(NII_Proxy):
         arr = self.clamp(min=-1024,max=1024,inplace=inplace)
         return arr.normalize(min_out = min_out, max_out = max_out, inplace=inplace)
 
-    def sum(self,axis = None,keepdims=False,where = np._NoValue)->float:  # type: ignore
+    def sum(self,axis = None,keepdims=False,where = np._NoValue, **qargs)->float:  # type: ignore
         if hasattr(where,"get_array"):
             where=where.get_array().astype(bool)
 
-        return np.sum(self.get_array(),axis=axis,keepdims=keepdims,where=where)
+        return np.sum(self.get_array(),axis=axis,keepdims=keepdims,where=where,**qargs)
     def threshold(self,threshold=0.5, inplace=False):
         arr = self.get_array()
         arr2 = arr.copy()
