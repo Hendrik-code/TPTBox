@@ -15,30 +15,23 @@ It can find, filter, search any BIDS_Family and subjects, and has many functiona
 - ...
 
 ## Install the package
-#### Make venv:
-```
+```bash
 conda create -n 3.10 python=3.10 
 conda activate 3.10
+pip install TPTBox
 ```
-### One of the following:
+### Install via github:
 (you should be in the project folder)
-```
-pip install -e ./
+```bash
+pip install poetry
+poetry install
 ```
 or:
-
 Develop mode is really, really nice:
+```bash
+pip install poetry
+poetry install --with dev 
 ```
-python setup.py develop
-sudo python3 setup.py develop
-```
-
-If "python3" don't know where to install, use
-```
-which python
-sudo <result from which python> setup.py develop
-```
-
 
 ## Functionalities
 
@@ -64,28 +57,51 @@ Contains definitions and sort order for our intern labels, for vertebrae, POI, .
 Example rotate and resample.
 
 ```python
-# R right, L left .. {"S": "ax", "I": "ax", "L": "sag", "R": "sag", "A": "cor", "P": "cor"}
-img_rot = reorient_to(img, axcodes_to=("P", "I", "R")) 
-img_rot_iso = resample_nib(img_rot, voxel_spacing=(1, 1, 1), order=3, c_val=0)
+
+from TPTBox import NII
+
+nii = NII.load("...path/xyz.nii.gz", seg=True)
+img_rot = nii.reorient(axcodes_to=("P", "I", "R"))
+img_scale = nii.rescale((1.5, 5, 1))  # in mm as currently rotated
+# resample to an other image
+img_resampled_to_other = nii.resample_from_to(img_scale)
+
+from TPTBox import NII
+
+nii = NII.load("...path/xyz.nii.gz", seg=True)
+# R right, L left
+# S superior/up, I inferior/down
+# A anterior/front, P posterior/back
+img_rot = nii.reorient(axcodes_to=("P", "I", "R"))
+img_scale = nii.rescale((1.5, 5, 1))  # in mm as currently rotated
+# resample to an other image
+img_resampled_to_other = nii.resample_from_to(img_scale)
+
+nii.get_array()  # get numpy array
+nii.affine  # Affine matrix
+nii.header  # NIFTY header
+nii.orientation  # Orientation in 3-Letters
+nii.zoom # Scale of the three image axis
+nii.shape #shape
 ```
 
-### Snapshot2D
+### Snapshot2D Spine
 
 The snapshot function automatically generates sag, cor, axial cuts in the center of a segmentation.
 
 ```python
-from pathlib import Path
-from BIDS.wrapper.snapshot_mr_fun2 import Snapshot_Frame,create_snapshot
-ct = Path('Path to CT')
-mri = Path('Path to MRI')
-vert = Path('Path to Vertebra segmentation')
-subreg = Path('Path to Vertebra subregions')
-cdt = (vert,subreg,[50]) # 50 is subregion of the vertebra body
+from TPTBox.spine.snapshot2D import Snapshot_Frame, create_snapshot
+
+ct = Path("Path to CT")
+mri = Path("Path to MRI")
+vert = Path("Path to Vertebra segmentation")
+subreg = Path("Path to Vertebra subregions")
+cdt = (vert, subreg, [50])  # 50 is subregion of the vertebra body
 # cdt can be also loaded as a json. See definition Centroid_DictList in nii_utils
 
 ct_frame = Snapshot_Frame(image=ct, segmentation=vert, centroids=cdt, mode="CT", coronal=True, axial=True)
 mr_frame = Snapshot_Frame(image=mri, segmentation=vert, centroids=None, mode="MRI", coronal=True, axial=True)
-create_snapshot(snp_path='snapshot.jpg',frames=[ct_frame, mr_frame])
+create_snapshot(snp_path="snapshot.jpg", frames=[ct_frame, mr_frame])
 ```
 
 
