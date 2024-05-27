@@ -573,10 +573,10 @@ if __name__ == "__main__":
     )
     arg_parser.add_argument("-sc", "--subjectchunks", default=3, type=int)
     args = arg_parser.parse_args()
-    print("args=%s" % args)
-    print("args.inputfolder=%s" % args.inputfolder)
-    print("args.outfolder=%s" % args.outfolder)
-    print("args.name=%s" % args.name)
+    print(f"args={args}")
+    print(f"args.inputfolder={args.inputfolder}")
+    print(f"args.outfolder={args.outfolder}")
+    print(f"args.name={args.name}")
     p = args.inputfolder
     assert p is not None, "use -i for a existing input folder"
     assert args.inputfolder is not None, "use -i for a existing input folder"
