@@ -3,7 +3,6 @@ from enum import Enum
 from typing import Literal, NoReturn
 
 import numpy as np
-
 from TPTBox.logger import log_file
 
 log = log_file.Reflection_Logger()
@@ -40,6 +39,7 @@ class Sentinel:
 
 class Location(Enum):
     Unknown = 0
+    Sacrum = 26
     # Vertebral subregions
     Vertebra_Full = 40
     Arcus_Vertebrae = 41
