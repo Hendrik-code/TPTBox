@@ -9,7 +9,6 @@ It can find, filter, search any BIDS_Family and subjects, and has many functiona
 - Reorient, Resample, Shift Niftys, Centroids, labels
 - Modular 2D snapshot generation (different views, MIPs, ...)
 - 3D Mesh generation from segmentation and snapshots from them
-- Running the Anduin docker smartly
 - Registration
 - Logging everything consistently
 - ...
