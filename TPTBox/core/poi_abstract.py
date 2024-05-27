@@ -294,14 +294,12 @@ class Abstract_POI:
         return self.copy(ctd)
 
     @property
-    def is_global(self) -> bool:
-        ...
+    def is_global(self) -> bool: ...
 
     def clone(self, **qargs):
         return self.copy(**qargs)
 
-    def copy(self, centroids: POI_Descriptor | None = None, **qargs) -> Self:
-        ...
+    def copy(self, centroids: POI_Descriptor | None = None, **qargs) -> Self: ...
 
     def map_labels(
         self,
@@ -398,6 +396,7 @@ class Abstract_POI:
         poi = self.centroids.sort(inplace=inplace)
 
         if inplace:
+            self.centroids = poi
             return self
         return self.copy(centroids=poi)
 
@@ -422,11 +421,10 @@ class Abstract_POI:
         """
         if isinstance(location, Location):
             location = location.value
-        if location not in self.keys_subregion() or isinstance(location, (list, tuple)):
+        if location not in self.keys_subregion() and not isinstance(location, Sequence):
             raise ValueError(f"The location {location} is not computed in this POI class")
         # Extract subregion based on the provided location
-        poi = self.extract_subregion(location)
-
+        poi = self.extract_subregion(*location) if isinstance(location, Sequence) else self.extract_subregion(location)
         # If vertebra sorting is requested, perform it
         if vertebra:
             from TPTBox.core.poi import POI, VertebraCentroids
@@ -436,7 +434,7 @@ class Abstract_POI:
             else:
                 raise ValueError("global POI does not supprot Vertebra sorting")
         else:
-            poi = poi.sort()
+            poi = poi.sort(inplace=False)
 
         # Convert centroids to NumPy array for processing
         centroids_coords = np.asarray(list(poi.values()))

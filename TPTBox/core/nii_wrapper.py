@@ -11,8 +11,6 @@ import nibabel.orientations as nio
 import nibabel.processing as nip
 import numpy as np
 from nibabel import Nifti1Header, Nifti1Image  # type: ignore
-from typing_extensions import Self
-
 from TPTBox.core.nii_wrapper_math import NII_Math
 from TPTBox.core.np_utils import (
     np_calc_boundary_mask,
@@ -30,6 +28,7 @@ from TPTBox.core.np_utils import (
     np_volume,
 )
 from TPTBox.core.vert_constants import Coordinate
+from typing_extensions import Self
 
 from . import bids_files
 from . import vert_constants as vc
@@ -681,8 +680,8 @@ class NII(NII_Math):
             return self
         else:
             return NII(nii,self.seg,self.c_val)
-    def resample_from_to_(self, to_vox_map:Image_Reference|Proxy, mode='constant', c_val:float|None=None,verbose:logging=True):
-        return self.resample_from_to(to_vox_map,mode=mode,c_val=c_val,inplace=True,verbose=verbose)
+    def resample_from_to_(self, to_vox_map:Image_Reference|Proxy, mode='constant', c_val:float|None=None,verbose:logging=True,aline_corners=False):
+        return self.resample_from_to(to_vox_map,mode=mode,c_val=c_val,inplace=True,verbose=verbose,aline_corners=aline_corners)
 
     def n4_bias_field_correction(
         self,
@@ -1166,7 +1165,7 @@ class NII(NII_Math):
             seg_arr = seg_arr * self.get_seg_array()
         return self.set_array(seg_arr,inplace=inplace)
     def extract_label_(self,label:int|vc.Location|list[int]|list[vc.Location], keep_label=False):
-        self.extract_label(label,keep_label,inplace=True)
+        return self.extract_label(label,keep_label,inplace=True)
     def remove_labels(self,*label:int | list[int], inplace=False, verbose:logging=True):
         '''If this NII is a segmentation you can single out one label.'''
         assert label != 0, 'Zero label does not make sens.  This is the background'

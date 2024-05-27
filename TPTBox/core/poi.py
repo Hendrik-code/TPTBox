@@ -124,6 +124,7 @@ class POI(Abstract_POI):
     origin: Coordinate | None = None
     # internal
     _zoom: None | Zooms = field(init=False, default=None, repr=False, compare=False)
+    _vert_orientation_pir = {}  # Elusive; will not be saved; will not be copied. For Buffering results  # noqa: RUF012
 
     @property
     def shape_int(self):
@@ -422,13 +423,13 @@ class POI(Abstract_POI):
         """
         ctd_arr = np.transpose(np.asarray(list(self.centroids.values())))
         v_list = list(self.centroids.keys())
-        # if ctd_arr.shape[0] == 0:
-        #    log.print(
-        #        "No centroids present",
-        #        verbose=verbose if not isinstance(verbose, bool) else True,
-        #        ltype=log_file.Log_Type.WARNING,
-        #    )
-        #    return self if inplace else self.copy()
+        if ctd_arr.shape[0] == 0:
+            log.print(
+                "No centroids present",
+                verbose=verbose if not isinstance(verbose, bool) else True,
+                ltype=log_file.Log_Type.WARNING,
+            )
+            return self if inplace else self.copy()
 
         ornt_fr = nio.axcodes2ornt(self.orientation)  # original centroid orientation
         ornt_to = nio.axcodes2ornt(axcodes_to)
@@ -448,16 +449,15 @@ class POI(Abstract_POI):
             shape = _shape
         assert shape is not None, "Require shape information for flipping dimensions. Set self.shape or use reorient_centroids_to"
         shp = np.asarray(shape)
+        ctd_arr[perm] = ctd_arr.copy()
+        for ax in trans:
+            if ax[1] == -1:
+                size = shp[ax[0]]
+                ctd_arr[ax[0]] = np.around(size - ctd_arr[ax[0]], decimals) - 1
         points = POI_Descriptor()
-        if ctd_arr.shape[0] != 0:
-            ctd_arr[perm] = ctd_arr.copy()
-            for ax in trans:
-                if ax[1] == -1:
-                    size = shp[ax[0]]
-                    ctd_arr[ax[0]] = np.around(size - ctd_arr[ax[0]], decimals) - 1
-            ctd_arr = np.transpose(ctd_arr).tolist()
-            for v, point in zip(v_list, ctd_arr, strict=True):
-                points[v] = tuple(point)
+        ctd_arr = np.transpose(ctd_arr).tolist()
+        for v, point in zip(v_list, ctd_arr, strict=True):
+            points[v] = tuple(point)
 
         log.print("[*] Centroids reoriented from", nio.ornt2axcodes(ornt_fr), "to", axcodes_to, verbose=verbose)
         if self.zoom is not None:
@@ -625,9 +625,6 @@ class POI(Abstract_POI):
                 return float(o)
             if isinstance(o, np.ndarray):
                 return o.tolist()
-            if isinstance(o, set):
-                return list(o)
-
             raise TypeError(type(o))
 
         with open(out_path, "w") as f:
@@ -1368,7 +1365,9 @@ def calc_poi_from_subreg_vert(
 
     log.print("Calc centroids from subregion id", subreg_id, vert_msk.shape, verbose=verbose)
     subreg_id_int = set(loc2int_list(subreg_id))
-    subreg_id_int_phase_1 = tuple(filter(lambda i: i < 60 and i not in [Location.Vertebra_Full.value], subreg_id_int))
+    subreg_id_int_phase_1 = tuple(
+        filter(lambda i: i < 60 and i not in [Location.Vertebra_Full.value, Location.Dens_axis.value], subreg_id_int)
+    )
     # Step 1 get all required locations, crop vert/subreg
     # Step 2 calc centroids
 
@@ -1435,7 +1434,7 @@ def calc_poi_from_subreg_vert(
     if extend_to is None:
         extend_to = POI({}, **vert_msk._extract_affine(), format=FORMAT_POI)
     if len(subreg_id_int) != 0:
-        # sprint("step 6", subreg_id_int)
+        # print("step 6", subreg_id_int)
         compute_non_centroid_pois(extend_to, int2loc(list(subreg_id_int)), vert_msk, subreg_msk, _vert_ids=_vert_ids, log=log)
     extend_to.apply_crop_reverse(crop, org_shape, inplace=True)
     return extend_to
@@ -1554,7 +1553,7 @@ def calc_centroids(
     assert vert_id == -1 or subreg_id == -1, "first or second dimension must be fixed."
     msk_nii = to_nii(msk, seg=True)
     msk_data = msk_nii.get_seg_array()
-    axc: Ax_Codes = nio.aff2axcodes(msk.affine)  # type: ignore
+    axc: Ax_Codes = nio.aff2axcodes(msk_nii.affine)  # type: ignore
     if extend_to is None:
         ctd_list = POI_Descriptor()
     else:
