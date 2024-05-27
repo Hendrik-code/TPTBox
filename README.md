@@ -56,15 +56,6 @@ Contains definitions and sort order for our intern labels, for vertebrae, POI, .
 Example rotate and resample.
 
 ```python
-
-from TPTBox import NII
-
-nii = NII.load("...path/xyz.nii.gz", seg=True)
-img_rot = nii.reorient(axcodes_to=("P", "I", "R"))
-img_scale = nii.rescale((1.5, 5, 1))  # in mm as currently rotated
-# resample to an other image
-img_resampled_to_other = nii.resample_from_to(img_scale)
-
 from TPTBox import NII
 
 nii = NII.load("...path/xyz.nii.gz", seg=True)
