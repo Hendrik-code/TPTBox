@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from enum import Enum
 from math import ceil, floor
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, Union
 
 import nibabel as nib
 import nibabel.orientations as nio
@@ -537,7 +537,7 @@ class NII(NII_Math):
         warnings.warn("apply_crop_slice_ id deprecated use apply_crop_ instead",stacklevel=5) #TODO remove in version 1.0
         return self.apply_crop_(*args,**qargs)
 
-    def apply_crop(self,ex_slice:tuple[slice,slice,slice]|tuple[slice,...] , inplace=False):
+    def apply_crop(self,ex_slice:tuple[slice,slice,slice]|Sequence[slice] , inplace=False):
         """
         The apply_crop_slice function applies a given slice to reduce the Nifti image volume. If a list of slices is provided, it computes the minimum volume of all slices and applies it.
 
@@ -553,7 +553,7 @@ class NII(NII_Math):
             return self
         return self.copy(nii)
 
-    def apply_crop_(self,ex_slice:tuple[slice,slice,slice]|tuple[slice,...]):
+    def apply_crop_(self,ex_slice:tuple[slice,slice,slice]|Sequence[slice]):
         return self.apply_crop(ex_slice=ex_slice,inplace=True)
 
     def pad_to(self,target_shape:list[int]|tuple[int,int,int] | Self, mode="constant",crop=False,inplace = False):
@@ -908,7 +908,7 @@ class NII(NII_Math):
 
 
     def fill_holes(self, labels: int | list[int] | None = None, verbose:logging=True, inplace=False):
-        """Fills holes in segmentations
+        """Fills holes in segmentation
 
         Args:
             labels (int | list[int] | None, optional): Labels that the hole-filling should be applied to. If none, applies on all labels found in arr. Defaults to None.
@@ -1103,6 +1103,48 @@ class NII(NII_Math):
         return f"shp={self.shape}; ori={self.orientation}, zoom={tuple(np.around(self.zoom, decimals=2))}, seg={self.seg}" # type: ignore
     def __repr__(self)-> str:
         return self.__str__()
+    def __array__(self,dtype=None):
+            self._unpack()
+            if dtype is None:
+                return self._arr
+            else:
+                return self._arr.astype(dtype, copy=False)
+    def __array_wrap__(self, array):
+        if array.shape != self.shape:
+            raise SyntaxError(f"Function call induce a shape change of nii image. Before {self.shape} after {array.shape}.")
+        return self.set_array(array)
+    def __getitem__(self, key)-> Any:
+        if isinstance(key,Sequence):
+            if all(isinstance(k, slice) for k in key):
+                #if all(k.step is not None and k.step == 1 for k in key):
+                #    raise NotImplementedError(f"Slicing is not implemented. Attemted {key}")
+                if len(key)!= len(self.shape):
+                    raise ValueError(f"Number slices must have exact number of slices like in dimension. Attemted: {key} - Shape {self.shape}")
+                return self.apply_crop(key) # type: ignore
+            elif  all(isinstance(k, int) for k in key):
+                if len(key)!= len(self.shape):
+                    raise ValueError(f"Number ints must have exact number of slices like in dimension. Attemted: {key} - Shape {self.shape}")
+                self._unpack()
+                return self._arr.__getitem__(key)
+        else:
+            raise TypeError("Invalid argument type.")
+    def __setitem__(self, key,value):
+        self._arr[key] = value
+        #if isinstance(key,Sequence):
+        #    if all(isinstance(k, slice) for k in key):
+        #        #if all(k.step is not None and k.step == 1 for k in key):
+        #        #    raise NotImplementedError(f"Slicing is not implemented. Attemted {key}")
+        #        if len(key)!= len(self.shape):
+        #            raise ValueError(f"Number slices must have exact number of slices like in dimension. Attemted: {key} - Shape {self.shape}")
+        #        return self.apply_crop(key)
+        #    elif  all(isinstance(k, int) for k in key):
+        #        if len(key)!= len(self.shape):
+        #            raise ValueError(f"Number ints must have exact number of slices like in dimension. Attemted: {key} - Shape {self.shape}")
+        #        self._unpack()
+        #        self._arr[key] = value
+        #else:
+        #    raise TypeError("Invalid argument type.")
+
     @classmethod
     def suppress_dtype_change_printout_in_set_array(cls, value=True):
         global suppress_dtype_change_printout_in_set_array  # noqa: PLW0603
