@@ -11,6 +11,8 @@ import nibabel.orientations as nio
 import nibabel.processing as nip
 import numpy as np
 from nibabel import Nifti1Header, Nifti1Image  # type: ignore
+from typing_extensions import Self
+
 from TPTBox.core.nii_wrapper_math import NII_Math
 from TPTBox.core.np_utils import (
     np_calc_boundary_mask,
@@ -28,7 +30,6 @@ from TPTBox.core.np_utils import (
     np_volume,
 )
 from TPTBox.core.vert_constants import Coordinate
-from typing_extensions import Self
 
 from . import bids_files
 from . import vert_constants as vc
