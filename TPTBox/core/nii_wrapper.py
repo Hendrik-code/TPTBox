@@ -612,7 +612,7 @@ class NII(NII_Math):
         return self.reorient(axcodes_to=axcodes_to, verbose=verbose, inplace=inplace)
     def reorient_same_as_(self, img_as: Nifti1Image | Self, verbose:vc.logging=False) -> Self:
         return self.reorient_same_as(img_as=img_as,verbose=verbose,inplace=True)
-    def rescale(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:vc.logging=False, inplace=False,mode='constant',aline_corners:bool=False):
+    def rescale(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:vc.logging=False, inplace=False,mode='constant',align_corners:bool=False):
         """
         Rescales the NIfTI image to a new voxel spacing.
 
@@ -626,7 +626,7 @@ class NII(NII_Math):
             inplace (bool, optional): Whether to modify the current object or return a new one. Defaults to False.
             mode (str, optional): One of the supported modes by scipy.ndimage.interpolation (e.g., "constant", "nearest",
                 "reflect", "wrap"). See the documentation for more details. Defaults to "constant".
-            aline_corners (bool|default): If True or not set and seg==True. Aline corners for scaling. This prevents segmentation mask to shift in a direction.
+            align_corners (bool|default): If True or not set and seg==True. Aline corners for scaling. This prevents segmentation mask to shift in a direction.
         Returns:
             NII: A new NII object with the resampled image data.
         """
@@ -648,7 +648,7 @@ class NII(NII_Math):
         new_shp = tuple(np.rint([shp[i] * zms[i] / voxel_spacing[i] for i in range(len(voxel_spacing))]).astype(int))
         new_aff = nib.affines.rescale_affine(aff, shp, voxel_spacing, new_shp)  # type: ignore
         new_aff[:3, 3] = nib.affines.apply_affine(aff, [0, 0, 0])# type: ignore
-        new_img = _resample_from_to(self, (new_shp, new_aff,voxel_spacing), order=order, mode=mode,aline_corners=aline_corners)
+        new_img = _resample_from_to(self, (new_shp, new_aff,voxel_spacing), order=order, mode=mode,align_corners=align_corners)
         log.print(f"Image resampled from {zms} to voxel size {voxel_spacing}",verbose=verbose)
         if inplace:
             self.nii = new_img
@@ -658,7 +658,7 @@ class NII(NII_Math):
     def rescale_(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:vc.logging=False,mode='constant'):
         return self.rescale( voxel_spacing=voxel_spacing, c_val=c_val, verbose=verbose,mode=mode, inplace=True)
 
-    def resample_from_to(self, to_vox_map:Image_Reference|Proxy, mode='constant', c_val=None, inplace = False,verbose:vc.logging=True,aline_corners:bool=False):
+    def resample_from_to(self, to_vox_map:Image_Reference|Proxy, mode='constant', c_val=None, inplace = False,verbose:vc.logging=True,align_corners:bool=False):
         """self will be resampled in coordinate of given other image. Adheres to global space not to local pixel space
         Args:
             to_vox_map (Image_Reference|Proxy): If object, has attributes shape giving input voxel shape, and affine giving mapping of input voxels to output space. If length 2 sequence, elements are (shape, affine) with same meaning as above. The affine is a (4, 4) array-like.\n
@@ -675,14 +675,14 @@ class NII(NII_Math):
         mapping = to_nii_optional(to_vox_map,seg=self.seg,default=to_vox_map)
         assert mapping is not None
         log.print(f"resample_from_to: {self} to {mapping}",verbose=verbose)
-        nii = _resample_from_to(self, mapping,order=0 if self.seg else 3, mode=mode,aline_corners=aline_corners)
+        nii = _resample_from_to(self, mapping,order=0 if self.seg else 3, mode=mode,align_corners=align_corners)
         if inplace:
             self.nii = nii
             return self
         else:
             return NII(nii,self.seg,self.c_val)
     def resample_from_to_(self, to_vox_map:Image_Reference|Proxy, mode='constant', c_val:float|None=None,verbose:logging=True,aline_corners=False):
-        return self.resample_from_to(to_vox_map,mode=mode,c_val=c_val,inplace=True,verbose=verbose,aline_corners=aline_corners)
+        return self.resample_from_to(to_vox_map,mode=mode,c_val=c_val,inplace=True,verbose=verbose,align_corners=aline_corners)
 
     def n4_bias_field_correction(
         self,
@@ -1365,7 +1365,7 @@ def _resample_from_to(
     to_img:NII|tuple[SHAPE,AFFINE,Zooms],
     order=3,
     mode="constant",
-    aline_corners:bool|Sentinel=Sentinel()  # noqa: B008
+    align_corners:bool|Sentinel=Sentinel()  # noqa: B008
 ):
     import numpy.linalg as npl
     import scipy.ndimage as scipy_img
@@ -1386,7 +1386,7 @@ def _resample_from_to(
     from_n_dim = len(from_img.shape)
     if from_n_dim < 3:
         raise AffineError("from_img must be at least 3D")
-    if (isinstance(aline_corners,Sentinel) and order == 0) or aline_corners:
+    if (isinstance(align_corners,Sentinel) and order == 0) or align_corners:
         # https://discuss.pytorch.org/t/what-we-should-use-align-corners-false/22663/6
         # https://discuss.pytorch.org/uploads/default/original/2X/6/6a242715685b8192f07c93a57a1d053b8add97bf.png
         # Simulate align_corner=True, by manipulating the affine
