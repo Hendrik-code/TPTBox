@@ -40,6 +40,7 @@ class Sentinel:
 
 class Location(Enum):
     Unknown = 0
+    # S1 = 26  # SACRUM
     # Vertebral subregions
     Vertebra_Full = 40
     Arcus_Vertebrae = 41

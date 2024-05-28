@@ -186,7 +186,7 @@ def calc_orientation_of_vertebra_PIR(
         select[plane_coords[:, :, 0], plane_coords[:, :, 1], plane_coords[:, :, 2]] = 1
         out += target_labels * select * reg_label
         if fill_back is not None:
-            fill_back[select == 1] = reg_label
+            fill_back[np.logical_and(select == 1, fill_back == 0)] = reg_label
     if fill_back is not None and fill_back_nii is not None:
         subreg_sar = subreg_iso.set_array(fill_back).reorient(("S", "A", "R"))
         fill_back = subreg_sar.get_array()
@@ -630,8 +630,7 @@ def strategy_ligament_attachment(
                 cords = plane_coords[loc125[0], loc125[1], :]
                 poi[vert_id, out_id] = tuple(x + y.start for x, y in zip(cords, bb, strict=False))
             except Exception:
-                print(vert_id, out_id, "missed its target. Skipped",loc102.sum(), plane_arcus.sum(), np.unique(plane_arcus))
-
+                print(vert_id, out_id, "missed its target. Skipped", loc102.sum(), plane_arcus.sum(), np.unique(plane_arcus))
 
 
 def _compute_vert_corners_in_reference_frame(poi: POI, vert_id: int, plane_coords: np.ndarray, subregion: np.ndarray):
@@ -838,13 +837,13 @@ def compute_non_centroid_pois(  # noqa: C901
             if location.value in all_poi_functions:
                 all_poi_functions[location.value](poi, current_subreg, vert_id, bb=bb, log=log)
             else:
-                raise NotImplementedError(location, location.value)
+                raise NotImplementedError(location.value)
 
 
 def calc_center_spinal_cord(
     poi: POI,
     subreg: NII,
-    spline_subreg_point_id: Location = Location.Vertebra_Corpus,
+    spline_subreg_point_id: Location | list[Location] = Location.Vertebra_Corpus,
     source_subreg_point_id: Location = Location.Vertebra_Corpus,
     subreg_id=Location.Spinal_Canal,
     intersection_target: list[Location] | None = None,
@@ -894,10 +893,11 @@ def calc_center_spinal_cord(
     assert _fill_inplace is None or subreg == _fill_inplace
     poi_iso = poi.rescale()
     if add_dense and (2, Location.Dens_axis) in poi_iso:
-        poi_iso[1, spline_subreg_point_id] = poi_iso[2, Location.Dens_axis]
-        poi_iso[1, source_subreg_point_id] = poi_iso[2, Location.Dens_axis]
+        sx = spline_subreg_point_id[0] if isinstance(spline_subreg_point_id, Sequence) else spline_subreg_point_id
+        poi_iso[1, sx] = poi_iso[2, Location.Dens_axis]
+        poi_iso[1, sx] = poi_iso[2, Location.Dens_axis]
     subreg_iso = subreg.rescale()
-    body_spline, body_spline_der = poi_iso.fit_spline(location=spline_subreg_point_id, vertebra=True)
+    body_spline, body_spline_der = poi_iso.fit_spline(location=spline_subreg_point_id, vertebra=False)
     target_labels = subreg_iso.extract_label(intersection_target).get_array()
     out = target_labels * 0
     fill_back = out.copy() if _fill_inplace is not None else None
@@ -935,8 +935,7 @@ def calc_center_spinal_cord(
         out += target_labels * select * reg_label
 
         if fill_back is not None:
-            fill_back[select == 1] = reg_label
-
+            fill_back[np.logical_and(select == 1, fill_back == 0)] = reg_label
     if fill_back is not None:
         assert _fill_inplace is not None
         subreg_iso = subreg_iso.set_array(fill_back).reorient(("S", "A", "R"))
