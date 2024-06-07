@@ -38,12 +38,14 @@ def writeSlices(series_tag_values: dict, new_img: sitk.Image, i, out_dir: str | 
     writer.Execute(image_slice)
 
 
-def nifti2dicom_1file(in_dir: str | Path, out_dir: str | Path, no_json_ok=False, secondary=False, json_path: None | str | Path = None):
+def nifti2dicom_1file(
+    in_nii: str | Path, out_dir: str | Path, no_json_ok=False, secondary=False, json_path: None | str | Path = None, name="slice"
+):
     """
     This function converts one NIfTI file into a DICOM series.
 
     Parameters:
-    - in_dir: Path to the NIfTI file
+    - in_nii: Path to the NIfTI file
     - out_dir: Path to the output directory
     - no_json_ok: Whether to proceed without a JSON metadata file
     - secondary: Whether the images are derived/secondary
@@ -53,7 +55,7 @@ def nifti2dicom_1file(in_dir: str | Path, out_dir: str | Path, no_json_ok=False,
     out_dir.mkdir(exist_ok=True)
 
     # Get JSON metadata
-    json_path = Path(str(in_dir).split(".")[0] + ".json") if json_path is None else Path(json_path)
+    json_path = Path(str(in_nii).split(".")[0] + ".json") if json_path is None else Path(json_path)
     if json_path.exists():
         with open(json_path) as j:
             meta: dict = json.load(j)
@@ -71,7 +73,7 @@ def nifti2dicom_1file(in_dir: str | Path, out_dir: str | Path, no_json_ok=False,
             raise FileNotFoundError(json_path)
         series_tag_values = {}
 
-    new_img = sitk.ReadImage(in_dir)
+    new_img = sitk.ReadImage(in_nii)
     series_tag_values["0008|0031"] = time.strftime("%H%M%S")  # Modification Time
     series_tag_values["0008|0031"] = time.strftime("%Y%m%d")  # Modification Date
     direction = new_img.GetDirection()
@@ -101,7 +103,7 @@ def nifti2dicom_1file(in_dir: str | Path, out_dir: str | Path, no_json_ok=False,
         # series_tag_values["0008|103e"] = "Created-Pycad"
 
     for i in range(new_img.GetDepth()):
-        writeSlices(series_tag_values, new_img, i, out_dir)
+        writeSlices(series_tag_values, new_img, i, out_dir, name=name)
 
 
 def nifti2dicom_mfiles(nifti_dir, out_dir=""):
