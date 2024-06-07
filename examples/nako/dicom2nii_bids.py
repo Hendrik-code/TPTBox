@@ -285,7 +285,7 @@ def from_dicom_json_to_extracting_nii(  # noqa: C901
     if not hasattr(py_dataset, "PixelData"):
         return
     del py_dataset.PixelData  # = None
-    py_dict = py_dataset.to_json_dict()
+    py_dict = py_dataset.to_json_dict(suppress_invalid_tags=True)
     if "00291010" in py_dict and "InlineBinary" in py_dict["00291010"]:
         del py_dict["00291010"]["InlineBinary"]
 
