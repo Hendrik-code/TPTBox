@@ -39,7 +39,7 @@ def writeSlices(series_tag_values: dict, new_img: sitk.Image, i, out_dir: str | 
 
 
 def nifti2dicom_1file(
-    in_nii: str | Path, out_dir: str | Path, no_json_ok=False, secondary=False, json_path: None | str | Path = None, name="slice"
+    in_nii: str | Path, out_dir: str | Path, no_json_ok=False, secondary=False, json_path: None | str | Path = None, out_name="slice"
 ):
     """
     This function converts one NIfTI file into a DICOM series.
@@ -103,7 +103,7 @@ def nifti2dicom_1file(
         # series_tag_values["0008|103e"] = "Created-Pycad"
 
     for i in range(new_img.GetDepth()):
-        writeSlices(series_tag_values, new_img, i, out_dir, name=name)
+        writeSlices(series_tag_values, new_img, i, out_dir, name=out_name)
 
 
 def nifti2dicom_mfiles(nifti_dir, out_dir=""):

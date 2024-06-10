@@ -62,6 +62,8 @@ def formatwarning_tb(*args, **kwargs):
     return s
 
 
+_dtyp_max = {"int8": 128, "uint8": 256, "int16": 32768, "uint16": 65536}
+
 warnings.formatwarning = formatwarning_tb
 
 N = TypeVar("N", bound="NII")
@@ -128,12 +130,13 @@ class NII(NII_Math):
     def __init__(self, nii: Nifti1Image|_unpacked_nii, seg=False,c_val=None, desc:str|None=None) -> None:
         assert nii is not None
         self.__divergent = False
+        self._checked_dtype = False
         self.nii = nii
-
         self.seg:bool = seg
         self.c_val:float|None=c_val # default c_vale if seg is None
         self.__min = None
         self.set_description(desc)
+
 
     @classmethod
     def load(cls, path: Image_Reference, seg, c_val=None):
@@ -159,8 +162,27 @@ class NII(NII_Math):
         if self.__unpacked:
             return
         if self.seg:
-            self._arr = np.asanyarray(self.nii.dataobj, dtype=self.nii.dataobj.dtype).astype(np.uint16).copy()
-
+            m = np.max(self.nii.dataobj)
+            if m<256:
+                dtype = np.uint8
+            elif m<65536:
+                dtype = np.uint16
+            else:
+                dtype = np.int32
+            self._arr = np.asanyarray(self.nii.dataobj, dtype=self.nii.dataobj.dtype).astype(dtype).copy()
+            self._checked_dtype = True
+        elif not self._checked_dtype:
+            # if the maximum is lager than the dtype, we use float.
+            self._checked_dtype = True
+            dtype = str(self.dtype)
+            if dtype not in _dtyp_max:
+                self._arr = np.asanyarray(self.nii.dataobj, dtype=self.nii.dataobj.dtype).copy() #type: ignore
+            else:
+                m = np.max(self.nii.dataobj)
+                if m > _dtyp_max[dtype]:
+                    self._arr = self.nii.get_fdata()
+                else:
+                    self._arr = np.asanyarray(self.nii.dataobj, dtype=self.nii.dataobj.dtype).copy() #type: ignore
         else:
             self._arr = np.asanyarray(self.nii.dataobj, dtype=self.nii.dataobj.dtype).copy() #type: ignore
 
@@ -207,6 +229,7 @@ class NII(NII_Math):
             zoom = np.sqrt(np.sum(rotation_zoom * rotation_zoom, axis=0))
             header.set_zooms(zoom)
             self._header = header
+            self._checked_dtype = True
         else:
             self.__unpacked = False
             self.__divergent = False
@@ -612,7 +635,7 @@ class NII(NII_Math):
         return self.reorient(axcodes_to=axcodes_to, verbose=verbose, inplace=inplace)
     def reorient_same_as_(self, img_as: Nifti1Image | Self, verbose:vc.logging=False) -> Self:
         return self.reorient_same_as(img_as=img_as,verbose=verbose,inplace=True)
-    def rescale(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:vc.logging=False, inplace=False,mode='constant',aline_corners:bool=False):
+    def rescale(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:vc.logging=False, inplace=False,mode='constant',align_corners:bool=False):
         """
         Rescales the NIfTI image to a new voxel spacing.
 
@@ -626,7 +649,7 @@ class NII(NII_Math):
             inplace (bool, optional): Whether to modify the current object or return a new one. Defaults to False.
             mode (str, optional): One of the supported modes by scipy.ndimage.interpolation (e.g., "constant", "nearest",
                 "reflect", "wrap"). See the documentation for more details. Defaults to "constant".
-            aline_corners (bool|default): If True or not set and seg==True. Aline corners for scaling. This prevents segmentation mask to shift in a direction.
+            align_corners (bool|default): If True or not set and seg==True. Aline corners for scaling. This prevents segmentation mask to shift in a direction.
         Returns:
             NII: A new NII object with the resampled image data.
         """
@@ -648,7 +671,7 @@ class NII(NII_Math):
         new_shp = tuple(np.rint([shp[i] * zms[i] / voxel_spacing[i] for i in range(len(voxel_spacing))]).astype(int))
         new_aff = nib.affines.rescale_affine(aff, shp, voxel_spacing, new_shp)  # type: ignore
         new_aff[:3, 3] = nib.affines.apply_affine(aff, [0, 0, 0])# type: ignore
-        new_img = _resample_from_to(self, (new_shp, new_aff,voxel_spacing), order=order, mode=mode,aline_corners=aline_corners)
+        new_img = _resample_from_to(self, (new_shp, new_aff,voxel_spacing), order=order, mode=mode,align_corners=align_corners)
         log.print(f"Image resampled from {zms} to voxel size {voxel_spacing}",verbose=verbose)
         if inplace:
             self.nii = new_img
@@ -658,7 +681,7 @@ class NII(NII_Math):
     def rescale_(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:vc.logging=False,mode='constant'):
         return self.rescale( voxel_spacing=voxel_spacing, c_val=c_val, verbose=verbose,mode=mode, inplace=True)
 
-    def resample_from_to(self, to_vox_map:Image_Reference|Proxy, mode='constant', c_val=None, inplace = False,verbose:vc.logging=True,aline_corners:bool=False):
+    def resample_from_to(self, to_vox_map:Image_Reference|Proxy, mode='constant', c_val=None, inplace = False,verbose:vc.logging=True,align_corners:bool=False):
         """self will be resampled in coordinate of given other image. Adheres to global space not to local pixel space
         Args:
             to_vox_map (Image_Reference|Proxy): If object, has attributes shape giving input voxel shape, and affine giving mapping of input voxels to output space. If length 2 sequence, elements are (shape, affine) with same meaning as above. The affine is a (4, 4) array-like.\n
@@ -675,14 +698,14 @@ class NII(NII_Math):
         mapping = to_nii_optional(to_vox_map,seg=self.seg,default=to_vox_map)
         assert mapping is not None
         log.print(f"resample_from_to: {self} to {mapping}",verbose=verbose)
-        nii = _resample_from_to(self, mapping,order=0 if self.seg else 3, mode=mode,aline_corners=aline_corners)
+        nii = _resample_from_to(self, mapping,order=0 if self.seg else 3, mode=mode,align_corners=align_corners)
         if inplace:
             self.nii = nii
             return self
         else:
             return NII(nii,self.seg,self.c_val)
     def resample_from_to_(self, to_vox_map:Image_Reference|Proxy, mode='constant', c_val:float|None=None,verbose:logging=True,aline_corners=False):
-        return self.resample_from_to(to_vox_map,mode=mode,c_val=c_val,inplace=True,verbose=verbose,aline_corners=aline_corners)
+        return self.resample_from_to(to_vox_map,mode=mode,c_val=c_val,inplace=True,verbose=verbose,align_corners=aline_corners)
 
     def n4_bias_field_correction(
         self,
@@ -1126,9 +1149,15 @@ class NII(NII_Math):
                     raise ValueError(f"Number ints must have exact number of slices like in dimension. Attemted: {key} - Shape {self.shape}")
                 self._unpack()
                 return self._arr.__getitem__(key)
+        elif isinstance(key,self.__class__):
+            return self.get_array()[key.get_array()==1]
+        elif isinstance(key,np.ndarray):
+            return self.get_array()[key]
         else:
-            raise TypeError("Invalid argument type.")
+            raise TypeError("Invalid argument type:", type(key))
     def __setitem__(self, key,value):
+        if isinstance(key,self.__class__):
+            key = key.get_array()==1
         self._arr[key] = value
         #if isinstance(key,Sequence):
         #    if all(isinstance(k, slice) for k in key):
@@ -1365,7 +1394,7 @@ def _resample_from_to(
     to_img:NII|tuple[SHAPE,AFFINE,Zooms],
     order=3,
     mode="constant",
-    aline_corners:bool|Sentinel=Sentinel()  # noqa: B008
+    align_corners:bool|Sentinel=Sentinel()  # noqa: B008
 ):
     import numpy.linalg as npl
     import scipy.ndimage as scipy_img
@@ -1386,7 +1415,7 @@ def _resample_from_to(
     from_n_dim = len(from_img.shape)
     if from_n_dim < 3:
         raise AffineError("from_img must be at least 3D")
-    if (isinstance(aline_corners,Sentinel) and order == 0) or aline_corners:
+    if (isinstance(align_corners,Sentinel) and order == 0) or align_corners:
         # https://discuss.pytorch.org/t/what-we-should-use-align-corners-false/22663/6
         # https://discuss.pytorch.org/uploads/default/original/2X/6/6a242715685b8192f07c93a57a1d053b8add97bf.png
         # Simulate align_corner=True, by manipulating the affine
