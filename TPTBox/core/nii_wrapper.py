@@ -62,6 +62,8 @@ def formatwarning_tb(*args, **kwargs):
     return s
 
 
+_dtyp_max = {"int8": 128, "uint8": 256, "int16": 32768, "uint16": 65536}
+
 warnings.formatwarning = formatwarning_tb
 
 N = TypeVar("N", bound="NII")
@@ -128,12 +130,13 @@ class NII(NII_Math):
     def __init__(self, nii: Nifti1Image|_unpacked_nii, seg=False,c_val=None, desc:str|None=None) -> None:
         assert nii is not None
         self.__divergent = False
+        self._checked_dtype = False
         self.nii = nii
-
         self.seg:bool = seg
         self.c_val:float|None=c_val # default c_vale if seg is None
         self.__min = None
         self.set_description(desc)
+
 
     @classmethod
     def load(cls, path: Image_Reference, seg, c_val=None):
@@ -159,8 +162,27 @@ class NII(NII_Math):
         if self.__unpacked:
             return
         if self.seg:
-            self._arr = np.asanyarray(self.nii.dataobj, dtype=self.nii.dataobj.dtype).astype(np.uint16).copy()
-
+            m = np.max(self.nii.dataobj)
+            if m<256:
+                dtype = np.uint8
+            elif m<65536:
+                dtype = np.uint16
+            else:
+                dtype = np.int32
+            self._arr = np.asanyarray(self.nii.dataobj, dtype=self.nii.dataobj.dtype).astype(dtype).copy()
+            self._checked_dtype = True
+        elif not self._checked_dtype:
+            # if the maximum is lager than the dtype, we use float.
+            self._checked_dtype = True
+            dtype = str(self.dtype)
+            if dtype not in _dtyp_max:
+                self._arr = np.asanyarray(self.nii.dataobj, dtype=self.nii.dataobj.dtype).copy() #type: ignore
+            else:
+                m = np.max(self.nii.dataobj)
+                if m > _dtyp_max[dtype]:
+                    self._arr = self.nii.get_fdata()
+                else:
+                    self._arr = np.asanyarray(self.nii.dataobj, dtype=self.nii.dataobj.dtype).copy() #type: ignore
         else:
             self._arr = np.asanyarray(self.nii.dataobj, dtype=self.nii.dataobj.dtype).copy() #type: ignore
 
@@ -207,6 +229,7 @@ class NII(NII_Math):
             zoom = np.sqrt(np.sum(rotation_zoom * rotation_zoom, axis=0))
             header.set_zooms(zoom)
             self._header = header
+            self._checked_dtype = True
         else:
             self.__unpacked = False
             self.__divergent = False
@@ -329,6 +352,8 @@ class NII(NII_Math):
 
         if arr.dtype == bool:
             arr = arr.astype(np.uint8)
+        if arr.dtype == np.float16:
+            arr = arr.astype(np.float32)
         if self.seg and isinstance(arr, (np.floating, float)):
             arr = arr.astype(np.int32)
         #if self.dtype == arr.dtype: #type: ignore
@@ -1126,9 +1151,15 @@ class NII(NII_Math):
                     raise ValueError(f"Number ints must have exact number of slices like in dimension. Attemted: {key} - Shape {self.shape}")
                 self._unpack()
                 return self._arr.__getitem__(key)
+        elif isinstance(key,self.__class__):
+            return self.get_array()[key.get_array()==1]
+        elif isinstance(key,np.ndarray):
+            return self.get_array()[key]
         else:
-            raise TypeError("Invalid argument type.")
+            raise TypeError("Invalid argument type:", type(key))
     def __setitem__(self, key,value):
+        if isinstance(key,self.__class__):
+            key = key.get_array()==1
         self._arr[key] = value
         #if isinstance(key,Sequence):
         #    if all(isinstance(k, slice) for k in key):
