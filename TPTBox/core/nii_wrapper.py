@@ -352,6 +352,8 @@ class NII(NII_Math):
 
         if arr.dtype == bool:
             arr = arr.astype(np.uint8)
+        if arr.dtype == np.float16:
+            arr = arr.astype(np.float32)
         if self.seg and isinstance(arr, (np.floating, float)):
             arr = arr.astype(np.int32)
         #if self.dtype == arr.dtype: #type: ignore
