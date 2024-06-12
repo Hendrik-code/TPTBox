@@ -178,8 +178,14 @@ create_snapshot(snp_path="snapshot.jpg", frames=[ct_frame, mr_frame])
 
 ### Snapshot3D
 
+Requires additonal python packages: vtk
+
 ```python
-TBD
+from TPTBox.mesh3D.snapshot3D import make_snapshot3D
+# all segmentation; orientation give the rotation of an image
+make_snapshot3D("sub-101000_msk.nii.gz","snapshot3D.png",orientation=["A", "L", "P", "R"]) 
+# Select witch segmentation per panel are chosen.
+make_snapshot3D("sub-101000_msk.nii.gz","snapshot3D_v2.png",orientation=["A"], ids_list=[[1,2],[3]]) 
 ```
 
 ### Logger
