@@ -21,7 +21,7 @@ from TPTBox.mesh3D.mesh_colors import get_color_by_label
 
 logger = Reflection_Logger()
 
-# This is not the same as a orientation, wo could add here diagonal views.
+# This is not the same as an orientation; we could add diagonal views here.
 VIEW = Literal["R", "A", "L", "P", "S", "I"]
 
 _red = [1, 0, 0]
