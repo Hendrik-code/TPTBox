@@ -8,10 +8,15 @@ from pathlib import Path
 from typing import Literal
 
 import numpy as np
-import vtk
-from fury import window
-from vtk.util import numpy_support  # type: ignore
-from xvfbwrapper import Xvfb
+
+try:
+    import vtk
+    from fury import window
+    from vtk.util import numpy_support  # type: ignore
+    from xvfbwrapper import Xvfb
+except Exception as e:
+    print(e)
+
 
 from TPTBox.mesh3D.mesh_colors import get_color_by_label
 
