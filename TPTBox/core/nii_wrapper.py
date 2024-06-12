@@ -1218,7 +1218,7 @@ class NII(NII_Math):
         b = b.resample_from_to(self,c_val=0,verbose=False)
         return b.get_array().sum()
 
-    def extract_label(self,label:int|vc.Location|list[int]|list[vc.Location], keep_label=False,inplace=False):
+    def extract_label(self,label:int|vc.Location|Sequence[int]|Sequence[vc.Location], keep_label=False,inplace=False):
         '''If this NII is a segmentation you can single out one label with [0,1].'''
         seg_arr = self.get_seg_array()
 
@@ -1238,7 +1238,7 @@ class NII(NII_Math):
         if keep_label:
             seg_arr = seg_arr * self.get_seg_array()
         return self.set_array(seg_arr,inplace=inplace)
-    def extract_label_(self,label:int|vc.Location|list[int]|list[vc.Location], keep_label=False):
+    def extract_label_(self,label:int|vc.Location|Sequence[int]|Sequence[vc.Location], keep_label=False):
         return self.extract_label(label,keep_label,inplace=True)
     def remove_labels(self,*label:int | list[int], inplace=False, verbose:logging=True):
         '''If this NII is a segmentation you can single out one label.'''
