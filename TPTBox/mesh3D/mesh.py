@@ -9,7 +9,7 @@ import numpy as np
 import pyvista as pv
 from skimage.measure import marching_cubes
 
-from TPTBox import NII, POI, Log_Type
+from TPTBox import NII, POI, Image_Reference, Log_Type, to_nii_seg
 from TPTBox.core import vert_constants as vc
 from TPTBox.core.np_utils import np_bbox_binary
 from TPTBox.core.poi import Coordinate
@@ -49,19 +49,25 @@ class Mesh3D:
         return Mesh3D(mesh)
 
     def show(self):
+        print("1")
         pv.start_xvfb()
         pl = pv.Plotter()
-        p.set_background("black", top=None)
+        pl.set_background("black", top=None)
         pv.global_theme.axes.show = True
         pv.global_theme.edge_color = "white"
         pv.global_theme.interactive = True
 
         pl.add_mesh(self.mesh)
-        p.show()
+        print(2)
+        pl.show()
 
 
 class SegmentationMesh(Mesh3D):
-    def __init__(self, int_arr: np.ndarray) -> None:
+    def __init__(self, int_arr: np.ndarray | Image_Reference) -> None:
+        if not isinstance(int_arr, np.ndarray):
+            seg_nii = to_nii_seg(int_arr)
+            seg_nii.reorient_().rescale_()
+            int_arr = seg_nii.get_array()
         assert np.min(int_arr) == 0, f"min value of image is not zero, got {np.min(int_arr)}"
         assert len(int_arr.shape) == 3, f"image does not have exactly 3 dimensions, got shape {int_arr.shape}"
 
@@ -69,7 +75,7 @@ class SegmentationMesh(Mesh3D):
         if np.issubdtype(int_arr.dtype, np.floating):
             print("input is of type float, converting to int")
             int_arr.astype(np.uint16)
-
+        print("calculate bounding box cutout")
         # calculate bounding box cutout
         bbox_crop = np_bbox_binary(int_arr, px_dist=2)
         x1, y1, z1 = bbox_crop[0].start, bbox_crop[1].start, bbox_crop[2].start
@@ -77,20 +83,14 @@ class SegmentationMesh(Mesh3D):
 
         vertices, faces, normals, values = marching_cubes(arr_cropped, gradient_direction="ascent", step_size=1)
         vertices += (x1, y1, z1)  # so it has correct relative coordinates (not world coordinates!)
+        print("column_stack")
 
-        vfaces = np.column_stack(
-            (
-                np.ones(
-                    len(faces),
-                )
-                * 3,
-                faces,
-            )
-        ).astype(int)
+        vfaces = np.column_stack((np.ones(len(faces)) * 3, faces)).astype(int)
 
         mesh = pv.PolyData(vertices, vfaces)
         mesh["Normals"] = normals
         mesh["values"] = values
+        print("mesh")
         self.mesh = mesh
 
     @classmethod
