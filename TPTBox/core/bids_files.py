@@ -1199,7 +1199,10 @@ class BIDS_Family:
         self.family_id = self.get_identifier()
 
     def __getitem__(self, item: str) -> list[BIDS_FILE]:
-        return self.data_dict[item]
+        try:
+            return self.data_dict[item]
+        except KeyError as e:
+            raise KeyError(f"BIDS_Family does not contain key {item}, only {self.keys()}") from e
 
     def __setitem__(self, key, value):
         self.data_dict[key] = value
