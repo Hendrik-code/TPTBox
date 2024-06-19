@@ -6,7 +6,6 @@ import os
 import sys
 import typing
 from collections.abc import Sequence
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from warnings import warn
 
