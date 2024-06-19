@@ -152,6 +152,7 @@ class BIDS_Global_info:
         verbose: bool = True,
         file_name_manipulation: typing.Callable[[str], str] | None = None,
         sequence_splitting_keys: list[str] | None = None,
+        filter_folder: typing.Callable[[Path, int], bool] | None = None,
     ):
         """This Objects creates a datastructures reflecting BIDS-folders.
 
@@ -159,6 +160,9 @@ class BIDS_Global_info:
             datasets (typing.List[str]): List of dataset paths
             parents (typing.List[str]): List of parents (like ["rawdata","sourcedata","derivatives"])
             additional_key (list, optional): Additional keys that are not in the default BIDS but should not raise a warning. Defaults to ["sequ", "seg", "ovl"].
+            filter_folder: Filter function, input is the path of the folder and the level of the folder structure. Return True if we should continue searching
+                        Example:
+                        filter_folder = lambda p, lvl: True if (lvl != 2 or p.name in ["sub-123","sub-456"]) else False
         """
         if sequence_splitting_keys is None:
             from TPTBox.core.bids_constants import sequence_splitting_keys
@@ -202,13 +206,23 @@ class BIDS_Global_info:
             for ps in parents:
                 path = Path(ds, ps)
                 if path.exists():
-                    self.search_folder(path, ds)
+                    self.search_folder(path, ds, filter_folder)
         self.entities_keys = entities_keys
 
-    def search_folder(self, path: Path, ds) -> None:
-        for w in path.rglob("*"):
-            if w.is_file():
-                self.add_file_2_subject(w, ds)
+    def search_folder(self, path: Path, ds, filter_folder) -> None:
+        def scantree(path, lvl=1):
+            """Recursively yield DirEntry objects for given directory."""
+            for entry in os.scandir(path):
+                if entry.is_dir(follow_symlinks=False):
+                    if filter_folder is not None and not filter_folder(Path(entry.path), lvl):
+                        continue
+                    yield from scantree(entry.path, lvl=lvl + 1)
+                else:
+                    yield entry
+
+        for entry in scantree(path):
+            if entry.is_file():
+                self.add_file_2_subject(Path(entry.path), ds)
 
     def add_file_2_subject(self, bids: BIDS_FILE | Path, ds=None) -> None:
         if isinstance(bids, Path) and "DS_Store" in bids.name:
