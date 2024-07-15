@@ -32,6 +32,7 @@ formats = [
     "GRE",  # Gradient-Echo
     "PWI",  # Perfusion weighted imaging
     "DTI",  # Diffusion tensor imaging
+    "R2star",
     "radiomics",
 ]
 formats_relaxed = [*formats, "t2", "t1", "t2c", "t1c", "cta", "mr", "snapshot", "t1dixon"]
