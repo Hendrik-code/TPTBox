@@ -141,12 +141,12 @@ def compute_crop_slice(nii: Nifti1Image, minimum=0, dist=0):
         raise ValueError("Array would be reduced to zero size")
     c_min = [cor_msk[0].min(), cor_msk[1].min(), cor_msk[2].min()]
     c_max = [cor_msk[0].max(), cor_msk[1].max(), cor_msk[2].max()]
-    x0 = c_min[0] - d[0] if (c_min[0] - d[0]) > 0 else 0
-    y0 = c_min[1] - d[1] if (c_min[1] - d[1]) > 0 else 0
-    z0 = c_min[2] - d[2] if (c_min[2] - d[2]) > 0 else 0
-    x1 = c_max[0] + d[0] if (c_max[0] + d[0]) < shp[0] else shp[0]
-    y1 = c_max[1] + d[1] if (c_max[1] + d[1]) < shp[1] else shp[1]
-    z1 = c_max[2] + d[2] if (c_max[2] + d[2]) < shp[2] else shp[2]
+    x0 = max(0, c_min[0] - d[0])
+    y0 = max(0, c_min[1] - d[1])
+    z0 = max(0, c_min[2] - d[2])
+    x1 = min(shp[0], c_max[0] + d[0])
+    y1 = min(shp[1], c_max[1] + d[1])
+    z1 = min(shp[2], c_max[2] + d[2])
     ex_slice = (slice(x0, x1 + 1), slice(y0, y1 + 1), slice(z0, z1 + 1))
     return ex_slice
 
