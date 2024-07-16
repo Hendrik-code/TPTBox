@@ -24,9 +24,7 @@ def __test_seg_file(spinal_cord_file: Path):
             return False
     else:
         return False
-    if data is None or data.sum() <= SEGMENTATION_TO_SMALL_THRESHOLD:
-        return False
-    return True
+    return not (data is None or data.sum() <= SEGMENTATION_TO_SMALL_THRESHOLD)
 
 
 ignore_list = ["No properties for slice"]

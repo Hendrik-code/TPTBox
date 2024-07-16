@@ -213,7 +213,7 @@ def sag_cor_curve_projection(
     return x_ctd, y_cord, z_cord
 
 
-def curve_projected_slice(x_ctd, img_data, y_cord, z_cord):
+def curve_projected_slice(x_ctd, img_data, y_cord, z_cord, axial_heights):
     shp = img_data.shape
     cor_plane = np.zeros((shp[0], shp[2]))
     sag_plane = np.zeros((shp[0], shp[1]))
@@ -227,7 +227,7 @@ def curve_projected_slice(x_ctd, img_data, y_cord, z_cord):
         else:
             cor_plane[x, :] = img_data[x, y_cord[x - min(x_ctd)], :]
             sag_plane[x, :] = img_data[x, :, z_cord[x - min(x_ctd)]]
-    return sag_plane, cor_plane, curve_projection_axial_fallback(img_data, x_ctd)
+    return sag_plane, cor_plane, curve_projection_axial_fallback(img_data, x_ctd, heights=axial_heights)
 
 
 def curve_projected_mean(
@@ -237,6 +237,7 @@ def curve_projected_mean(
     y_cord,
     ctd_list,
     thick_t: tuple[int, int] = (100, 300),
+    axial_heights=None,
 ):
     shp = img_data.shape
     cor_plane = np.zeros((shp[0], shp[2]))
@@ -267,7 +268,7 @@ def curve_projected_mean(
         sag_plane[x, :] = div0(sag, np.count_nonzero(img_data[x, :, :], 1), fill=0)
         cor = np.nansum(cor_cut, 0, where=plane_bool)
         cor_plane[x, :] = div0(cor, np.count_nonzero(plane_bool, 0), fill=0)
-    return sag_plane, cor_plane, curve_projection_axial_fallback(img_data, x_ctd)
+    return sag_plane, cor_plane, curve_projection_axial_fallback(img_data, x_ctd, heights=axial_heights)
 
 
 def curve_projected_mip(
@@ -278,6 +279,7 @@ def curve_projected_mip(
     ctd_list,  # noqa: ARG001
     thick_t: tuple[int, int] = (100, 300),
     make_colored_depth: bool = False,
+    axial_heights=None,
 ):
     shp = img_data.shape
     cor_plane = np.zeros((shp[0], shp[2]))
@@ -333,7 +335,7 @@ def curve_projected_mip(
         cor_plane = cmap(cor_m_plane)[..., :3]
         sag_plane = cmap(sag_m_plane)[..., :3]
 
-    return sag_plane, cor_plane, curve_projection_axial_fallback(img_data, x_ctd)
+    return sag_plane, cor_plane, curve_projection_axial_fallback(img_data, x_ctd, heights=axial_heights)
 
 
 def normalize_image(img, v_range: tuple[float, float] | None = None):
@@ -346,24 +348,29 @@ def normalize_image(img, v_range: tuple[float, float] | None = None):
     return (img - min_v) / (max_v - min_v)
 
 
-def curve_projection_axial_fallback(img_data, x_ctd):
-    # Axial
-    center = x_ctd[len(x_ctd) // 2]
-    center_up = x_ctd[max(0, len(x_ctd) // 2 - 1)]
-    center_down = x_ctd[min(len(x_ctd) - 1, len(x_ctd) // 2 + 1)]
-    try:
-        axl_plane = np.concatenate(
-            [
-                img_data[(center + center_up) // 2, :, :],
-                img_data[center, :, :],
-                img_data[(center + center_down) // 2, :, :],
-            ],
-            axis=0,
-        )
-    except Exception as e:
-        print(e)
-        axl_plane = np.zeros((1, 1))
-    return axl_plane
+def curve_projection_axial_fallback(img_data, x_ctd, heights: list[float] | None):
+    if heights is not None:
+        heights = [int(abs(h if abs(h) >= 1 else img_data.shape[0] * h)) for h in (heights) if abs(h) <= img_data.shape[0]]
+        axl_plane = np.concatenate([img_data[h, :, :] for h in heights], axis=0)
+        return axl_plane
+    else:
+        # Axial
+        center = x_ctd[len(x_ctd) // 2]
+        center_up = x_ctd[max(0, len(x_ctd) // 2 - 1)]
+        center_down = x_ctd[min(len(x_ctd) - 1, len(x_ctd) // 2 + 1)]
+        try:
+            axl_plane = np.concatenate(
+                [
+                    img_data[(center + center_up) // 2, :, :],
+                    img_data[center, :, :],
+                    img_data[(center + center_down) // 2, :, :],
+                ],
+                axis=0,
+            )
+        except Exception as e:
+            print(e)
+            axl_plane = np.zeros((1, 1))
+        return axl_plane
 
 
 def make_isotropic2d(arr2d: np.ndarray, zms2d, msk=False) -> np.ndarray:
@@ -402,8 +409,8 @@ def make_isotropic2dpluscolor(arr3d, zms2d, msk=False):
     return img
 
 
-def create_figure(dpi, planes: list):
-    fig_h = round(2 * planes[0].shape[0] / dpi, 2) + 0.5
+def create_figure(dpi, planes: list, has_title=True):
+    fig_h = round(2 * planes[0].shape[0] / dpi, 2) + (0.5 if has_title else 0)
     plane_w = [p.shape[1] for p in planes]
     w = sum(plane_w)
     fig_w = round(2 * w / dpi, 2)
@@ -419,7 +426,7 @@ def create_figure(dpi, planes: list):
     for a in axs:
         a.axis("off")
         idx = list(axs).index(a)
-        a.set_position([(x_pos[idx] / w), -0.03, plane_w[idx] / w, 1])
+        a.set_position([(x_pos[idx] / w), (-0.03 if has_title else 0), plane_w[idx] / w, 1])
     return fig, axs
 
 
@@ -473,6 +480,7 @@ def make_2d_slice(
     to_ax=("I", "P", "L"),
     curve_location: Location = Location.Vertebra_Corpus,
     rescale_to_iso: bool = True,
+    axial_heights=None,
 ):
     img_nii = to_nii(img)
     img_reo = img_nii.reorient_(to_ax)
@@ -495,9 +503,17 @@ def make_2d_slice(
         )
         # Calculate snapshot data values depending on visualization type
         if visualization_type == Visualization_Type.Slice:
-            sag, cor, axl = curve_projected_slice(x_ctd=x_ctd, img_data=img_data, y_cord=y_cord, z_cord=z_cord)
+            sag, cor, axl = curve_projected_slice(
+                x_ctd=x_ctd,
+                img_data=img_data,
+                y_cord=y_cord,
+                z_cord=z_cord,
+                axial_heights=axial_heights,
+            )
         elif visualization_type == Visualization_Type.Maximum_Intensity:
-            sag, cor, axl = curve_projected_mip(img_data=img_data, zms=zms, x_ctd=x_ctd, y_cord=y_cord, ctd_list=ctd_reo)
+            sag, cor, axl = curve_projected_mip(
+                img_data=img_data, zms=zms, x_ctd=x_ctd, y_cord=y_cord, ctd_list=ctd_reo, axial_heights=axial_heights
+            )
         elif visualization_type == Visualization_Type.Maximum_Intensity_Colored_Depth:
             sag, cor, axl = curve_projected_mip(
                 img_data=img_data,
@@ -506,10 +522,13 @@ def make_2d_slice(
                 y_cord=y_cord,
                 ctd_list=ctd_reo,
                 make_colored_depth=not msk,
+                axial_heights=axial_heights,
             )
         # make isotropic
         elif visualization_type == Visualization_Type.Mean_Intensity:
-            sag, cor, axl = curve_projected_mean(img_data=img_data, zms=zms, x_ctd=x_ctd, y_cord=y_cord, ctd_list=ctd_reo)
+            sag, cor, axl = curve_projected_mean(
+                img_data=img_data, zms=zms, x_ctd=x_ctd, y_cord=y_cord, ctd_list=ctd_reo, axial_heights=axial_heights
+            )
 
     # elif visualization_type == visualization_type.Mean_Intensity:
     #    plane_dict = {"S": "ax", "I": "ax", "L": "sag", "R": "sag", "A": "cor", "P": "cor"}
@@ -564,6 +583,8 @@ class Snapshot_Frame:
     sagittal: bool = True
     coronal: bool = False
     axial: bool = False
+
+    axial_heights: list[float | int] | None = None
     # Title: str = for all views same, list entry for each view, None = no title
     title: str | list[str] | None = None
     # Image mode, cmap
@@ -732,6 +753,7 @@ def create_snapshot(  # noqa: C901
                 cor_savgol_filter=frame.cor_savgol_filter,
                 curve_location=frame.curve_location,
                 rescale_to_iso=frame.rescale_to_iso,
+                axial_heights=frame.axial_heights,
             )
             if seg is not None:
                 sag_seg, cor_seg, axl_seg = make_2d_slice(
@@ -745,6 +767,7 @@ def create_snapshot(  # noqa: C901
                     cor_savgol_filter=frame.cor_savgol_filter,
                     curve_location=frame.curve_location,
                     rescale_to_iso=frame.rescale_to_iso,
+                    axial_heights=frame.axial_heights,
                 )
             else:
                 sag_seg, cor_seg, axl_seg = (None, None, None)
@@ -853,7 +876,7 @@ def create_snapshot(  # noqa: C901
                 )
             )
 
-    fig, axs = create_figure(dpi, img_list)
+    fig, axs = create_figure(dpi, img_list, has_title=frame.title is None)
     for ax, (img, msk, ctd, wdw, is_sag, alpha, cmap, zms, curve_location, poi_labelmap, hide_centroid_labels, title) in zip(
         axs, frame_list, strict=False
     ):

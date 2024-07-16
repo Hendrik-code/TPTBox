@@ -4,7 +4,8 @@ from pathlib import Path
 from typing import NoReturn
 
 import numpy as np
-from scipy.linalg import norm
+from numpy.linalg import norm
+from scipy.interpolate import RegularGridInterpolator
 from scipy.spatial.distance import cdist
 
 from TPTBox import NII, POI, Log_Type, Logger_Interface, Print_Logger, calc_poi_from_subreg_vert
@@ -56,7 +57,7 @@ class Strategy_Pattern:
         >>> result = strategy(poi, current_subreg, vert_id, bb)
     """
 
-    def __init__(self, target: Location, strategy: Callable, prerequisite: set[Location] | None = None, **args) -> None:
+    def __init__(self, target: Location, strategy: Callable, prerequisite: set[Location] | None = None, prio=0, **args) -> None:
         self.target = target
         self.args = args
         if prerequisite is None:
@@ -73,6 +74,7 @@ class Strategy_Pattern:
         self.prerequisite = prerequisite
         self.strategy = strategy
         all_poi_functions[target.value] = self
+        self._prio = prio
 
     def __call__(self, poi: POI, current_subreg: NII, vert_id: int, bb, log: Logger_Interface = _log):
         try:
@@ -80,6 +82,9 @@ class Strategy_Pattern:
         except Exception:
             _log.print_error()
             return None
+
+    def prority(self):
+        return self.target.value + self._prio
 
 
 class Strategy_Pattern_Side_Effect(Strategy_Pattern):
@@ -350,6 +355,7 @@ def get_vert_direction_PIR(poi: POI, vert_id, do_norm=True) -> Vertebra_Orientat
         right = np.array(poi[k : Location.Vertebra_Direction_Right])
 
         poi._vert_orientation_pir[k] = n(post - center), n(down - center), n(right - center)
+
     return poi._vert_orientation_pir[vert_id]
 
 
@@ -403,7 +409,7 @@ def strategy_line_cast(
     vert_id: int,
     current_subreg: NII,
     location: Location,
-    start_point: Location,
+    start_point: Location | np.ndarray,
     regions_loc: list[Location] | Location,
     normal_vector_points: tuple[Location, Location] | Directions,
     bb,
@@ -413,13 +419,13 @@ def strategy_line_cast(
     # if legacy_code:
     #    horizontal_plane_landmarks_old(poi, region, label_id, bb, log)
     # else:
-    extreme_point = max_distance_ray_cast(poi, region, vert_id, bb, normal_vector_points, start_point, log=log)
+    extreme_point = max_distance_ray_cast_convex(poi, region, vert_id, bb, normal_vector_points, start_point, log=log)
     if extreme_point is None:
         return
     poi[vert_id, location.value] = tuple(a.start + b for a, b in zip(bb, extreme_point, strict=True))
 
 
-def max_distance_ray_cast(
+def max_distance_ray_cast_pixel_level(
     poi: POI,
     region: NII,
     vert_id: int,
@@ -454,6 +460,82 @@ def max_distance_ray_cast(
     return out
 
 
+def max_distance_ray_cast_convex(
+    poi: POI,
+    region: NII,
+    vert_id: int,
+    bb: tuple[slice, slice, slice],
+    normal_vector_points: tuple[Location, Location] | Directions = "R",
+    start_point: Location | np.ndarray = Location.Vertebra_Corpus,
+    log: Logger_Interface = _log,
+    acc_delta: float = 0.00005,
+):
+    start_point_np = _to_local_np(start_point, bb, poi, vert_id, log) if isinstance(start_point, Location) else start_point
+    if start_point_np is None:
+        return None
+
+    """Convex assumption!"""
+    # Compute a normal vector, that defines the plane direction
+    if isinstance(normal_vector_points, str):
+        normal_vector = _get_direction(normal_vector_points, poi, vert_id) / np.array(poi.zoom)
+        normal_vector = normal_vector / norm(normal_vector)
+    else:
+        try:
+            b = _to_local_np(normal_vector_points[1], bb, poi, vert_id, log)
+            if b is None:
+                return None
+            a = _to_local_np(normal_vector_points[0], bb, poi, vert_id, log)
+            normal_vector = b - a
+            normal_vector = normal_vector / norm(normal_vector)
+            log.print(f"ray_cast used with old normal_vector_points {normal_vector_points}", Log_Type.FAIL)
+        except TypeError as e:
+            print("TypeError", e)
+            return None
+    # Create a function to interpolate within the mask array
+    interpolator = RegularGridInterpolator([np.arange(region.shape[i]) for i in range(3)], region.get_array())
+
+    def is_inside(distance):
+        coords = [start_point_np[i] + normal_vector[i] * distance for i in [0, 1, 2]]
+        if any(i < 0 for i in coords):
+            return 0
+        if any(coords[i] > region.shape[i] - 1 for i in range(len(coords))):
+            return 0
+        # Evaluate the mask value at the interpolated coordinates
+        mask_value = interpolator(coords)
+        return mask_value > 0.5
+
+    if not is_inside(0):
+        return start_point_np
+    count = 0
+    min_v = 0
+    max_v = sum(region.shape)
+    delta = max_v * 2
+    while acc_delta < delta:
+        bisection = (max_v - min_v) / 2 + min_v
+        if is_inside(bisection):
+            min_v = bisection
+        else:
+            max_v = bisection
+        delta = max_v - min_v
+        count += 1
+    return start_point_np + normal_vector * ((min_v + max_v) / 2)
+    ## Golden section search
+    # phi = (1 + np.sqrt(5)) / 2  # Golden ratio
+    # a, b = 0, sum(region.shape)
+    #
+    # while abs(b - a) > acc_delta:
+    #    x1 = b - (b - a) / phi
+    #    x2 = a + (b - a) / phi
+    #
+    #    if is_inside(x1) > is_inside(x2):
+    #        a = x1
+    #    else:
+    #        b = x2
+    #    count += 1
+    # print(count)
+    # return start_point_np + normal_vector * ((a + b) / 2)
+
+
 def ray_cast(
     poi: POI,
     region: NII,
@@ -463,7 +545,7 @@ def ray_cast(
     start_point: Location | np.ndarray = Location.Vertebra_Corpus,
     log: Logger_Interface = _log,
     two_sided=False,
-):
+) -> tuple[np.ndarray | None, np.ndarray | None]:
     """Perform ray casting in a region.
 
     Args:
@@ -484,14 +566,16 @@ def ray_cast(
     start_point_np = _to_local_np(start_point, bb, poi, vert_id, log) if isinstance(start_point, Location) else start_point
     if start_point_np is None:
         return None, None
-    ### Compute a normal vector, that defines the plane direction ###
+
+    # Compute a normal vector, that defines the plane direction
     if isinstance(normal_vector_points, str):
-        normal_vector = _get_direction(normal_vector_points, poi, vert_id)
+        normal_vector = _get_direction(normal_vector_points, poi, vert_id) / np.array(poi.zoom)
+        normal_vector = normal_vector / norm(normal_vector)
     else:
         try:
             b = _to_local_np(normal_vector_points[1], bb, poi, vert_id, log)
             if b is None:
-                raise TypeError()  # noqa: TRY301
+                return None, None
             a = _to_local_np(normal_vector_points[0], bb, poi, vert_id, log)
             normal_vector = b - a
             normal_vector = normal_vector / norm(normal_vector)
@@ -506,14 +590,14 @@ def ray_cast(
         num_pixel = np.abs(np.floor(np.max((np.array(region.shape) - start_point_np) / normal_vector))).item()
         arange = np.arange(0, num_pixel, step=1, dtype=float)
         coords = [start_point_np[i] + normal_vector[i] * arange for i in [0, 1, 2]]
+
+        # Clip coordinates to region bounds
         for i in [0, 1, 2]:
-            cut_off = (region.shape[i] <= np.floor(coords[i])).sum()
-            if cut_off == 0:
-                cut_off = (np.floor(coords[i]) <= 0).sum()
-            if cut_off != 0:
-                coords = [c[:-cut_off] for c in coords]
-                arange = arange[:-cut_off]
-        return np.stack(coords, -1).astype(int), arange
+            coords[i] = np.clip(coords[i], 0, region.shape[i] - 1)
+        # Convert coordinates to integers for indexing
+        int_coords = [c.astype(int) for c in coords]
+
+        return np.stack(int_coords, -1), arange
 
     plane_coords, arange = _calc_pixels(normal_vector, start_point_np)
     if two_sided:
@@ -521,7 +605,140 @@ def ray_cast(
         arange2 = -arange2
         plane_coords = np.concatenate([plane_coords, plane_coords2])
         arange = np.concatenate([arange, arange2]) - np.min(arange2)
+
     return plane_coords, arange
+
+
+#### find corner ####
+
+
+def strategy_find_corner(
+    poi: POI,
+    current_subreg: NII,
+    vert_id: int,
+    bb: tuple[slice, slice, slice],
+    location: Location,
+    vec1: Location,
+    vec2: Location,
+    start_point=Location.Vertebra_Corpus,
+    log: Logger_Interface = _log,
+    shift_direction: Directions | None = None,
+):
+    start_point = shift_point(poi, vert_id, bb, start_point, direction=shift_direction, log=log)
+    corner_point = find_corner_point(poi, current_subreg, vert_id, bb, start_point, vec1=vec1, vec2=vec2, log=log)
+
+    if corner_point is None:
+        return
+    poi[vert_id, location.value] = tuple(a.start + b for a, b in zip(bb, corner_point, strict=True))
+
+
+def find_corner_point(poi, region, vert_id, bb, start_point, vec1, vec2, log: Logger_Interface = _log, delta=0.00000005):
+    # Convert start point and vectors to local numpy coordinates
+    start_point_np = _to_local_np(start_point, bb, poi, vert_id, log) if isinstance(start_point, Location) else start_point
+    if start_point_np is None:
+        return None
+    v1 = _to_local_np(vec1, bb, poi, vert_id, log) - start_point_np
+    v2 = _to_local_np(vec2, bb, poi, vert_id, log) - start_point_np
+
+    # Initialize factors and interpolator
+    factor1 = factor2 = 1
+    interpolator = RegularGridInterpolator([np.arange(region.shape[i]) for i in range(3)], region.get_array())
+
+    def is_inside(f1=0.0, f2=0.0):
+        coords = start_point_np + (factor1 + f1) * v1 + (factor2 + f2) * v2
+        if any(i < 0 for i in coords) or any(coords[i] > region.shape[i] - 1 for i in range(len(coords))):
+            return False
+        return interpolator(coords) > 0.5
+
+    # Adjust factors until inside region
+    while not is_inside():
+        factor1 = factor2 = factor2 * 0.98
+
+    v1_n: float = 1 / norm(v1)  # type: ignore
+    v2_n: float = 1 / norm(v2)  # type: ignore
+    f1 = f2 = 0
+
+    # Refine factors using delta
+    while delta > (v1_n + v2_n) / 2:
+        changed = False
+        if is_inside(v1_n + f1, f2):
+            f1 += v1_n
+            changed = True
+        if is_inside(f1, f2 + v2_n):
+            f2 += v2_n
+            changed = True
+        if not changed:
+            v1_n /= 2
+            v2_n /= 2
+
+    return start_point_np + (factor1 + f1) * v1 + (factor2 + f2) * v2
+
+
+####
+
+
+def strategy_ligament_attachment_point_flava(
+    poi: POI,
+    current_subreg: NII,
+    vert_id: int,
+    bb: tuple[slice, slice, slice],
+    location: Location,
+    goal: Location,
+    log: Logger_Interface = _log,
+    delta=0.0000001,
+):
+    try:
+        normal_vector1 = _get_direction("S", poi, vert_id) / np.array(poi.zoom)
+        v1 = normal_vector1 / norm(normal_vector1)
+
+        normal_vector2 = _get_direction("A", poi, vert_id) / np.array(poi.zoom)
+        v2 = normal_vector2 / norm(normal_vector2)
+    except KeyError:
+        return
+
+    start_point_np = _to_local_np(Location.Spinosus_Process, bb, poi, vert_id, log) if isinstance(goal, Location) else goal
+
+    goal_np = _to_local_np(goal, bb, poi, vert_id, log) if isinstance(goal, Location) else goal
+    if goal_np is None or start_point_np is None:
+        return
+
+    region = current_subreg.extract_label([Location.Arcus_Vertebrae, Location.Spinosus_Process]).get_array()
+    interpolator = RegularGridInterpolator([np.arange(region.shape[i]) for i in range(3)], region)
+    dist_curr = norm(start_point_np - goal_np)
+
+    def is_inside_and_closer(f1=0.0, f2=0.0):
+        coords = start_point_np + f1 * v1 + f2 * v2
+        if any(i < 0 for i in coords) or any(coords[i] > region.shape[i] - 1 for i in range(len(coords))):
+            return False
+        if interpolator(coords) > 0.5:
+            dist_new = norm(coords - goal_np)
+            return dist_curr > dist_new
+        else:
+            return False
+
+    v1_n: float = 0.5
+    v2_n: float = 0.5
+    f1 = f2 = 0
+    # Refine factors using delta
+    while delta < (v1_n + v2_n) / 2:
+        changed = False
+        if is_inside_and_closer(v1_n + f1, f2):
+            f1 += v1_n
+            changed = True
+            coords = start_point_np + f1 * v1 + f2 * v2
+            dist_curr = norm(coords - goal_np)
+        if is_inside_and_closer(f1, f2 + v2_n):
+            f2 += v2_n
+            changed = True
+            coords = start_point_np + f1 * v1 + f2 * v2
+            dist_curr = norm(coords - goal_np)
+
+        if not changed:
+            v1_n /= 2
+            v2_n /= 2
+
+    coords = start_point_np + f1 * v1 + f2 * v2
+    poi[vert_id, location] = tuple(x + y.start for x, y in zip(coords, bb, strict=False))
 
 
 def _to_local_np(loc: Location, bb: tuple[slice, slice, slice], poi: POI, label, log: Logger_Interface):
@@ -531,106 +748,210 @@ def _to_local_np(loc: Location, bb: tuple[slice, slice, slice], poi: POI, label,
     return None
 
 
-def strategy_ligament_attachment(
+def shift_point(
+    poi: POI,
+    vert_id: int,
+    bb,
+    start_point: Location = Location.Vertebra_Corpus,
+    direction: Directions | None = "R",
+    log: Logger_Interface = _log,
+):
+    if direction is None:
+        return _to_local_np(start_point, bb, poi, vert_id, log)
+    sup_articular_right = _to_local_np(Location.Superior_Articular_Right, bb, poi, vert_id, log)
+    sup_articular_left = _to_local_np(Location.Superior_Articular_Left, bb, poi, vert_id, log)
+    factor = 3.0
+    if sup_articular_left is None or sup_articular_right is None:
+        sup_articular_right = _to_local_np(Location.Inferior_Articular_Right, bb, poi, vert_id, log)
+        sup_articular_left = _to_local_np(Location.Inferior_Articular_Left, bb, poi, vert_id, log)
+        factor = 2.0
+        if sup_articular_left is None or sup_articular_right is None:
+            return
+    vertebra_width = np.linalg.norm(sup_articular_right - sup_articular_left)
+    shift = vertebra_width / factor
+    normal_vector = _get_direction(direction, poi, vert_id) / np.array(poi.zoom)
+    normal_vector = normal_vector / norm(normal_vector)
+    start_point_np = _to_local_np(start_point, bb, poi, vert_id, log) if isinstance(start_point, Location) else start_point
+    if start_point_np is None:
+        return None
+    return start_point_np + normal_vector * shift
+
+
+def strategy_shifted_line_cast(
     poi: POI,
     current_subreg: NII,
     location: Location,
     vert_id: int,
     bb,
+    regions_loc: list[Location] | Location,
+    normal_vector_points: tuple[Location, Location] | Directions,
+    start_point: Location = Location.Vertebra_Corpus,
     log=_log,
-    corpus=None,
     direction: Directions = "R",
-    compute_arcus_points=False,
-    do_shift=False,
+    do_shift=True,
 ):
-    if corpus is None:
-        corpus = [Location.Vertebra_Corpus, Location.Vertebra_Corpus_border]
-    corpus = current_subreg.extract_label(corpus)
-    # Step 1: compute shift from center
-    if do_shift:
-        # The shift is dependen on the distance between Superior_Articular_Right and Superior_Articular_Left
-        sup_articular_right = _to_local_np(Location.Superior_Articular_Right, bb, poi, vert_id, log)
-        sup_articular_left = _to_local_np(Location.Superior_Articular_Left, bb, poi, vert_id, log)
-        factor = 3.0
-        if sup_articular_left is None or sup_articular_right is None:
-            # fallback if a Superior is missing; TODO Test if we to readjust factor for the neck vertebra
-            sup_articular_right = _to_local_np(Location.Inferior_Articular_Right, bb, poi, vert_id, log)
-            sup_articular_left = _to_local_np(Location.Inferior_Articular_Left, bb, poi, vert_id, log)
-            factor = 2.0
-            if sup_articular_left is None or sup_articular_right is None:
-                return
-        vertebra_width = (sup_articular_right - sup_articular_left) ** 2  # TODO need zoom?
-        vertebra_width = np.sqrt(np.sum(vertebra_width))
-        shift = vertebra_width / factor
-    else:
-        shift = 0
-
-    # Step 2: add corner points
-    start_point_np = _to_local_np(Location.Vertebra_Corpus, bb, poi, vert_id, log=log)
-    if start_point_np is None:
+    try:
+        cords = shift_point(poi, vert_id, bb, start_point, direction=direction if do_shift else None, log=log)
+    except KeyError as e:
+        log.print(f"region={vert_id},subregion={e} is missing", ltype=Log_Type.FAIL)
         return
-
-    normal_vector = _get_direction(direction, poi, vert_id)
-    # The main axis will be treated differently
-    idx = [plane_dict[i] for i in current_subreg.orientation]
-    axis = idx.index(plane_dict[direction])
-    assert axis == np.argmax(np.abs(normal_vector)).item(), (axis, direction, normal_vector)
-    dims = [0, 1, 2]
-    dims.remove(axis)
-    dim1, dim2 = dims
-    if current_subreg.orientation[axis] != direction:
-        shift *= -1
-    # Make a plane through start_point with the norm of "normal_vector", which is shifted by "shift" along the norm
-    start_point_np = start_point_np.copy()
-    start_point_np[axis] = start_point_np[axis] + shift
-    shift_total = -start_point_np.dot(normal_vector)
-    xx, yy = np.meshgrid(range(current_subreg.shape[dim1]), range(current_subreg.shape[dim2]))
-    zz = (-normal_vector[dim1] * xx - normal_vector[dim2] * yy - shift_total) * 1.0 / normal_vector[axis]
-    z_max = current_subreg.shape[axis] - 1
-    zz[zz < 0] = 0
-    zz[zz > z_max] = 0
-    # make cords to array again
-    plane_coords = np.zeros([xx.shape[0], xx.shape[1], 3])
-    plane_coords[:, :, axis] = zz
-    plane_coords[:, :, dim1] = xx
-    plane_coords[:, :, dim2] = yy
-    plane_coords = plane_coords.astype(int)
-    # 1 where the selected subreg is, else 0
-    corpus_arr = corpus.get_array()
-
-    plane = corpus_arr[plane_coords[:, :, 0], plane_coords[:, :, 1], plane_coords[:, :, 2]]
-    if plane.sum() == 0:
-        log.print(vert_id, "add_vertebra_body_points, Plane empty", ltype=Log_Type.STRANGE)
+    if cords is None:
         return
-    ## Compute Corner Point
-    out_points = _compute_vert_corners_in_reference_frame(poi, vert_id=vert_id, plane_coords=plane_coords, subregion=corpus_arr)
-    for i, point in enumerate(out_points):
-        # cords = plane_coords[point[0], point[1], :]
-        poi[vert_id, location.value + i] = tuple(x + y.start for x, y in zip(point, bb, strict=False))
-    for idx, (i, j, d) in enumerate([(0, 1, "S"), (1, 3, "P"), (2, 3, "I"), (0, 2, "A")], start=location.value + 4):  #
-        point = (out_points[i] + out_points[j]) // 2
-        point2 = max_distance_ray_cast(poi, corpus, vert_id, bb, d, point, two_sided=True)
-        if point2 is None:
-            point2 = point
-        poi[vert_id, idx] = tuple(x + y.start for x, y in zip(point2, bb, strict=False))
-    if compute_arcus_points:
-        arcus = current_subreg.extract_label(Location.Arcus_Vertebrae).get_array()
-        plane_arcus = arcus[plane_coords[:, :, 0], plane_coords[:, :, 1], plane_coords[:, :, 2]]
-        for in_id, out_id in [
-            (1, Location.Ligament_Attachment_Point_Flava_Superior_Median.value),
-            (3, Location.Ligament_Attachment_Point_Flava_Inferior_Median.value),
-        ]:
-            try:
-                loc102 = out_points[in_id]
-                # Transform 3D Point in 2D point of plane
-                arr_poi = arcus.copy() * 0
-                arr_poi[loc102[0], loc102[1], loc102[2]] = 1
-                loc102 = np.concatenate(np.where(arr_poi[plane_coords[:, :, 0], plane_coords[:, :, 1], plane_coords[:, :, 2]]))
-                loc125 = get_nearest_neighbor(loc102, plane_arcus, 1)  # 41
-                cords = plane_coords[loc125[0], loc125[1], :]
-                poi[vert_id, out_id] = tuple(x + y.start for x, y in zip(cords, bb, strict=False))
-            except Exception:
-                print(vert_id, out_id, "missed its target. Skipped", loc102.sum(), plane_arcus.sum(), np.unique(plane_arcus))
+    strategy_line_cast(
+        start_point=cords,
+        regions_loc=regions_loc,
+        normal_vector_points=normal_vector_points,
+        poi=poi,
+        vert_id=vert_id,
+        current_subreg=current_subreg,
+        location=location,
+        bb=bb,
+        log=_log,
+    )
+
+
+# def strategy_ligament_attachment(
+#    poi: POI,
+#    current_subreg: NII,
+#    location: Location,
+#    vert_id: int,
+#    bb,
+#    log=_log,
+#    corpus=None,
+#    direction: Directions = "R",
+#    compute_arcus_points=False,
+#    do_shift=False,
+# ):
+#    if corpus is None:
+#        corpus = [Location.Vertebra_Corpus, Location.Vertebra_Corpus_border]
+#    corpus = current_subreg.extract_label(corpus)
+#    org_zoom = None
+#    # if max(poi.zoom) / min(poi.zoom) > 1.5:
+#    #    org_zoom = poi.zoom
+#    #    poi = poi.rescale_()
+#    #    current_subreg = current_subreg.rescale()
+#    # Step 1: compute shift from center
+#    if do_shift:
+#        sup_articular_right = _to_local_np(Location.Superior_Articular_Right, bb, poi, vert_id, log)
+#        sup_articular_left = _to_local_np(Location.Superior_Articular_Left, bb, poi, vert_id, log)
+#        factor = 3.0
+#        if sup_articular_left is None or sup_articular_right is None:
+#            sup_articular_right = _to_local_np(Location.Inferior_Articular_Right, bb, poi, vert_id, log)
+#            sup_articular_left = _to_local_np(Location.Inferior_Articular_Left, bb, poi, vert_id, log)
+#            factor = 2.0
+#            if sup_articular_left is None or sup_articular_right is None:
+#                return
+#        vertebra_width = np.linalg.norm(sup_articular_right - sup_articular_left)
+#        shift = vertebra_width / factor
+#    else:
+#        shift = 0
+#
+#    # Step 2: add corner points
+#    start_point_np = _to_local_np(Location.Vertebra_Corpus, bb, poi, vert_id, log=log)
+#    if start_point_np is None:
+#        return
+#    normal_vector = _get_direction(direction, poi, vert_id)  # / np.array(poi.zoom)
+#    # normal_vector = normal_vector / norm(normal_vector)
+#
+#    idx = [plane_dict[i] for i in current_subreg.orientation]
+#    axis = idx.index(plane_dict[direction])
+#    assert axis == np.argmax(np.abs(normal_vector)).item(), (axis, direction, normal_vector)
+#    dims = [0, 1, 2]
+#    dims.remove(axis)
+#    dim1, dim2 = dims
+#    if current_subreg.orientation[axis] != direction:
+#        shift *= -1
+#    start_point_np = start_point_np.copy()
+#    start_point_np[axis] = start_point_np[axis] + shift + 1
+#    shift_total = -start_point_np.dot(normal_vector)
+#    xx, yy = np.meshgrid(range(current_subreg.shape[dim1]), range(current_subreg.shape[dim2]))
+#    zz = (-normal_vector[dim1] * xx - normal_vector[dim2] * yy - shift_total) / normal_vector[axis]
+#
+#    z_max = current_subreg.shape[axis] - 1
+#    zz[zz < 0] = 0
+#    zz[zz > z_max] = z_max
+#
+#    xx = xx.astype(np.float32)
+#    yy = yy.astype(np.float32)
+#    zz = zz.astype(np.float32)
+#
+#    x0 = np.floor(xx).astype(int)
+#    x1 = x0 + 1
+#    y0 = np.floor(yy).astype(int)
+#    y1 = y0 + 1
+#    z0 = np.floor(zz).astype(int)
+#    z1 = z0 + 1
+#
+#    x1[x1 >= current_subreg.shape[dim1]] = x0[x1 >= current_subreg.shape[dim1]]
+#    y1[y1 >= current_subreg.shape[dim2]] = y0[y1 >= current_subreg.shape[dim2]]
+#    z1[z1 >= current_subreg.shape[axis]] = z0[z1 >= current_subreg.shape[axis]]
+#
+#    xd = (xx - x0).reshape(-1)
+#    yd = (yy - y0).reshape(-1)
+#    zd = (zz - z0).reshape(-1)
+#
+#    corpus_arr = corpus.get_array()
+#
+#    def trilinear_interpolation(v000, v001, v010, v011, v100, v101, v110, v111, xd, yd, zd):
+#        c00 = v000 * (1 - xd) + v100 * xd
+#        c01 = v001 * (1 - xd) + v101 * xd
+#        c10 = v010 * (1 - xd) + v110 * xd
+#        c11 = v011 * (1 - xd) + v111 * xd
+#        c0 = c00 * (1 - yd) + c10 * yd
+#        c1 = c01 * (1 - yd) + c11 * yd
+#        return c0 * (1 - zd) + c1 * zd
+#
+#    v000 = corpus_arr[x0, y0, z0].reshape(-1)
+#    v001 = corpus_arr[x0, y0, z1].reshape(-1)
+#    v010 = corpus_arr[x0, y1, z0].reshape(-1)
+#    v011 = corpus_arr[x0, y1, z1].reshape(-1)
+#    v100 = corpus_arr[x1, y0, z0].reshape(-1)
+#    v101 = corpus_arr[x1, y0, z1].reshape(-1)
+#    v110 = corpus_arr[x1, y1, z0].reshape(-1)
+#    v111 = corpus_arr[x1, y1, z1].reshape(-1)
+#
+#    plane = trilinear_interpolation(v000, v001, v010, v011, v100, v101, v110, v111, xd, yd, zd).reshape(xx.shape)
+#
+#    if plane.sum() == 0:
+#        log.print(vert_id, "add_vertebra_body_points, Plane empty", ltype=Log_Type.STRANGE)
+#        return
+#
+#    plane_coords = np.zeros([xx.shape[0], xx.shape[1], 3])
+#    plane_coords[:, :, axis] = zz
+#    plane_coords[:, :, dim1] = xx
+#    plane_coords[:, :, dim2] = yy
+#    plane_coords = plane_coords.astype(int)
+#
+#    out_points = _compute_vert_corners_in_reference_frame(poi, vert_id=vert_id, plane_coords=plane_coords, subregion=corpus_arr)
+#    for i, point in enumerate(out_points):
+#        poi[vert_id, location.value + i] = tuple(x + y.start for x, y in zip(point, bb, strict=False))
+#
+#    for idx, (i, j, d) in enumerate([(0, 1, "S"), (1, 3, "P"), (2, 3, "I"), (0, 2, "A")], start=location.value + 4):
+#        point = (out_points[i] + out_points[j]) // 2
+#        point2 = max_distance_ray_cast(poi, corpus, vert_id, bb, d, point, two_sided=True)
+#        if point2 is None:
+#            point2 = point
+#        poi[vert_id, idx] = tuple(x + y.start for x, y in zip(point2, bb, strict=False))
+#
+#    if compute_arcus_points:
+#        arcus = current_subreg.extract_label(Location.Arcus_Vertebrae).get_array()
+#        plane_arcus = arcus[plane_coords[:, :, 0], plane_coords[:, :, 1], plane_coords[:, :, 2]]
+#        for in_id, out_id in [
+#            (1, Location.Ligament_Attachment_Point_Flava_Superior_Median.value),
+#            (3, Location.Ligament_Attachment_Point_Flava_Inferior_Median.value),
+#        ]:
+#            try:
+#                loc102 = out_points[in_id]
+#                arr_poi = arcus.copy() * 0
+#                arr_poi[loc102[0], loc102[1], loc102[2]] = 1
+#                loc102 = np.concatenate(np.where(arr_poi[plane_coords[:, :, 0], plane_coords[:, :, 1], plane_coords[:, :, 2]]))
+#                loc125 = get_nearest_neighbor(loc102, plane_arcus, 1)  # 41
+#                cords = plane_coords[loc125[0], loc125[1], :]
+#                poi[vert_id, out_id] = tuple(x + y.start for x, y in zip(cords, bb, strict=False))
+#            except Exception:
+#                print(vert_id, out_id, "missed its target. Skipped", loc102.sum(), plane_arcus.sum(), np.unique(plane_arcus))
+#    if org_zoom is not None:
+#        poi.rescale_(org_zoom)
 
 
 def _compute_vert_corners_in_reference_frame(poi: POI, vert_id: int, plane_coords: np.ndarray, subregion: np.ndarray):
@@ -688,59 +1009,131 @@ Strategy_Pattern(L.Muscle_Inserts_Articulate_Process_Inferior_Right, strategy=S,
 Strategy_Pattern(L.Muscle_Inserts_Articulate_Process_Superior_Left, strategy=S, subreg_id=L.Superior_Articular_Left, direction=("S")) # 88
 Strategy_Pattern(L.Muscle_Inserts_Articulate_Process_Superior_Right, strategy=S, subreg_id=L.Superior_Articular_Right, direction=("S")) # 89
 #Strategy_Pattern(L.Vertebra_Disc_Post, strategy=S, subreg_id=L.Vertebra_Disc, direction=("P"))
+
 S = strategy_line_cast
 Strategy_Pattern(L.Muscle_Inserts_Vertebral_Body_Right, strategy=S, regions_loc =[L.Vertebra_Corpus, L.Vertebra_Corpus_border],
                  start_point = L.Vertebra_Corpus, normal_vector_points ="R" ) # 84
 Strategy_Pattern(L.Muscle_Inserts_Vertebral_Body_Left, strategy=S, regions_loc =[L.Vertebra_Corpus, L.Vertebra_Corpus_border],
                  start_point = L.Vertebra_Corpus, normal_vector_points ="L" ) # 85
-Strategy_Pattern(
-    L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Median,
-    strategy_ligament_attachment,
-    compute_arcus_points=True,
-    corpus=[L.Vertebra_Corpus, L.Vertebra_Corpus_border],
-    prerequisite={L.Superior_Articular_Right,L.Superior_Articular_Left,L.Inferior_Articular_Right,L.Inferior_Articular_Left}
-)
-Strategy_Pattern_Side_Effect(L.Ligament_Attachment_Point_Posterior_Longitudinal_Superior_Median,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Median)
-Strategy_Pattern_Side_Effect(L.Ligament_Attachment_Point_Anterior_Longitudinal_Inferior_Median,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Median)
-Strategy_Pattern_Side_Effect(L.Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Median,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Median)
-Strategy_Pattern_Side_Effect(L.Additional_Vertebral_Body_Middle_Superior_Median,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Median)
-Strategy_Pattern_Side_Effect(L.Additional_Vertebral_Body_Posterior_Central_Median,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Median)
-Strategy_Pattern_Side_Effect(L.Additional_Vertebral_Body_Middle_Inferior_Median,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Median)
-Strategy_Pattern_Side_Effect(L.Additional_Vertebral_Body_Anterior_Central_Median,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Median)
-Strategy_Pattern_Side_Effect(L.Ligament_Attachment_Point_Flava_Superior_Median,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Median)
-Strategy_Pattern_Side_Effect(L.Ligament_Attachment_Point_Flava_Inferior_Median,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Median)
+Strategy_Pattern(L.Additional_Vertebral_Body_Middle_Superior_Median, strategy=S, regions_loc =[L.Vertebra_Corpus, L.Vertebra_Corpus_border],
+                 start_point = L.Vertebra_Corpus, normal_vector_points ="S" ) # 105
+Strategy_Pattern(L.Additional_Vertebral_Body_Posterior_Central_Median, strategy=S, regions_loc =[L.Vertebra_Corpus, L.Vertebra_Corpus_border],
+                 start_point = L.Vertebra_Corpus, normal_vector_points ="P" ) # 106
+Strategy_Pattern(L.Additional_Vertebral_Body_Middle_Inferior_Median, strategy=S, regions_loc =[L.Vertebra_Corpus, L.Vertebra_Corpus_border],
+                 start_point = L.Vertebra_Corpus, normal_vector_points ="I" ) # 107
+Strategy_Pattern(L.Additional_Vertebral_Body_Anterior_Central_Median, strategy=S, regions_loc =[L.Vertebra_Corpus, L.Vertebra_Corpus_border],
+                 start_point = L.Vertebra_Corpus, normal_vector_points ="A" ) # 108
+S = strategy_shifted_line_cast
+Strategy_Pattern(L.Additional_Vertebral_Body_Middle_Superior_Right, strategy=S, regions_loc =[L.Vertebra_Corpus, L.Vertebra_Corpus_border],
+                 start_point = L.Vertebra_Corpus,prerequisite={L.Superior_Articular_Right,L.Superior_Articular_Left,L.Inferior_Articular_Right,L.Inferior_Articular_Left,L.Vertebra_Direction_Inferior},
+                 direction="R",normal_vector_points ="S",
+     ) # 121
+Strategy_Pattern(L.Additional_Vertebral_Body_Posterior_Central_Right, strategy=S, regions_loc =[L.Vertebra_Corpus, L.Vertebra_Corpus_border],
+                 start_point = L.Vertebra_Corpus,prerequisite={L.Superior_Articular_Right,L.Superior_Articular_Left,L.Inferior_Articular_Right,L.Inferior_Articular_Left,L.Vertebra_Direction_Inferior},
+                 direction="R",normal_vector_points ="P",
+     ) # 122
+Strategy_Pattern(L.Additional_Vertebral_Body_Middle_Inferior_Right, strategy=S, regions_loc =[L.Vertebra_Corpus, L.Vertebra_Corpus_border],
+                 start_point = L.Vertebra_Corpus,prerequisite={L.Superior_Articular_Right,L.Superior_Articular_Left,L.Inferior_Articular_Right,L.Inferior_Articular_Left,L.Vertebra_Direction_Inferior},
+                 direction="R",normal_vector_points ="I",
+     ) # 123
+Strategy_Pattern(L.Additional_Vertebral_Body_Anterior_Central_Right, strategy=S, regions_loc =[L.Vertebra_Corpus, L.Vertebra_Corpus_border],
+                 start_point = L.Vertebra_Corpus,prerequisite={L.Superior_Articular_Right,L.Superior_Articular_Left,L.Inferior_Articular_Right,L.Inferior_Articular_Left,L.Vertebra_Direction_Inferior},
+                 direction="R",normal_vector_points ="A",
+     ) # 124
 
-Strategy_Pattern(
-    L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Right,
-    strategy_ligament_attachment,
-    corpus=[L.Vertebra_Corpus, L.Vertebra_Corpus_border],
-    prerequisite={L.Superior_Articular_Right,L.Superior_Articular_Left,L.Inferior_Articular_Right,L.Inferior_Articular_Left},
-    do_shift=True,
-    direction="R"
-)
-Strategy_Pattern_Side_Effect(L.Ligament_Attachment_Point_Posterior_Longitudinal_Superior_Right,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Right)
-Strategy_Pattern_Side_Effect(L.Ligament_Attachment_Point_Anterior_Longitudinal_Inferior_Right,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Right)
-Strategy_Pattern_Side_Effect(L.Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Right,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Right)
-Strategy_Pattern_Side_Effect(L.Additional_Vertebral_Body_Middle_Superior_Right,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Right)
-Strategy_Pattern_Side_Effect(L.Additional_Vertebral_Body_Posterior_Central_Right,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Right)
-Strategy_Pattern_Side_Effect(L.Additional_Vertebral_Body_Middle_Inferior_Right,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Right)
-Strategy_Pattern_Side_Effect(L.Additional_Vertebral_Body_Anterior_Central_Right,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Right)
+Strategy_Pattern(L.Additional_Vertebral_Body_Middle_Superior_Left, strategy=S, regions_loc =[L.Vertebra_Corpus, L.Vertebra_Corpus_border],
+                 start_point = L.Vertebra_Corpus,prerequisite={L.Superior_Articular_Right,L.Superior_Articular_Left,L.Inferior_Articular_Right,L.Inferior_Articular_Left,L.Vertebra_Direction_Inferior},
+                 direction="L",normal_vector_points ="S",
+     ) # 113
+Strategy_Pattern(L.Additional_Vertebral_Body_Posterior_Central_Left, strategy=S, regions_loc =[L.Vertebra_Corpus, L.Vertebra_Corpus_border],
+                 start_point = L.Vertebra_Corpus,prerequisite={L.Superior_Articular_Right,L.Superior_Articular_Left,L.Inferior_Articular_Right,L.Inferior_Articular_Left,L.Vertebra_Direction_Inferior},
+                 direction="L",normal_vector_points ="P",
+     ) # 114
+Strategy_Pattern(L.Additional_Vertebral_Body_Middle_Inferior_Left, strategy=S, regions_loc =[L.Vertebra_Corpus, L.Vertebra_Corpus_border],
+                 start_point = L.Vertebra_Corpus,prerequisite={L.Superior_Articular_Right,L.Superior_Articular_Left,L.Inferior_Articular_Right,L.Inferior_Articular_Left,L.Vertebra_Direction_Inferior},
+                 direction="L",normal_vector_points ="I",
+     ) # 115
+Strategy_Pattern(L.Additional_Vertebral_Body_Anterior_Central_Left, strategy=S, regions_loc =[L.Vertebra_Corpus, L.Vertebra_Corpus_border],
+                 start_point = L.Vertebra_Corpus,prerequisite={L.Superior_Articular_Right,L.Superior_Articular_Left,L.Inferior_Articular_Right,L.Inferior_Articular_Left,L.Vertebra_Direction_Inferior},
+                 direction="L",normal_vector_points ="A",
+     ) # 116
 
-Strategy_Pattern(
-    L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Left,
-    strategy_ligament_attachment,
-    corpus=[L.Vertebra_Corpus, L.Vertebra_Corpus_border],
-    prerequisite={L.Superior_Articular_Right,L.Superior_Articular_Left,L.Inferior_Articular_Right,L.Inferior_Articular_Left},
-    do_shift=True,
-    direction="L"
-)
-Strategy_Pattern_Side_Effect(L.Ligament_Attachment_Point_Posterior_Longitudinal_Superior_Left,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Left)
-Strategy_Pattern_Side_Effect(L.Ligament_Attachment_Point_Anterior_Longitudinal_Inferior_Left,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Left)
-Strategy_Pattern_Side_Effect(L.Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Left,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Left)
-Strategy_Pattern_Side_Effect(L.Additional_Vertebral_Body_Middle_Superior_Left,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Left)
-Strategy_Pattern_Side_Effect(L.Additional_Vertebral_Body_Posterior_Central_Left,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Left)
-Strategy_Pattern_Side_Effect(L.Additional_Vertebral_Body_Middle_Inferior_Left,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Left)
-Strategy_Pattern_Side_Effect(L.Additional_Vertebral_Body_Anterior_Central_Left,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Left)
+S = strategy_find_corner
+Strategy_Pattern(L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Median,start_point = L.Vertebra_Corpus,strategy=S,prerequisite={L.Vertebra_Direction_Inferior},
+    vec1= L.Additional_Vertebral_Body_Anterior_Central_Median,vec2 = L.Additional_Vertebral_Body_Middle_Superior_Median,prio=100) #101
+
+Strategy_Pattern(L.Ligament_Attachment_Point_Posterior_Longitudinal_Superior_Median,start_point = L.Vertebra_Corpus,strategy=S,prerequisite={L.Vertebra_Direction_Inferior},
+    vec1= L.Additional_Vertebral_Body_Posterior_Central_Median,vec2 = L.Additional_Vertebral_Body_Middle_Superior_Median,prio=100) #102
+
+Strategy_Pattern(L.Ligament_Attachment_Point_Anterior_Longitudinal_Inferior_Median,start_point = L.Vertebra_Corpus,strategy=S,prerequisite={L.Vertebra_Direction_Inferior},
+    vec1= L.Additional_Vertebral_Body_Anterior_Central_Median,vec2 = L.Additional_Vertebral_Body_Middle_Inferior_Median,prio=100) #103
+
+Strategy_Pattern(L.Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Median,start_point = L.Vertebra_Corpus,strategy=S,prerequisite={L.Vertebra_Direction_Inferior},
+    vec1= L.Additional_Vertebral_Body_Posterior_Central_Median,vec2 = L.Additional_Vertebral_Body_Middle_Inferior_Median,prio=100) #104
+
+Strategy_Pattern(L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Right,start_point = L.Vertebra_Corpus,strategy=S,prerequisite={L.Vertebra_Direction_Inferior},
+    vec1= L.Additional_Vertebral_Body_Anterior_Central_Right,vec2 = L.Additional_Vertebral_Body_Middle_Superior_Right,prio=100,shift_direction="R") #117
+
+Strategy_Pattern(L.Ligament_Attachment_Point_Posterior_Longitudinal_Superior_Right,start_point = L.Vertebra_Corpus,strategy=S,prerequisite={L.Vertebra_Direction_Inferior},
+    vec1= L.Additional_Vertebral_Body_Posterior_Central_Right,vec2 = L.Additional_Vertebral_Body_Middle_Superior_Right,prio=100,shift_direction="R") #118
+
+Strategy_Pattern(L.Ligament_Attachment_Point_Anterior_Longitudinal_Inferior_Right,start_point = L.Vertebra_Corpus,strategy=S,prerequisite={L.Vertebra_Direction_Inferior},
+    vec1= L.Additional_Vertebral_Body_Anterior_Central_Right,vec2 = L.Additional_Vertebral_Body_Middle_Inferior_Right,prio=100,shift_direction="R") #119
+
+Strategy_Pattern(L.Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Right,start_point = L.Vertebra_Corpus,strategy=S,prerequisite={L.Vertebra_Direction_Inferior},
+    vec1= L.Additional_Vertebral_Body_Posterior_Central_Right,vec2 = L.Additional_Vertebral_Body_Middle_Inferior_Right,prio=100,shift_direction="R") #120
+
+Strategy_Pattern(L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Left,start_point = L.Vertebra_Corpus,strategy=S,prerequisite={L.Vertebra_Direction_Inferior},
+    vec1= L.Additional_Vertebral_Body_Anterior_Central_Left,vec2 = L.Additional_Vertebral_Body_Middle_Superior_Left,prio=100,shift_direction="L") #109
+
+Strategy_Pattern(L.Ligament_Attachment_Point_Posterior_Longitudinal_Superior_Left,start_point = L.Vertebra_Corpus,strategy=S,prerequisite={L.Vertebra_Direction_Inferior},
+    vec1= L.Additional_Vertebral_Body_Posterior_Central_Left,vec2 = L.Additional_Vertebral_Body_Middle_Superior_Left,prio=100,shift_direction="L") #110
+
+Strategy_Pattern(L.Ligament_Attachment_Point_Anterior_Longitudinal_Inferior_Left,start_point = L.Vertebra_Corpus,strategy=S,prerequisite={L.Vertebra_Direction_Inferior},
+    vec1= L.Additional_Vertebral_Body_Anterior_Central_Left,vec2 = L.Additional_Vertebral_Body_Middle_Inferior_Left,prio=100,shift_direction="L") #111
+
+Strategy_Pattern(L.Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Left,start_point = L.Vertebra_Corpus,strategy=S,prerequisite={L.Vertebra_Direction_Inferior},
+    vec1= L.Additional_Vertebral_Body_Posterior_Central_Left,vec2 = L.Additional_Vertebral_Body_Middle_Inferior_Left,prio=100,shift_direction="L") #112
+S = strategy_ligament_attachment_point_flava
+Strategy_Pattern(L.Ligament_Attachment_Point_Flava_Superior_Median,goal = L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Median,strategy=S,prio=200,
+                 prerequisite={L.Spinosus_Process}
+                 ) #125
+Strategy_Pattern(L.Ligament_Attachment_Point_Flava_Inferior_Median,goal = L.Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Median,strategy=S,prio=200,
+                 prerequisite={L.Spinosus_Process}) #127
+#Strategy_Pattern_Side_Effect(L.Ligament_Attachment_Point_Flava_Superior_Median,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Left)
+#Strategy_Pattern_Side_Effect(L.Ligament_Attachment_Point_Flava_Inferior_Median,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Left)
+
+#Strategy_Pattern(
+#    L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Right,
+#    strategy_ligament_attachment,
+#    corpus=[L.Vertebra_Corpus, L.Vertebra_Corpus_border],
+#    prerequisite={L.Superior_Articular_Right,L.Superior_Articular_Left,L.Inferior_Articular_Right,L.Inferior_Articular_Left},
+#    do_shift=True,
+#    direction="R"
+#)
+#Strategy_Pattern_Side_Effect(L.Ligament_Attachment_Point_Posterior_Longitudinal_Superior_Right,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Right)
+#Strategy_Pattern_Side_Effect(L.Ligament_Attachment_Point_Anterior_Longitudinal_Inferior_Right,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Right)
+#Strategy_Pattern_Side_Effect(L.Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Right,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Right)
+#Strategy_Pattern_Side_Effect(L.Additional_Vertebral_Body_Middle_Superior_Right,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Right)
+#Strategy_Pattern_Side_Effect(L.Additional_Vertebral_Body_Posterior_Central_Right,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Right)
+#Strategy_Pattern_Side_Effect(L.Additional_Vertebral_Body_Middle_Inferior_Right,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Right)
+#Strategy_Pattern_Side_Effect(L.Additional_Vertebral_Body_Anterior_Central_Right,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Right)
+
+#Strategy_Pattern(
+#    L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Left,
+#    strategy_ligament_attachment,
+#    corpus=[L.Vertebra_Corpus, L.Vertebra_Corpus_border],
+#    prerequisite={L.Superior_Articular_Right,L.Superior_Articular_Left,L.Inferior_Articular_Right,L.Inferior_Articular_Left},
+#    do_shift=True,
+#    direction="L"
+#)
+#Strategy_Pattern_Side_Effect(L.Ligament_Attachment_Point_Posterior_Longitudinal_Superior_Left,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Left)
+#Strategy_Pattern_Side_Effect(L.Ligament_Attachment_Point_Anterior_Longitudinal_Inferior_Left,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Left)
+#Strategy_Pattern_Side_Effect(L.Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Left,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Left)
+#Strategy_Pattern_Side_Effect(L.Additional_Vertebral_Body_Middle_Superior_Left,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Left)
+#Strategy_Pattern_Side_Effect(L.Additional_Vertebral_Body_Posterior_Central_Left,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Left)
+#Strategy_Pattern_Side_Effect(L.Additional_Vertebral_Body_Middle_Inferior_Left,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Left)
+#Strategy_Pattern_Side_Effect(L.Additional_Vertebral_Body_Anterior_Central_Left,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Left)
 
 Strategy_Computed_Before(L.Dens_axis,L.Vertebra_Direction_Inferior)
 Strategy_Computed_Before(L.Spinal_Canal_ivd_lvl,L.Vertebra_Disc,L.Vertebra_Corpus,L.Dens_axis)
@@ -772,7 +1165,7 @@ def compute_non_centroid_pois(  # noqa: C901
                     locations.remove(i)
 
     locations = [pois_computed_by_side_effect.get(l.value, l) for l in locations]
-    locations = sorted(list(set(locations)), key=lambda x: x.value)  # type: ignore # noqa: C414
+    locations = sorted(set(locations), key=lambda x: all_poi_functions[x.value].prority() if x.value in all_poi_functions else x.value)  # type: ignore
     log.print("Calc pois from subregion id", {l.name for l in locations})
     ### DENSE###
     if Location.Dens_axis in locations and 2 in _vert_ids and (2, Location.Dens_axis.value) not in poi:

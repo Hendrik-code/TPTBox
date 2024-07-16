@@ -44,15 +44,6 @@ sys.path.append(str(file.parents[1]))
 # If the session level is omitted in the folder structure, the filename MUST begin with the string sub-<label>, without ses-<label>
 
 
-def strict_mode():
-    v = entities_keys["sequ"]
-    del entities[v]
-    del entities_keys["sequ"]
-    v = entities_keys["seg"]
-    del entities[v]
-    del entities_keys["seg"]
-
-
 def validate_entities(key: str, value: str, name: str, verbose: bool):
     if not verbose:
         return True
@@ -997,7 +988,7 @@ class Searchquery:
                         required (bool, optional): If True: A key must exist or the family/file is filtered.
                                     If False: Only if the key exist the family/file will be considers for filtering. Defaults to True.
         """
-        if self._flatten:  #
+        if self._flatten:
             assert isinstance(self.candidates, list)
             for bids_file in self.candidates.copy():
                 if not bids_file.do_filter(key, filter_fun, required=required):
@@ -1338,7 +1329,7 @@ class BIDS_Family:
 if __name__ == "__main__":
     global_info = BIDS_Global_info(
         ["/media/robert/Expansion/dataset-Testset"],
-        ["sourcedata", "rawdata", "rawdata_ct", "rawdata_dixon", "derivatives"],  #
+        ["sourcedata", "rawdata", "rawdata_ct", "rawdata_dixon", "derivatives"],
     )
     for _, subject in global_info.enumerate_subjects():
         query = subject.new_query()
