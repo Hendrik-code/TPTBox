@@ -68,8 +68,8 @@ def save_json(json_ob, file):
         raise FileExistsError(file)
     if Path(file).exists():
         return True
-    with open(file, "w") as file:
-        json.dump(json_ob, file, indent=4, default=convert)
+    with open(file, "w") as file_handel:
+        json.dump(json_ob, file_handel, indent=4, default=convert)
     return False
 
 

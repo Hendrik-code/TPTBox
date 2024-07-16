@@ -261,7 +261,6 @@ class Test_bids_file(unittest.TestCase):
             for i, g in coms.items():
                 self.assertTrue(i in np_coms)
                 self.assertTrue(np.all([g[idx] == np_coms[i][idx] for idx in range(3)]))
-                #
                 self.assertTrue((i, 50) in cent)
                 self.assertTrue(np.all([g[idx] == cent[i, 50][idx] for idx in range(3)]))
             # self.assertEqual(coms, np_coms)
