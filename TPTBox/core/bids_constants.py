@@ -32,6 +32,7 @@ formats = [
     "GRE",  # Gradient-Echo
     "PWI",  # Perfusion weighted imaging
     "DTI",  # Diffusion tensor imaging
+    "R2star",
     "radiomics",
     "MPR",  # Rapid gradient-echo (MP RAGE) sampling
 ]

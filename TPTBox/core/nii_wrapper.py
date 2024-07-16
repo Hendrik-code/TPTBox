@@ -151,19 +151,31 @@ class NII(NII_Math):
         return nii
         #return NII(nib.load(path), seg, c_val) #type: ignore
     @classmethod
-    def load_bids(cls, nii: bids_files.BIDS_FILE):
-        if "nii" in nii.file:
-            path = nii.file['nii']
+    def load_bids(cls, nii_bids: bids_files.BIDS_FILE):
+        if "nii" in nii_bids.file:
+            path = nii_bids.file['nii']
+            nifty = nib.load(path)
+        elif "nii.gz" in nii_bids.file:
+            path = nii_bids.file['nii.gz']
+            nifty = nib.load(path)
         else:
-            assert 'nii.gz' in nii.file, nii.file
-            path = nii.file['nii.gz']
-        if nii.get_interpolation_order() == 0:
+            import SimpleITK as sitk  # noqa: N813
+
+            from TPTBox.core.sitk_utils import sitk_to_nib
+            for f in nii_bids.file:
+                try:
+                    img = sitk.ReadImage(nii_bids.file[f])
+                    nifty =  sitk_to_nib(img)
+                except Exception:
+                    pass
+                break
+        if nii_bids.get_interpolation_order() == 0:
             seg = True
             c_val=0
         else:
             seg = False
-            c_val = -1024 if "ct" in nii.format.lower() else 0
-        return NII(nib.load(path),seg,c_val=c_val) #type: ignore
+            c_val = -1024 if "ct" in nii_bids.format.lower() else 0
+        return NII(nifty,seg,c_val) # type: ignore
     def _unpack(self):
         if self.__unpacked:
             return
@@ -355,7 +367,6 @@ class NII(NII_Math):
         Returns:
             self
         """
-
         if arr.dtype == bool:
             arr = arr.astype(np.uint8)
         if arr.dtype == np.float16:
@@ -372,7 +383,6 @@ class NII(NII_Math):
         #    nii = (arr,nii2.affine,nii2.header) # type: ignore
         #if all(a is None for a in self.header.get_slope_inter()):
         #    nii.header.set_slope_inter(1,self.get_c_val()) # type: ignore
-
         if inplace:
             self.nii = nii
             return self
@@ -493,12 +503,12 @@ class NII(NII_Math):
             raise ValueError('Array would be reduced to zero size')
         c_min = [cor_msk[0].min(), cor_msk[1].min(), cor_msk[2].min()]
         c_max = [cor_msk[0].max(), cor_msk[1].max(), cor_msk[2].max()]
-        x0 = c_min[0] - d[0] if (c_min[0] - d[0]) > 0 else 0
-        y0 = c_min[1] - d[1] if (c_min[1] - d[1]) > 0 else 0
-        z0 = c_min[2] - d[2] if (c_min[2] - d[2]) > 0 else 0
-        x1 = c_max[0] + d[0] if (c_max[0] + d[0]) < shp[0] else shp[0]
-        y1 = c_max[1] + d[1] if (c_max[1] + d[1]) < shp[1] else shp[1]
-        z1 = c_max[2] + d[2] if (c_max[2] + d[2]) < shp[2] else shp[2]
+        x0 = max(0, c_min[0] - d[0])
+        y0 = max(0, c_min[1] - d[1])
+        z0 = max(0, c_min[2] - d[2])
+        x1 = min(shp[0], c_max[0] + d[0])
+        y1 = min(shp[1], c_max[1] + d[1])
+        z1 = min(shp[2], c_max[2] + d[2])
         ex_slice = [slice(x0, x1+1), slice(y0, y1+1), slice(z0, z1+1)]
 
         if other_crop is not None:
@@ -519,7 +529,7 @@ class NII(NII_Math):
                     if new_goal > self.shape[i]:
                         new_start -= new_goal - self.shape[i]
                         new_goal = self.shape[i]
-                    if new_start < 0:#
+                    if new_start < 0:
                         new_goal -= new_start
                         new_start = 0
                     ex_slice[i] = slice(new_start,new_goal)
@@ -1188,10 +1198,12 @@ class NII(NII_Math):
         return self.set_array(array)
     def __getitem__(self, key)-> Any:
         if isinstance(key,Sequence):
-            if all(isinstance(k, slice) for k in key):
+            from types import EllipsisType
+
+            if all(isinstance(k, (slice,EllipsisType)) for k in key):
                 #if all(k.step is not None and k.step == 1 for k in key):
                 #    raise NotImplementedError(f"Slicing is not implemented. Attemted {key}")
-                if len(key)!= len(self.shape):
+                if len(key)!= len(self.shape) or Ellipsis in key:
                     raise ValueError(f"Number slices must have exact number of slices like in dimension. Attemted: {key} - Shape {self.shape}")
                 return self.apply_crop(key) # type: ignore
             elif  all(isinstance(k, int) for k in key):
@@ -1199,6 +1211,8 @@ class NII(NII_Math):
                     raise ValueError(f"Number ints must have exact number of slices like in dimension. Attemted: {key} - Shape {self.shape}")
                 self._unpack()
                 return self._arr.__getitem__(key)
+            else:
+                raise TypeError("Invalid argument type:", (key))
         elif isinstance(key,self.__class__):
             return self.get_array()[key.get_array()==1]
         elif isinstance(key,np.ndarray):
@@ -1208,6 +1222,7 @@ class NII(NII_Math):
     def __setitem__(self, key,value):
         if isinstance(key,self.__class__):
             key = key.get_array()==1
+        self._unpack()
         self._arr[key] = value
         #if isinstance(key,Sequence):
         #    if all(isinstance(k, slice) for k in key):
@@ -1251,9 +1266,7 @@ class NII(NII_Math):
         min_v = min(y1[2],y2[2])+ min_overlap
         if min_v < x1[2] < max_v:
             return True
-        if min_v < x2[2] < max_v:
-            return True
-        return False
+        return min_v < x2[2] < max_v
 
     def get_intersecting_volume(self, b: Self) -> bool:
         '''
@@ -1270,7 +1283,7 @@ class NII(NII_Math):
         '''If this NII is a segmentation you can single out one label with [0,1].'''
         seg_arr = self.get_seg_array()
 
-        if isinstance(label, list):
+        if isinstance(label, Sequence):
             label = [l.value if isinstance(l,Enum) else l for l in label]
             if 1 not in label:
                 seg_arr[seg_arr == 1] = 0
@@ -1410,13 +1423,19 @@ def to_nii_optional(img_bids: Image_Reference|None, seg=False, default=None) -> 
 
 
 def to_nii(img_bids: Image_Reference, seg=False) -> NII:
+    if isinstance(img_bids, Path):
+        img_bids = str(img_bids)
     if isinstance(img_bids, NII):
         return img_bids.copy()
     elif isinstance(img_bids, bids_files.BIDS_FILE):
         return img_bids.open_nii()
-    elif isinstance(img_bids, Path):
-        return NII(nib.load(str(img_bids)), seg) #type: ignore
+
     elif isinstance(img_bids, str):
+        if img_bids.split(".")[-1] in ("mha",):
+            import SimpleITK as sitk  # noqa: N813
+            img = sitk.ReadImage(img_bids)
+            from TPTBox.core.sitk_utils import sitk_to_nii
+            return sitk_to_nii(img,seg)
         return NII(nib.load(img_bids), seg) #type: ignore
     elif isinstance(img_bids, Nifti1Image):
         return NII(img_bids, seg)

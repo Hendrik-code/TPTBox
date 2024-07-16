@@ -74,11 +74,7 @@ def sqr1d(c1: float, w1: float, c2: float, w2: float):
     if (c1 + w1) < (c2 - w2):
         # print("case1", c1 + w1, "<", (c2 - w2))
         return False
-    if (c1 - w1) > (c2 + w2):
-        # print("case2", (c1 + w1), ">", (c2 - w2))
-        return False
-    # print("no", (c1, w1), "~", (c2, w2))
-    return True
+    return not c1 - w1 > c2 + w2
 
 
 def get_random_ax_code() -> AX_CODES:

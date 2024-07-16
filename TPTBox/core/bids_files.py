@@ -44,15 +44,6 @@ sys.path.append(str(file.parents[1]))
 # If the session level is omitted in the folder structure, the filename MUST begin with the string sub-<label>, without ses-<label>
 
 
-def strict_mode():
-    v = entities_keys["sequ"]
-    del entities[v]
-    del entities_keys["sequ"]
-    v = entities_keys["seg"]
-    del entities[v]
-    del entities_keys["seg"]
-
-
 def validate_entities(key: str, value: str, name: str, verbose: bool):
     if not verbose:
         return True
@@ -152,6 +143,7 @@ class BIDS_Global_info:
         verbose: bool = True,
         file_name_manipulation: typing.Callable[[str], str] | None = None,
         sequence_splitting_keys: list[str] | None = None,
+        filter_folder: typing.Callable[[Path, int], bool] | None = None,
     ):
         """This Objects creates a datastructures reflecting BIDS-folders.
 
@@ -159,6 +151,9 @@ class BIDS_Global_info:
             datasets (typing.List[str]): List of dataset paths
             parents (typing.List[str]): List of parents (like ["rawdata","sourcedata","derivatives"])
             additional_key (list, optional): Additional keys that are not in the default BIDS but should not raise a warning. Defaults to ["sequ", "seg", "ovl"].
+            filter_folder: Filter function, input is the path of the folder and the level of the folder structure. Return True if we should continue searching
+                        Example:
+                        filter_folder = lambda p, lvl: True if (lvl != 2 or p.name in ["sub-123","sub-456"]) else False
         """
         if sequence_splitting_keys is None:
             from TPTBox.core.bids_constants import sequence_splitting_keys
@@ -202,13 +197,23 @@ class BIDS_Global_info:
             for ps in parents:
                 path = Path(ds, ps)
                 if path.exists():
-                    self.search_folder(path, ds)
+                    self.search_folder(path, ds, filter_folder)
         self.entities_keys = entities_keys
 
-    def search_folder(self, path: Path, ds) -> None:
-        for w in path.rglob("*"):
-            if w.is_file():
-                self.add_file_2_subject(w, ds)
+    def search_folder(self, path: Path, ds, filter_folder) -> None:
+        def scantree(path, lvl=1):
+            """Recursively yield DirEntry objects for given directory."""
+            for entry in os.scandir(path):
+                if entry.is_dir(follow_symlinks=False):
+                    if filter_folder is not None and not filter_folder(Path(entry.path), lvl):
+                        continue
+                    yield from scantree(entry.path, lvl=lvl + 1)
+                else:
+                    yield entry
+
+        for entry in scantree(path):
+            if entry.is_file():
+                self.add_file_2_subject(Path(entry.path), ds)
 
     def add_file_2_subject(self, bids: BIDS_FILE | Path, ds=None) -> None:
         if isinstance(bids, Path) and "DS_Store" in bids.name:
@@ -988,7 +993,7 @@ class Searchquery:
                         required (bool, optional): If True: A key must exist or the family/file is filtered.
                                     If False: Only if the key exist the family/file will be considers for filtering. Defaults to True.
         """
-        if self._flatten:  #
+        if self._flatten:
             assert isinstance(self.candidates, list)
             for bids_file in self.candidates.copy():
                 if not bids_file.do_filter(key, filter_fun, required=required):
@@ -1204,7 +1209,10 @@ class BIDS_Family:
         self.family_id = self.get_identifier()
 
     def __getitem__(self, item: str) -> list[BIDS_FILE]:
-        return self.data_dict[item]
+        try:
+            return self.data_dict[item]
+        except KeyError as e:
+            raise KeyError(f"BIDS_Family does not contain key {item}, only {self.keys()}") from e
 
     def __setitem__(self, key, value):
         self.data_dict[key] = value
@@ -1326,7 +1334,7 @@ class BIDS_Family:
 if __name__ == "__main__":
     global_info = BIDS_Global_info(
         ["/media/robert/Expansion/dataset-Testset"],
-        ["sourcedata", "rawdata", "rawdata_ct", "rawdata_dixon", "derivatives"],  #
+        ["sourcedata", "rawdata", "rawdata_ct", "rawdata_dixon", "derivatives"],
     )
     for _, subject in global_info.enumerate_subjects():
         query = subject.new_query()

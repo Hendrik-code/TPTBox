@@ -5,6 +5,7 @@ from pathlib import Path
 
 import TPTBox.stitching.stitching_tools as st
 from TPTBox import BIDS_FILE, BIDS_Global_info, Print_Logger
+from TPTBox.core.bids_constants import sequence_splitting_keys
 
 logger = Print_Logger()
 arg_parser = argparse.ArgumentParser()
@@ -15,8 +16,9 @@ args = arg_parser.parse_args()
 print(f"args={args}")
 print(f"args.inputfolder={args.inputfolder}")
 print(f"args.rawdata={args.rawdata}")
-BIDS_Global_info.remove_splitting_key("chunk")
-bgi = BIDS_Global_info(datasets=[Path(args.inputfolder)], parents=[args.rawdata])
+
+sequence_splitting_keys.remove("chunk")
+bgi = BIDS_Global_info(datasets=[Path(args.inputfolder)], parents=[args.rawdata], sequence_splitting_keys=sequence_splitting_keys)
 print()
 skipped = []
 skipped_single = []
@@ -61,11 +63,11 @@ def split_multi_scans(v: list[BIDS_FILE], out: BIDS_FILE):
         )
         return False
     else:
-        for number, v in enumerate(splits[::-1], start=1):
+        for number, v_list in enumerate(splits[::-1], start=1):
             out_new = out.get_changed_path(parent=out.get_parent(), info={"sequ": "stitched", "nameconflict": None, "run": str(number)})
             if out_new.exists():
                 continue
-            st.stitching(*v, out=out_new)
+            st.stitching(*v_list, out=out_new)
         return True
 
 

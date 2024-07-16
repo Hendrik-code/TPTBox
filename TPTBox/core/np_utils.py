@@ -489,7 +489,7 @@ def np_connected_components(
     """
 
     assert np.min(arr) == 0, f"min value of mask not zero, got {np.min(arr)}"
-    assert np.max(arr) >= 1, f"wrong normalization, max value is not >= one, got {np.unique(arr)}"
+    assert np.max(arr) >= 0, f"wrong normalization, max value is not >= 0, got {np_unique(arr)}"
     assert 2 <= arr.ndim <= 3, f"expected 2D or 3D, but got {arr.ndim}"
     assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
     connectivity = min(connectivity * 2, 8) if arr.ndim == 2 else 6 if connectivity == 1 else 18 if connectivity == 2 else 26
@@ -543,7 +543,7 @@ def np_get_largest_k_connected_components(
     labels: Sequence[int] = _to_labels(arr, label_ref)
     arr2[np.isin(arr, labels, invert=True)] = 0  # type:ignore
 
-    labels_out, n = connected_components(arr, connectivity=connectivity, return_N=True)
+    labels_out, n = connected_components(arr2, connectivity=connectivity, return_N=True)
     if k is None:
         k = n
     k = min(k, n)  # if k > N, will return all N but still sorted
