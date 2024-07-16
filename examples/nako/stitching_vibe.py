@@ -63,11 +63,11 @@ def split_multi_scans(v: list[BIDS_FILE], out: BIDS_FILE):
         )
         return False
     else:
-        for number, v in enumerate(splits[::-1], start=1):
+        for number, v_list in enumerate(splits[::-1], start=1):
             out_new = out.get_changed_path(parent=out.get_parent(), info={"sequ": "stitched", "nameconflict": None, "run": str(number)})
             if out_new.exists():
                 continue
-            st.stitching(*v, out=out_new)
+            st.stitching(*v_list, out=out_new)
         return True
 
 
