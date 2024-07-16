@@ -8,7 +8,7 @@ from scipy.linalg import norm
 from scipy.spatial.distance import cdist
 
 from TPTBox import NII, POI, Log_Type, Logger_Interface, Print_Logger, calc_poi_from_subreg_vert
-from TPTBox.core.vert_constants import Directions, Location, never_called, plane_dict, vert_directions
+from TPTBox.core.vert_constants import DIRECTIONS, Location, _plane_dict, never_called, vert_directions
 
 _log = Print_Logger()
 Vertebra_Orientation = tuple[np.ndarray, np.ndarray, np.ndarray]
@@ -160,8 +160,8 @@ def calc_orientation_of_vertebra_PIR(
         down_vector[reg_label] = normal_vector_post.copy()
         # create_plane_coords
         # The main axis will be treated differently
-        idx = [plane_dict[i] for i in subreg_iso.orientation]
-        axis = idx.index(plane_dict["S"])
+        idx = [_plane_dict[i] for i in subreg_iso.orientation]
+        axis = idx.index(_plane_dict["S"])
         # assert axis == np.argmax(np.abs(normal_vector)).item()
         dims = [0, 1, 2]
         dims.remove(axis)
@@ -245,7 +245,7 @@ def _make_spine_plot(pois: POI, body_spline, vert_nii: NII, filenames):
 
 
 ##### Extreme Points ####
-def _get_sub_array_by_direction(d: Directions, cords: np.ndarray) -> np.ndarray:
+def _get_sub_array_by_direction(d: DIRECTIONS, cords: np.ndarray) -> np.ndarray:
     """Get the sub-array of coordinates along a specified direction.
     cords must be in PIR direction
     Returns:
@@ -272,7 +272,7 @@ def _get_sub_array_by_direction(d: Directions, cords: np.ndarray) -> np.ndarray:
         never_called(d)
 
 
-def _get_direction(d: Directions, poi: POI, vert_id: int) -> np.ndarray:
+def _get_direction(d: DIRECTIONS, poi: POI, vert_id: int) -> np.ndarray:
     """Get the sub-array of coordinates along a specified direction.
     cords must be in PIR direction
     Returns:
@@ -300,7 +300,7 @@ def _get_direction(d: Directions, poi: POI, vert_id: int) -> np.ndarray:
         never_called(d)
 
 
-def get_extreme_point_by_vert_direction(poi: POI, region: NII, vert_id, direction: Sequence[Directions] | Directions = "I"):
+def get_extreme_point_by_vert_direction(poi: POI, region: NII, vert_id, direction: Sequence[DIRECTIONS] | DIRECTIONS = "I"):
     """
     Get the extreme point in a specified direction.
 
@@ -315,7 +315,7 @@ def get_extreme_point_by_vert_direction(poi: POI, region: NII, vert_id, directio
         Assumes `region` contains binary values indicating the presence of points.
         Uses `_get_sub_array_by_direction` internally.
     """
-    direction_: Sequence[Directions] = direction if isinstance(direction, Sequence) else (direction,)  # type: ignore
+    direction_: Sequence[DIRECTIONS] = direction if isinstance(direction, Sequence) else (direction,)  # type: ignore
 
     to_reference_frame, from_reference_frame = get_vert_direction_matrix(poi, vert_id=vert_id)
     pc = np.stack(np.where(region.get_array() == 1))
@@ -364,7 +364,7 @@ def strategy_extreme_points(
     poi: POI,
     current_subreg: NII,
     location: Location,
-    direction: Sequence[Directions] | Directions,
+    direction: Sequence[DIRECTIONS] | DIRECTIONS,
     vert_id: int,
     subreg_id: Location | list[Location],
     bb,
@@ -405,7 +405,7 @@ def strategy_line_cast(
     location: Location,
     start_point: Location,
     regions_loc: list[Location] | Location,
-    normal_vector_points: tuple[Location, Location] | Directions,
+    normal_vector_points: tuple[Location, Location] | DIRECTIONS,
     bb,
     log: Logger_Interface = _log,
 ):
@@ -424,7 +424,7 @@ def max_distance_ray_cast(
     region: NII,
     vert_id: int,
     bb: tuple[slice, slice, slice],
-    normal_vector_points: tuple[Location, Location] | Directions = "R",
+    normal_vector_points: tuple[Location, Location] | DIRECTIONS = "R",
     start_point: Location | np.ndarray = Location.Vertebra_Corpus,
     two_sided=False,
     log: Logger_Interface = _log,
@@ -459,7 +459,7 @@ def ray_cast(
     region: NII,
     vert_id: int,
     bb: tuple[slice, slice, slice],
-    normal_vector_points: tuple[Location, Location] | Directions = "R",
+    normal_vector_points: tuple[Location, Location] | DIRECTIONS = "R",
     start_point: Location | np.ndarray = Location.Vertebra_Corpus,
     log: Logger_Interface = _log,
     two_sided=False,
@@ -539,7 +539,7 @@ def strategy_ligament_attachment(
     bb,
     log=_log,
     corpus=None,
-    direction: Directions = "R",
+    direction: DIRECTIONS = "R",
     compute_arcus_points=False,
     do_shift=False,
 ):
@@ -572,8 +572,8 @@ def strategy_ligament_attachment(
 
     normal_vector = _get_direction(direction, poi, vert_id)
     # The main axis will be treated differently
-    idx = [plane_dict[i] for i in current_subreg.orientation]
-    axis = idx.index(plane_dict[direction])
+    idx = [_plane_dict[i] for i in current_subreg.orientation]
+    axis = idx.index(_plane_dict[direction])
     assert axis == np.argmax(np.abs(normal_vector)).item(), (axis, direction, normal_vector)
     dims = [0, 1, 2]
     dims.remove(axis)
@@ -908,8 +908,8 @@ def calc_center_spinal_cord(
         normal_vector /= np.linalg.norm(normal_vector)
         # create_plane_coords
         # The main axis will be treated differently
-        idx = [plane_dict[i] for i in subreg_iso.orientation]
-        axis = idx.index(plane_dict["S"])
+        idx = [_plane_dict[i] for i in subreg_iso.orientation]
+        axis = idx.index(_plane_dict["S"])
         # assert axis == np.argmax(np.abs(normal_vector)).item()
         dims = [0, 1, 2]
         dims.remove(axis)

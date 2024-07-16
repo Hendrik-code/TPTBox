@@ -6,28 +6,34 @@ import numpy as np
 
 from TPTBox.logger import log_file
 
+#####################
 log = log_file.Reflection_Logger()
 logging = bool | log_file.Logger_Interface
 # R: Right, L: Left; S: Superior (up), I: Inferior (down); A: Anterior (front), P: Posterior (back)
-Directions = Literal["R", "L", "S", "I", "A", "P"]
-Ax_Codes = tuple[Directions, Directions, Directions]
+DIRECTIONS = Literal["R", "L", "S", "I", "A", "P"]
+AX_CODES = tuple[DIRECTIONS, DIRECTIONS, DIRECTIONS]
+ROTATION = np.ndarray
+ZOOMS = tuple[float, float, float] | Sequence[float]
+#####################
 LABEL_MAX = 256
-Zooms = tuple[float, float, float] | Sequence[float]
 
-Centroid_Dict = dict[int, tuple[float, float, float]]
-Triple = tuple[float, float, float] | Sequence[float]
-Coordinate = Triple
-POI_Dict = dict[int, dict[int, Coordinate]]
+CENTROID_DICT = dict[int, tuple[float, float, float]]
+TRIPLE = tuple[float, float, float] | Sequence[float]
+COORDINATE = TRIPLE
+POI_DICT = dict[int, dict[int, COORDINATE]]
 
-
-Rotation = np.ndarray
-Label_Map = dict[int | str, int | str] | dict[str, str] | dict[int, int]
-
-Label_Reference = int | Sequence[int] | None
+AFFINE = np.ndarray
+SHAPE = TRIPLE | tuple[int, int, int]
+ORIGIN = TRIPLE
 
 
-plane_dict: dict[Directions, str] = {"S": "ax", "I": "ax", "L": "sag", "R": "sag", "A": "cor", "P": "cor"}
-same_direction: dict[Directions, Directions] = {"S": "I", "I": "S", "L": "R", "R": "L", "A": "P", "P": "A"}
+LABEL_MAP = dict[int | str, int | str] | dict[str, str] | dict[int, int]
+
+LABEL_REFERENCE = int | Sequence[int] | None
+
+
+_plane_dict: dict[DIRECTIONS, str] = {"S": "ax", "I": "ax", "L": "sag", "R": "sag", "A": "cor", "P": "cor"}
+_same_direction: dict[DIRECTIONS, DIRECTIONS] = {"S": "I", "I": "S", "L": "R", "R": "L", "A": "P", "P": "A"}
 
 
 def never_called(args: NoReturn) -> NoReturn:  # noqa: ARG001

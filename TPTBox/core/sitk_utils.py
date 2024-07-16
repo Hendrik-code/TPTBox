@@ -296,7 +296,7 @@ def sitk_to_nii(image: sitk.Image, seg: bool) -> "NII":
 
 def transform_centroid(ctd: "POI", transform: sitk.Transform, img_fixed: sitk.Image, img_moving: sitk.Image, reg_type):
     import TPTBox
-    from TPTBox.core.poi import POI, POI_Descriptor, POI_Dict
+    from TPTBox.core.poi import POI, POI_DICT, POI_Descriptor
 
     out = TPTBox.core.poi.POI_Descriptor()
 
