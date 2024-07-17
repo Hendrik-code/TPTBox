@@ -1350,22 +1350,21 @@ class NII(NII_Math):
         """Checks if the different metadata is equal to some comparison entries
 
         Args:
-            other (Self | &quot;POI&quot; | None, optional): _description_. Defaults to None.
-            affine (AFFINE | None, optional): _description_. Defaults to None.
-            zms (Zooms | None, optional): _description_. Defaults to None.
-            orientation (Ax_Codes | None, optional): _description_. Defaults to None.
-            origin (ORIGIN | None, optional): _description_. Defaults to None.
-            shape (SHAPE | None, optional): _description_. Defaults to None.
-            error_tolerance (float, optional): _description_. Defaults to 1e-4.
-            raise_error (bool, optional): _description_. Defaults to True.
-            verbose (logging, optional): _description_. Defaults to False.
+            other (Self | POI | None, optional): If set, will assert each entry of that object instead. Defaults to None.
+            affine (AFFINE | None, optional): Affine matrix to compare against. If none, will not assert affine. Defaults to None.
+            zms (Zooms | None, optional): Zoom to compare against. If none, will not assert zoom. Defaults to None.
+            orientation (Ax_Codes | None, optional): Orientation to compare against. If none, will not assert orientation. Defaults to None.
+            origin (ORIGIN | None, optional): Origin to compare against. If none, will not assert origin. Defaults to None.
+            shape (SHAPE | None, optional): Shape to compare against. If none, will not assert shape. Defaults to None.
+            error_tolerance (float, optional): Accepted error tolerance in all assertions except shape. Defaults to 1e-4.
+            raise_error (bool, optional): If true, will raise AssertionError if anything is found. Defaults to True.
+            verbose (logging, optional): If true, will print out each assertion mismatch. Defaults to False.
 
         Raises:
-            NotImplementedError: _description_
-            AssertionError: _description_
+            AssertionError: If any of the assertions failed and raise_error is True
 
         Returns:
-            _type_: _description_
+            bool: True if there are no assertion errors
         """
         found_errors: list[str] = []
 
