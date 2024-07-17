@@ -34,6 +34,7 @@ formats = [
     "DTI",  # Diffusion tensor imaging
     "R2star",
     "radiomics",
+    "MPR",  # Rapid gradient-echo (MP RAGE) sampling
 ]
 formats_relaxed = [*formats, "t2", "t1", "t2c", "t1c", "cta", "mr", "snapshot", "t1dixon"]
 # Recommended writing style: T1c, T2c; This list is not official and can be extended.
