@@ -9,7 +9,7 @@ from scipy.interpolate import RegularGridInterpolator
 from scipy.spatial.distance import cdist
 
 from TPTBox import NII, POI, Log_Type, Logger_Interface, Print_Logger, calc_poi_from_subreg_vert
-from TPTBox.core.vert_constants import Directions, Location, never_called, plane_dict, vert_directions
+from TPTBox.core.vert_constants import DIRECTIONS, Location, _plane_dict, never_called, vert_directions
 
 _log = Print_Logger()
 Vertebra_Orientation = tuple[np.ndarray, np.ndarray, np.ndarray]
@@ -112,7 +112,7 @@ def calc_orientation_of_vertebra_PIR(
     spine_plot_path: None | str = None,
     save_normals_in_info=False,
 ) -> tuple[POI, NII | None]:
-    """Calculate the orientation of vertebrae using PIR (Posterior, Inferior, Right) directions.
+    """Calculate the orientation of vertebrae using PIR (Posterior, Inferior, Right) DIRECTIONS.
 
     Args:
         poi (POI | None): Point of interest. If None, computed from `vert` and `subreg`.
@@ -165,8 +165,8 @@ def calc_orientation_of_vertebra_PIR(
         down_vector[reg_label] = normal_vector_post.copy()
         # create_plane_coords
         # The main axis will be treated differently
-        idx = [plane_dict[i] for i in subreg_iso.orientation]
-        axis = idx.index(plane_dict["S"])
+        idx = [_plane_dict[i] for i in subreg_iso.orientation]
+        axis = idx.index(_plane_dict["S"])
         # assert axis == np.argmax(np.abs(normal_vector)).item()
         dims = [0, 1, 2]
         dims.remove(axis)
@@ -218,7 +218,7 @@ def calc_orientation_of_vertebra_PIR(
         normal_vector_post = normal_vector_post / norm(normal_vector_post)
         poi._vert_orientation_pir[vert_id] = (normal_vector_post, normal_down, np.cross(normal_vector_post, normal_down))
 
-        ### MAKE directions POIs ###
+        ### MAKE DIRECTIONS POIs ###
         # print(ret[vert_id, source_subreg_point_id], normal_vector_post)
         ret[vert_id, Location.Vertebra_Direction_Posterior] = tuple(ret[vert_id, source_subreg_point_id] + normal_vector_post * 10)
         ret[vert_id, Location.Vertebra_Direction_Inferior] = tuple(ret[vert_id, source_subreg_point_id] + normal_down * 10)
@@ -250,7 +250,7 @@ def _make_spine_plot(pois: POI, body_spline, vert_nii: NII, filenames):
 
 
 ##### Extreme Points ####
-def _get_sub_array_by_direction(d: Directions, cords: np.ndarray) -> np.ndarray:
+def _get_sub_array_by_direction(d: DIRECTIONS, cords: np.ndarray) -> np.ndarray:
     """Get the sub-array of coordinates along a specified direction.
     cords must be in PIR direction
     Returns:
@@ -277,7 +277,7 @@ def _get_sub_array_by_direction(d: Directions, cords: np.ndarray) -> np.ndarray:
         never_called(d)
 
 
-def _get_direction(d: Directions, poi: POI, vert_id: int) -> np.ndarray:
+def _get_direction(d: DIRECTIONS, poi: POI, vert_id: int) -> np.ndarray:
     """Get the sub-array of coordinates along a specified direction.
     cords must be in PIR direction
     Returns:
@@ -305,7 +305,7 @@ def _get_direction(d: Directions, poi: POI, vert_id: int) -> np.ndarray:
         never_called(d)
 
 
-def get_extreme_point_by_vert_direction(poi: POI, region: NII, vert_id, direction: Sequence[Directions] | Directions = "I"):
+def get_extreme_point_by_vert_direction(poi: POI, region: NII, vert_id, direction: Sequence[DIRECTIONS] | DIRECTIONS = "I"):
     """
     Get the extreme point in a specified direction.
 
@@ -313,14 +313,14 @@ def get_extreme_point_by_vert_direction(poi: POI, region: NII, vert_id, directio
         poi (POI): The chosen point of interest represented as an array.
         region (NII): An array containing the subregion mask.
         vert_id: The ID of the vertex.
-        direction (Union[Sequence[Directions], Directions], optional): The direction(s) to search for the extreme point.
+        direction (Union[Sequence[DIRECTIONS], DIRECTIONS], optional): The direction(s) to search for the extreme point.
             Defaults to "I" (positive direction along the secondary axis).
 
     Note:
         Assumes `region` contains binary values indicating the presence of points.
         Uses `_get_sub_array_by_direction` internally.
     """
-    direction_: Sequence[Directions] = direction if isinstance(direction, Sequence) else (direction,)  # type: ignore
+    direction_: Sequence[DIRECTIONS] = direction if isinstance(direction, Sequence) else (direction,)  # type: ignore
 
     to_reference_frame, from_reference_frame = get_vert_direction_matrix(poi, vert_id=vert_id)
     pc = np.stack(np.where(region.get_array() == 1))
@@ -333,7 +333,7 @@ def get_extreme_point_by_vert_direction(poi: POI, region: NII, vert_id, directio
 def get_vert_direction_PIR(poi: POI, vert_id, do_norm=True) -> Vertebra_Orientation:
     """Retive the vertebra orientation from the POI. Must be computed by calc_orientation_of_vertebra_PIR first."""
     if vert_id in poi._vert_orientation_pir:
-        return poi._vert_orientation_pir[vert_id]  # Elusive buffer of iso directions.
+        return poi._vert_orientation_pir[vert_id]  # Elusive buffer of iso DIRECTIONS.
     poi = (
         poi.extract_subregion(
             Location.Vertebra_Corpus,
@@ -370,7 +370,7 @@ def strategy_extreme_points(
     poi: POI,
     current_subreg: NII,
     location: Location,
-    direction: Sequence[Directions] | Directions,
+    direction: Sequence[DIRECTIONS] | DIRECTIONS,
     vert_id: int,
     subreg_id: Location | list[Location],
     bb,
@@ -382,7 +382,7 @@ def strategy_extreme_points(
         poi (POI): The point of interest.
         current_subreg (NII): The current subregion.
         location (Location): The location to update in the point of interest.
-        direction (Union[Sequence[Directions], Directions]): Direction(s) to search for the extreme point.
+        direction (Union[Sequence[DIRECTIONS], DIRECTIONS]): Direction(s) to search for the extreme point.
         vert_id (int): The vertex ID.
         subreg_id (Location): The subregion ID.
         bb: The bounding box.
@@ -411,7 +411,7 @@ def strategy_line_cast(
     location: Location,
     start_point: Location | np.ndarray,
     regions_loc: list[Location] | Location,
-    normal_vector_points: tuple[Location, Location] | Directions,
+    normal_vector_points: tuple[Location, Location] | DIRECTIONS,
     bb,
     log: Logger_Interface = _log,
 ):
@@ -430,7 +430,7 @@ def max_distance_ray_cast_pixel_level(
     region: NII,
     vert_id: int,
     bb: tuple[slice, slice, slice],
-    normal_vector_points: tuple[Location, Location] | Directions = "R",
+    normal_vector_points: tuple[Location, Location] | DIRECTIONS = "R",
     start_point: Location | np.ndarray = Location.Vertebra_Corpus,
     two_sided=False,
     log: Logger_Interface = _log,
@@ -442,7 +442,7 @@ def max_distance_ray_cast_pixel_level(
         region (NII): Region to cast rays in.
         vert_id (int): Label of the region in `region`.
         bb (Tuple[slice, slice, slice]): Bounding box coordinates.
-        normal_vector_points (Union[Tuple[Location, Location], Directions], optional):
+        normal_vector_points (Union[Tuple[Location, Location], DIRECTIONS], optional):
             Points defining the normal vector or the direction. Defaults to "R".
         start_point (Location, optional): Starting point of the ray. Defaults to Location.Vertebra_Corpus.
         log (Logger_Interface, optional): Logger interface. Defaults to _log.
@@ -465,7 +465,7 @@ def max_distance_ray_cast_convex(
     region: NII,
     vert_id: int,
     bb: tuple[slice, slice, slice],
-    normal_vector_points: tuple[Location, Location] | Directions = "R",
+    normal_vector_points: tuple[Location, Location] | DIRECTIONS = "R",
     start_point: Location | np.ndarray = Location.Vertebra_Corpus,
     log: Logger_Interface = _log,
     acc_delta: float = 0.00005,
@@ -541,7 +541,7 @@ def ray_cast(
     region: NII,
     vert_id: int,
     bb: tuple[slice, slice, slice],
-    normal_vector_points: tuple[Location, Location] | Directions = "R",
+    normal_vector_points: tuple[Location, Location] | DIRECTIONS = "R",
     start_point: Location | np.ndarray = Location.Vertebra_Corpus,
     log: Logger_Interface = _log,
     two_sided=False,
@@ -553,7 +553,7 @@ def ray_cast(
         region (NII): Region to cast rays in.
         vert_id (int): Vertex ID.
         bb (Tuple[slice, slice, slice]): Bounding box coordinates.
-        normal_vector_points (Union[Tuple[Location, Location], Directions], optional):
+        normal_vector_points (Union[Tuple[Location, Location], DIRECTIONS], optional):
             Points defining the normal vector or the direction. Defaults to "R".
         start_point (Union[Location, np.ndarray], optional): Starting point of the ray.
             Defaults to Location.Vertebra_Corpus.
@@ -622,7 +622,7 @@ def strategy_find_corner(
     vec2: Location,
     start_point=Location.Vertebra_Corpus,
     log: Logger_Interface = _log,
-    shift_direction: Directions | None = None,
+    shift_direction: DIRECTIONS | None = None,
 ):
     start_point = shift_point(poi, vert_id, bb, start_point, direction=shift_direction, log=log)
     corner_point = find_corner_point(poi, current_subreg, vert_id, bb, start_point, vec1=vec1, vec2=vec2, log=log)
@@ -753,7 +753,7 @@ def shift_point(
     vert_id: int,
     bb,
     start_point: Location = Location.Vertebra_Corpus,
-    direction: Directions | None = "R",
+    direction: DIRECTIONS | None = "R",
     log: Logger_Interface = _log,
 ):
     if direction is None:
@@ -784,10 +784,10 @@ def strategy_shifted_line_cast(
     vert_id: int,
     bb,
     regions_loc: list[Location] | Location,
-    normal_vector_points: tuple[Location, Location] | Directions,
+    normal_vector_points: tuple[Location, Location] | DIRECTIONS,
     start_point: Location = Location.Vertebra_Corpus,
     log=_log,
-    direction: Directions = "R",
+    direction: DIRECTIONS = "R",
     do_shift=True,
 ):
     try:
@@ -818,7 +818,7 @@ def strategy_shifted_line_cast(
 #    bb,
 #    log=_log,
 #    corpus=None,
-#    direction: Directions = "R",
+#    direction: DIRECTIONS = "R",
 #    compute_arcus_points=False,
 #    do_shift=False,
 # ):
@@ -853,8 +853,8 @@ def strategy_shifted_line_cast(
 #    normal_vector = _get_direction(direction, poi, vert_id)  # / np.array(poi.zoom)
 #    # normal_vector = normal_vector / norm(normal_vector)
 #
-#    idx = [plane_dict[i] for i in current_subreg.orientation]
-#    axis = idx.index(plane_dict[direction])
+#    idx = [_plane_dict[i] for i in current_subreg.orientation]
+#    axis = idx.index(_plane_dict[direction])
 #    assert axis == np.argmax(np.abs(normal_vector)).item(), (axis, direction, normal_vector)
 #    dims = [0, 1, 2]
 #    dims.remove(axis)
@@ -1155,7 +1155,7 @@ def compute_non_centroid_pois(  # noqa: C901
     locations = list(locations) if isinstance(locations, Sequence) else [locations]
     ### STEP 1 Vert Direction###
     if Location.Vertebra_Direction_Inferior in locations:
-        log.print("Compute Vertebra directions")
+        log.print("Compute Vertebra DIRECTIONS")
         ### Calc vertebra direction; We always need them, so we just compute them. ###
         sub_regions = poi.keys_subregion()
         if any(a.value not in sub_regions for a in vert_directions):
@@ -1301,8 +1301,8 @@ def calc_center_spinal_cord(
         normal_vector /= np.linalg.norm(normal_vector)
         # create_plane_coords
         # The main axis will be treated differently
-        idx = [plane_dict[i] for i in subreg_iso.orientation]
-        axis = idx.index(plane_dict["S"])
+        idx = [_plane_dict[i] for i in subreg_iso.orientation]
+        axis = idx.index(_plane_dict["S"])
         # assert axis == np.argmax(np.abs(normal_vector)).item()
         dims = [0, 1, 2]
         dims.remove(axis)

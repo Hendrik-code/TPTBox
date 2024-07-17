@@ -14,13 +14,13 @@ import numpy as np
 
 import TPTBox.core.bids_files as bids
 from TPTBox import POI
-from TPTBox.core.nii_wrapper import NII, Ax_Codes
+from TPTBox.core.nii_wrapper import AX_CODES, NII
 from TPTBox.core.vert_constants import conversion_poi2text
 
 repeats = 20
 
 
-def get_random_ax_code() -> Ax_Codes:
+def get_random_ax_code() -> AX_CODES:
     directions = [["R", "L"], ["S", "I"], ["A", "P"]]
     idx = [0, 1, 2]
     random.shuffle(idx)

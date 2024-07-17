@@ -16,6 +16,8 @@ from typing_extensions import Self
 from TPTBox.core.nii_wrapper_math import NII_Math
 from TPTBox.core.np_utils import (
     np_calc_boundary_mask,
+    np_calc_convex_hull,
+    np_calc_overlapping_labels,
     np_center_of_mass,
     np_connected_components,
     np_count_nonzero,
@@ -29,26 +31,30 @@ from TPTBox.core.np_utils import (
     np_unique_withoutzero,
     np_volume,
 )
-from TPTBox.core.vert_constants import Coordinate
+from TPTBox.core.vert_constants import COORDINATE
+from TPTBox.logger.log_file import Log_Type
 
 from . import bids_files
-from . import vert_constants as vc
-from .vert_constants import Sentinel
+from .vert_constants import (
+    AFFINE,
+    AX_CODES,
+    DIRECTIONS,
+    LABEL_MAP,
+    ORIGIN,
+    ROTATION,
+    SHAPE,
+    ZOOMS,
+    Location,
+    Sentinel,
+    _plane_dict,
+    _same_direction,
+    log,
+    logging,
+    v_name2idx,
+)
 
-AFFINE = np.ndarray
 _unpacked_nii = tuple[np.ndarray, AFFINE, nib.nifti1.Nifti1Header]
-log = vc.log
-Ax_Codes = vc.Ax_Codes
-logging = vc.logging
-v_name2idx = vc.v_name2idx
-Label_Map = vc.Label_Map
-Directions = vc.Directions
-plane_dict = vc.plane_dict
 _formatwarning = warnings.formatwarning
-Zooms = vc.Zooms
-SHAPE = vc.Triple | tuple[int, int, int]
-ORIGIN = vc.Triple
-ROTATION = vc.Rotation
 if TYPE_CHECKING:
     from TPTBox.core.poi import POI
 
@@ -273,12 +279,12 @@ class NII(NII_Math):
         self._unpack()
         self._aff = affine
     @property
-    def orientation(self) -> vc.Ax_Codes:
+    def orientation(self) -> AX_CODES:
         ort = nio.io_orientation(self.affine)
         return nio.ornt2axcodes(ort) # type: ignore
 
     @property
-    def zoom(self) -> Zooms:
+    def zoom(self) -> ZOOMS:
         rotation_zoom = self.affine[:3, :3]
         zoom = np.sqrt(np.sum(rotation_zoom * rotation_zoom, axis=0)) if self.__divergent else self.header.get_zooms()
 
@@ -305,7 +311,7 @@ class NII(NII_Math):
 
 
     @orientation.setter
-    def orientation(self, value: vc.Ax_Codes):
+    def orientation(self, value: AX_CODES):
         self.reorient_(value, verbose=False)
 
     @property
@@ -349,7 +355,7 @@ class NII(NII_Math):
             return self.get_seg_array()
         self._unpack()
         return self._arr.copy()
-    def set_array(self,arr:np.ndarray, inplace=False,verbose:vc.logging=False)-> Self:  # noqa: ARG002
+    def set_array(self,arr:np.ndarray, inplace=False,verbose:logging=False)-> Self:  # noqa: ARG002
         """Creates a NII where the array is replaces with the input array.
 
         Note: This function works "Out-of-place" by default, like all other methods.
@@ -383,7 +389,7 @@ class NII(NII_Math):
         else:
             return NII(nii,self.seg) # type: ignore
 
-    def set_array_(self,arr:np.ndarray,verbose:vc.logging=True):
+    def set_array_(self,arr:np.ndarray,verbose:logging=True):
         return self.set_array(arr,inplace=True,verbose=verbose)
     def set_dtype_(self,dtype:type|Literal['smallest_int'] = np.float32):
         if dtype == "smallest_int":
@@ -400,16 +406,16 @@ class NII(NII_Math):
             self.nii = Nifti1Image(self.get_array().astype(dtype),self.affine,self.header)
 
         return self
-    def global_to_local(self, x: vc.Coordinate):
+    def global_to_local(self, x: COORDINATE):
         a = self.rotation.T @ (np.array(x) - self.origin) / np.array(self.zoom)
         return tuple(round(float(v), 7) for v in a)
 
-    def local_to_global(self, x:  vc.Coordinate):
+    def local_to_global(self, x:  COORDINATE):
         a = self.rotation @ (np.array(x) * np.array(self.zoom)) + self.origin
         return tuple(round(float(v), 7) for v in a)
 
 
-    def reorient(self:Self, axcodes_to: vc.Ax_Codes = ("P", "I", "R"), verbose:vc.logging=False, inplace=False)-> Self:
+    def reorient(self:Self, axcodes_to: AX_CODES = ("P", "I", "R"), verbose:logging=False, inplace=False)-> Self:
         """
         Reorients the input Nifti image to the desired orientation, specified by the axis codes.
 
@@ -453,7 +459,7 @@ class NII(NII_Math):
             return self
 
         return NII(new_img, self.seg) # type: ignore
-    def reorient_(self:Self, axcodes_to: vc.Ax_Codes|None = ("P", "I", "R"), verbose:vc.logging=False) -> Self:
+    def reorient_(self:Self, axcodes_to: AX_CODES|None = ("P", "I", "R"), verbose:logging=False) -> Self:
         if axcodes_to is None:
             return self
         return self.reorient(axcodes_to=axcodes_to, verbose=verbose,inplace=True)
@@ -628,7 +634,7 @@ class NII(NII_Math):
             return self
         return self.copy(nii)
 
-    def rescale_and_reorient(self, axcodes_to=None, voxel_spacing=(-1, -1, -1), verbose:vc.logging=True, inplace=False,c_val:float|None=None,mode='constant'):
+    def rescale_and_reorient(self, axcodes_to=None, voxel_spacing=(-1, -1, -1), verbose:logging=True, inplace=False,c_val:float|None=None,mode='constant'):
 
         ## Resample and rotate and Save Tempfiles
         if axcodes_to is None:
@@ -639,15 +645,15 @@ class NII(NII_Math):
             curr = self.reorient(axcodes_to=axcodes_to, verbose=verbose, inplace=inplace)
         return curr.rescale(voxel_spacing=voxel_spacing, verbose=verbose, inplace=inplace,c_val=c_val,mode=mode)
 
-    def rescale_and_reorient_(self,axcodes_to=None, voxel_spacing=(-1, -1, -1),c_val:float|None=None,mode='constant', verbose:vc.logging=True):
+    def rescale_and_reorient_(self,axcodes_to=None, voxel_spacing=(-1, -1, -1),c_val:float|None=None,mode='constant', verbose:logging=True):
         return self.rescale_and_reorient(axcodes_to=axcodes_to,voxel_spacing=voxel_spacing,c_val=c_val,mode=mode,verbose=verbose,inplace=True)
 
-    def reorient_same_as(self, img_as: Nifti1Image | Self, verbose:vc.logging=False, inplace=False) -> Self:
-        axcodes_to: Ax_Codes = nio.ornt2axcodes(nio.io_orientation(img_as.affine)) # type: ignore
+    def reorient_same_as(self, img_as: Nifti1Image | Self, verbose:logging=False, inplace=False) -> Self:
+        axcodes_to: AX_CODES = nio.ornt2axcodes(nio.io_orientation(img_as.affine)) # type: ignore
         return self.reorient(axcodes_to=axcodes_to, verbose=verbose, inplace=inplace)
-    def reorient_same_as_(self, img_as: Nifti1Image | Self, verbose:vc.logging=False) -> Self:
+    def reorient_same_as_(self, img_as: Nifti1Image | Self, verbose:logging=False) -> Self:
         return self.reorient_same_as(img_as=img_as,verbose=verbose,inplace=True)
-    def rescale(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:vc.logging=False, inplace=False,mode='constant',align_corners:bool=False):
+    def rescale(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:logging=False, inplace=False,mode='constant',align_corners:bool=False):
         """
         Rescales the NIfTI image to a new voxel spacing.
 
@@ -690,10 +696,10 @@ class NII(NII_Math):
             return self
         return NII(new_img, self.seg,self.c_val)
 
-    def rescale_(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:vc.logging=False,mode='constant'):
+    def rescale_(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:logging=False,mode='constant'):
         return self.rescale( voxel_spacing=voxel_spacing, c_val=c_val, verbose=verbose,mode=mode, inplace=True)
 
-    def resample_from_to(self, to_vox_map:Image_Reference|Proxy, mode='constant', c_val=None, inplace = False,verbose:vc.logging=True,align_corners:bool=False):
+    def resample_from_to(self, to_vox_map:Image_Reference|Proxy, mode='constant', c_val=None, inplace = False,verbose:logging=True,align_corners:bool=False):
         """self will be resampled in coordinate of given other image. Adheres to global space not to local pixel space
         Args:
             to_vox_map (Image_Reference|Proxy): If object, has attributes shape giving input voxel shape, and affine giving mapping of input voxels to output space. If length 2 sequence, elements are (shape, affine) with same meaning as above. The affine is a (4, 4) array-like.\n
@@ -861,20 +867,20 @@ class NII(NII_Math):
         ix_max = np.array(zms == np.amax(zms))
         num_max = np_count_nonzero(ix_max)
         if num_max == 2:
-            plane = plane_dict[axc[~ix_max][0]]
+            plane = _plane_dict[axc[~ix_max][0]]
         elif num_max == 1:
-            plane = plane_dict[axc[ix_max][0]]
+            plane = _plane_dict[axc[ix_max][0]]
         else:
             plane = "iso"
         return plane
 
-    def get_axis(self,direction:Directions = "S"):
+    def get_axis(self,direction:DIRECTIONS = "S"):
         if direction not in self.orientation:
-            direction = vc.same_direction[direction]
+            direction = _same_direction[direction]
         return self.orientation.index(direction)
 
 
-    def erode_msk(self, mm: int = 5, labels: Sequence[int] | None = None, connectivity: int = 3, inplace=False,verbose:vc.logging=True):
+    def erode_msk(self, mm: int = 5, labels: Sequence[int] | None = None, connectivity: int = 3, inplace=False,verbose:logging=True):
         """
         Erodes the binary segmentation mask by the specified number of voxels.
 
@@ -942,7 +948,7 @@ class NII(NII_Math):
         return self.dilate_msk(mm=mm, labels=labels, connectivity=connectivity, mask=mask, inplace=True, verbose=verbose)
 
 
-    def fill_holes(self, labels: int | list[int] | None = None, verbose:logging=True, inplace=False):
+    def fill_holes(self, labels: int | list[int] | None = None, slice_wise_dim: int | None = None, verbose:logging=True, inplace=False):
         """Fills holes in segmentation
 
         Args:
@@ -950,6 +956,7 @@ class NII(NII_Math):
             verbose: whether to print which labels have been filled
             inplace (bool): Whether to modify the current NIfTI image object in place or create a new object with the mapped labels.
                 Default is False.
+            slice_wise_dim (int | None, optional): If the input is 3D, the specified dimension here cna be used for 2D slice-wise filling. Defaults to None.
 
         Returns:
             NII: If inplace is True, returns the current NIfTI image object with filled holes. Otherwise, returns a new NIfTI image object with filled holes.
@@ -961,7 +968,7 @@ class NII(NII_Math):
 
         seg_arr = self.get_seg_array()
         #volumes = np_volume(seg_arr, label_ref=labels)
-        filled = np_fill_holes(seg_arr, label_ref=labels)
+        filled = np_fill_holes(seg_arr, label_ref=labels, slice_wise_dim=slice_wise_dim)
         #volumes_filled = np_volume(filled, label_ref=labels)
         #changes_in_labels = [i for i in labels if i in volumes_filled and i in volumes and volumes_filled[i] != volumes[i]]
         #if len(changes_in_labels) > 0:
@@ -971,8 +978,30 @@ class NII(NII_Math):
         log.print("Fill holes called", verbose=verbose)
         return self.set_array(filled, inplace=inplace)
 
-    def fill_holes_(self, labels: int | list[int] | None = None, verbose:logging=True):
-        return self.fill_holes(labels, verbose, inplace=True)
+    def fill_holes_(self, labels: int | list[int] | None = None, slice_wise_dim: int | None = None, verbose:logging=True):
+        return self.fill_holes(labels, slice_wise_dim, verbose, inplace=True)
+
+    def calc_convex_hull(
+        self,
+        axis: DIRECTIONS = "S",
+        inplace: bool = False,
+        verbose: bool = False,
+    ):
+        """Calculates the convex hull of this segmentation nifty
+
+        Args:
+            axis (int | None, optional): If given axis, will calculate convex hull along that axis (remaining dimension must be at least 2). Defaults to None.
+        """
+        assert self.seg, "To calculate the convex hull, this must be a segmentation"
+        axis_int = self.get_axis(axis)
+        convex_hull_arr = np_calc_convex_hull(self.get_seg_array(), axis=axis_int, verbose=verbose)
+        if inplace:
+            return self.set_array_(convex_hull_arr)
+        return self.set_array(convex_hull_arr)
+
+    def calc_convex_hull_(self, axis: DIRECTIONS="S", verbose: bool = False,):
+        return self.calc_convex_hull(axis=axis, inplace=True, verbose=verbose)
+
 
     def boundary_mask(self, threshold: float,inplace = False):
         """
@@ -997,18 +1026,22 @@ class NII(NII_Math):
         """
         return self.set_array(np_calc_boundary_mask(self.get_array(),threshold),inplace=inplace,verbose=False)
 
-    def get_segmentation_connected_components(self, labels: int |list[int], connectivity: int = 3, verbose: bool=False):
+    def get_segmentation_connected_components(self, labels: int |list[int], connectivity: int = 3, transform_back_to_nii: bool = False, verbose: bool=False):
         """Calculates and returns the connected components of this segmentation NII
 
         Args:
             label (int): the label(s) of the connected components
             connectivity (int, optional): Connectivity for the connected components. Defaults to 3.
+            transform_back_to_nii (bool): If True, will map the labels to niftys, not numpy arrays. Defaults to False.
 
         Returns:
             cc: dict[label, cc_idx, arr], cc_n: dict[label, int]
         """
         arr = self.get_seg_array()
-        return np_connected_components(arr, connectivity=connectivity, label_ref=labels, verbose=verbose)
+        cc, cc_n = np_connected_components(arr, connectivity=connectivity, label_ref=labels, verbose=verbose)
+        if transform_back_to_nii:
+            cc = {i: self.set_array(k) for i,k in cc.items()}
+        return cc, cc_n
 
     def get_segmentation_connected_components_center_of_mass(self, label: int, connectivity: int = 3, sort_by_axis: int | None = None):
         """Calculates the center of mass of the different connected components of a given label in an array
@@ -1048,8 +1081,8 @@ class NII(NII_Math):
         """
         if self.orientation != mask_gt.orientation:
             mask_gt = mask_gt.reorient_same_as(self)
-        assert self.zoom == mask_gt.zoom, f"zoom mismatch, got {self.zoom} and gt zoom {mask_gt.zoom}"
-        assert self.shape == mask_gt.shape, f"shape mismatch, got {self.shape} and gt shape {mask_gt.shape}"
+
+        self.assert_affine(zoom=mask_gt.zoom, shape=mask_gt.shape)
         arr = self.get_seg_array()
         gt = mask_gt.get_seg_array()
         diff_arr = arr.copy() * 0
@@ -1067,8 +1100,23 @@ class NII(NII_Math):
 
         return self.set_array(diff_arr)
 
+    def get_overlapping_labels_to(
+        self,
+        mask_other: Self,
+    ) -> list[tuple[int, int]]:
+        """Calculates the pairs of labels that are overlapping in at least one voxel (fast)
 
-    def map_labels(self, label_map:Label_Map , verbose:logging=True, inplace=False):
+        Args:
+            mask_other (NII): The array to be compared with.
+
+        Returns:
+            list[tuple[int, int]]: List of tuples of labels that overlap in at least one voxel. First label in the tuple is Self NII, the second is of the mask_other
+        """
+        assert self.seg and mask_other.seg
+        return np_calc_overlapping_labels(self.get_seg_array(), mask_other.get_seg_array())
+
+
+    def map_labels(self, label_map:LABEL_MAP , verbose:logging=True, inplace=False):
         """
         Maps labels in the given NIfTI image according to the label_map dictionary.
         Args:
@@ -1107,7 +1155,7 @@ class NII(NII_Math):
             return self
         return NII(nii, True)
 
-    def map_labels_(self, label_map: Label_Map, verbose:logging=True):
+    def map_labels_(self, label_map: LABEL_MAP, verbose:logging=True):
         return self.map_labels(label_map,verbose=verbose,inplace=True)
     def copy(self, nib:Nifti1Image|_unpacked_nii|None = None):
         if nib is None:
@@ -1132,7 +1180,7 @@ class NII(NII_Math):
                 out.set_data_dtype(np.uint16)
             else:
                 out.set_data_dtype(np.int32)
-        log.print(f"Save {file} as {out.get_data_dtype()}",verbose=verbose,ltype=vc.log_file.Log_Type.SAVE)
+        log.print(f"Save {file} as {out.get_data_dtype()}",verbose=verbose,ltype=Log_Type.SAVE)
         nib.save(out, file) #type: ignore
     def __str__(self) -> str:
         return f"shp={self.shape}; ori={self.orientation}, zoom={tuple(np.around(self.zoom, decimals=2))}, seg={self.seg}" # type: ignore
@@ -1231,7 +1279,7 @@ class NII(NII_Math):
         b = b.resample_from_to(self,c_val=0,verbose=False)
         return b.get_array().sum()
 
-    def extract_label(self,label:int|vc.Location|Sequence[int]|Sequence[vc.Location], keep_label=False,inplace=False):
+    def extract_label(self,label:int|Location|Sequence[int]|Sequence[Location], keep_label=False,inplace=False):
         '''If this NII is a segmentation you can single out one label with [0,1].'''
         seg_arr = self.get_seg_array()
 
@@ -1243,7 +1291,7 @@ class NII(NII_Math):
                 seg_arr[seg_arr == l] = 1
             seg_arr[seg_arr != 1] = 0
         else:
-            if isinstance(label,vc.Location):
+            if isinstance(label,Location):
                 label = label.value
             assert label != 0, 'Zero label does not make sens. This is the background'
             seg_arr[seg_arr != label] = 0
@@ -1251,7 +1299,7 @@ class NII(NII_Math):
         if keep_label:
             seg_arr = seg_arr * self.get_seg_array()
         return self.set_array(seg_arr,inplace=inplace)
-    def extract_label_(self,label:int|vc.Location|Sequence[int]|Sequence[vc.Location], keep_label=False):
+    def extract_label_(self,label:int|Location|Sequence[int]|Sequence[Location], keep_label=False):
         return self.extract_label(label,keep_label,inplace=True)
     def remove_labels(self,*label:int | list[int], inplace=False, verbose:logging=True):
         '''If this NII is a segmentation you can single out one label.'''
@@ -1283,7 +1331,7 @@ class NII(NII_Math):
         '''Returns a dict stating how many pixels are present for each label'''
         return np_volume(self.get_seg_array(), include_zero=include_zero)
 
-    def center_of_masses(self) -> dict[int, Coordinate]:
+    def center_of_masses(self) -> dict[int, COORDINATE]:
         '''Returns a dict stating the center of mass for each present label (not including zero!)'''
         return np_center_of_mass(self.get_seg_array())
 
@@ -1291,8 +1339,8 @@ class NII(NII_Math):
             self,
             other: Self | "POI" | None = None,
             affine: AFFINE | None = None,
-            zoom: Zooms | None = None,
-            orientation: Ax_Codes | None = None,
+            zoom: ZOOMS | None = None,
+            orientation: AX_CODES | None = None,
             rotation: ROTATION | None = None,
             origin: ORIGIN | None = None,
             shape: SHAPE | None = None,
@@ -1302,29 +1350,28 @@ class NII(NII_Math):
         """Checks if the different metadata is equal to some comparison entries
 
         Args:
-            other (Self | &quot;POI&quot; | None, optional): _description_. Defaults to None.
-            affine (AFFINE | None, optional): _description_. Defaults to None.
-            zms (Zooms | None, optional): _description_. Defaults to None.
-            orientation (Ax_Codes | None, optional): _description_. Defaults to None.
-            origin (ORIGIN | None, optional): _description_. Defaults to None.
-            shape (SHAPE | None, optional): _description_. Defaults to None.
-            error_tolerance (float, optional): _description_. Defaults to 1e-4.
-            raise_error (bool, optional): _description_. Defaults to True.
-            verbose (logging, optional): _description_. Defaults to False.
+            other (Self | POI | None, optional): If set, will assert each entry of that object instead. Defaults to None.
+            affine (AFFINE | None, optional): Affine matrix to compare against. If none, will not assert affine. Defaults to None.
+            zms (Zooms | None, optional): Zoom to compare against. If none, will not assert zoom. Defaults to None.
+            orientation (Ax_Codes | None, optional): Orientation to compare against. If none, will not assert orientation. Defaults to None.
+            origin (ORIGIN | None, optional): Origin to compare against. If none, will not assert origin. Defaults to None.
+            shape (SHAPE | None, optional): Shape to compare against. If none, will not assert shape. Defaults to None.
+            error_tolerance (float, optional): Accepted error tolerance in all assertions except shape. Defaults to 1e-4.
+            raise_error (bool, optional): If true, will raise AssertionError if anything is found. Defaults to True.
+            verbose (logging, optional): If true, will print out each assertion mismatch. Defaults to False.
 
         Raises:
-            NotImplementedError: _description_
-            AssertionError: _description_
+            AssertionError: If any of the assertions failed and raise_error is True
 
         Returns:
-            _type_: _description_
+            bool: True if there are no assertion errors
         """
         found_errors: list[str] = []
 
         # Make Checks
         if other is not None:
             other_data = other._extract_affine()
-            other_match = self.assert_affine(other=None, **other_data, raise_error=raise_error)
+            other_match = self.assert_affine(other=None, **other_data, raise_error=raise_error, error_tolerance=error_tolerance)
             if not other_match:
                 found_errors.append(f"object mismatch {self!s}, {other!s}")
         if affine is not None:
@@ -1353,7 +1400,7 @@ class NII(NII_Math):
 
         # Print errors
         for err in found_errors:
-            log.print(err, verbose=verbose)
+            log.print(err, Log_Type.FAIL, verbose=verbose)
 
         # Final conclusion and possible raising of AssertionError
         has_errors = len(found_errors) > 0
@@ -1412,7 +1459,7 @@ def to_nii_interpolateable(i_img:Interpolateable_Image_Reference) -> NII:
 
 def _resample_from_to(
     from_img:NII,
-    to_img:NII|tuple[SHAPE,AFFINE,Zooms],
+    to_img:NII|tuple[SHAPE,AFFINE,ZOOMS],
     order=3,
     mode="constant",
     align_corners:bool|Sentinel=Sentinel()  # noqa: B008

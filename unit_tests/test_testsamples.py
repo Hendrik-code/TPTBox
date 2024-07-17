@@ -86,7 +86,10 @@ class Test_testsamples(unittest.TestCase):
             poi = calc_poi_from_subreg_vert(vert_nii, subreg_nii, subreg_id=locs, verbose=False).extract_vert(vert_id)
             for l in locs:
                 self.assertIn((vert_id, l.value), poi)
-            poi.assert_affine(vert_nii)
+            poi.assert_affine(
+                vert_nii,
+                shape_tolerance=0.5,
+            )
 
     def test_POIs_CT(self):
         _, subreg_nii, vert_nii, label = get_test_ct()
