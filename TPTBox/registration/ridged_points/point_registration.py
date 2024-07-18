@@ -7,9 +7,9 @@ import numpy as np
 import SimpleITK as sitk  # noqa: N813
 
 from TPTBox import (
+    AX_CODES,
     NII,
     POI,
-    Ax_Codes,
     Image_Reference,
     Location,
     Log_Type,
@@ -34,7 +34,7 @@ class Point_Registration:
     _img_moving: sitk.Image
     _img_fixed: sitk.Image
     _transform: sitk.VersorRigid3DTransform
-    orientation: Ax_Codes
+    orientation: AX_CODES
     error_reg: float
     error_natural: float
     input_poi: POI

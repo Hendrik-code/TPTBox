@@ -9,14 +9,14 @@ from pathlib import Path
 import nibabel as nib
 import numpy as np
 
-from TPTBox.core.nii_wrapper import NII, Ax_Codes
+from TPTBox.core.nii_wrapper import AX_CODES, NII
 from TPTBox.stitching import stitching_raw
 from TPTBox.tests.test_utils import overlap
 
 # TODO saving did not work with the test and I do not understand why.
 
 
-def get_random_ax_code() -> Ax_Codes:
+def get_random_ax_code() -> AX_CODES:
     directions = [["R", "L"], ["S", "I"], ["A", "P"]]
     idx = [0, 1, 2]
     random.shuffle(idx)

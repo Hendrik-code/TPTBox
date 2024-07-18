@@ -15,7 +15,7 @@ import TPTBox.core.bids_files as bids  # noqa: E402
 from TPTBox import Centroids  # noqa: E402
 from TPTBox.core.nii_wrapper import NII  # noqa: E402
 from TPTBox.core.poi import POI  # noqa: E402
-from TPTBox.core.vert_constants import Ax_Codes  # noqa: E402
+from TPTBox.core.vert_constants import AX_CODES  # noqa: E402
 
 repeats = 20
 
@@ -77,7 +77,7 @@ def sqr1d(c1: float, w1: float, c2: float, w2: float):
     return not c1 - w1 > c2 + w2
 
 
-def get_random_ax_code() -> Ax_Codes:
+def get_random_ax_code() -> AX_CODES:
     directions = [["R", "L"], ["S", "I"], ["A", "P"]]
     idx = [0, 1, 2]
     random.shuffle(idx)

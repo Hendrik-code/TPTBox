@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from typing import Any, TypeVar
 
 import numpy as np
+import scipy
 from cc3d import connected_components, contacts, region_graph, voxel_connectivity_graph
 from cc3d import statistics as _cc3dstats
 from fill_voids import fill
@@ -11,7 +12,7 @@ from numpy.typing import NDArray
 from scipy.ndimage import binary_erosion, center_of_mass, generate_binary_structure
 from skimage.measure import euler_number, label
 
-from TPTBox.core.vert_constants import Coordinate, Label_Map, Label_Reference, log
+from TPTBox.core.vert_constants import COORDINATE, LABEL_MAP, LABEL_REFERENCE, log
 from TPTBox.logger import Log_Type
 
 UINT = TypeVar("UINT", bound=np.unsignedinteger[Any])
@@ -114,7 +115,7 @@ def np_unique_withoutzero(arr: UINTARRAY) -> list[int]:
     return [i for i in np.unique(arr) if i != 0]
 
 
-def np_center_of_mass(arr: UINTARRAY) -> dict[int, Coordinate]:
+def np_center_of_mass(arr: UINTARRAY) -> dict[int, COORDINATE]:
     """Calculates center of mass, mapping label in array to a coordinate (float) (exluding zero)
 
     Args:
@@ -238,7 +239,7 @@ def np_dice(seg: np.ndarray, gt: np.ndarray, binary_compare: bool = False, label
 
 
 def np_dilate_msk(
-    arr: np.ndarray, label_ref: Label_Reference = None, mm: int = 5, connectivity: int = 3, mask: np.ndarray | None = None
+    arr: np.ndarray, label_ref: LABEL_REFERENCE = None, mm: int = 5, connectivity: int = 3, mask: np.ndarray | None = None
 ) -> np.ndarray:
     """
     Dilates the given array by the specified number of voxels (not including the zero).
@@ -277,7 +278,7 @@ def np_dilate_msk(
     return out
 
 
-def np_erode_msk(arr: np.ndarray, label_ref: Label_Reference = None, mm: int = 5, connectivity: int = 3) -> np.ndarray:
+def np_erode_msk(arr: np.ndarray, label_ref: LABEL_REFERENCE = None, mm: int = 5, connectivity: int = 3) -> np.ndarray:
     """
     Erodes the given array by the specified number of voxels.
 
@@ -308,7 +309,7 @@ def np_erode_msk(arr: np.ndarray, label_ref: Label_Reference = None, mm: int = 5
     return out
 
 
-def np_map_labels(arr: UINTARRAY, label_map: Label_Map) -> np.ndarray:
+def np_map_labels(arr: UINTARRAY, label_map: LABEL_MAP) -> np.ndarray:
     """Maps labels in the given array according to the label_map dictionary.
     Args:
         label_map (dict): A dictionary that maps the original label values (str or int) to the new label values (int).
@@ -420,7 +421,7 @@ def np_center_of_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.
     return ctd_bbox
 
 
-def np_approx_center_of_mass(seg: np.ndarray, label_ref: Label_Reference = None) -> dict[int, Coordinate]:
+def np_approx_center_of_mass(seg: np.ndarray, label_ref: LABEL_REFERENCE = None) -> dict[int, COORDINATE]:
     import warnings
 
     warnings.warn("np_approx_center_of_mass deprecated use np_center_of_mass instead", stacklevel=3)  # TODO remove in version 1.0
@@ -472,7 +473,7 @@ def np_find_index_of_k_max_values(arr: np.ndarray, k: int = 2) -> list[int]:
 def np_connected_components(
     arr: UINTARRAY,
     connectivity: int = 3,
-    label_ref: Label_Reference = None,
+    label_ref: LABEL_REFERENCE = None,
     verbose: bool = False,
 ) -> tuple[dict[int, UINTARRAY], dict[int, int]]:
     """Calculates the connected components of a given array (works with zeros as well!)
@@ -488,7 +489,7 @@ def np_connected_components(
     """
 
     assert np.min(arr) == 0, f"min value of mask not zero, got {np.min(arr)}"
-    assert np.max(arr) >= 1, f"wrong normalization, max value is not >= one, got {np.unique(arr)}"
+    assert np.max(arr) >= 0, f"wrong normalization, max value is not >= 0, got {np_unique(arr)}"
     assert 2 <= arr.ndim <= 3, f"expected 2D or 3D, but got {arr.ndim}"
     assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
     connectivity = min(connectivity * 2, 8) if arr.ndim == 2 else 6 if connectivity == 1 else 18 if connectivity == 2 else 26
@@ -513,7 +514,7 @@ def np_connected_components(
 def np_get_largest_k_connected_components(
     arr: UINTARRAY,
     k: int | None = None,
-    label_ref: Label_Reference = None,
+    label_ref: LABEL_REFERENCE = None,
     connectivity: int = 3,
     return_original_labels: bool = True,
 ) -> UINTARRAY:
@@ -542,7 +543,7 @@ def np_get_largest_k_connected_components(
     labels: Sequence[int] = _to_labels(arr, label_ref)
     arr2[np.isin(arr, labels, invert=True)] = 0  # type:ignore
 
-    labels_out, n = connected_components(arr, connectivity=connectivity, return_N=True)
+    labels_out, n = connected_components(arr2, connectivity=connectivity, return_N=True)
     if k is None:
         k = n
     k = min(k, n)  # if k > N, will return all N but still sorted
@@ -561,7 +562,7 @@ def np_get_largest_k_connected_components(
 
 def np_get_connected_components_center_of_mass(
     arr: UINTARRAY, label: int, connectivity: int = 3, sort_by_axis: int | None = None
-) -> list[Coordinate]:
+) -> list[COORDINATE]:
     """Calculates the center of mass of the different connected components of a given label in an array
 
     Args:
@@ -644,7 +645,7 @@ def np_translate_arr(arr: np.ndarray, translation_vector: tuple[int, int] | tupl
     return arr_translated
 
 
-def np_fill_holes(arr: np.ndarray, label_ref: Label_Reference = None, slice_wise_dim: int | None = None) -> np.ndarray:
+def np_fill_holes(arr: np.ndarray, label_ref: LABEL_REFERENCE = None, slice_wise_dim: int | None = None) -> np.ndarray:
     """Fills holes in segmentations
 
     Args:
@@ -671,6 +672,67 @@ def np_fill_holes(arr: np.ndarray, label_ref: Label_Reference = None, slice_wise
         filled[filled != 0] = l
         arr[arr == 0] = filled[arr == 0]
     return arr
+
+
+def np_calc_convex_hull(
+    arr: INTARRAY,
+    axis: int | None = None,
+    verbose: bool = False,
+):
+    """Calculates the convex hull of a given array, returning the array filled with its convex hull
+
+    Args:
+        arr (INTARRAY): Input array
+        axis (int | None, optional): If given axis, will calculate convex hull along that axis (remaining dimension must be at least 2). Defaults to None.
+    """
+    n_dims = arr.ndim
+    if axis is None:
+        assert 2 <= n_dims <= 3, f"If axis is none, array must be 2- or 3-dimensional, but got {n_dims} with shape {arr.shape}"
+        return _convex_hull(arr, verbose=verbose)[0]
+    else:
+        assert 3 <= n_dims <= 4, f"If axis is given, the array must be 3- or 4-dimensional, but got {n_dims} with shape {arr.shape}"
+        assert 0 <= axis <= n_dims, f"Specified axis must be in range of dimension, but got axis={axis} and n_dims={n_dims}"
+        h = arr * 0
+        for i in range(arr.shape[axis]):
+            slices = _select_axis_dynamically(axis=axis, index=i, n_dims=n_dims)
+            if np.count_nonzero(arr[slices]) == 0:
+                continue
+            try:
+                convex_hull_slice = _convex_hull(arr[slices], verbose=verbose)[0].astype(arr.dtype)
+                h[slices] += convex_hull_slice
+            except Exception:
+                pass
+        return h
+
+
+def _select_axis_dynamically(axis: int, index: int, n_dims: int = 3):
+    slices = tuple([slice(None) if i != axis else index for i in range(n_dims)])
+    return slices
+
+
+def _convex_hull(
+    arr: INTARRAY,
+    verbose: bool = False,
+):
+    """Calculates the convex hull of a given array (all labels are taken)
+
+    Args:
+        arr (INTARRAY): integer array
+
+    Returns:
+        _type_: out_img, hull
+    """
+    points = np.transpose(np.where(arr))
+    if len(points) <= 3:
+        print("To few points") if verbose else None
+        return np.zeros_like(arr, dtype=arr.dtype)
+    hull = scipy.spatial.ConvexHull(points)
+    deln = scipy.spatial.Delaunay(points[hull.vertices])
+    idx = np.stack(np.indices(arr.shape), axis=-1)
+    out_idx = np.nonzero(deln.find_simplex(idx) + 1)
+    out_img = np.zeros(arr.shape, dtype=arr.dtype)
+    out_img[out_idx] = 1
+    return out_img, hull
 
 
 def np_calc_boundary_mask(
@@ -784,7 +846,33 @@ def np_betti_numbers(img: np.ndarray, verbose=False) -> tuple[int, int, int]:
     return b0, b1, b2
 
 
-def _to_labels(arr: np.ndarray, labels: Label_Reference = None) -> Sequence[int]:
+def np_calc_overlapping_labels(
+    reference_arr: np.ndarray,
+    prediction_arr: np.ndarray,
+) -> list[tuple[int, int]]:
+    """Calculates the pairs of labels that are overlapping in at least one voxel (fast)
+
+    Args:
+        prediction_arr (np.ndarray): Numpy array containing the prediction labels.
+        reference_arr (np.ndarray): Numpy array containing the reference labels.
+        ref_labels (list[int]): List of unique reference labels.
+
+    Returns:
+        list[tuple[int, int]]: List of tuples of labels that overlap in at least one voxel
+    """
+    ref_labels = np_unique_withoutzero(reference_arr)
+    overlap_arr = prediction_arr.astype(np.uint32)
+    max_ref = max(ref_labels) + 1
+    overlap_arr = (overlap_arr * max_ref) + reference_arr
+    overlap_arr[reference_arr == 0] = 0
+    # overlapping_indices = [(i % (max_ref), i // (max_ref)) for i in np.unique(overlap_arr) if i > max_ref]
+    # instance_pairs = [(reference_arr, prediction_arr, i, j) for i, j in overlapping_indices]
+
+    # (ref, pred)
+    return [(int(i % (max_ref)), int(i // (max_ref))) for i in np.unique(overlap_arr) if i > max_ref]
+
+
+def _to_labels(arr: np.ndarray, labels: LABEL_REFERENCE = None) -> Sequence[int]:
     if labels is None:
         labels = list(np_unique(arr))
     if not isinstance(labels, Sequence):
