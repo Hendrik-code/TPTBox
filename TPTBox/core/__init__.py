@@ -8,8 +8,8 @@ from .bids_files import BIDS_FILE, BIDS_Family, BIDS_Global_info, Searchquery, S
 # NII
 from .nii_wrapper import NII, Image_Reference, Interpolateable_Image_Reference, to_nii, to_nii_interpolateable, to_nii_optional, to_nii_seg
 from .poi import (
+    AX_CODES,
     POI,
-    Ax_Codes,
     POI_Reference,
     VertebraCentroids,
     calc_centroids,
@@ -18,4 +18,4 @@ from .poi import (
     load_poi,
 )
 from .poi_global import POI_Global
-from .vert_constants import Location, Zooms, v_idx2name, v_idx_order, v_name2idx
+from .vert_constants import ZOOMS, Location, v_idx2name, v_idx_order, v_name2idx

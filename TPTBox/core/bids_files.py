@@ -549,6 +549,7 @@ class BIDS_FILE:
         additional_folder: str | None = None,
         dataset_path: str | None = None,
         make_parent=True,
+        no_sorting_mode: bool = False,
         non_strict_mode: bool = False,
     ) -> Path:
         """
@@ -574,6 +575,8 @@ class BIDS_FILE:
             additional_folder (str | None, optional): add an additional folder towards path. Defaults to None.
 
             dataset_path (str | None, optional): Override the dataset_path. Defaults to None.
+
+            no_sorting_mode (bool): If true, will keep the order of the origin nii. Defaults to False
 
         Returns:
             _type_: _description_
@@ -629,12 +632,14 @@ class BIDS_FILE:
                     final_info[key] = value
                 # file_name += f"{key}-{value}_"
             # sort by order
-            entity_keys = list(entities_keys.keys())
-            keys_sorted = sorted(
-                final_info.keys(),
-                key=lambda x: entity_keys.index(x) if x in entity_keys else list(final_info.keys()).index(x) + len(entity_keys),
-            )
-            for key in keys_sorted:
+            keys_order = final_info.keys()
+            if not no_sorting_mode:
+                entity_keys = list(entities_keys.keys())
+                keys_order = sorted(
+                    final_info.keys(),
+                    key=lambda x: entity_keys.index(x) if x in entity_keys else list(final_info.keys()).index(x) + len(entity_keys),
+                )
+            for key in keys_order:
                 file_name += f"{key}-{final_info[key]}_"
             # End Info
             bids_format = bids_format if bids_format is not None else same_format
@@ -777,9 +782,9 @@ class BIDS_FILE:
         from TPTBox import load_centroids
 
         try:
-            cdt = load_centroids(self.file["json"])
-            if cdt.zoom is None or cdt.shape is None:
-                if nii is None:
+            ctd = load_centroids(self.file["json"])
+            if ctd.zoom is None or ctd.shape is None or ctd.rotation is None or ctd.origin is None or ctd.orientation is None:
+                if nii is None and "ctd.json" in str(self.file["json"]):
                     p = Path(str(self.file["json"]).replace("ctd.json", "msk.nii.gz"))
                     nii = p if p.exists() else nii
                 assert (
@@ -787,14 +792,14 @@ class BIDS_FILE:
                 ), "This file has no zoom info. Use open_ctd(self, nii) with a image reference (BIDS_FILE/PATH) with the same nii"
                 nii = TPTBox.to_nii(nii)
                 assert isinstance(nii, TPTBox.NII)
-                cdt.zoom = nii.zoom
-                cdt.shape = nii.shape
-                cdt.rotation = nii.rotation
-                cdt.origin = nii.origin
-                cdt.orientation = nii.orientation
+                ctd.zoom = nii.zoom
+                ctd.shape = nii.shape
+                ctd.rotation = nii.rotation
+                ctd.origin = nii.origin
+                ctd.orientation = nii.orientation
         except KeyError as e:
             raise ValueError(f"json not present. Found only {self.file.keys()}\t{self.file}\n\n{self}") from e
-        return cdt
+        return ctd
 
     def open_ctd(self, nii: TPTBox.Image_Reference | None = None):
         return self.open_poi(nii)
@@ -1204,7 +1209,10 @@ class BIDS_Family:
         self.family_id = self.get_identifier()
 
     def __getitem__(self, item: str) -> list[BIDS_FILE]:
-        return self.data_dict[item]
+        try:
+            return self.data_dict[item]
+        except KeyError as e:
+            raise KeyError(f"BIDS_Family does not contain key {item}, only {self.keys()}") from e
 
     def __setitem__(self, key, value):
         self.data_dict[key] = value

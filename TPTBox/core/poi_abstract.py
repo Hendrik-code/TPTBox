@@ -12,7 +12,7 @@ from typing_extensions import Self
 from TPTBox.core.nii_wrapper import NII
 
 from . import vert_constants
-from .vert_constants import Coordinate, Location, POI_Dict, Sentinel, log, log_file, logging
+from .vert_constants import COORDINATE, POI_DICT, Location, Sentinel, log, log_file, logging
 
 ROUNDING_LVL = 7
 POI_ID = tuple[int, int] | slice | tuple[Location, Location] | tuple[Location, int] | tuple[int, Location]
@@ -72,7 +72,7 @@ class POI_Descriptor(AbstractSet, MutableMapping):
     def __init__(
         self,
         *,
-        default: POI_Dict | None = None,
+        default: POI_DICT | None = None,
         definition: Abstract_POI_Definition | None = None,
     ):
         if definition is None:
@@ -131,7 +131,7 @@ class POI_Descriptor(AbstractSet, MutableMapping):
         self.sort()
         return self.pois.copy().items()
 
-    def _apply_all(self, fun: Callable[[float, float, float], Coordinate], inplace=False):
+    def _apply_all(self, fun: Callable[[float, float, float], COORDINATE], inplace=False):
         out = self if inplace else POI_Descriptor()
         for region, subregion, cord in self.items():
             out[region:subregion] = fun(*cord)
@@ -150,11 +150,11 @@ class POI_Descriptor(AbstractSet, MutableMapping):
     def keys_subregion(self):
         return {x2 for x1, x2, y in self.items()}
 
-    def __getitem__(self, key: POI_ID) -> Coordinate:
+    def __getitem__(self, key: POI_ID) -> COORDINATE:
         region, subregion = unpack_poi_id(key, self.definition)
         return self.pois[region][subregion]
 
-    def __setitem__(self, key: POI_ID, value: Coordinate):
+    def __setitem__(self, key: POI_ID, value: COORDINATE):
         self._len = None
         region, subregion = unpack_poi_id(key, self.definition)
         if region not in self.pois:
@@ -287,19 +287,21 @@ class Abstract_POI:
     def _get_centroids(self) -> POI_Descriptor:
         return self.centroids  # type: ignore
 
-    def apply_all(self, fun: Callable[[float, float, float], Coordinate], inplace=False):
+    def apply_all(self, fun: Callable[[float, float, float], COORDINATE], inplace=False):
         ctd = self._get_centroids()._apply_all(fun, inplace)
         if inplace:
             return self
         return self.copy(ctd)
 
     @property
-    def is_global(self) -> bool: ...
+    def is_global(self) -> bool:
+        ...
 
     def clone(self, **qargs):
         return self.copy(**qargs)
 
-    def copy(self, centroids: POI_Descriptor | None = None, **qargs) -> Self: ...
+    def copy(self, centroids: POI_Descriptor | None = None, **qargs) -> Self:
+        ...
 
     def map_labels(
         self,
@@ -472,7 +474,7 @@ class Abstract_POI:
     def __contains__(self, key: POI_ID) -> bool:
         return key in self.centroids
 
-    def __getitem__(self, key: POI_ID) -> Coordinate:
+    def __getitem__(self, key: POI_ID) -> COORDINATE:
         return tuple(self.centroids[key])
 
     def __setitem__(self, key: POI_ID, value: tuple[float, float, float] | Sequence[float]):
@@ -505,7 +507,7 @@ class Abstract_POI:
     def keys_subregion(self):
         return list(self.centroids.keys_subregion())
 
-    def values(self) -> list[Coordinate]:
+    def values(self) -> list[COORDINATE]:
         return self.centroids.values()
 
     def remove_centroid_(self, *label: tuple[int, int]):

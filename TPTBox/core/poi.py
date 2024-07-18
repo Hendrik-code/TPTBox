@@ -13,18 +13,22 @@ import numpy as np
 from scipy.ndimage import center_of_mass
 from typing_extensions import Self
 
+from ..logger import Log_Type  # noqa: TID252
 from . import bids_files
 from .nii_wrapper import NII, Image_Reference, to_nii, to_nii_optional
 from .poi_abstract import ROUNDING_LVL, Abstract_POI, POI_Descriptor, Sentinel
 from .vert_constants import (
+    AFFINE,
+    AX_CODES,
+    COORDINATE,
     LABEL_MAX,
-    Ax_Codes,
-    Coordinate,
+    ORIGIN,
+    POI_DICT,
+    ROTATION,
+    SHAPE,
+    TRIPLE,
+    ZOOMS,
     Location,
-    POI_Dict,
-    Rotation,
-    Triple,
-    Zooms,
     conversion_poi,
     conversion_poi2text,
     log,
@@ -117,13 +121,13 @@ class POI(Abstract_POI):
         POI(centroids={4: {0: (5.0, 10.0, 15.0), 1: (8.0, 12.0, 18.0)}, 3: {0: (5.0, 15.0, 25.0)}}, orientation=('R', 'A', 'S'), zoom=(2.0, 2.0, 2.0), info={}, origin=None)
     """
 
-    orientation: Ax_Codes = ("R", "A", "S")
-    zoom: None | Zooms = field(init=True, default=None)  # type: ignore
-    shape: Triple | None = field(default=None, repr=True, compare=False)
-    rotation: Rotation | None = field(default=None, repr=False, compare=False)
-    origin: Coordinate | None = None
+    orientation: AX_CODES = ("R", "A", "S")
+    zoom: None | ZOOMS = field(init=True, default=None)  # type: ignore
+    shape: TRIPLE | None = field(default=None, repr=True, compare=False)
+    rotation: ROTATION | None = field(default=None, repr=False, compare=False)
+    origin: COORDINATE | None = None
     # internal
-    _zoom: None | Zooms = field(init=False, default=None, repr=False, compare=False)
+    _zoom: None | ZOOMS = field(init=False, default=None, repr=False, compare=False)
     _vert_orientation_pir = {}  # Elusive; will not be saved; will not be copied. For Buffering results  # noqa: RUF012
 
     @property
@@ -166,12 +170,12 @@ class POI(Abstract_POI):
 
     def copy(
         self,
-        centroids: POI_Dict | POI_Descriptor | None = None,
-        orientation: Ax_Codes | None = None,
-        zoom: Zooms | None | Sentinel = Sentinel(),  # noqa: B008
+        centroids: POI_DICT | POI_Descriptor | None = None,
+        orientation: AX_CODES | None = None,
+        zoom: ZOOMS | None | Sentinel = Sentinel(),  # noqa: B008
         shape: tuple[float, float, float] | tuple[float, ...] | None | Sentinel = Sentinel(),  # noqa: B008
-        rotation: Rotation | None | Sentinel = Sentinel(),  # noqa: B008
-        origin: Coordinate | None | Sentinel = Sentinel(),  # noqa: B008
+        rotation: ROTATION | None | Sentinel = Sentinel(),  # noqa: B008
+        origin: COORDINATE | None | Sentinel = Sentinel(),  # noqa: B008
     ) -> Self:
         """Create a copy of the POI object with optional attribute overrides.
 
@@ -209,7 +213,7 @@ class POI(Abstract_POI):
             format=self.format,
         )
 
-    def local_to_global(self, x: Coordinate) -> Coordinate:
+    def local_to_global(self, x: COORDINATE) -> COORDINATE:
         """Converts local coordinates to global coordinates using zoom, rotation, and origin.
 
         Args:
@@ -240,7 +244,7 @@ class POI(Abstract_POI):
         # return tuple(a.tolist())
         return tuple(round(float(v), ROUNDING_LVL) for v in a)
 
-    def global_to_local(self, x: Coordinate) -> Coordinate:
+    def global_to_local(self, x: COORDINATE) -> COORDINATE:
         """Converts global coordinates to local coordinates using zoom, rotation, and origin.
 
         Args:
@@ -342,7 +346,7 @@ class POI(Abstract_POI):
                     else:
                         return end + in_shape[i]
 
-                shape: Triple | None = tuple(int(map_v(o_shift[i], i) - o_shift[i].start) for i in range(3))  # type: ignore
+                shape: TRIPLE | None = tuple(int(map_v(o_shift[i], i) - o_shift[i].start) for i in range(3))  # type: ignore
             if self.origin is not None:
                 origin = self.local_to_global(tuple(float(y.start) for y in o_shift))  # type: ignore
                 # origin = tuple(float(x + y.start) for x, y in zip(self.origin, o_shift))
@@ -392,7 +396,7 @@ class POI(Abstract_POI):
             return self
         return self.apply_crop(translation_vector, inplace=inplace, **kwargs)
 
-    def reorient(self, axcodes_to: Ax_Codes = ("P", "I", "R"), decimals=ROUNDING_LVL, verbose: logging = False, inplace=False, _shape=None):
+    def reorient(self, axcodes_to: AX_CODES = ("P", "I", "R"), decimals=ROUNDING_LVL, verbose: logging = False, inplace=False, _shape=None):
         """Reorients the centroids of an image from the current orientation to the specified orientation.
 
         This method updates the position of the centroids, zoom level, and shape of the image accordingly.
@@ -463,7 +467,7 @@ class POI(Abstract_POI):
         if self.zoom is not None:
             zoom_i = np.array(self.zoom)
             zoom_i[perm] = zoom_i.copy()
-            zoom: Zooms | None = tuple(zoom_i)
+            zoom: ZOOMS | None = tuple(zoom_i)
         else:
             zoom = None
         perm2 = trans[:, 0]
@@ -496,20 +500,20 @@ class POI(Abstract_POI):
             return self
         return self.copy(orientation=axcodes_to, centroids=points, zoom=zoom, shape=shape, origin=origin, rotation=rotation)
 
-    def reorient_(self, axcodes_to: Ax_Codes = ("P", "I", "R"), decimals=3, verbose: logging = False, _shape=None):
+    def reorient_(self, axcodes_to: AX_CODES = ("P", "I", "R"), decimals=3, verbose: logging = False, _shape=None):
         return self.reorient(axcodes_to, decimals=decimals, verbose=verbose, inplace=True, _shape=_shape)
 
     def reorient_centroids_to(self, img: Image_Reference, decimals=ROUNDING_LVL, verbose: logging = False, inplace=False) -> Self:
         # reorient centroids to image orientation
         if not isinstance(img, NII):
             img = to_nii(img)
-        axcodes_to: Ax_Codes = nio.aff2axcodes(img.affine)  # type: ignore
+        axcodes_to: AX_CODES = nio.aff2axcodes(img.affine)  # type: ignore
         return self.reorient(axcodes_to, decimals=decimals, verbose=verbose, inplace=inplace, _shape=img.shape)
 
     def reorient_centroids_to_(self, img: Image_Reference, decimals=ROUNDING_LVL, verbose: logging = False) -> Self:
         return self.reorient_centroids_to(img, decimals=decimals, verbose=verbose, inplace=True)
 
-    def rescale(self, voxel_spacing: Zooms = (1, 1, 1), decimals=ROUNDING_LVL, verbose: logging = True, inplace=False) -> Self:
+    def rescale(self, voxel_spacing: ZOOMS = (1, 1, 1), decimals=ROUNDING_LVL, verbose: logging = True, inplace=False) -> Self:
         """Rescale the centroid coordinates to a new voxel spacing in the current x-y-z-orientation.
 
         Args:
@@ -557,7 +561,7 @@ class POI(Abstract_POI):
             return self
         return self.copy(centroids=points, zoom=voxel_spacing, shape=shp)
 
-    def rescale_(self, voxel_spacing: Zooms = (1, 1, 1), decimals=3, verbose: logging = False) -> Self:
+    def rescale_(self, voxel_spacing: ZOOMS = (1, 1, 1), decimals=3, verbose: logging = False) -> Self:
         return self.rescale(voxel_spacing=voxel_spacing, decimals=decimals, verbose=verbose, inplace=True)
 
     def to_global(self):
@@ -767,39 +771,111 @@ class POI(Abstract_POI):
         """
         return load_poi(poi)
 
-    def assert_affine(self, nii: NII | Self):
-        return
-        assert self.zoom is not None
-        assert nii.zoom is not None
-        assert np.isclose(self.zoom, nii.zoom, rtol=0.001).all()
-        assert self.orientation == nii.orientation, (self.orientation, nii.orientation)
-        s = self.shape_int
-        if isinstance(nii, NII):
-            assert s is not None
-            s = tuple(round(x, 0) for x in s)
-        atol = 10  # 0.01  # 1e-5
-        assert s == nii.shape, (s, nii.shape, self, str(nii))
-        assert self.rotation is not None
-        assert nii.rotation is not None
-        assert self.rotation is not None
-        assert nii.rotation is not None
-        assert np.isclose(self.rotation, nii.rotation, atol=atol).all()
-        assert self.origin is not None
-        assert nii.origin is not None
-        assert nii.origin is not None
-        assert self.origin is not None
+    def assert_affine(
+        self,
+        other: Self | NII | None = None,
+        ignore_missing_values: bool = False,
+        affine: AFFINE | None = None,
+        zoom: ZOOMS | None = None,
+        orientation: AX_CODES | None = None,
+        rotation: ROTATION | None = None,
+        origin: ORIGIN | None = None,
+        shape: SHAPE | None = None,
+        shape_tolerance: float = 0.0,
+        error_tolerance: float = 1e-4,
+        raise_error: bool = True,
+        verbose: logging = False,
+    ):
+        """Checks if the different metadata is equal to some comparison entries
 
-        aff_equ = np.isclose(self.affine, nii.affine, atol=atol).all()
-        assert aff_equ, f"{np.round(self.affine,2)}\n {np.round(nii.affine,2)}"
-        assert np.isclose(self.origin, nii.origin, atol=atol).all(), (self.origin, nii.origin)
+        Args:
+            other (Self | POI | None, optional): If set, will assert each entry of that object instead. Defaults to None.
+            affine (AFFINE | None, optional): Affine matrix to compare against. If none, will not assert affine. Defaults to None.
+            zms (Zooms | None, optional): Zoom to compare against. If none, will not assert zoom. Defaults to None.
+            orientation (Ax_Codes | None, optional): Orientation to compare against. If none, will not assert orientation. Defaults to None.
+            origin (ORIGIN | None, optional): Origin to compare against. If none, will not assert origin. Defaults to None.
+            shape (SHAPE | None, optional): Shape to compare against. If none, will not assert shape. Defaults to None.
+            shape_tolerance (float, optional): error tolerance in shape as float, as POIs can have float shapes. Defaults to 0.0.
+            error_tolerance (float, optional): Accepted error tolerance in all assertions except shape. Defaults to 1e-4.
+            raise_error (bool, optional): If true, will raise AssertionError if anything is found. Defaults to True.
+            verbose (logging, optional): If true, will print out each assertion mismatch. Defaults to False.
+
+        Raises:
+            AssertionError: If any of the assertions failed and raise_error is True
+
+        Returns:
+            bool: True if there are no assertion errors
+        """
+        found_errors: list[str] = []
+
+        # Make Checks
+        if other is not None:
+            other_data = other._extract_affine()
+            other_match = self.assert_affine(
+                other=None, **other_data, raise_error=raise_error, shape_tolerance=shape_tolerance, error_tolerance=error_tolerance
+            )
+            if not other_match:
+                found_errors.append(f"object mismatch {self!s}, {other!s}")
+        if affine is not None and (not ignore_missing_values or self.affine is not None):
+            if self.affine is None:
+                found_errors.append(f"affine mismatch {self.affine}, {affine}")
+            else:
+                affine_diff = self.affine - affine
+                affine_match = np.all([abs(a) <= error_tolerance for a in affine_diff.flatten()])
+                found_errors.append(f"affine mismatch {self.affine}, {affine}") if not affine_match else None
+        if rotation is not None and (not ignore_missing_values or self.rotation is not None):
+            if self.rotation is None:
+                found_errors.append(f"rotation mismatch {self.rotation}, {rotation}")
+            else:
+                rotation_diff = self.rotation - rotation
+                rotation_match = np.all([abs(a) <= error_tolerance for a in rotation_diff.flatten()])
+                found_errors.append(f"rotation mismatch {self.rotation}, {rotation}") if not rotation_match else None
+        if zoom is not None and (not ignore_missing_values or self.zoom is not None):
+            if self.zoom is None:
+                found_errors.append(f"zoom mismatch {self.zoom}, {zoom}")
+            else:
+                zms_diff = (self.zoom[i] - zoom[i] for i in range(3))
+                zms_match = np.all([abs(a) <= error_tolerance for a in zms_diff])
+                found_errors.append(f"zoom mismatch {self.zoom}, {zoom}") if not zms_match else None
+        if orientation is not None and (not ignore_missing_values or self.affine is not None):
+            if self.orientation is None:
+                found_errors.append(f"orientation mismatch {self.orientation}, {orientation}")
+            else:
+                orientation_match = np.all([i == orientation[idx] for idx, i in enumerate(self.orientation)])
+                found_errors.append(f"orientation mismatch {self.orientation}, {orientation}") if not orientation_match else None
+        if origin is not None and (not ignore_missing_values or self.origin is not None):
+            if self.origin is None:
+                found_errors.append(f"origin mismatch {self.origin}, {origin}")
+            else:
+                origin_diff = (self.origin[i] - origin[i] for i in range(3))
+                origin_match = np.all([abs(a) <= error_tolerance for a in origin_diff])
+                found_errors.append(f"origin mismatch {self.origin}, {origin}") if not origin_match else None
+        if shape is not None and (not ignore_missing_values or self.shape is not None):
+            if self.shape is None:
+                found_errors.append(f"shape mismatch {self.shape}, {shape}")
+            else:
+                shape_diff = (float(self.shape[i]) - float(shape[i]) for i in range(3))
+                shape_match = np.all([abs(a) <= shape_tolerance for a in shape_diff])
+                found_errors.append(f"shape mismatch {self.shape}, {shape}") if not shape_match else None
+
+        # Print errors
+        for err in found_errors:
+            log.print(err, Log_Type.FAIL, verbose=verbose)
+
+        # Final conclusion and possible raising of AssertionError
+        has_errors = len(found_errors) > 0
+        if raise_error and has_errors:
+            raise AssertionError(f"assert_affine failed with {found_errors}")
+
+        return not has_errors
 
 
 class VertebraCentroids(POI):
     def __init__(
         self,
         _centroids,
-        _orientation: Ax_Codes,
-        _shape: Triple | None,
+        _orientation: AX_CODES,
+        _shape: TRIPLE | None,
         zoom=None,
         **qargs,
     ):
@@ -954,8 +1030,8 @@ def load_poi(ctd_path: POI_Reference, verbose=True) -> POI:  # noqa: ARG001
         return _load_format_POI_old(dict_list)  # This file if used in the old POI-pipeline and is deprecated
 
     assert "direction" in dict_list[0], f'File format error: first index must be a "Direction" but got {dict_list[0]}'
-    axcode: Ax_Codes = tuple(dict_list[0]["direction"])  # type: ignore
-    zoom: Zooms = dict_list[0].get("zoom", None)  # type: ignore
+    axcode: AX_CODES = tuple(dict_list[0]["direction"])  # type: ignore
+    zoom: ZOOMS = dict_list[0].get("zoom", None)  # type: ignore
     shape = dict_list[0].get("shape", None)  # type: ignore
     shape = tuple(shape) if shape is not None else None
     format_ = dict_list[0].get("format", None)
@@ -1550,14 +1626,14 @@ def calc_centroids(
     assert vert_id == -1 or subreg_id == -1, "first or second dimension must be fixed."
     msk_nii = to_nii(msk, seg=True)
     msk_data = msk_nii.get_seg_array()
-    axc: Ax_Codes = nio.aff2axcodes(msk_nii.affine)  # type: ignore
+    axc: AX_CODES = nio.aff2axcodes(msk_nii.affine)  # type: ignore
     if extend_to is None:
         ctd_list = POI_Descriptor()
     else:
         if not inplace:
             extend_to = extend_to.copy()
         ctd_list = extend_to.centroids
-        extend_to.assert_affine(msk_nii)
+        extend_to.assert_affine(msk_nii, shape_tolerance=0.5)
         # assert extend_to.orientation == axc, (extend_to.orientation, axc)
     for i in msk_nii.unique():
         msk_temp = np.zeros(msk_data.shape, dtype=bool)

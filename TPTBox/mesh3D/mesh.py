@@ -12,7 +12,7 @@ from skimage.measure import marching_cubes
 from TPTBox import NII, POI, Image_Reference, Log_Type, to_nii_seg
 from TPTBox.core import vert_constants as vc
 from TPTBox.core.np_utils import np_bbox_binary
-from TPTBox.core.poi import Coordinate
+from TPTBox.core.poi import COORDINATE
 
 log = vc.log
 logging = vc.logging
@@ -122,7 +122,7 @@ class POIMesh(Mesh3D):
         if subregions is None:
             subregions = poi.keys_subregion()
 
-        poi_extracted: list[Coordinate] = []
+        poi_extracted: list[COORDINATE] = []
 
         for r_id, s_id, coord in poi.items():
             if r_id in regions and s_id in subregions:
