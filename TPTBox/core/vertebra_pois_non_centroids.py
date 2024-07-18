@@ -661,11 +661,13 @@ def _find_corner_point(
         return
     v1 = _to_local_np(vec1, bb, poi, vert_id, log) - start_point_np
     v2 = _to_local_np(vec2, bb, poi, vert_id, log) - start_point_np
+
     if norm(v1) < 0.000001 and norm(v2) < 0.000001:
         log.on_fail(
             f"find_corner_point - Points to close {vert_id=};{start_point_np=},{vec1=},{vec2=},{norm(v1)=},{norm(v2)=}  ",
         )
         return None
+
     # Initialize factors and interpolator
     factor1 = factor2 = 1
     interpolator = RegularGridInterpolator([np.arange(region.shape[i]) for i in range(3)], region.get_array())
@@ -1169,6 +1171,7 @@ Strategy_Computed_Before(L.Dens_axis,L.Vertebra_Direction_Inferior)
 Strategy_Computed_Before(L.Spinal_Canal_ivd_lvl,L.Vertebra_Disc,L.Vertebra_Corpus,L.Dens_axis)
 Strategy_Computed_Before(L.Spinal_Cord,L.Vertebra_Disc,L.Vertebra_Corpus,L.Dens_axis)
 Strategy_Computed_Before(L.Spinal_Canal,L.Vertebra_Corpus)
+
 
 # fmt: on
 def compute_non_centroid_pois(  # noqa: C901
