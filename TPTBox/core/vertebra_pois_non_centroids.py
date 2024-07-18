@@ -1,6 +1,8 @@
 import warnings
 from collections.abc import Callable, Sequence
+from functools import wraps
 from pathlib import Path
+from time import time
 from typing import NoReturn
 
 import numpy as np
@@ -24,6 +26,18 @@ def run_poi_pipeline(vert: NII, subreg: NII, poi_path: Path, logger: Logger_Inte
 
 def _strategy_side_effect(*args, **qargs):  # noqa: ARG001
     pass
+
+
+def timing(f):
+    @wraps(f)
+    def wrap(*args, **kw):
+        ts = time()
+        result = f(*args, **kw)
+        te = time()
+        print(f"func:{f.__name__!r} took: {te-ts:2.4f} sec")
+        return result
+
+    return wrap
 
 
 class Strategy_Pattern:
@@ -288,7 +302,7 @@ def _get_direction(d: Directions, poi: POI, vert_id: int) -> np.ndarray:
     Note:
         Assumes the input `cords` array has shape (3, n), where n is the number of coordinates.
     """
-    P, I, R = get_vert_direction_PIR(poi, vert_id)  # noqa: N806
+    P, I, R = get_vert_direction_PIR(poi, vert_id, to_pir=False)  # noqa: N806
     if d == "P":
         return P
     elif d == "A":
@@ -330,33 +344,31 @@ def get_extreme_point_by_vert_direction(poi: POI, region: NII, vert_id, directio
     return pc[:, idx]
 
 
-def get_vert_direction_PIR(poi: POI, vert_id, do_norm=True) -> Vertebra_Orientation:
+def get_vert_direction_PIR(poi: POI, vert_id, do_norm=True, to_pir=True) -> Vertebra_Orientation:
     """Retive the vertebra orientation from the POI. Must be computed by calc_orientation_of_vertebra_PIR first."""
-    if vert_id in poi._vert_orientation_pir:
-        return poi._vert_orientation_pir[vert_id]  # Elusive buffer of iso directions.
-    poi = (
-        poi.extract_subregion(
-            Location.Vertebra_Corpus,
-            Location.Vertebra_Direction_Posterior,
-            Location.Vertebra_Direction_Inferior,
-            Location.Vertebra_Direction_Right,
-        )
-        .rescale(verbose=False)
-        .reorient(verbose=False)
+    if vert_id in poi._vert_orientation_pir and to_pir:
+        return poi._vert_orientation_pir[vert_id]  # Elusive buffer of iso/PIR directions.
+    poi = poi.extract_subregion(
+        Location.Vertebra_Corpus,
+        Location.Vertebra_Direction_Posterior,
+        Location.Vertebra_Direction_Inferior,
+        Location.Vertebra_Direction_Right,
     )
+    if to_pir:
+        poi = poi.rescale(verbose=False).reorient(verbose=False)
 
     def n(x):
         return x / norm(x) if do_norm else x
 
-    for k in poi.keys_region():
-        center = np.array(poi[k : Location.Vertebra_Corpus])
-        post = np.array(poi[k : Location.Vertebra_Direction_Posterior])
-        down = np.array(poi[k : Location.Vertebra_Direction_Inferior])
-        right = np.array(poi[k : Location.Vertebra_Direction_Right])
+    center = np.array(poi[vert_id : Location.Vertebra_Corpus])
+    post = np.array(poi[vert_id : Location.Vertebra_Direction_Posterior])
+    down = np.array(poi[vert_id : Location.Vertebra_Direction_Inferior])
+    right = np.array(poi[vert_id : Location.Vertebra_Direction_Right])
+    out = n(post - center), n(down - center), n(right - center)
+    if to_pir:
+        poi._vert_orientation_pir[vert_id] = out
 
-        poi._vert_orientation_pir[k] = n(post - center), n(down - center), n(right - center)
-
-    return poi._vert_orientation_pir[vert_id]
+    return out
 
 
 def get_vert_direction_matrix(poi: POI, vert_id: int):
@@ -478,6 +490,7 @@ def max_distance_ray_cast_convex(
     # Compute a normal vector, that defines the plane direction
     if isinstance(normal_vector_points, str):
         normal_vector = _get_direction(normal_vector_points, poi, vert_id) / np.array(poi.zoom)
+
         normal_vector = normal_vector / norm(normal_vector)
     else:
         try:
@@ -625,21 +638,34 @@ def strategy_find_corner(
     shift_direction: Directions | None = None,
 ):
     start_point = shift_point(poi, vert_id, bb, start_point, direction=shift_direction, log=log)
-    corner_point = find_corner_point(poi, current_subreg, vert_id, bb, start_point, vec1=vec1, vec2=vec2, log=log)
+    corner_point = _find_corner_point(poi, current_subreg, vert_id, bb, start_point, vec1=vec1, vec2=vec2, log=log, location=location)
 
     if corner_point is None:
         return
     poi[vert_id, location.value] = tuple(a.start + b for a, b in zip(bb, corner_point, strict=True))
 
 
-def find_corner_point(poi, region, vert_id, bb, start_point, vec1, vec2, log: Logger_Interface = _log, delta=0.00000005):
+# @timing
+def _find_corner_point(
+    poi: POI, region, vert_id, bb, start_point, vec1, vec2, log: Logger_Interface = _log, delta=0.00000005, location=None
+):
     # Convert start point and vectors to local numpy coordinates
     start_point_np = _to_local_np(start_point, bb, poi, vert_id, log) if isinstance(start_point, Location) else start_point
     if start_point_np is None:
         return None
+    if (vert_id, vec1.value) not in poi.keys():
+        log.on_fail(f"find_corner_point - point missing {vert_id=} {vec1.value=} {location=},{poi.keys()}")
+        return
+    if (vert_id, vec2.value) not in poi.keys():
+        log.on_fail(f"find_corner_point - point missing {(vert_id, vec2.value)=} {location=}")
+        return
     v1 = _to_local_np(vec1, bb, poi, vert_id, log) - start_point_np
     v2 = _to_local_np(vec2, bb, poi, vert_id, log) - start_point_np
-
+    if norm(v1) < 0.000001 and norm(v2) < 0.000001:
+        log.on_fail(
+            f"find_corner_point - Points to close {vert_id=};{start_point_np=},{vec1=},{vec2=},{norm(v1)=},{norm(v2)=}  ",
+        )
+        return None
     # Initialize factors and interpolator
     factor1 = factor2 = 1
     interpolator = RegularGridInterpolator([np.arange(region.shape[i]) for i in range(3)], region.get_array())
@@ -656,6 +682,7 @@ def find_corner_point(poi, region, vert_id, bb, start_point, vec1, vec2, log: Lo
 
     v1_n: float = 1 / norm(v1)  # type: ignore
     v2_n: float = 1 / norm(v2)  # type: ignore
+
     f1 = f2 = 0
 
     # Refine factors using delta
@@ -745,6 +772,7 @@ def _to_local_np(loc: Location, bb: tuple[slice, slice, slice], poi: POI, label,
     if (label, loc.value) in poi:
         return np.asarray([a - b.start for a, b in zip(poi[label, loc.value], bb, strict=True)])
     log.print(f"region={label},subregion={loc.value} is missing", ltype=Log_Type.FAIL)
+    # raise KeyError(f"region={label},subregion={loc.value} is missing")
     return None
 
 
@@ -767,6 +795,8 @@ def shift_point(
         factor = 2.0
         if sup_articular_left is None or sup_articular_right is None:
             return
+    if vert_id <= 11:
+        factor *= (12 - vert_id) / 11 + 1
     vertebra_width = np.linalg.norm(sup_articular_right - sup_articular_left)
     shift = vertebra_width / factor
     normal_vector = _get_direction(direction, poi, vert_id) / np.array(poi.zoom)
@@ -1060,16 +1090,16 @@ Strategy_Pattern(L.Additional_Vertebral_Body_Anterior_Central_Left, strategy=S, 
 
 S = strategy_find_corner
 Strategy_Pattern(L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Median,start_point = L.Vertebra_Corpus,strategy=S,prerequisite={L.Vertebra_Direction_Inferior},
-    vec1= L.Additional_Vertebral_Body_Anterior_Central_Median,vec2 = L.Additional_Vertebral_Body_Middle_Superior_Median,prio=100) #101
+    vec1= L.Additional_Vertebral_Body_Anterior_Central_Median,vec2 = L.Additional_Vertebral_Body_Middle_Superior_Median,prio=150) #101
 
 Strategy_Pattern(L.Ligament_Attachment_Point_Posterior_Longitudinal_Superior_Median,start_point = L.Vertebra_Corpus,strategy=S,prerequisite={L.Vertebra_Direction_Inferior},
-    vec1= L.Additional_Vertebral_Body_Posterior_Central_Median,vec2 = L.Additional_Vertebral_Body_Middle_Superior_Median,prio=100) #102
+    vec1= L.Additional_Vertebral_Body_Posterior_Central_Median,vec2 = L.Additional_Vertebral_Body_Middle_Superior_Median,prio=150) #102
 
 Strategy_Pattern(L.Ligament_Attachment_Point_Anterior_Longitudinal_Inferior_Median,start_point = L.Vertebra_Corpus,strategy=S,prerequisite={L.Vertebra_Direction_Inferior},
-    vec1= L.Additional_Vertebral_Body_Anterior_Central_Median,vec2 = L.Additional_Vertebral_Body_Middle_Inferior_Median,prio=100) #103
+    vec1= L.Additional_Vertebral_Body_Anterior_Central_Median,vec2 = L.Additional_Vertebral_Body_Middle_Inferior_Median,prio=150) #103
 
 Strategy_Pattern(L.Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Median,start_point = L.Vertebra_Corpus,strategy=S,prerequisite={L.Vertebra_Direction_Inferior},
-    vec1= L.Additional_Vertebral_Body_Posterior_Central_Median,vec2 = L.Additional_Vertebral_Body_Middle_Inferior_Median,prio=100) #104
+    vec1= L.Additional_Vertebral_Body_Posterior_Central_Median,vec2 = L.Additional_Vertebral_Body_Middle_Inferior_Median,prio=150) #104
 
 Strategy_Pattern(L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Right,start_point = L.Vertebra_Corpus,strategy=S,prerequisite={L.Vertebra_Direction_Inferior},
     vec1= L.Additional_Vertebral_Body_Anterior_Central_Right,vec2 = L.Additional_Vertebral_Body_Middle_Superior_Right,prio=100,shift_direction="R") #117
