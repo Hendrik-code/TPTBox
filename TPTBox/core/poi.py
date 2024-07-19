@@ -782,6 +782,7 @@ class POI(Abstract_POI):
         origin: ORIGIN | None = None,
         shape: SHAPE | None = None,
         shape_tolerance: float = 0.0,
+        origin_tolerance: float = 0.0,
         error_tolerance: float = 1e-4,
         raise_error: bool = True,
         verbose: logging = False,
@@ -812,7 +813,12 @@ class POI(Abstract_POI):
         if other is not None:
             other_data = other._extract_affine()
             other_match = self.assert_affine(
-                other=None, **other_data, raise_error=raise_error, shape_tolerance=shape_tolerance, error_tolerance=error_tolerance
+                other=None,
+                **other_data,
+                raise_error=raise_error,
+                shape_tolerance=shape_tolerance,
+                error_tolerance=error_tolerance,
+                origin_tolerance=origin_tolerance,
             )
             if not other_match:
                 found_errors.append(f"object mismatch {self!s}, {other!s}")
@@ -848,7 +854,7 @@ class POI(Abstract_POI):
                 found_errors.append(f"origin mismatch {self.origin}, {origin}")
             else:
                 origin_diff = (self.origin[i] - origin[i] for i in range(3))
-                origin_match = np.all([abs(a) <= error_tolerance for a in origin_diff])
+                origin_match = np.all([abs(a) <= origin_tolerance for a in origin_diff])
                 found_errors.append(f"origin mismatch {self.origin}, {origin}") if not origin_match else None
         if shape is not None and (not ignore_missing_values or self.shape is not None):
             if self.shape is None:
@@ -1633,7 +1639,11 @@ def calc_centroids(
         if not inplace:
             extend_to = extend_to.copy()
         ctd_list = extend_to.centroids
-        extend_to.assert_affine(msk_nii, shape_tolerance=0.5)
+        extend_to.assert_affine(
+            msk_nii,
+            shape_tolerance=0.5,
+            origin_tolerance=0.5,
+        )
         # assert extend_to.orientation == axc, (extend_to.orientation, axc)
     for i in msk_nii.unique():
         msk_temp = np.zeros(msk_data.shape, dtype=bool)
