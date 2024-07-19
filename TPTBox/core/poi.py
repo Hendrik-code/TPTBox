@@ -122,10 +122,10 @@ class POI(Abstract_POI):
     """
 
     orientation: AX_CODES = ("R", "A", "S")
-    zoom: None | ZOOMS = field(init=True, default=None)  # type: ignore
-    shape: TRIPLE | None = field(default=None, repr=True, compare=False)
-    rotation: ROTATION | None = field(default=None, repr=False, compare=False)
-    origin: COORDINATE | None = None
+    zoom: ZOOMS = field(init=True, default=None)  # type: ignore
+    shape: TRIPLE = field(default=None, repr=True, compare=False)
+    rotation: ROTATION = field(default=None, repr=False, compare=False)
+    origin: COORDINATE = None
     # internal
     _zoom: None | ZOOMS = field(init=False, default=None, repr=False, compare=False)
     _vert_orientation_pir = {}  # Elusive; will not be saved; will not be copied. For Buffering results  # noqa: RUF012
