@@ -32,8 +32,22 @@ LABEL_MAP = dict[int | str, int | str] | dict[str, str] | dict[int, int]
 LABEL_REFERENCE = int | Sequence[int] | None
 
 
-_plane_dict: dict[DIRECTIONS, str] = {"S": "ax", "I": "ax", "L": "sag", "R": "sag", "A": "cor", "P": "cor"}
-_same_direction: dict[DIRECTIONS, DIRECTIONS] = {"S": "I", "I": "S", "L": "R", "R": "L", "A": "P", "P": "A"}
+_plane_dict: dict[DIRECTIONS, str] = {
+    "S": "ax",
+    "I": "ax",
+    "L": "sag",
+    "R": "sag",
+    "A": "cor",
+    "P": "cor",
+}
+_same_direction: dict[DIRECTIONS, DIRECTIONS] = {
+    "S": "I",
+    "I": "S",
+    "L": "R",
+    "R": "L",
+    "A": "P",
+    "P": "A",
+}
 
 
 def never_called(args: NoReturn) -> NoReturn:  # noqa: ARG001
@@ -213,6 +227,10 @@ conversion_poi = {
     "ITL_S": 142,
     "ITL_D": 144,
 }
-vert_directions = [Location.Vertebra_Direction_Inferior, Location.Vertebra_Direction_Right, Location.Vertebra_Direction_Posterior]
+vert_directions = [
+    Location.Vertebra_Direction_Inferior,
+    Location.Vertebra_Direction_Right,
+    Location.Vertebra_Direction_Posterior,
+]
 
 conversion_poi2text = {k: v for v, k in conversion_poi.items()}

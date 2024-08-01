@@ -9,10 +9,9 @@ import numpy as np
 from scipy import interpolate
 from typing_extensions import Self
 
-from TPTBox.core.nii_wrapper import NII
-
-from . import vert_constants
-from .vert_constants import COORDINATE, POI_DICT, Location, Sentinel, log, log_file, logging
+from .. import vert_constants
+from ..nii_poi_abstract import Has_Affine
+from ..vert_constants import COORDINATE, POI_DICT, Location, log, log_file, logging
 
 ROUNDING_LVL = 7
 POI_ID = tuple[int, int] | slice | tuple[Location, Location] | tuple[Location, int] | tuple[int, Location]
@@ -23,7 +22,10 @@ DIMENSIONS = 3
 
 class Abstract_POI_Definition:
     def __init__(
-        self, path: str | Path | None = None, region: dict[int, str] | None = None, subregion: dict[int, str] | None = None
+        self,
+        path: str | Path | None = None,
+        region: dict[int, str] | None = None,
+        subregion: dict[int, str] | None = None,
     ) -> None:
         """Place holder class to move string names to integer with multiple definitions"""
         if path is not None:
@@ -76,7 +78,10 @@ class POI_Descriptor(AbstractSet, MutableMapping):
         definition: Abstract_POI_Definition | None = None,
     ):
         if definition is None:
-            definition = Abstract_POI_Definition(region=vert_constants.v_idx2name, subregion=vert_constants.subreg_idx2name)
+            definition = Abstract_POI_Definition(
+                region=vert_constants.v_idx2name,
+                subregion=vert_constants.subreg_idx2name,
+            )
         if default is None:
             default = {}
         self.pois = default
@@ -154,7 +159,12 @@ class POI_Descriptor(AbstractSet, MutableMapping):
         region, subregion = unpack_poi_id(key, self.definition)
         return self.pois[region][subregion]
 
+    def get(self, key: POI_ID):
+        return np.array(self[key])
+
     def __setitem__(self, key: POI_ID, value: COORDINATE):
+        if isinstance(value, np.ndarray):
+            value = tuple(value.tolist())
         self._len = None
         region, subregion = unpack_poi_id(key, self.definition)
         if region not in self.pois:
@@ -263,7 +273,7 @@ class POI_Descriptor(AbstractSet, MutableMapping):
 
 
 @dataclass
-class Abstract_POI:
+class Abstract_POI(Has_Affine):
     _centroids: POI_Descriptor = field(default_factory=lambda: POI_Descriptor(), repr=False, kw_only=True)
     centroids: POI_Descriptor = field(repr=False, hash=False, compare=False, default=None)  # type: ignore
     format: int | None = field(default=None, repr=False, compare=False)
@@ -294,14 +304,12 @@ class Abstract_POI:
         return self.copy(ctd)
 
     @property
-    def is_global(self) -> bool:
-        ...
+    def is_global(self) -> bool: ...
 
     def clone(self, **qargs):
         return self.copy(**qargs)
 
-    def copy(self, centroids: POI_Descriptor | None = None, **qargs) -> Self:
-        ...
+    def copy(self, centroids: POI_Descriptor | None = None, **qargs) -> Self: ...
 
     def map_labels(
         self,
@@ -403,7 +411,11 @@ class Abstract_POI:
         return self.copy(centroids=poi)
 
     def fit_spline(
-        self, smoothness: int = 10, samples_per_poi=20, location: int | Location = Location.Vertebra_Corpus, vertebra=False
+        self,
+        smoothness: int = 10,
+        samples_per_poi=20,
+        location: int | Location = Location.Vertebra_Corpus,
+        vertebra=False,
     ) -> tuple[np.ndarray, np.ndarray]:
         """
         Fits a spline interpolation through a set of centroids and calculates the first derivative of the spline curve.
@@ -445,10 +457,18 @@ class Abstract_POI:
         num_sample_pts = len(centroids_coords) * samples_per_poi
 
         # Extract coordinates for interpolation
-        x_sample, y_sample, z_sample = centroids_coords[:, 0], centroids_coords[:, 1], centroids_coords[:, 2]
+        x_sample, y_sample, z_sample = (
+            centroids_coords[:, 0],
+            centroids_coords[:, 1],
+            centroids_coords[:, 2],
+        )
         assert len(x_sample) != 0, x_sample.shape
         # Perform cubic spline interpolation
-        tck, u = interpolate.splprep([x_sample, y_sample, z_sample], k=3 if len(x_sample) > 3 else len(x_sample) - 1, s=smoothness)
+        tck, u = interpolate.splprep(
+            [x_sample, y_sample, z_sample],
+            k=3 if len(x_sample) > 3 else len(x_sample) - 1,
+            s=smoothness,
+        )
         u_fine = np.linspace(0, 1, num_sample_pts)
         x_fine, y_fine, z_fine = interpolate.splev(u_fine, tck)
 
@@ -583,9 +603,9 @@ class Abstract_POI:
     def round_(self, ndigits):
         return self.round(ndigits=ndigits, inplace=True)
 
-    def assert_affine(self, nii: NII | Self):
-        assert not isinstance(nii, NII)
-        assert self.is_global == nii.is_global
+    # def assert_affine(self, nii: NII | Self):
+    #    assert not isinstance(nii, NII)
+    #    assert self.is_global == nii.is_global
 
     def calculate_distances_cord(self, target_point: tuple[float, float, float] | Sequence[float]) -> dict[tuple[int, int], float]:
         """Calculate the distances between the target point and each centroid.

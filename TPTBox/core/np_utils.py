@@ -5,13 +5,13 @@ from typing import Any, TypeVar
 
 import numpy as np
 import scipy
-from cc3d import connected_components, contacts, region_graph, voxel_connectivity_graph
+from cc3d import connected_components, contacts, region_graph
 from cc3d import statistics as _cc3dstats
+from cc3d import voxel_connectivity_graph
 from fill_voids import fill
 from numpy.typing import NDArray
 from scipy.ndimage import binary_erosion, center_of_mass, generate_binary_structure
 from skimage.measure import euler_number, label
-
 from TPTBox.core.vert_constants import COORDINATE, LABEL_MAP, LABEL_REFERENCE, log
 from TPTBox.logger import Log_Type
 
@@ -705,7 +705,7 @@ def np_calc_convex_hull(
         return h
 
 
-def _select_axis_dynamically(axis: int, index: int, n_dims: int = 3):
+def _select_axis_dynamically(axis: int, index: int | slice, n_dims: int = 3):
     slices = tuple([slice(None) if i != axis else index for i in range(n_dims)])
     return slices
 

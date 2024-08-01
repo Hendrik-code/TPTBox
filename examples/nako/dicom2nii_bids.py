@@ -27,7 +27,7 @@ from TPTBox.core.bids_constants import formats
 
 sys.path.append(str(Path(__file__).parent))
 
-from dicom2nii_utils import get_json, save_json, test_name_conflict
+from TPTBox.core.dicom.dicom2nii_utils import get_json_from_dicom, get_plane_dicom, save_json, test_name_conflict
 
 logger = No_Logger()
 
@@ -42,13 +42,13 @@ dixon_mapping = {
     "in1": "eco3-in1",
     "pop1": "eco4-pop1",
     "arb1": "eco5-arb1",
-    "fp": "fat-outphase",
+    "fp": "fat-fraction",
     "eff": "r2s",
-    "wp": "water-outphase",
+    "wp": "water-fraction",
 }
 
 
-def get_plane(dicoms: list[pydicom.FileDataset]) -> str | None:
+def get_plane_dicom(dicoms: list[pydicom.FileDataset]) -> str | None:
     """Determines the orientation plane of the NIfTI image along the x, y, or z-axis.
 
     Returns:
@@ -108,7 +108,7 @@ def generate_general_name(
     _increment_id=0,
 ):
     if acq is None:
-        acq = get_plane(dcm_data_l)
+        acq = get_plane_dicom(dcm_data_l)
     ### get json
     dcm_data = dcm_data_l[0]
     py_dataset = deepcopy(dcm_data)
@@ -118,7 +118,7 @@ def generate_general_name(
         del py_dict["00291010"]["InlineBinary"]
     if "00291020" in py_dict and "InlineBinary" in py_dict["00291010"]:
         del py_dict["00291020"]["InlineBinary"]
-    simp_json = get_json(py_dict)
+    simp_json = get_json_from_dicom(py_dict)
     # print(simp_json)
     #
     keys: dict[str, str] = {}
@@ -291,7 +291,7 @@ def from_dicom_json_to_extracting_nii(  # noqa: C901
 
     if "00291020" in py_dict and "InlineBinary" in py_dict["00291020"]:
         del py_dict["00291020"]["InlineBinary"]
-    simp_json = get_json(py_dict)
+    simp_json = get_json_from_dicom(py_dict)
     if "StudyDescription" in simp_json and "nako" in str(simp_json["StudyDescription"]).lower():
         keys = {}
         keys["sub"] = str(simp_json["PatientID"]).split("_")[0]
@@ -389,7 +389,7 @@ def from_dicom_json_to_extracting_nii(  # noqa: C901
             template = file_mapping["templates"][template_name]
         else:
             if mri_format not in file_mapping["templates_map"]:
-                acq = get_plane(dcm_data_l)
+                acq = get_plane_dicom(dcm_data_l)
                 for key, template in file_mapping["templates"].items():
                     try:
                         file = generate_general_name(
