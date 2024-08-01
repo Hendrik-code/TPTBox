@@ -58,6 +58,143 @@ class Sentinel:
     pass
 
 
+# get range of all ribs
+
+VERTEBRA_INSTANCE_RIB_LABEL_OFFSET = 40 - 8  # 40 - 55
+VERTEBRA_INSTANCE_IVD_LABEL_OFFSET = 100  # 101 - 125
+VERTEBRA_INSTANCE_ENDPLATE_LABEL_OFFSET = 200  # 201 - 225
+
+_vidx2name = None
+_vname2idx = None
+
+
+class Vertebra_Instance(Enum):
+    def __new__(cls, *args):
+        obj = object.__new__(cls)
+        obj._value_ = args[0]
+        return obj
+
+    def __init__(
+        self,
+        vertebra_label: int,
+        has_rib: bool = False,
+        has_ivd: bool = True,
+    ):
+        #
+        self._rib = None
+        self._ivd = None
+        self._endplate = None
+        if has_rib:
+            self._rib = (
+                vertebra_label + VERTEBRA_INSTANCE_RIB_LABEL_OFFSET if vertebra_label != 28 else 21 + VERTEBRA_INSTANCE_RIB_LABEL_OFFSET
+            )
+        if has_ivd:
+            self._ivd = vertebra_label + VERTEBRA_INSTANCE_IVD_LABEL_OFFSET
+            self._endplate = vertebra_label + VERTEBRA_INSTANCE_ENDPLATE_LABEL_OFFSET
+
+    @classmethod
+    def vertebra_label_without_sacrum(cls) -> list[int]:
+        # TODO add sacrum label and similar flags into init (also C, T, L)
+        l = list(range(1, 26))
+        l.append(28)
+        return l
+
+    @classmethod
+    def rib_label(cls) -> list[int]:
+        return [i._rib for i in Vertebra_Instance if i._rib is not None]
+
+    @classmethod
+    def endplate_label(cls) -> list[int]:
+        return [i._endplate for i in Vertebra_Instance if i._endplate is not None]
+
+    # TODO maybe easier to have a nested enum where the inner enum stands for vertebra, rib, ivd, ... makes naming independent of hard-coded attribute names
+    @classmethod
+    def name2idx(cls) -> dict[str, int]:
+        global _vname2idx  # noqa: PLW0603
+        if _vname2idx is not None:
+            return _vname2idx
+        name2idx = {}
+        for instance in Vertebra_Instance:
+            name2idx[instance.name] = instance.value
+            for structure in ["rib", "ivd", "endplate"]:
+                attrname = f"_{structure}"
+                assert hasattr(instance, attrname)
+                attr = getattr(instance, attrname)
+                if attr is not None:
+                    name2idx[instance.name + attrname] = attr
+        _vname2idx = name2idx
+        return name2idx
+
+    @classmethod
+    def idx2name(cls) -> dict[int, str]:
+        global _vidx2name  # noqa: PLW0603
+        if _vidx2name is not None:
+            return _vidx2name
+        _vidx2name = {value: key for key, value in Vertebra_Instance.name2idx().items()}
+        return _vidx2name
+
+    C1 = 1
+    C2 = 2
+    C3 = 3
+    C4 = 4
+    C5 = 5
+    C6 = 6
+    C7 = 7, True, True
+    T1 = 8, True, True
+    T2 = 9, True, True
+    T3 = 10, True, True
+    T4 = 11, True, True
+    T5 = 12, True, True
+    T6 = 13, True, True
+    T7 = 14, True, True
+    T8 = 15, True, True
+    T9 = 16, True, True
+    T10 = 17, True, True
+    T11 = 18, True, True
+    T12 = 19, True, True
+    T13 = 28, True, True
+    L1 = 20, True, True
+    L2 = 21
+    L3 = 22
+    L4 = 23
+    L5 = 24
+    L6 = 25
+    S1 = 26
+    COCC = 27
+    S2 = 29
+    S3 = 30
+    S4 = 31
+    S5 = 32
+    S6 = 33
+
+    @property
+    def VERTEBRA(self) -> int:
+        return self.value
+
+    @property
+    def RIB(self) -> int:
+        assert self._rib is not None, (self.name, self.value)
+        return self._rib
+
+    @classmethod
+    def rib2vert(cls, riblabel: int) -> int:
+        assert riblabel in Vertebra_Instance.rib_label(), riblabel
+        return riblabel - VERTEBRA_INSTANCE_RIB_LABEL_OFFSET if riblabel != 21 + VERTEBRA_INSTANCE_RIB_LABEL_OFFSET else 28
+
+    @property
+    def IVD(self) -> int:
+        assert self._ivd is not None, (self.name, self.value)
+        return self._ivd
+
+    @property
+    def ENDPLATE(self) -> int:
+        assert self._endplate is not None, (self.name, self.value)
+        return self._endplate
+
+    def __str__(self):
+        return str(self.name)
+
+
 class Location(Enum):
     Unknown = 0
     # S1 = 26  # SACRUM
@@ -88,7 +225,9 @@ class Location(Enum):
     Spinal_Canal = 61  # Center of vertebra
     Spinal_Canal_ivd_lvl = 126
     Endplate = 62
-    # 63-80 Free
+    Rib_Left = 63
+    Rib_Right = 64
+    # 66-80 Free
     # Muscle inserts
     # https://www.frontiersin.org/articles/10.3389/fbioe.2022.862804/full
     # 81-91

@@ -265,6 +265,22 @@ class Test_bids_file(unittest.TestCase):
                 self.assertTrue(np.all([g[idx] == cent[i, 50][idx] for idx in range(3)]))
             # self.assertEqual(coms, np_coms)
 
+    def test_apply_pad(self):
+        for _ in range(repeats):
+            msk, cent, order, sizes = get_nii(num_point=random.randint(3, 10))
+            msk2 = msk.apply_pad(padd=[(2, 2), (2, 2), (2, 2)], inplace=False)
+            print(msk)
+            print(msk2)
+            for i in range(3):
+                self.assertEqual(msk.shape[i], msk2.shape[i] - 4)
+            self.assertFalse(msk.assert_affine(other=msk2, raise_error=False))
+
+            msk3 = msk2.pad_to(msk.shape, inplace=False)
+            print(msk3)
+            for i in range(3):
+                self.assertEqual(msk.shape[i], msk3.shape[i])
+            self.assertTrue(msk3.assert_affine(other=msk))
+
 
 if __name__ == "__main__":
     unittest.main()

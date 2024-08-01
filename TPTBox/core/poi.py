@@ -17,11 +17,14 @@ from TPTBox.core import bids_files
 from TPTBox.core.nii_wrapper import NII, Image_Reference, to_nii, to_nii_optional
 from TPTBox.core.poi_fun.poi_abstract import ROUNDING_LVL, Abstract_POI, POI_Descriptor
 from TPTBox.core.vert_constants import (
+    AFFINE,
     AX_CODES,
     COORDINATE,
     LABEL_MAX,
+    ORIGIN,
     POI_DICT,
     ROTATION,
+    SHAPE,
     TRIPLE,
     ZOOMS,
     Location,
@@ -837,6 +840,110 @@ class POI(Abstract_POI):
             >>> loaded_poi = POI.load(existing_poi)
         """
         return load_poi(poi)
+
+    def assert_affine(
+        self,
+        other: Self | NII | None = None,
+        ignore_missing_values: bool = False,
+        affine: AFFINE | None = None,
+        zoom: ZOOMS | None = None,
+        orientation: AX_CODES | None = None,
+        rotation: ROTATION | None = None,
+        origin: ORIGIN | None = None,
+        shape: SHAPE | None = None,
+        shape_tolerance: float = 0.0,
+        origin_tolerance: float = 0.0,
+        error_tolerance: float = 1e-4,
+        raise_error: bool = True,
+        verbose: logging = False,
+    ):
+        """Checks if the different metadata is equal to some comparison entries
+
+        Args:
+            other (Self | POI | None, optional): If set, will assert each entry of that object instead. Defaults to None.
+            affine (AFFINE | None, optional): Affine matrix to compare against. If none, will not assert affine. Defaults to None.
+            zms (Zooms | None, optional): Zoom to compare against. If none, will not assert zoom. Defaults to None.
+            orientation (Ax_Codes | None, optional): Orientation to compare against. If none, will not assert orientation. Defaults to None.
+            origin (ORIGIN | None, optional): Origin to compare against. If none, will not assert origin. Defaults to None.
+            shape (SHAPE | None, optional): Shape to compare against. If none, will not assert shape. Defaults to None.
+            shape_tolerance (float, optional): error tolerance in shape as float, as POIs can have float shapes. Defaults to 0.0.
+            error_tolerance (float, optional): Accepted error tolerance in all assertions except shape. Defaults to 1e-4.
+            raise_error (bool, optional): If true, will raise AssertionError if anything is found. Defaults to True.
+            verbose (logging, optional): If true, will print out each assertion mismatch. Defaults to False.
+
+        Raises:
+            AssertionError: If any of the assertions failed and raise_error is True
+
+        Returns:
+            bool: True if there are no assertion errors
+        """
+        found_errors: list[str] = []
+
+        # Make Checks
+        if other is not None:
+            other_data = other._extract_affine()
+            other_match = self.assert_affine(
+                other=None,
+                **other_data,
+                raise_error=raise_error,
+                shape_tolerance=shape_tolerance,
+                error_tolerance=error_tolerance,
+                origin_tolerance=origin_tolerance,
+            )
+            if not other_match:
+                found_errors.append(f"object mismatch {self!s}, {other!s}")
+        if affine is not None and (not ignore_missing_values or self.affine is not None):
+            if self.affine is None:
+                found_errors.append(f"affine mismatch {self.affine}, {affine}")
+            else:
+                affine_diff = self.affine - affine
+                affine_match = np.all([abs(a) <= error_tolerance for a in affine_diff.flatten()])
+                found_errors.append(f"affine mismatch {self.affine}, {affine}") if not affine_match else None
+        if rotation is not None and (not ignore_missing_values or self.rotation is not None):
+            if self.rotation is None:
+                found_errors.append(f"rotation mismatch {self.rotation}, {rotation}")
+            else:
+                rotation_diff = self.rotation - rotation
+                rotation_match = np.all([abs(a) <= error_tolerance for a in rotation_diff.flatten()])
+                found_errors.append(f"rotation mismatch {self.rotation}, {rotation}") if not rotation_match else None
+        if zoom is not None and (not ignore_missing_values or self.zoom is not None):
+            if self.zoom is None:
+                found_errors.append(f"zoom mismatch {self.zoom}, {zoom}")
+            else:
+                zms_diff = (self.zoom[i] - zoom[i] for i in range(3))
+                zms_match = np.all([abs(a) <= error_tolerance for a in zms_diff])
+                found_errors.append(f"zoom mismatch {self.zoom}, {zoom}") if not zms_match else None
+        if orientation is not None and (not ignore_missing_values or self.affine is not None):
+            if self.orientation is None:
+                found_errors.append(f"orientation mismatch {self.orientation}, {orientation}")
+            else:
+                orientation_match = np.all([i == orientation[idx] for idx, i in enumerate(self.orientation)])
+                found_errors.append(f"orientation mismatch {self.orientation}, {orientation}") if not orientation_match else None
+        if origin is not None and (not ignore_missing_values or self.origin is not None):
+            if self.origin is None:
+                found_errors.append(f"origin mismatch {self.origin}, {origin}")
+            else:
+                origin_diff = (self.origin[i] - origin[i] for i in range(3))
+                origin_match = np.all([abs(a) <= origin_tolerance for a in origin_diff])
+                found_errors.append(f"origin mismatch {self.origin}, {origin}") if not origin_match else None
+        if shape is not None and (not ignore_missing_values or self.shape is not None):
+            if self.shape is None:
+                found_errors.append(f"shape mismatch {self.shape}, {shape}")
+            else:
+                shape_diff = (float(self.shape[i]) - float(shape[i]) for i in range(3))
+                shape_match = np.all([abs(a) <= shape_tolerance for a in shape_diff])
+                found_errors.append(f"shape mismatch {self.shape}, {shape}") if not shape_match else None
+
+        # Print errors
+        for err in found_errors:
+            log.print(err, Log_Type.FAIL, verbose=verbose)
+
+        # Final conclusion and possible raising of AssertionError
+        has_errors = len(found_errors) > 0
+        if raise_error and has_errors:
+            raise AssertionError(f"assert_affine failed with {found_errors}")
+
+        return not has_errors
 
 
 class VertebraCentroids(POI):
