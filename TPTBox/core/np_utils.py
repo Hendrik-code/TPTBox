@@ -257,14 +257,14 @@ def np_dilate_msk(
 
     """
     labels: list[int] = _to_labels(arr, label_ref)
-    present_labels = np_unique(arr)
+    # present_labels = np_unique(arr)
 
     if mask is not None:
         mask[mask != 0] = 1
 
     struct = generate_binary_structure(arr.ndim, connectivity)
 
-    labels: list[int] = [l for l in labels if l != 0 and l in present_labels]
+    labels: list[int] = [l for l in labels if l != 0]  # and l in present_labels]
 
     out = arr.copy()
     for _ in range(mm):
@@ -293,13 +293,13 @@ def np_erode_msk(arr: np.ndarray, label_ref: LABEL_REFERENCE = None, mm: int = 5
         The method uses binary erosion with a 3D structuring element to erode the mask by the specified number of voxels.
     """
     labels: list[int] = _to_labels(arr, label_ref)
-    present_labels = np_unique(arr)
+    # present_labels = np_unique(arr)
 
     struct = generate_binary_structure(arr.ndim, connectivity)
     msk_i_data = arr.copy()
     out = arr.copy()
     for i in labels:
-        if i == 0 or i not in present_labels:
+        if i == 0:  # or i not in present_labels:
             continue
         data = msk_i_data.copy()
         data[i != data] = 0
