@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from enum import Enum
 from math import ceil, floor
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
 import nibabel as nib
 import nibabel.orientations as nio
@@ -20,7 +20,6 @@ from TPTBox.core.np_utils import (
     np_calc_overlapping_labels,
     np_center_of_mass,
     np_connected_components,
-    np_count_nonzero,
     np_dilate_msk,
     np_erode_msk,
     np_fill_holes,
@@ -40,14 +39,10 @@ from .vert_constants import (
     AX_CODES,
     DIRECTIONS,
     LABEL_MAP,
-    ORIGIN,
-    ROTATION,
     SHAPE,
     ZOOMS,
     Location,
     Sentinel,
-    _plane_dict,
-    _same_direction,
     log,
     logging,
     v_name2idx,
@@ -56,7 +51,7 @@ from .vert_constants import (
 _unpacked_nii = tuple[np.ndarray, AFFINE, nib.nifti1.Nifti1Header]
 _formatwarning = warnings.formatwarning
 if TYPE_CHECKING:
-    from TPTBox.core.poi import POI
+    pass
 
 
 def formatwarning_tb(*args, **kwargs):
@@ -74,7 +69,13 @@ warnings.formatwarning = formatwarning_tb
 
 N = TypeVar("N", bound="NII")
 Image_Reference = bids_files.BIDS_FILE | Nifti1Image | Path | str | N
-Interpolateable_Image_Reference = bids_files.BIDS_FILE | tuple[Nifti1Image, bool] | tuple[Path, bool] | tuple[str, bool] | N
+Interpolateable_Image_Reference = (
+    bids_files.BIDS_FILE
+    | tuple[Nifti1Image, bool]
+    | tuple[Path, bool]
+    | tuple[str, bool]
+    | N
+)
 
 Proxy = tuple[tuple[int, int, int], np.ndarray]
 suppress_dtype_change_printout_in_set_array = False
@@ -257,7 +258,7 @@ class NII(NII_Math):
     def shape(self) -> tuple[int, int, int]:
         if self.__unpacked:
             return tuple(self._arr.shape) # type: ignore
-        return self.nii.shape
+        return self.nii.shape # type: ignore
     @property
     def dtype(self)->type:
         if self.__unpacked:
@@ -277,6 +278,8 @@ class NII(NII_Math):
     @affine.setter
     def affine(self,affine:np.ndarray):
         self._unpack()
+        self.__divergent = True
+
         self._aff = affine
     @property
     def orientation(self) -> AX_CODES:
@@ -342,14 +345,6 @@ class NII(NII_Math):
             )
         self._unpack()
         return self._arr.copy() #type: ignore
-    def _extract_affine(self, rm_key=()):
-        out =  {"zoom":self.zoom,"origin": self.origin, "shape": self.shape, "rotation": self.rotation, "orientation":self.orientation}
-        for k in rm_key:
-            out.pop(k)
-        return out
-    def get_empty_POI(self):
-        from TPTBox import POI
-        return POI({},orientation=self.orientation,zoom = self.zoom,shape=self.shape,rotation=self.rotation,origin=self.origin)
     def get_array(self) -> np.ndarray:
         if self.seg:
             return self.get_seg_array()
@@ -406,6 +401,7 @@ class NII(NII_Math):
             self.nii = Nifti1Image(self.get_array().astype(dtype),self.affine,self.header)
 
         return self
+
     def global_to_local(self, x: COORDINATE):
         a = self.rotation.T @ (np.array(x) - self.origin) / np.array(self.zoom)
         return tuple(round(float(v), 7) for v in a)
@@ -413,7 +409,6 @@ class NII(NII_Math):
     def local_to_global(self, x:  COORDINATE):
         a = self.rotation @ (np.array(x) * np.array(self.zoom)) + self.origin
         return tuple(round(float(v), 7) for v in a)
-
 
     def reorient(self:Self, axcodes_to: AX_CODES = ("P", "I", "R"), verbose:logging=False, inplace=False)-> Self:
         """
@@ -846,38 +841,6 @@ class NII(NII_Math):
     def to_ants(self):
         import ants
         return ants.from_nibabel(self.nii)
-    def get_plane(self) -> str:
-        """Determines the orientation plane of the NIfTI image along the x, y, or z-axis.
-
-        Returns:
-            str: The orientation plane of the image, which can be one of the following:
-                - 'ax': Axial plane (along the z-axis).
-                - 'cor': Coronal plane (along the y-axis).
-                - 'sag': Sagittal plane (along the x-axis).
-                - 'iso': Isotropic plane (if the image has equal zoom values along all axes).
-        Examples:
-            >>> nii = NII(nib.load('my_image.nii.gz'))
-            >>> nii.get_plane()
-            'ax'
-        """
-        #plane_dict = {"S": "ax", "I": "ax", "L": "sag", "R": "sag", "A": "cor", "P": "cor"}
-        img = to_nii(self)
-        axc = np.array(nio.aff2axcodes(img.affine))
-        zms = np.around(img.zoom, 1)
-        ix_max = np.array(zms == np.amax(zms))
-        num_max = np_count_nonzero(ix_max)
-        if num_max == 2:
-            plane = _plane_dict[axc[~ix_max][0]]
-        elif num_max == 1:
-            plane = _plane_dict[axc[ix_max][0]]
-        else:
-            plane = "iso"
-        return plane
-
-    def get_axis(self,direction:DIRECTIONS = "S"):
-        if direction not in self.orientation:
-            direction = _same_direction[direction]
-        return self.orientation.index(direction)
 
 
     def erode_msk(self, mm: int = 5, labels: Sequence[int] | None = None, connectivity: int = 3, inplace=False,verbose:logging=True):
@@ -1043,6 +1006,39 @@ class NII(NII_Math):
             cc = {i: self.set_array(k) for i,k in cc.items()}
         return cc, cc_n
 
+    def filter_connected_components(self, labels: int |list[int]|None,min_volume:int|None=None,max_volume:int|None=None, max_count_component = None, connectivity: int = 3,removed_to_label=0):
+        """
+        Filter connected components in a segmentation array based on specified volume constraints.
+
+        Parameters:
+        labels (int | list[int]): The labels of the components to filter.
+        min_volume (int | None): Minimum volume for a component to be retained. Components smaller than this will be removed.
+        max_volume (int | None): Maximum volume for a component to be retained. Components larger than this will be removed.
+        max_count_component (int | None): Maximum number of components to retain. Once this limit is reached, remaining components will be removed.
+        connectivity (int): Connectivity criterion for defining connected components (default is 3).
+        removed_to_label (int): Label to assign to removed components (default is 0).
+
+        Returns:
+        None
+        """
+        arr = self.get_seg_array()
+        nii = self.get_largest_k_segmentation_connected_components(None,labels,connectivity=connectivity,return_original_labels=False)
+        for k, idx in enumerate(nii.unique(),start=1):
+            msk = nii.extract_label(idx)
+            nii *=(-msk+1)
+            s = msk.sum()
+            #print(idx,k,s)
+            if min_volume is not None and s < min_volume:
+                arr[msk.get_array()!=0] = removed_to_label
+                arr[nii.get_array()!=0] = removed_to_label # set all future to 0
+                break
+            if max_volume is not None and s>max_volume:
+                arr[msk.get_array()==1] = removed_to_label
+            if max_count_component is not None and k == max_count_component:
+                arr[nii.get_array()!=0] = removed_to_label # set all future to 0
+                break
+        #print("Finish")            
+        return self.set_array(arr)
     def get_segmentation_connected_components_center_of_mass(self, label: int, connectivity: int = 3, sort_by_axis: int | None = None):
         """Calculates the center of mass of the different connected components of a given label in an array
 
@@ -1212,7 +1208,9 @@ class NII(NII_Math):
                 self._unpack()
                 return self._arr.__getitem__(key)
             else:
-                raise TypeError("Invalid argument type:", (key))
+                self._unpack()
+                return self._arr.__getitem__(key)
+                #raise TypeError("Invalid argument type:", (key))
         elif isinstance(key,self.__class__):
             return self.get_array()[key.get_array()==1]
         elif isinstance(key,np.ndarray):
@@ -1301,7 +1299,7 @@ class NII(NII_Math):
         return self.set_array(seg_arr,inplace=inplace)
     def extract_label_(self,label:int|Location|Sequence[int]|Sequence[Location], keep_label=False):
         return self.extract_label(label,keep_label,inplace=True)
-    def remove_labels(self,*label:int | list[int], inplace=False, verbose:logging=True):
+    def remove_labels(self,*label:int|Location|Sequence[int]|Sequence[Location], inplace=False, verbose:logging=True):
         '''If this NII is a segmentation you can single out one label.'''
         assert label != 0, 'Zero label does not make sens.  This is the background'
         seg_arr = self.get_seg_array()
@@ -1312,8 +1310,8 @@ class NII(NII_Math):
             else:
                 seg_arr[seg_arr == l] = 0
         return self.set_array(seg_arr,inplace=inplace, verbose=verbose)
-    def remove_labels_(self,*label:int, verbose:logging=True):
-        return self.remove_labels(*label,inplace=True,verbose=verbose)
+    def remove_labels_(self,label:int|Location|Sequence[int]|Sequence[Location], verbose:logging=True):
+        return self.remove_labels(label,inplace=True,verbose=verbose)
     def apply_mask(self,mask:Self, inplace=False):
         assert mask.shape == self.shape, f"[def apply_mask] Mask and Shape are not equal: \nMask - {mask},\nSelf - {self})"
         seg_arr = mask.get_seg_array()
@@ -1335,79 +1333,7 @@ class NII(NII_Math):
         '''Returns a dict stating the center of mass for each present label (not including zero!)'''
         return np_center_of_mass(self.get_seg_array())
 
-    def assert_affine(
-            self,
-            other: Self | "POI" | None = None,
-            affine: AFFINE | None = None,
-            zoom: ZOOMS | None = None,
-            orientation: AX_CODES | None = None,
-            rotation: ROTATION | None = None,
-            origin: ORIGIN | None = None,
-            shape: SHAPE | None = None,
-            error_tolerance: float = 1e-4,
-            raise_error: bool = True,
-            verbose: logging = False,):
-        """Checks if the different metadata is equal to some comparison entries
 
-        Args:
-            other (Self | POI | None, optional): If set, will assert each entry of that object instead. Defaults to None.
-            affine (AFFINE | None, optional): Affine matrix to compare against. If none, will not assert affine. Defaults to None.
-            zms (Zooms | None, optional): Zoom to compare against. If none, will not assert zoom. Defaults to None.
-            orientation (Ax_Codes | None, optional): Orientation to compare against. If none, will not assert orientation. Defaults to None.
-            origin (ORIGIN | None, optional): Origin to compare against. If none, will not assert origin. Defaults to None.
-            shape (SHAPE | None, optional): Shape to compare against. If none, will not assert shape. Defaults to None.
-            error_tolerance (float, optional): Accepted error tolerance in all assertions except shape. Defaults to 1e-4.
-            raise_error (bool, optional): If true, will raise AssertionError if anything is found. Defaults to True.
-            verbose (logging, optional): If true, will print out each assertion mismatch. Defaults to False.
-
-        Raises:
-            AssertionError: If any of the assertions failed and raise_error is True
-
-        Returns:
-            bool: True if there are no assertion errors
-        """
-        found_errors: list[str] = []
-
-        # Make Checks
-        if other is not None:
-            other_data = other._extract_affine()
-            other_match = self.assert_affine(other=None, **other_data, raise_error=raise_error, error_tolerance=error_tolerance)
-            if not other_match:
-                found_errors.append(f"object mismatch {self!s}, {other!s}")
-        if affine is not None:
-            affine_diff = self.affine - affine
-            affine_match = np.all([abs(a) <= error_tolerance for a in affine_diff.flatten()])
-            found_errors.append(f"affine mismatch {self.affine}, {affine}") if not affine_match else None
-        if rotation is not None:
-            rotation_diff = self.rotation - rotation
-            rotation_match = np.all([abs(a) <= error_tolerance for a in rotation_diff.flatten()])
-            found_errors.append(f"rotation mismatch {self.rotation}, {rotation}") if not rotation_match else None
-        if zoom is not None:
-            zms_diff = (self.zoom[i] - zoom[i] for i in range(3))
-            zms_match = np.all([abs(a) <= error_tolerance for a in zms_diff])
-            found_errors.append(f"zoom mismatch {self.zoom}, {zoom}") if not zms_match else None
-        if orientation is not None:
-            orientation_match = np.all([i == orientation[idx] for idx, i in enumerate(self.orientation)])
-            found_errors.append(f"orientation mismatch {self.orientation}, {orientation}") if not orientation_match else None
-        if origin is not None:
-            origin_diff = (self.origin[i] - origin[i] for i in range(3))
-            origin_match = np.all([abs(a) <= error_tolerance for a in origin_diff])
-            found_errors.append(f"origin mismatch {self.origin}, {origin}") if not origin_match else None
-        if shape is not None:
-            shape_diff = (self.shape[i] - shape[i] for i in range(3))
-            shape_match = np.all([abs(a) <= error_tolerance for a in shape_diff])
-            found_errors.append(f"shape mismatch {self.shape}, {shape}") if not shape_match else None
-
-        # Print errors
-        for err in found_errors:
-            log.print(err, Log_Type.FAIL, verbose=verbose)
-
-        # Final conclusion and possible raising of AssertionError
-        has_errors = len(found_errors) > 0
-        if raise_error and has_errors:
-            raise AssertionError(f"assert_affine failed with {found_errors}")
-
-        return not has_errors
 
 
 def to_nii_optional(img_bids: Image_Reference|None, seg=False, default=None) -> NII | None:

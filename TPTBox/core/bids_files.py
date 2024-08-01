@@ -90,6 +90,8 @@ def validate_entities(key: str, value: str, name: str, verbose: bool):
             "eco5-arb1",
             "fat-outphase",
             "water-outphase",
+            "water-fraction",
+            "fat-fraction",
             "r2s",
         ]
         if key in entity_parts and value not in parts:
@@ -213,6 +215,8 @@ class BIDS_Global_info:
 
         for entry in scantree(path):
             if entry.is_file():
+                if entry.name[0] == ".":
+                    continue
                 self.add_file_2_subject(Path(entry.path), ds)
 
     def add_file_2_subject(self, bids: BIDS_FILE | Path, ds=None) -> None:
@@ -503,6 +507,14 @@ class BIDS_FILE:
         filename = folder_list[-1]
         # print(parent, subpath, filename)
         return self.dataset, parent, str.join("/", subpath), filename
+
+    @property
+    def parent(self):
+        return self.get_parent()
+
+    @property
+    def bids_format(self):
+        return self.format
 
     def get_parent(self, file_type=None):
         return self.get_path_decomposed(file_type)[1]
