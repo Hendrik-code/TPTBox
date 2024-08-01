@@ -32,7 +32,7 @@ from TPTBox.core.poi import (
 from TPTBox.core.poi import load_poi
 from TPTBox.core.poi import load_poi as load_centroids
 from TPTBox.core.poi_fun.poi_global import POI_Global
-from TPTBox.core.vert_constants import ZOOMS, Location, v_idx2name, v_idx_order, v_name2idx
+from TPTBox.core.vert_constants import ZOOMS, Location, Vertebra_Instance, v_idx2name, v_idx_order, v_name2idx
 
 # Logger
 from TPTBox.logger import Log_Type, Logger, Logger_Interface, Print_Logger, String_Logger

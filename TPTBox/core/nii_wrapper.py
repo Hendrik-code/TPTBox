@@ -39,6 +39,9 @@ from .vert_constants import (
     AX_CODES,
     DIRECTIONS,
     LABEL_MAP,
+    LABEL_REFERENCE,
+    ORIGIN,
+    ROTATION,
     SHAPE,
     ZOOMS,
     Location,
@@ -69,13 +72,7 @@ warnings.formatwarning = formatwarning_tb
 
 N = TypeVar("N", bound="NII")
 Image_Reference = bids_files.BIDS_FILE | Nifti1Image | Path | str | N
-Interpolateable_Image_Reference = (
-    bids_files.BIDS_FILE
-    | tuple[Nifti1Image, bool]
-    | tuple[Path, bool]
-    | tuple[str, bool]
-    | N
-)
+Interpolateable_Image_Reference = bids_files.BIDS_FILE | tuple[Nifti1Image, bool] | tuple[Path, bool] | tuple[str, bool] | N
 
 Proxy = tuple[tuple[int, int, int], np.ndarray]
 suppress_dtype_change_printout_in_set_array = False
@@ -464,7 +461,7 @@ class NII(NII_Math):
         warnings.warn("compute_crop_slice id deprecated use compute_crop instead",stacklevel=5) #TODO remove in version 1.0
         return self.compute_crop(**qargs)
 
-    def compute_crop(self,minimum: float=0, dist=0, other_crop:tuple[slice,...]|None=None, maximum_size:tuple[slice,...]|int|tuple[int,...]|None=None)->tuple[slice,slice,slice]:
+    def compute_crop(self,minimum: float=0, dist: float = 0, other_crop:tuple[slice,...]|None=None, maximum_size:tuple[slice,...]|int|tuple[int,...]|None=None)->tuple[slice,slice,slice]:
         """
         Computes the minimum slice that removes unused space from the image and returns the corresponding slice tuple along with the origin shift required for centroids.
 
@@ -843,13 +840,13 @@ class NII(NII_Math):
         return ants.from_nibabel(self.nii)
 
 
-    def erode_msk(self, mm: int = 5, labels: Sequence[int] | None = None, connectivity: int = 3, inplace=False,verbose:logging=True):
+    def erode_msk(self, mm: int = 5, labels: LABEL_REFERENCE = None, connectivity: int = 3, inplace=False,verbose:logging=True):
         """
         Erodes the binary segmentation mask by the specified number of voxels.
 
         Args:
             mm (int, optional): The number of voxels to erode the mask by. Defaults to 5.
-            labels (list[int], optional): Labels that should be dilated. If None, will erode all labels (not including zero!)
+            labels (LABEL_REFERENCE, optional): Labels that should be dilated. If None, will erode all labels (not including zero!)
             connectivity (int, optional): Elements up to a squared distance of connectivity from the center are considered neighbors. connectivity may range from 1 (no diagonal elements are neighbors) to rank (all elements are neighbors).
             inplace (bool, optional): Whether to modify the mask in place or return a new object. Defaults to False.
             verbose (bool, optional): Whether to print a message indicating that the mask was eroded. Defaults to True.
@@ -872,10 +869,10 @@ class NII(NII_Math):
             return self
         return NII(msk_e,seg=True,c_val=0)
 
-    def erode_msk_(self, mm:int = 5, labels: Sequence[int] | None = None, connectivity: int=3, verbose:logging=True):
+    def erode_msk_(self, mm:int = 5, labels: LABEL_REFERENCE = None, connectivity: int=3, verbose:logging=True):
         return self.erode_msk(mm=mm, labels=labels, connectivity=connectivity, inplace=True, verbose=verbose)
 
-    def dilate_msk(self, mm: int = 5, labels: Sequence[int] | None = None, connectivity: int = 3, mask: Self | None = None, inplace=False, verbose:logging=True):
+    def dilate_msk(self, mm: int = 5, labels: LABEL_REFERENCE = None, connectivity: int = 3, mask: Self | None = None, inplace=False, verbose:logging=True):
         """
         Dilates the binary segmentation mask by the specified number of voxels.
 
@@ -907,15 +904,15 @@ class NII(NII_Math):
             return self
         return NII(msk_e,seg=True,c_val=0)
 
-    def dilate_msk_(self, mm:int = 5, labels: list[int] | None = None, connectivity: int=3, mask: Self | None = None, verbose:logging=True):
+    def dilate_msk_(self, mm:int = 5, labels: LABEL_REFERENCE = None, connectivity: int=3, mask: Self | None = None, verbose:logging=True):
         return self.dilate_msk(mm=mm, labels=labels, connectivity=connectivity, mask=mask, inplace=True, verbose=verbose)
 
 
-    def fill_holes(self, labels: int | list[int] | None = None, slice_wise_dim: int | None = None, verbose:logging=True, inplace=False):
+    def fill_holes(self, labels: LABEL_REFERENCE = None, slice_wise_dim: int | None = None, verbose:logging=True, inplace=False):
         """Fills holes in segmentation
 
         Args:
-            labels (int | list[int] | None, optional): Labels that the hole-filling should be applied to. If none, applies on all labels found in arr. Defaults to None.
+            labels (LABEL_REFERENCE, optional): Labels that the hole-filling should be applied to. If none, applies on all labels found in arr. Defaults to None.
             verbose: whether to print which labels have been filled
             inplace (bool): Whether to modify the current NIfTI image object in place or create a new object with the mapped labels.
                 Default is False.
@@ -941,7 +938,7 @@ class NII(NII_Math):
         log.print("Fill holes called", verbose=verbose)
         return self.set_array(filled, inplace=inplace)
 
-    def fill_holes_(self, labels: int | list[int] | None = None, slice_wise_dim: int | None = None, verbose:logging=True):
+    def fill_holes_(self, labels: LABEL_REFERENCE = None, slice_wise_dim: int | None = None, verbose:logging=True):
         return self.fill_holes(labels, slice_wise_dim, verbose, inplace=True)
 
     def calc_convex_hull(
@@ -1037,7 +1034,7 @@ class NII(NII_Math):
             if max_count_component is not None and k == max_count_component:
                 arr[nii.get_array()!=0] = removed_to_label # set all future to 0
                 break
-        #print("Finish")            
+        #print("Finish")
         return self.set_array(arr)
     def get_segmentation_connected_components_center_of_mass(self, label: int, connectivity: int = 3, sort_by_axis: int | None = None):
         """Calculates the center of mass of the different connected components of a given label in an array
