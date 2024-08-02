@@ -146,3 +146,26 @@ class Test_testsamples(unittest.TestCase):
             assert returned.origin == vert_nii.origin
             assert (returned.affine == vert_nii.affine).all()
             assert (returned.get_array() == vert_nii.get_array()).all()
+
+    def test_angle(self):
+        _, subreg_nii, vert_nii, label = get_test_mri()
+        locs = [Location.Vertebra_Direction_Inferior]
+        poi = calc_poi_from_subreg_vert(vert_nii, subreg_nii, subreg_id=locs, verbose=False)
+        from TPTBox.spine.statistics import angles
+
+        a, b = angles.compute_angel_between_two_points_(poi, label, label + 1, "R")
+        assert abs(a - 2.5) < 0.1, a
+        assert abs(b - 2.5) < 0.1, b
+        a, b = angles.compute_angel_between_two_points_(poi, label, label + 1, "P")
+        assert abs(a - 3.3) < 0.1, a
+        assert abs(b - 3.4) < 0.1, b
+
+        _, subreg_nii, vert_nii, label = get_test_ct()
+        locs = [Location.Vertebra_Direction_Inferior]
+        poi = calc_poi_from_subreg_vert(vert_nii, subreg_nii, subreg_id=locs, verbose=False)
+        a, b = angles.compute_angel_between_two_points_(poi, label, label + 1, "R")
+        assert abs(a - 3.38) < 0.1, a
+        assert abs(b - 3.404) < 0.1, b
+        a, b = angles.compute_angel_between_two_points_(poi, label, label + 1, "P")
+        assert abs(a - 8.41) < 0.1, a
+        assert abs(b - 8.42) < 0.1, b
