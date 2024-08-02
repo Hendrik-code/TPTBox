@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from enum import Enum
 from math import ceil, floor
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, TypeVar
+from typing import Any, Literal, TypeVar
 
 import nibabel as nib
 import nibabel.orientations as nio
@@ -53,8 +53,6 @@ from .vert_constants import (
 
 _unpacked_nii = tuple[np.ndarray, AFFINE, nib.nifti1.Nifti1Header]
 _formatwarning = warnings.formatwarning
-if TYPE_CHECKING:
-    pass
 
 
 def formatwarning_tb(*args, **kwargs):
