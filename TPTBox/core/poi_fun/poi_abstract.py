@@ -11,10 +11,18 @@ from typing_extensions import Self
 
 from .. import vert_constants
 from ..nii_poi_abstract import Has_Affine
-from ..vert_constants import COORDINATE, POI_DICT, Location, log, log_file, logging
+from ..vert_constants import COORDINATE, POI_DICT, Location, Vertebra_Instance, log, log_file, logging
 
 ROUNDING_LVL = 7
-POI_ID = tuple[int, int] | slice | tuple[Location, Location] | tuple[Location, int] | tuple[int, Location]
+POI_ID = (
+    tuple[int, int]
+    | slice
+    | tuple[Location, Location]
+    | tuple[Location, int]
+    | tuple[int, Location]
+    | tuple[Vertebra_Instance, Location]
+    | tuple[Vertebra_Instance, int]
+)
 
 MAPPING = dict[int | str, int | str] | dict[int, int] | dict[int, int | None] | dict[int, None] | dict[int | str, int | str | None] | None
 DIMENSIONS = 3
@@ -492,6 +500,7 @@ class Abstract_POI(Has_Affine):
         return iter(self.centroids.keys())
 
     def __contains__(self, key: POI_ID) -> bool:
+        key = unpack_poi_id(key, self.centroids.definition)
         return key in self.centroids
 
     def __getitem__(self, key: POI_ID) -> COORDINATE:

@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from enum import Enum
-from typing import Literal, NoReturn
+from typing import TYPE_CHECKING, Literal, NoReturn
 
 import numpy as np
 
@@ -31,7 +31,8 @@ LABEL_MAP = dict[int | str, int | str] | dict[str, str] | dict[int, int]
 
 LABEL_REFERENCE = int | Sequence[int] | None
 
-
+if TYPE_CHECKING:
+    from TPTBox import POI
 _plane_dict: dict[DIRECTIONS, str] = {
     "S": "ax",
     "I": "ax",
@@ -80,7 +81,6 @@ class Vertebra_Instance(Enum):
         has_rib: bool = False,
         has_ivd: bool = True,
     ):
-        #
         self._rib = None
         self._ivd = None
         self._endplate = None
@@ -132,6 +132,44 @@ class Vertebra_Instance(Enum):
             return _vidx2name
         _vidx2name = {value: key for key, value in Vertebra_Instance.name2idx().items()}
         return _vidx2name
+
+    @classmethod
+    def cervical(cls):
+        return (cls.C1, cls.C2, cls.C3, cls.C4, cls.C5, cls.C6, cls.C7)
+
+    @classmethod
+    def thoracic(cls):
+        return (cls.T1, cls.T2, cls.T3, cls.T4, cls.T5, cls.T6, cls.T7, cls.T8, cls.T9, cls.T10, cls.T11, cls.T12, cls.T13)
+
+    @classmethod
+    def lumbar(cls):
+        return (cls.L1, cls.L2, cls.L3, cls.L4, cls.L5, cls.L6)
+
+    @classmethod
+    def sacrum(cls):
+        return (cls.S1, cls.S2, cls.S3, cls.S4, cls.S5, cls.S6, cls.COCC)
+
+    @classmethod
+    def order(cls):
+        return cls.cervical() + cls.thoracic() + cls.lumbar() + cls.sacrum()
+
+    def get_next_poi(self, poi: "POI"):
+        r = poi.keys_region()
+        o = self.order()
+        idx = o.index(self)
+        for vert in o[idx + 1 :]:
+            if vert.value in r:
+                return vert
+        return None
+
+    def get_previous_poi(self, poi: "POI"):
+        r = poi.keys_region()
+        o = self.order()
+        idx = o.index(self)
+        for vert in reversed(o[:idx]):
+            if vert.value in r:
+                return vert
+        return None
 
     C1 = 1
     C2 = 2
