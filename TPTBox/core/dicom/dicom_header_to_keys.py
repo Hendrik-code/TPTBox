@@ -133,7 +133,12 @@ def extract_keys_from_json(simp_json: dict, dcm_data_l: list[pydicom.FileDataset
                 **keys,
             }
         elif "ME_vibe" in series_description:
-            return "mevibe", {"acq": "ax", "part": dixon_mapping[series_description.split("_")[-1].lower()], **keys}
+            return "mevibe", {
+                "acq": "ax",
+                "part": dixon_mapping[series_description.split("_")[-1].lower()],
+                "sequ": simp_json["SeriesNumber"],
+                **keys,
+            }
         elif "PD" in series_description:
             return "pd", {"acq": "iso", **keys}
         elif "T2_HASTE" in series_description:
