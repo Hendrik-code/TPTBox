@@ -9,7 +9,7 @@ from numpy.linalg import norm
 from scipy.interpolate import RegularGridInterpolator
 from scipy.spatial.distance import cdist
 
-from TPTBox import NII, POI, Log_Type, Logger_Interface, Print_Logger, calc_poi_from_subreg_vert
+from TPTBox import NII, POI, Log_Type, Logger_Interface, Print_Logger, Vertebra_Instance, calc_poi_from_subreg_vert
 from TPTBox.core.poi_fun.ray_casting import max_distance_ray_cast_convex, ray_cast_pixel_lvl
 from TPTBox.core.vert_constants import COORDINATE, DIRECTIONS, Location, _plane_dict, never_called, vert_directions
 
@@ -17,6 +17,7 @@ _log = Print_Logger()
 Vertebra_Orientation = tuple[np.ndarray, np.ndarray, np.ndarray]
 all_poi_functions: dict[int, "Strategy_Pattern"] = {}
 pois_computed_by_side_effect: dict[int, Location] = {}
+_sacrum = set(Vertebra_Instance.sacrum())
 
 
 def run_poi_pipeline(vert: NII, subreg: NII, poi_path: Path, logger: Logger_Interface = _log):
@@ -1312,20 +1313,12 @@ def compute_non_centroid_pois(
             if location.value in all_poi_functions:
                 fun = all_poi_functions[location.value]
 
-                if not fun.sacrum and vert_id in {
-                    26,
-                    29,
-                    30,
-                    31,
-                    32,
-                    33,
-                    27,
-                }:  # TODO replace with global definition
+                if not fun.sacrum and vert_id in _sacrum:
                     continue
 
                 fun(poi, current_subreg, vert_id, bb=bb, log=log)
             else:
-                warnings.warn(f"NotImplementedError: {location}")
+                warnings.warn(f"NotImplementedError: {location}", stacklevel=0)
 
 
 def calc_center_spinal_cord(
