@@ -157,6 +157,7 @@ class BIDS_Global_info:
                         Example:
                         filter_folder = lambda p, lvl: True if (lvl != 2 or p.name in ["sub-123","sub-456"]) else False
         """
+        self.count_file = 0
         if sequence_splitting_keys is None:
             from TPTBox.core.bids_constants import sequence_splitting_keys
 
@@ -238,11 +239,20 @@ class BIDS_Global_info:
             if bids_key in self._global_bids_list:
                 self._global_bids_list[bids_key].add_file(bids)
                 return
-            bids = BIDS_FILE(bids, ds, verbose=self.verbose, file_name_manipulation=self.file_name_manipulation)
+            bids = BIDS_FILE(
+                bids,
+                ds,
+                verbose=self.verbose,
+                file_name_manipulation=self.file_name_manipulation,
+            )
         subject = bids.info.get("sub", "unsorted")
         if subject not in self.subjects:
             self.subjects[subject] = Subject_Container(subject, self.sequence_splitting_keys)
-        print("Found:", subject, "  total=", len(self.subjects), "    ", end="\r")
+        self.count_file += 1
+        print(
+            f"Found: {subject}, total file keys {(self.count_file)},  total subjects = {len(self.subjects)}    ",
+            end="\r",
+        )
         self.subjects[subject].add(bids)
 
     def enumerate_subjects(self, sort=False) -> list[tuple[str, Subject_Container]]:
@@ -463,7 +473,7 @@ class BIDS_FILE:
         validate_entities(key, value, f"..._{key}-{value}_...", self.verbose)
         self.info[key] = value
 
-    def get(self, key, default: str | None = None) -> str | None:
+    def get(self, key, default=None):
         if key in self.info:
             return self.info[key]
         return default
