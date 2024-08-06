@@ -860,7 +860,7 @@ class NII(NII_Math):
         log.print("erode mask",end='\r',verbose=verbose)
         labels = self.unique() if labels is None else labels
         msk_i_data = self.get_seg_array()
-        out = np_erode_msk(msk_i_data, label_ref=labels, mm=mm, connectivity=connectivity)
+        out = np_erode_msk(msk_i_data, label_ref=labels, mm=mm, connectivity=connectivity,border_value=border_value)
         msk_e = out.astype(np.uint16), self.affine, self.header
         log.print("Mask eroded by", mm, "voxels",verbose=verbose)
         if inplace:
@@ -869,7 +869,7 @@ class NII(NII_Math):
         return NII(msk_e,seg=True,c_val=0)
 
     def erode_msk_(self, mm:int = 5, labels: LABEL_REFERENCE = None, connectivity: int=3, verbose:logging=True,border_value=0):
-        return self.erode_msk(mm=mm, labels=labels, connectivity=connectivity, inplace=True, verbose=verbose)
+        return self.erode_msk(mm=mm, labels=labels, connectivity=connectivity, inplace=True, verbose=verbose,border_value=border_value)
 
     def dilate_msk(self, mm: int = 5, labels: LABEL_REFERENCE = None, connectivity: int = 3, mask: Self | None = None, inplace=False, verbose:logging=True):
         """

@@ -5,9 +5,12 @@ from typing import Any, TypeVar
 
 import numpy as np
 import scipy
-from cc3d import connected_components  # pip install connected-components-3d
-from cc3d import voxel_connectivity_graph  # pip install connected-components-3d
-from cc3d import contacts, region_graph
+from cc3d import (
+    connected_components,  # pip install connected-components-3d
+    contacts,
+    region_graph,
+    voxel_connectivity_graph,
+)
 from cc3d import statistics as _cc3dstats
 from fill_voids import fill
 from numpy.typing import NDArray
