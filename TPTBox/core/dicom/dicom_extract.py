@@ -84,14 +84,16 @@ def get_paths(
     return json_file_name, nii_path
 
 
-def from_dicom_to_nii(dcm_data_l: list[pydicom.FileDataset], nifti_dir: str | Path, make_subject_chunks: int = 0, use_session=False):
+def from_dicom_to_nii(
+    dcm_data_l: list[pydicom.FileDataset], nifti_dir: str | Path, make_subject_chunks: int = 0, use_session=False, verbose=True
+):
     simp_json = get_json_from_dicom(dcm_data_l)
     fname, nii_path = get_paths(simp_json, dcm_data_l, nifti_dir, make_subject_chunks, use_session)
-    logger.print(fname, Log_Type.NEUTRAL)
+    logger.print(fname, Log_Type.NEUTRAL, verbose=verbose)
     exist = save_json(simp_json, fname)
     if exist and Path(nii_path).exists():
-        logger.print("already exists:", fname, ltype=Log_Type.STRANGE)
-        return
+        logger.print("already exists:", fname, ltype=Log_Type.STRANGE, verbose=verbose)
+        return nii_path
     suc = convert_to_nifti(dcm_data_l, nii_path)
     return nii_path if suc else None
 
@@ -148,7 +150,7 @@ def read_dicom_files(dicom_out_path: Path) -> dict[str, list[FileDataset]]:
     return dicom_files
 
 
-def extract_folder(dicom_folder: Path | list[Path], dataset_path_out: Path, make_subject_chunks: int = 0, use_session=False):
+def extract_folder(dicom_folder: Path | list[Path], dataset_path_out: Path, make_subject_chunks: int = 0, use_session=False, verbose=True):
     """Extract DICOM files, convert to NIfTI format, and optionally delete the original DICOM files.
 
     Args:
@@ -172,8 +174,8 @@ def extract_folder(dicom_folder: Path | list[Path], dataset_path_out: Path, make
                 dicom_path = unzip_files(dicom_path, temp_dir)
             dicom_files_dict = read_dicom_files(dicom_path)
             for key, files in dicom_files_dict.items():
-                logger.print("Start", key)
-                out = from_dicom_to_nii(files, dataset_path_out, make_subject_chunks, use_session)
+                logger.print("Start", key, verbose=verbose)
+                out = from_dicom_to_nii(files, dataset_path_out, make_subject_chunks, use_session, verbose=verbose)
                 outs[key] = out
         except Exception:
             logger.print_error()
