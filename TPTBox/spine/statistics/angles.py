@@ -345,18 +345,18 @@ def _get_norm(poi: POI, id1, subreg: MoveTo, location, inv=1):
     if isinstance(id1, int):
         id1 = Vertebra_Instance(id1)
     norm1_vert = unit_vector(np.array(poi[id1, 50]) - np.array(poi[id1, location])) * inv
-
-    if subreg == MoveTo.CENTER:
-        return
-    elif subreg == MoveTo.BOTTOM:
-        next_vert = id1.get_next_poi(poi)
-    elif subreg == MoveTo.TOP:
-        next_vert = id1.get_previous_poi(poi)
-    if next_vert is None:
-        return norm1_vert
-    if (next_vert, location) in poi:
-        norm1_vert_2 = unit_vector(np.array(poi[next_vert, 50]) - np.array(poi[next_vert, location])) * inv
-        norm1_vert = (norm1_vert + norm1_vert_2) / 2
+    ## This would mix the angle of two adjacent Vertebra.
+    # if subreg == MoveTo.CENTER:
+    #    return
+    # elif subreg == MoveTo.BOTTOM:
+    #    next_vert = id1.get_next_poi(poi)
+    # elif subreg == MoveTo.TOP:
+    #    next_vert = id1.get_previous_poi(poi)
+    # if next_vert is None:
+    #    return norm1_vert
+    # if (next_vert, location) in poi:
+    #    norm1_vert_2 = unit_vector(np.array(poi[next_vert, 50]) - np.array(poi[next_vert, location])) * inv
+    #    norm1_vert = (norm1_vert + norm1_vert_2) / 2
     return norm1_vert
 
 
@@ -623,8 +623,11 @@ def plot_compute_lordosis_and_kyphosis(
         if id1 is None or id2 is None or (id1.value, 50) not in poi:
             continue
         vert = round((id1.value + id2.value) / 2)
-        cord = poi[vert, 50]
-        text_out.append((vert, (f"{str(name).split('_')[-1]}: {v:.1f}°", 15, cord[1])))
+        while (vert, 50) not in poi and vert != 0:
+            vert -= 1
+        if (vert, 50) not in poi:
+            cord = poi[vert, 50]
+            text_out.append((vert, (f"{str(name).split('_')[-1]}: {v:.1f}°", 15, cord[1])))
 
     poi.info["line_segments_sag"] = out + poi.info.get("line_segments_sag", [])
     poi.info["text_sag"] = text_out + poi.info.get("text_sag", [])

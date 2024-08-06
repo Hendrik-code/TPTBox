@@ -40,8 +40,6 @@ from .vert_constants import (
     DIRECTIONS,
     LABEL_MAP,
     LABEL_REFERENCE,
-    ORIGIN,
-    ROTATION,
     SHAPE,
     ZOOMS,
     Location,
@@ -173,36 +171,39 @@ class NII(NII_Math):
             c_val = -1024 if "ct" in nii_bids.format.lower() else 0
         return NII(nifty,seg,c_val) # type: ignore
     def _unpack(self):
-        if self.__unpacked:
-            return
-        if self.seg:
-            m = np.max(self.nii.dataobj)
-            if m<256:
-                dtype = np.uint8
-            elif m<65536:
-                dtype = np.uint16
-            else:
-                dtype = np.int32
-            self._arr = np.asanyarray(self.nii.dataobj, dtype=self.nii.dataobj.dtype).astype(dtype).copy()
-            self._checked_dtype = True
-        elif not self._checked_dtype:
-            # if the maximum is lager than the dtype, we use float.
-            self._checked_dtype = True
-            dtype = str(self.dtype)
-            if dtype not in _dtyp_max:
-                self._arr = np.asanyarray(self.nii.dataobj, dtype=self.nii.dataobj.dtype).copy() #type: ignore
-            else:
+        try:
+            if self.__unpacked:
+                return
+            if self.seg:
                 m = np.max(self.nii.dataobj)
-                if m > _dtyp_max[dtype]:
-                    self._arr = self.nii.get_fdata()
+                if m<256:
+                    dtype = np.uint8
+                elif m<65536:
+                    dtype = np.uint16
                 else:
+                    dtype = np.int32
+                self._arr = np.asanyarray(self.nii.dataobj, dtype=self.nii.dataobj.dtype).astype(dtype).copy()
+                self._checked_dtype = True
+            elif not self._checked_dtype:
+                # if the maximum is lager than the dtype, we use float.
+                self._checked_dtype = True
+                dtype = str(self.dtype)
+                if dtype not in _dtyp_max:
                     self._arr = np.asanyarray(self.nii.dataobj, dtype=self.nii.dataobj.dtype).copy() #type: ignore
-        else:
-            self._arr = np.asanyarray(self.nii.dataobj, dtype=self.nii.dataobj.dtype).copy() #type: ignore
+                else:
+                    m = np.max(self.nii.dataobj)
+                    if m > _dtyp_max[dtype]:
+                        self._arr = self.nii.get_fdata()
+                    else:
+                        self._arr = np.asanyarray(self.nii.dataobj, dtype=self.nii.dataobj.dtype).copy() #type: ignore
+            else:
+                self._arr = np.asanyarray(self.nii.dataobj, dtype=self.nii.dataobj.dtype).copy() #type: ignore
 
-        self._aff = self.nii.affine
-        self._header:Nifti1Header = self.nii.header # type: ignore
-        self.__unpacked = True
+            self._aff = self.nii.affine
+            self._header:Nifti1Header = self.nii.header # type: ignore
+            self.__unpacked = True
+        except EOFError as e:
+            raise EOFError(f"{self.nii.get_filename()}: {e!s}\nThe file is probably brocken beyond repair, due killing a software during nifty saving.") from None
     @property
     def nii_abstract(self) -> Nifti1Image|_unpacked_nii:
         if self.__unpacked:
@@ -838,7 +839,7 @@ class NII(NII_Math):
         return ants.from_nibabel(self.nii)
 
 
-    def erode_msk(self, mm: int = 5, labels: LABEL_REFERENCE = None, connectivity: int = 3, inplace=False,verbose:logging=True):
+    def erode_msk(self, mm: int = 5, labels: LABEL_REFERENCE = None, connectivity: int = 3, inplace=False,verbose:logging=True,border_value=0):
         """
         Erodes the binary segmentation mask by the specified number of voxels.
 
@@ -867,7 +868,7 @@ class NII(NII_Math):
             return self
         return NII(msk_e,seg=True,c_val=0)
 
-    def erode_msk_(self, mm:int = 5, labels: LABEL_REFERENCE = None, connectivity: int=3, verbose:logging=True):
+    def erode_msk_(self, mm:int = 5, labels: LABEL_REFERENCE = None, connectivity: int=3, verbose:logging=True,border_value=0):
         return self.erode_msk(mm=mm, labels=labels, connectivity=connectivity, inplace=True, verbose=verbose)
 
     def dilate_msk(self, mm: int = 5, labels: LABEL_REFERENCE = None, connectivity: int = 3, mask: Self | None = None, inplace=False, verbose:logging=True):
