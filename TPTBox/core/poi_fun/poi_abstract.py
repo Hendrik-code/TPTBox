@@ -9,9 +9,9 @@ import numpy as np
 from scipy import interpolate
 from typing_extensions import Self
 
-from .. import vert_constants
-from ..nii_poi_abstract import Has_Affine
-from ..vert_constants import COORDINATE, POI_DICT, Location, Vertebra_Instance, log, log_file, logging
+from TPTBox.core import vert_constants
+from TPTBox.core.nii_poi_abstract import Has_Affine
+from TPTBox.core.vert_constants import COORDINATE, POI_DICT, Location, Vertebra_Instance, log, log_file, logging
 
 ROUNDING_LVL = 7
 POI_ID = (

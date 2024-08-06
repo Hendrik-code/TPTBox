@@ -1008,7 +1008,7 @@ format_key = {FORMAT_DOCKER: "docker", FORMAT_GRUBER: "guber", FORMAT_POI: "POI"
 format_key2value = {value: key for key, value in format_key.items()}
 
 
-def _poi_to_dict_list(ctd: POI, additional_info: dict | None, save_hint=0, verbose: logging = False):
+def _poi_to_dict_list(ctd: POI, additional_info: dict | None, save_hint=0, verbose: logging = False):  # noqa: C901
     ori: _Orientation = {"direction": ctd.orientation}
     print_out = ""
     # if hasattr(ctd, "location") and ctd.location != Location.Unknown:
