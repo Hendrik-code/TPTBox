@@ -11,8 +11,6 @@ from TPTBox.logger import Log_Type
 from .vert_constants import AFFINE, AX_CODES, DIRECTIONS, ORIGIN, ROTATION, SHAPE, ZOOMS, _plane_dict, _same_direction, log, logging
 
 if TYPE_CHECKING:
-    from nibabel.nifti1 import Nifti1Header
-
     from TPTBox import NII, POI
 
     class AFFINE_Proxy:
@@ -59,7 +57,7 @@ class Has_Affine(AFFINE_Proxy):
         origin: ORIGIN | None = None,
         shape: SHAPE | None = None,
         shape_tolerance: float = 0.0,
-        origin_tolerance: float = 0.0,
+        origin_tolerance: float = 0.01,
         error_tolerance: float = 1e-4,
         raise_error: bool = True,
         verbose: logging = False,
@@ -187,7 +185,14 @@ class Has_Affine(AFFINE_Proxy):
     def get_empty_POI(self):
         from TPTBox import POI
 
-        return POI({}, orientation=self.orientation, zoom=self.zoom, shape=self.shape, rotation=self.rotation, origin=self.origin)
+        return POI(
+            {},
+            orientation=self.orientation,
+            zoom=self.zoom,
+            shape=self.shape,
+            rotation=self.rotation,
+            origin=self.origin,
+        )
 
     def make_empty_nii(self, seg=False):
         nii = nib.Nifti1Image(np.zeros(self.shape_int), affine=self.affine)

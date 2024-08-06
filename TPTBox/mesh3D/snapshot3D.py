@@ -1,7 +1,6 @@
 # Source: https://github.com/wasserth/TotalSegmentator/blob/master/totalsegmentator/preview.py
 
 
-import sys
 from collections.abc import Sequence
 from multiprocessing import Pool
 from pathlib import Path
@@ -36,6 +35,7 @@ def make_snapshot3D(
     resolution: float | None = None,
     width_factor=1.0,
     verbose=True,
+    crop=True,
 ) -> Image.Image:
     """
     Generate a 3D snapshot from a medical image and save it to the specified output path.
@@ -75,7 +75,8 @@ def make_snapshot3D(
         t = NamedTemporaryFile(suffix="_snap3D.png")
         output_path = str(t.name)
     nii = to_nii_seg(img)
-    nii.apply_crop_(nii.compute_crop())
+    if crop:
+        nii.apply_crop_(nii.compute_crop())
     if resolution is None:
         resolution = min(nii.zoom)
     if isinstance(view, str):
