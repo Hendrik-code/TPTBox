@@ -11,7 +11,7 @@ from typing_extensions import Self
 
 from TPTBox.core import vert_constants
 from TPTBox.core.nii_poi_abstract import Has_Affine
-from TPTBox.core.vert_constants import COORDINATE, POI_DICT, Location, Vertebra_Instance, log, log_file, logging
+from TPTBox.core.vert_constants import COORDINATE, POI_DICT, Abstract_lvl, Location, Vertebra_Instance, log, log_file, logging
 
 ROUNDING_LVL = 7
 POI_ID = (
@@ -114,15 +114,17 @@ class POI_Descriptor(AbstractSet, MutableMapping):
 
         return POI_Descriptor(default=deepcopy(self.pois))
 
-    def sort(self: Self, inplace=True):
+    def _sort(self: Self, inplace=True, order_dict: dict | None = None):
         """Sort vertebra dictionary by sorting_list"""
+        if order_dict is None:
+            order_dict = {}
 
         def order_cardinal(elem: tuple[int, ...]):
             key1, key2 = elem[0], elem[1]
-            return key1 * vert_constants.LABEL_MAX * 64 + key2
+            return order_dict.get(key1, key1) * vert_constants.LABEL_MAX * 64 + key2
 
         poi_new = {}
-        for k1, k2, v in sorted(self.items(sort=False), key=order_cardinal):  # type: ignore
+        for k1, k2, v in sorted(self.items(), key=order_cardinal):  # type: ignore
             if k1 not in poi_new:
                 poi_new[k1] = {}
             poi_new[k1][k2] = v
@@ -131,8 +133,7 @@ class POI_Descriptor(AbstractSet, MutableMapping):
             return self
         return POI_Descriptor(default=poi_new)
 
-    def items(self, sort=True):
-        self.sort() if sort else None
+    def items(self):
         i = 0
         for region, sub in self.pois.items():
             for subregion, coords in sub.items():
@@ -141,7 +142,6 @@ class POI_Descriptor(AbstractSet, MutableMapping):
         self._len = i
 
     def items_2d(self):
-        self.sort()
         return self.pois.copy().items()
 
     def _apply_all(self, fun: Callable[[float, float, float], COORDINATE], inplace=False):
@@ -286,6 +286,8 @@ class Abstract_POI(Has_Affine):
     centroids: POI_Descriptor = field(repr=False, hash=False, compare=False, default=None)  # type: ignore
     format: int | None = field(default=None, repr=False, compare=False)
     info: dict = field(default_factory=dict, compare=False)  # additional info (key,value pairs)
+    level_one_info: type[Abstract_lvl] = Vertebra_Instance  # Must be Enum and must has order_dict
+    level_two_info: type[Abstract_lvl] = Location
 
     @property
     def centroids(self) -> POI_Descriptor:
@@ -409,10 +411,11 @@ class Abstract_POI(Has_Affine):
             inplace=True,
         )
 
-    def sort(self, inplace=True) -> Self:
+    def sort(self, inplace=True, order_dict: dict | None = None) -> Self:
         """Sort vertebra dictionary by sorting_list"""
-        poi = self.centroids.sort(inplace=inplace)
-
+        if self.level_one_info is not None:
+            order_dict = self.level_one_info.order_dict()
+        poi = self.centroids._sort(inplace=inplace, order_dict=order_dict)
         if inplace:
             self.centroids = poi
             return self
@@ -433,7 +436,7 @@ class Abstract_POI(Has_Affine):
             smoothness (int, optional): Smoothing parameter for the spline interpolation. Default is 10.
             samples_per_poi (int, optional): Number of sample points to generate per centroid. Default is 20.
             location (int, optional): Location parameter for subregion extraction. Default is 50.
-            vertebra (bool, optional): Indicates whether to perform VertebraCentroids sorting. Default is False.
+            vertebra (bool, optional): Indicates whether to perform VertebraCentroids sorting. Default is True.
 
         Returns:
             tuple[np.ndarray, np.ndarray]: A tuple containing two NumPy arrays:
@@ -448,16 +451,7 @@ class Abstract_POI(Has_Affine):
         # Extract subregion based on the provided location
         poi = self.extract_subregion(*location) if isinstance(location, Sequence) else self.extract_subregion(location)
         # If vertebra sorting is requested, perform it
-        if vertebra:
-            from TPTBox.core.poi import POI, VertebraCentroids
-
-            if isinstance(poi, (VertebraCentroids, POI)):
-                poi = VertebraCentroids.from_pois(poi).sort()  # Set sorting
-            else:
-                raise ValueError("global POI does not supprot Vertebra sorting")
-        else:
-            poi = poi.sort(inplace=False)
-
+        poi = poi.sort(inplace=False, order_dict=Vertebra_Instance.order_dict() if vertebra else None)
         # Convert centroids to NumPy array for processing
         centroids_coords = np.asarray(list(poi.values()))
 
@@ -514,29 +508,40 @@ class Abstract_POI(Has_Affine):
     def __len__(self) -> int:
         return self.centroids.__len__()
 
-    def items(self):
-        self.sort()
+    def items(self, sort=True):
+        if sort:
+            self.sort()
         return self.centroids.items()
 
-    def items_2D(self):
-        self.sort()
+    def items_2D(self, sort=True):
+        if sort:
+            self.sort()
         return self.centroids.items_2d()
 
-    def items_flatten(self):
-        self.sort()
+    def items_flatten(self, sort=True):
+        if sort:
+            self.sort()
         for x1, x2, y in self.centroids.items():
             yield x2 * vert_constants.LABEL_MAX + x1, y
 
-    def keys(self):
+    def keys(self, sort=False):
+        if sort:
+            self.sort()
         return self.centroids.keys()
 
-    def keys_region(self):
+    def keys_region(self, sort=False):
+        if sort:
+            self.sort()
         return self.centroids.keys_region()
 
-    def keys_subregion(self):
+    def keys_subregion(self, sort=False):
+        if sort:
+            self.sort()
         return list(self.centroids.keys_subregion())
 
-    def values(self) -> list[COORDINATE]:
+    def values(self, sort=False) -> list[COORDINATE]:
+        if sort:
+            self.sort()
         return self.centroids.values()
 
     def remove_centroid_(self, *label: tuple[int, int]):

@@ -68,8 +68,39 @@ VERTEBRA_INSTANCE_ENDPLATE_LABEL_OFFSET = 200  # 201 - 225
 _vidx2name = None
 _vname2idx = None
 
+_register_lvl = {}
 
-class Vertebra_Instance(Enum):
+
+class Abstract_lvl(Enum):
+    def __init_subclass__(cls, **kwargs):
+        _register_lvl[str(cls.__name__)] = cls
+
+    @classmethod
+    def order_dict(cls) -> dict[int, int]:
+        return {}  # Default integer order
+
+    @classmethod
+    def _get_name(cls, i: int, no_raise=True) -> str:
+        try:
+            return cls(i).name
+        except ValueError:
+            if not no_raise:
+                raise
+            return str(i)
+
+    @classmethod
+    def _get_id(cls, s: str | int, no_raise=True) -> int:
+        if isinstance(s, int):
+            return s
+        try:
+            return cls[s].value
+        except KeyError:
+            if not no_raise:
+                raise
+            return int(s)
+
+
+class Vertebra_Instance(Abstract_lvl):
     def __new__(cls, *args):
         obj = object.__new__(cls)
         obj._value_ = args[0]
@@ -153,6 +184,10 @@ class Vertebra_Instance(Enum):
     def order(cls):
         return cls.cervical() + cls.thoracic() + cls.lumbar() + cls.sacrum()
 
+    @classmethod
+    def order_dict(cls) -> dict[int, int]:
+        return {a.value: e for e, a in enumerate(cls.order())}
+
     def get_next_poi(self, poi: "POI"):
         r = poi.keys_region()
         o = self.order()
@@ -233,7 +268,7 @@ class Vertebra_Instance(Enum):
         return str(self.name)
 
 
-class Location(Enum):
+class Location(Abstract_lvl):
     Unknown = 0
     # S1 = 26  # SACRUM
     # Vertebral subregions

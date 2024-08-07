@@ -2,8 +2,13 @@ import numpy as np
 from numpy.linalg import norm
 from scipy.interpolate import RegularGridInterpolator
 
-from TPTBox import NII
+from TPTBox import NII, POI
 from TPTBox.core.vert_constants import COORDINATE
+
+
+def unit_vector(vector):
+    """Returns the unit vector of the vector."""
+    return vector / np.linalg.norm(vector)
 
 
 def max_distance_ray_cast_convex(
@@ -21,7 +26,9 @@ def max_distance_ray_cast_convex(
     normal_vector = np.asarray(direction_vector)
     normal_vector = normal_vector / norm(normal_vector)
     # Create a function to interpolate within the mask array
-    interpolator = RegularGridInterpolator([np.arange(region.shape[i]) for i in range(3)], region.get_array())
+    interpolator = RegularGridInterpolator(
+        [np.arange(region.shape[i]) for i in range(3)], region.get_array()
+    )
 
     def is_inside(distance):
         coords = [start_point_np[i] + normal_vector[i] * distance for i in [0, 1, 2]]
@@ -56,10 +63,14 @@ def ray_cast_pixel_lvl(
     shape: np.ndarray | tuple[int, ...],
     two_sided=False,
 ) -> tuple[np.ndarray | None, np.ndarray | None]:
+    normal_vector = unit_vector(normal_vector)
+
     def _calc_pixels(normal_vector, start_point_np):
         # Make a plane through start_point with the norm of "normal_vector", which is shifted by "shift" along the norm
         start_point_np = start_point_np.copy()
-        num_pixel = np.abs(np.floor(np.max((np.array(shape) - start_point_np) / normal_vector))).item()
+        num_pixel = np.abs(
+            np.floor(np.max((np.array(shape) - start_point_np) / normal_vector))
+        ).item()
         arange = np.arange(0, min(num_pixel, 1000), step=1, dtype=float)
         coords = [start_point_np[i] + normal_vector[i] * arange for i in [0, 1, 2]]
 
@@ -86,17 +97,57 @@ def ray_cast_pixel_lvl(
     return plane_coords, arange
 
 
-def add_ray_to_img(start_point: np.ndarray | COORDINATE, normal_vector: np.ndarray, region: NII, add_to_img=True, inplace=False, value=0):
+def add_ray_to_img(
+    start_point: np.ndarray | COORDINATE,
+    normal_vector: np.ndarray,
+    seg: NII,
+    add_to_img=True,
+    inplace=False,
+    value=0,
+    dilate=1,
+):
     start_point = np.array(start_point)
-    plane_coords, arange = ray_cast_pixel_lvl(start_point, normal_vector, shape=region.shape)
+    plane_coords, arange = ray_cast_pixel_lvl(
+        start_point, normal_vector, shape=seg.shape
+    )
     if plane_coords is None:
         return None
-    selected_arr = np.zeros(region.shape, dtype=region.dtype)
-    selected_arr[plane_coords[..., 0], plane_coords[..., 1], plane_coords[..., 2]] = arange if value == 0 else value
-    ray = region.set_array(selected_arr)
+    selected_arr = np.zeros(seg.shape, dtype=seg.dtype)
+    selected_arr[plane_coords[..., 0], plane_coords[..., 1], plane_coords[..., 2]] = (
+        arange if value == 0 else value
+    )
+    ray = seg.set_array(selected_arr)
+    if dilate != 0:
+        ray.dilate_msk_(dilate)
     if add_to_img:
         if not inplace:
-            region = region.copy()
-        region[ray != 0] = ray[ray != 0]
-        return region
+            seg = seg.copy()
+        seg[ray != 0] = ray[ray != 0]
+        return seg
     return ray
+
+
+def add_spline_to_img(
+    seg: NII,
+    poi: "POI",
+    location=50,
+    add_to_img=True,
+    override_seg=True,
+    value=100,
+    dilate=2,
+):
+    cor, _ = poi.fit_spline(location=location, vertebra=True)
+    spline = seg.copy() * 0
+    # spline.rescale_()
+    for x, y, z in cor:
+        spline[round(x), round(y), round(z)] = value
+    spline.dilate_msk_(dilate)
+    # spline.resample_from_to_(a)
+    if add_to_img:
+        if override_seg:
+            seg[spline != 0] = spline[spline != 0]
+        else:
+            cond = np.logical_and(spline != 0, seg == 0)
+            seg[cond] = spline[cond]
+        return seg
+    return spline
