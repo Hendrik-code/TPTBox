@@ -341,22 +341,23 @@ def compute_lordosis_and_kyphosis(poi: POI, project_2d=False):
     }
 
 
-def _get_norm(poi: POI, id1, subreg: MoveTo, location, inv=1):  # noqa: ARG001
+def _get_norm(poi: POI, id1, mv: MoveTo, location, inv=1):
     if isinstance(id1, int):
         id1 = Vertebra_Instance(id1)
     norm1_vert = unit_vector(np.array(poi[id1, 50]) - np.array(poi[id1, location])) * inv
-    ## This would mix the angle of two adjacent Vertebra.
-    # if subreg == MoveTo.CENTER:
-    #    return
-    # elif subreg == MoveTo.BOTTOM:
-    #    next_vert = id1.get_next_poi(poi)
-    # elif subreg == MoveTo.TOP:
-    #    next_vert = id1.get_previous_poi(poi)
-    # if next_vert is None:
-    #    return norm1_vert
-    # if (next_vert, location) in poi:
-    #    norm1_vert_2 = unit_vector(np.array(poi[next_vert, 50]) - np.array(poi[next_vert, location])) * inv
-    #    norm1_vert = (norm1_vert + norm1_vert_2) / 2
+    # if mix:
+    #    # This would mix the angle of two adjacent Vertebra.
+    #    if mv == MoveTo.CENTER:
+    #        return norm1_vert
+    #    elif mv == MoveTo.BOTTOM:
+    #        next_vert = id1.get_next_poi(poi)
+    #    elif mv == MoveTo.TOP:
+    #        next_vert = id1.get_previous_poi(poi)
+    #    if next_vert is None:
+    #        return norm1_vert
+    #    if (next_vert, location) in poi:
+    #        norm1_vert_2 = unit_vector(np.array(poi[next_vert, 50]) - np.array(poi[next_vert, location])) * inv
+    #        norm1_vert = (norm1_vert + norm1_vert_2) / 2
     return norm1_vert
 
 
@@ -688,7 +689,9 @@ def plot_cobb_angle(
         if from_vert is not None:
             for id1, mv in zip([from_vert, to_vert], [vert_id1_mv, vert_id2_mv], strict=False):
                 c = mv.get_location(id1, poi)
-                a = _get_norm(poi, id1, mv, Location.Vertebra_Direction_Right, 1)
+                a = _get_norm(poi, id1, mv, Location.Vertebra_Direction_Right)
+                print(a, id1, mv, c)
+
                 assert a is not None
                 out.append((apex, c, (-a[2] * line_len, a[1] * line_len)))
                 out.append((apex, c, (a[2] * line_len, -a[1] * line_len)))
@@ -766,18 +769,51 @@ def plot_cobb_and_lordosis_and_kyphosis(
 
 
 if __name__ == "__main__":
-    from TPTBox import POI
+    from TPTBox import POI, calc_poi_from_subreg_vert
 
-    poi = POI.load(
-        "/DATA/NAS/datasets_processed/CT_spine/dataset-Cancer/derivatives/sub-mc0005/ses-20231005/sub-mc0005_ses-20231005_sequ-206_seg-spine_poi.json"
-    )
+    # poi = POI.load(
+    #    "/DATA/NAS/datasets_processed/CT_spine/dataset-Cancer/derivatives_spineps/sub-mc0034/ses-20240312/sub-mc0034_ses-20240312_sequ-206_mod-ct_seg-spine_msk.nii.gz"
+    # )
     nii = to_nii(
-        "/DATA/NAS/datasets_processed/CT_spine/dataset-Cancer/derivatives_spine_r/sub-mc0005/ses-20231005/sub-mc0005_ses-20231005_sequ-206_seg-vert_msk.nii.gz",
+        "/DATA/NAS/datasets_processed/CT_spine/dataset-Cancer/derivatives_spineps/sub-mc0034/ses-20240312//sub-mc0034_ses-20240312_sequ-206_mod-ct_seg-vert_msk.nii.gz",
+        True,
+    )
+    nii_subreg = to_nii(
+        "/DATA/NAS/datasets_processed/CT_spine/dataset-Cancer/derivatives_spineps/sub-mc0034/ses-20240312/sub-mc0034_ses-20240312_sequ-206_mod-ct_seg-spine_msk.nii.gz",
         True,
     )
     nii2 = to_nii(
-        "/DATA/NAS/datasets_processed/CT_spine/dataset-Cancer/rawdata/sub-mc0005/ses-20231005/sub-mc0005_ses-20231005_sequ-206_ct.nii.gz",
+        "/DATA/NAS/datasets_processed/CT_spine/dataset-Cancer/rawdata/sub-mc0034/ses-20240312/sub-mc0034_ses-20240312_sequ-206_ct.nii.gz",
         False,
     )
+    poi = calc_poi_from_subreg_vert(nii, nii_subreg, subreg_id=Location.Vertebra_Direction_Right)
+    print(poi.extract_vert(24))
+    # print(_get_norm(poi.rescale(), 24, None, Location.Vertebra_Direction_Right))
     plot_compute_lordosis_and_kyphosis("test_2.png", poi, nii)
     plot_cobb_angle("test.png", poi, nii2, nii)
+    from TPTBox.core.poi_fun.ray_casting import add_ray_to_img
+
+    cor, _ = poi.fit_spline(location=50, vertebra=False)
+    print(nii.shape)
+    print(poi[24, 50], unit_vector(np.array(poi[24, 50]) - np.array(poi[24, Location.Vertebra_Direction_Right])))
+    a = add_ray_to_img(
+        poi[24, 50], np.array(poi[24, 50]) - np.array(poi[24, Location.Vertebra_Direction_Right]), nii, True, value=99, dilate=2
+    )
+    assert a is not None
+    a = add_ray_to_img(
+        poi[24, 50], np.array(poi[24, 50]) - np.array(poi[24, Location.Vertebra_Direction_Posterior]), a, True, value=100, dilate=2
+    )
+    assert a is not None
+    a = add_ray_to_img(
+        poi[24, 50], np.array(poi[24, 50]) - np.array(poi[24, Location.Vertebra_Direction_Inferior]), a, True, value=101, dilate=2
+    )
+    assert a is not None
+    spline = a.copy() * 0
+    # spline.rescale_()
+    for x, y, z in cor:
+        spline[round(x), round(y), round(z)] = 103
+    spline.dilate_msk_(2)
+    # spline.resample_from_to_(a)
+    a[spline != 0] = spline[spline != 0]
+    print(a.unique())
+    a.save("/DATA/NAS/datasets_processed/CT_spine/dataset-Cancer/derivatives_spineps/sub-mc0034/ses-20240312/test.nii.gz")

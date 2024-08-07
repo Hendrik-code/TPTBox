@@ -42,7 +42,7 @@ def timing(f):
         ts = time()
         result = f(*args, **kw)
         te = time()
-        print(f"func:{f.__name__!r} took: {te-ts:2.4f} sec")
+        _log.on_neutral(f"func:{f.__name__!r} took: {te-ts:2.4f} sec")
         return result
 
     return wrap
@@ -277,14 +277,13 @@ def calc_orientation_of_vertebra_PIR(
             )
 
             ### MAKE DIRECTIONS POIs ###
-            # print(ret[vert_id, source_subreg_point_id], normal_vector_post)
             ret[vert_id, Location.Vertebra_Direction_Posterior] = tuple(ret[vert_id, source_subreg_point_id] + normal_vector_post * 10)
             ret[vert_id, Location.Vertebra_Direction_Inferior] = tuple(ret[vert_id, source_subreg_point_id] + normal_down * 10)
             ret[vert_id, Location.Vertebra_Direction_Right] = tuple(
                 ret[vert_id:source_subreg_point_id] + np.cross(normal_vector_post, normal_down * 10)
             )
         except KeyError as e:
-            print(e)
+            _log.on_fail("calc_orientation_of_vertebra_PIR - KeyError", e)
 
     # if make_thicker:
     ret.remove_centroid(*ret.extract_subregion(subreg_id).keys())
@@ -454,10 +453,7 @@ def strategy_extreme_points(
 
     region = current_subreg.extract_label(subreg_id)
     if region.sum() == 0:
-        log.print(
-            f"reg={vert_id},subreg={subreg_id} is missing (extreme_points); {current_subreg.unique()}",
-            ltype=Log_Type.FAIL,
-        )
+        log.on_fail(f"reg={vert_id},subreg={subreg_id} is missing (extreme_points); {current_subreg.unique()}")
         return
     # extreme_point = get_extreme_point(poi, region, vert_id, bb, anti_point)
 
@@ -563,12 +559,9 @@ def max_distance_ray_cast_convex_poi(
             a = _to_local_np(normal_vector_points[0], bb, poi, vert_id, log)
             normal_vector = b - a
             normal_vector = normal_vector / norm(normal_vector)
-            log.print(
-                f"ray_cast used with old normal_vector_points {normal_vector_points}",
-                Log_Type.FAIL,
-            )
+            log.on_fail(f"ray_cast used with old normal_vector_points {normal_vector_points}")
         except TypeError as e:
-            print("TypeError", e)
+            log.on_fail("TypeError", e)
             return None
     return max_distance_ray_cast_convex(region, start_point_np, normal_vector, acc_delta)
 
@@ -616,12 +609,9 @@ def ray_cast_pixel_level_from_poi(
             a = _to_local_np(normal_vector_points[0], bb, poi, vert_id, log)
             normal_vector = b - a
             normal_vector = normal_vector / norm(normal_vector)
-            log.print(
-                f"ray_cast used with old normal_vector_points {normal_vector_points}",
-                Log_Type.FAIL,
-            )
+            log.on_fail(f"ray_cast used with old normal_vector_points {normal_vector_points}")
         except TypeError as e:
-            print("TypeError", e)
+            log.on_fail("TypeError", e)
             return None, None
     return ray_cast_pixel_lvl(start_point_np, normal_vector, region.shape, two_sided=two_sided)
 
@@ -802,7 +792,7 @@ def _to_local_np(
 ):
     if (label, loc.value) in poi:
         return np.asarray([a - b.start for a, b in zip(poi[label, loc.value], bb, strict=True)])
-    log.print(f"region={label},subregion={loc.value} is missing", ltype=Log_Type.FAIL)
+    log.on_fail(f"region={label},subregion={loc.value} is missing")
     # raise KeyError(f"region={label},subregion={loc.value} is missing")
     return None
 
@@ -861,7 +851,7 @@ def strategy_shifted_line_cast(
             log=log,
         )
     except KeyError as e:
-        log.print(f"region={vert_id},subregion={e} is missing", ltype=Log_Type.FAIL)
+        log.on_fail(f"region={vert_id},subregion={e} is missing")
         return
     if cords is None:
         return
@@ -981,7 +971,7 @@ def strategy_shifted_line_cast(
 #    plane = trilinear_interpolation(v000, v001, v010, v011, v100, v101, v110, v111, xd, yd, zd).reshape(xx.shape)
 #
 #    if plane.sum() == 0:
-#        log.print(vert_id, "add_vertebra_body_points, Plane empty", ltype=Log_Type.STRANGE)
+#        log.p rint(vert_id, "add_vertebra_body_points, Plane empty", ltype=Log_Type.STRANGE)
 #        return
 #
 #    plane_coords = np.zeros([xx.shape[0], xx.shape[1], 3])
@@ -1017,7 +1007,7 @@ def strategy_shifted_line_cast(
 #                cords = plane_coords[loc125[0], loc125[1], :]
 #                poi[vert_id, out_id] = tuple(x + y.start for x, y in zip(cords, bb, strict=False))
 #            except Exception:
-#                print(vert_id, out_id, "missed its target. Skipped", loc102.sum(), plane_arcus.sum(), np.unique(plane_arcus))
+#                pri nt(vert_id, out_id, "missed its target. Skipped", loc102.sum(), plane_arcus.sum(), np.unique(plane_arcus))
 #    if org_zoom is not None:
 #        poi.rescale_(org_zoom)
 
@@ -1028,7 +1018,6 @@ def _compute_vert_corners_in_reference_frame(poi: POI, vert_id: int, plane_coord
     pc = (
         plane_coords[subregion[plane_coords[:, :, 0], plane_coords[:, :, 1], plane_coords[:, :, 2]] != 0].swapaxes(-1, 0).reshape((3, -1))
     )  # (3,n)
-    # print(pc.shape, to_reference_frame.shape)
     cords = to_reference_frame @ pc  # 3,n; 3 = P,I,R of vert
     out: list[np.ndarray] = []
     p_101_ref = np.argmax(-cords[0] - cords[1])  # 0 101 A,S,*
@@ -1226,7 +1215,7 @@ def compute_non_centroid_pois(
     assert 52 not in poi.keys_region()
 
     if Location.Vertebra_Direction_Inferior in locations:
-        log.print("Compute Vertebra DIRECTIONS")
+        log.on_text("Compute Vertebra DIRECTIONS")
         ### Calc vertebra direction; We always need them, so we just compute them. ###
         sub_regions = poi.keys_subregion()
         if any(a.value not in sub_regions for a in vert_directions):
@@ -1238,7 +1227,7 @@ def compute_non_centroid_pois(
         set(locations),
         key=lambda x: all_poi_functions[x.value].prority() if x.value in all_poi_functions else x.value,
     )  # type: ignore
-    log.print("Calc pois from subregion id", {l.name for l in locations})
+    log.on_text("Calc pois from subregion id", {l.name for l in locations})
     ### DENSE###
     if Location.Dens_axis in locations and 2 in _vert_ids and (2, Location.Dens_axis.value) not in poi:
         a = subreg * vert.extract_label(2)
@@ -1378,7 +1367,7 @@ def calc_center_spinal_cord(
         poi_iso[1, sx] = poi_iso[2, Location.Dens_axis]
         poi_iso[1, sx] = poi_iso[2, Location.Dens_axis]
     subreg_iso = subreg.rescale()
-    body_spline, body_spline_der = poi_iso.fit_spline(location=spline_subreg_point_id, vertebra=False)
+    body_spline, body_spline_der = poi_iso.fit_spline(location=spline_subreg_point_id, vertebra=True)
     target_labels = subreg_iso.extract_label(intersection_target).get_array()
     out = target_labels * 0
     fill_back = out.copy() if _fill_inplace is not None else None
@@ -1429,7 +1418,6 @@ def calc_center_spinal_cord(
             fill_back[i] = x_slice
 
         arr = subreg_iso.set_array(fill_back).reorient(poi.orientation).rescale_(poi.zoom).get_array()
-        # print(arr.shape, _fill_inplace, fill_back.shape)
         _fill_inplace.set_array_(arr)
     ret = calc_centroids(
         subreg_iso.set_array(out),

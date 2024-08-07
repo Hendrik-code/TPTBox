@@ -20,15 +20,7 @@ from TPTBox.core.nii_wrapper import (
     to_nii_optional,
     to_nii_seg,
 )
-from TPTBox.core.poi import (
-    AX_CODES,
-    POI,
-    POI_Reference,
-    VertebraCentroids,
-    calc_centroids,
-    calc_poi_from_subreg_vert,
-    calc_poi_labeled_buffered,
-)
+from TPTBox.core.poi import AX_CODES, POI, POI_Reference, calc_centroids, calc_poi_from_subreg_vert, calc_poi_labeled_buffered
 from TPTBox.core.poi import load_poi
 from TPTBox.core.poi import load_poi as load_centroids
 from TPTBox.core.poi_fun.poi_global import POI_Global

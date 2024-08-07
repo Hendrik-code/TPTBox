@@ -68,7 +68,13 @@ warnings.formatwarning = formatwarning_tb
 
 N = TypeVar("N", bound="NII")
 Image_Reference = bids_files.BIDS_FILE | Nifti1Image | Path | str | N
-Interpolateable_Image_Reference = bids_files.BIDS_FILE | tuple[Nifti1Image, bool] | tuple[Path, bool] | tuple[str, bool] | N
+Interpolateable_Image_Reference = (
+    bids_files.BIDS_FILE
+    | tuple[Nifti1Image, bool]
+    | tuple[Path, bool]
+    | tuple[str, bool]
+    | N
+)
 
 Proxy = tuple[tuple[int, int, int], np.ndarray]
 suppress_dtype_change_printout_in_set_array = False
@@ -365,7 +371,8 @@ class NII(NII_Math):
         if self.seg and isinstance(arr, (np.floating, float)):
             arr = arr.astype(np.int32)
         #if self.dtype == arr.dtype: #type: ignore
-        nii:_unpacked_nii = (arr,self.affine,self.header)
+        nii:_unpacked_nii = (arr,self.affine,self.header.copy())
+        self.header.set_data_dtype(arr.dtype)
         #else:
         #    if not suppress_dtype_change_printout_in_set_array:
         #        log.print(f"'set_array' with different dtype: from {self.nii.dataobj.dtype} to {arr.dtype}",verbose=verbose) #type: ignore
@@ -1287,6 +1294,9 @@ class NII(NII_Math):
         else:
             if isinstance(label,Location):
                 label = label.value
+            if isinstance(label,str):
+                label = int(label)
+                    
             assert label != 0, 'Zero label does not make sens. This is the background'
             seg_arr[seg_arr != label] = 0
             seg_arr[seg_arr == label] = 1
