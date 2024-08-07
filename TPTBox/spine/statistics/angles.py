@@ -341,7 +341,7 @@ def compute_lordosis_and_kyphosis(poi: POI, project_2d=False):
     }
 
 
-def _get_norm(poi: POI, id1, mv: MoveTo, location, inv=1):
+def _get_norm(poi: POI, id1, mv: MoveTo, location, inv=1):  # noqa: ARG001
     if isinstance(id1, int):
         id1 = Vertebra_Instance(id1)
     norm1_vert = unit_vector(np.array(poi[id1, 50]) - np.array(poi[id1, location])) * inv

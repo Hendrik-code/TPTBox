@@ -165,6 +165,13 @@ class Vertebra_Instance(Abstract_lvl):
         return _vidx2name
 
     @classmethod
+    def is_sacrum(cls, i: int):
+        try:
+            return cls(i) in cls.sacrum()
+        except KeyError:
+            return False
+
+    @classmethod
     def cervical(cls):
         return (cls.C1, cls.C2, cls.C3, cls.C4, cls.C5, cls.C6, cls.C7)
 

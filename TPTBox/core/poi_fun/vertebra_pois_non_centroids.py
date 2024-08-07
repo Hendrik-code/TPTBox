@@ -18,6 +18,8 @@ Vertebra_Orientation = tuple[np.ndarray, np.ndarray, np.ndarray]
 all_poi_functions: dict[int, "Strategy_Pattern"] = {}
 pois_computed_by_side_effect: dict[int, Location] = {}
 _sacrum = set(Vertebra_Instance.sacrum())
+_sacrum_w_o_arcus = (Vertebra_Instance.COCC.value, Vertebra_Instance.S6.value, Vertebra_Instance.S5.value, Vertebra_Instance.S4.value)
+_sacrum_w_o_direction = (Vertebra_Instance.COCC.value,)
 
 
 def run_poi_pipeline(vert: NII, subreg: NII, poi_path: Path, logger: Logger_Interface = _log):
@@ -283,7 +285,8 @@ def calc_orientation_of_vertebra_PIR(
                 ret[vert_id:source_subreg_point_id] + np.cross(normal_vector_post, normal_down * 10)
             )
         except KeyError as e:
-            _log.on_fail("calc_orientation_of_vertebra_PIR - KeyError", e)
+            if vert_id not in _sacrum_w_o_direction:
+                _log.on_fail(f"calc_orientation_of_vertebra_PIR {vert_id=} - KeyError=", e)
 
     # if make_thicker:
     ret.remove_centroid(*ret.extract_subregion(subreg_id).keys())
@@ -548,9 +551,15 @@ def max_distance_ray_cast_convex_poi(
     """Convex assumption!"""
     # Compute a normal vector, that defines the plane direction
     if isinstance(normal_vector_points, str):
-        normal_vector = _get_direction(normal_vector_points, poi, vert_id) / np.array(poi.zoom)
+        try:
+            normal_vector = _get_direction(normal_vector_points, poi, vert_id)
+        except KeyError:
+            if vert_id not in _sacrum_w_o_arcus:
+                log.on_fail(f"region={vert_id},DIRECTIONS={normal_vector_points} is missing")
+            return
+            # raise KeyError(f"region={label},subregion={loc.value} is missing.")
+        normal_vector /= norm(normal_vector)
 
-        normal_vector = normal_vector / norm(normal_vector)
     else:
         try:
             b = _to_local_np(normal_vector_points[1], bb, poi, vert_id, log)
@@ -599,7 +608,7 @@ def ray_cast_pixel_level_from_poi(
 
     # Compute a normal vector, that defines the plane direction
     if isinstance(normal_vector_points, str):
-        normal_vector = _get_direction(normal_vector_points, poi, vert_id) / np.array(poi.zoom)
+        normal_vector = _get_direction(normal_vector_points, poi, vert_id)  # / np.array(poi.zoom)
         normal_vector = normal_vector / norm(normal_vector)
     else:
         try:
@@ -631,6 +640,9 @@ def strategy_find_corner(
     log: Logger_Interface = _log,
     shift_direction: DIRECTIONS | None = None,
 ):
+    if vert_id in _sacrum_w_o_arcus:
+        return
+
     start_point = shift_point(poi, vert_id, bb, start_point, direction=shift_direction, log=log)
     corner_point = _find_corner_point(
         poi,
@@ -725,20 +737,26 @@ def strategy_ligament_attachment_point_flava(
     vert_id: int,
     bb: tuple[slice, slice, slice],
     location: Location,
-    goal: Location,
+    goal: Location | np.ndarray,
     log: Logger_Interface = _log,
     delta=0.0000001,
 ):
+    if vert_id in _sacrum_w_o_arcus:
+        return
     try:
-        normal_vector1 = _get_direction("S", poi, vert_id) / np.array(poi.zoom)
+        normal_vector1 = _get_direction("S", poi, vert_id)  # / np.array(poi.zoom)
         v1 = normal_vector1 / norm(normal_vector1)
 
-        normal_vector2 = _get_direction("A", poi, vert_id) / np.array(poi.zoom)
+        normal_vector2 = _get_direction("A", poi, vert_id)  # / np.array(poi.zoom)
         v2 = normal_vector2 / norm(normal_vector2)
     except KeyError:
         return
-
-    start_point_np = _to_local_np(Location.Spinosus_Process, bb, poi, vert_id, log) if isinstance(goal, Location) else goal
+    if isinstance(goal, Location):
+        start_point_np = _to_local_np(Location.Spinosus_Process, bb, poi, vert_id, log, verbose=False)
+        if start_point_np is None:
+            start_point_np = _to_local_np(Location.Arcus_Vertebrae, bb, poi, vert_id, log, verbose=True)
+    else:
+        start_point_np = goal
 
     goal_np = _to_local_np(goal, bb, poi, vert_id, log) if isinstance(goal, Location) else goal
     if goal_np is None or start_point_np is None:
@@ -789,11 +807,13 @@ def _to_local_np(
     poi: POI,
     label,
     log: Logger_Interface,
+    verbose=True,
 ):
     if (label, loc.value) in poi:
         return np.asarray([a - b.start for a, b in zip(poi[label, loc.value], bb, strict=True)])
-    log.on_fail(f"region={label},subregion={loc.value} is missing")
-    # raise KeyError(f"region={label},subregion={loc.value} is missing")
+    if verbose:
+        log.on_fail(f"region={label},subregion={loc.value} is missing")
+        # raise KeyError(f"region={label},subregion={loc.value} is missing.")
     return None
 
 
@@ -805,22 +825,33 @@ def shift_point(
     direction: DIRECTIONS | None = "R",
     log: Logger_Interface = _log,
 ):
+    if vert_id in _sacrum_w_o_arcus:
+        return
+
     if direction is None:
         return _to_local_np(start_point, bb, poi, vert_id, log)
-    sup_articular_right = _to_local_np(Location.Superior_Articular_Right, bb, poi, vert_id, log)
-    sup_articular_left = _to_local_np(Location.Superior_Articular_Left, bb, poi, vert_id, log)
-    factor = 3.0
+    sup_articular_right = sup_articular_left = None
+    if Vertebra_Instance.is_sacrum(vert_id):
+        if (vert_id, Location.Costal_Process_Left) not in poi:
+            return
+        sup_articular_right = _to_local_np(Location.Costal_Process_Right, bb, poi, vert_id, log)
+        sup_articular_left = _to_local_np(Location.Costal_Process_Left, bb, poi, vert_id, log)
+        factor = 6.0
+    if sup_articular_left is None or sup_articular_right is None:
+        sup_articular_right = _to_local_np(Location.Superior_Articular_Right, bb, poi, vert_id, log, verbose=False)
+        sup_articular_left = _to_local_np(Location.Superior_Articular_Left, bb, poi, vert_id, log, verbose=False)
+        factor = 3.0
     if sup_articular_left is None or sup_articular_right is None:
         sup_articular_right = _to_local_np(Location.Inferior_Articular_Right, bb, poi, vert_id, log)
         sup_articular_left = _to_local_np(Location.Inferior_Articular_Left, bb, poi, vert_id, log)
         factor = 2.0
-        if sup_articular_left is None or sup_articular_right is None:
-            return
+    if sup_articular_left is None or sup_articular_right is None:
+        return
     if vert_id <= 11:
         factor *= (12 - vert_id) / 11 + 1
     vertebra_width = np.linalg.norm(sup_articular_right - sup_articular_left)
     shift = vertebra_width / factor
-    normal_vector = _get_direction(direction, poi, vert_id) / np.array(poi.zoom)
+    normal_vector = _get_direction(direction, poi, vert_id)  # / np.array(poi.zoom)
     normal_vector = normal_vector / norm(normal_vector)
     start_point_np = _to_local_np(start_point, bb, poi, vert_id, log) if isinstance(start_point, Location) else start_point
     if start_point_np is None:
@@ -841,6 +872,8 @@ def strategy_shifted_line_cast(
     direction: DIRECTIONS = "R",
     do_shift=True,
 ):
+    if vert_id in _sacrum_w_o_arcus:
+        return
     try:
         cords = shift_point(
             poi,
@@ -850,8 +883,8 @@ def strategy_shifted_line_cast(
             direction=direction if do_shift else None,
             log=log,
         )
-    except KeyError as e:
-        log.on_fail(f"region={vert_id},subregion={e} is missing")
+    except KeyError:
+        log.on_fail(f"region={vert_id},subregion={location} is missing. (shifted_line_cast)")
         return
     if cords is None:
         return
@@ -1081,29 +1114,30 @@ Strategy_Pattern(L.Additional_Vertebral_Body_Middle_Inferior_Median, strategy=S,
 Strategy_Pattern(L.Additional_Vertebral_Body_Anterior_Central_Median, strategy=S, regions_loc =[L.Vertebra_Corpus, L.Vertebra_Corpus_border],
                  start_point = L.Vertebra_Corpus, normal_vector_points ="A" ) # 108
 S = strategy_shifted_line_cast
+_pre = {L.Costal_Process_Left,L.Costal_Process_Right,L.Superior_Articular_Right,L.Superior_Articular_Left,L.Inferior_Articular_Right,L.Inferior_Articular_Left,L.Vertebra_Direction_Inferior}
 Strategy_Pattern(L.Additional_Vertebral_Body_Middle_Superior_Right, strategy=S, regions_loc =[L.Vertebra_Corpus, L.Vertebra_Corpus_border],
-                 start_point = L.Vertebra_Corpus,prerequisite={L.Superior_Articular_Right,L.Superior_Articular_Left,L.Inferior_Articular_Right,L.Inferior_Articular_Left,L.Vertebra_Direction_Inferior},
+                 start_point = L.Vertebra_Corpus,prerequisite=_pre,
                  direction="R",normal_vector_points ="S",
      ) # 121
 Strategy_Pattern(L.Additional_Vertebral_Body_Posterior_Central_Right, strategy=S, regions_loc =[L.Vertebra_Corpus, L.Vertebra_Corpus_border],
-                 start_point = L.Vertebra_Corpus,prerequisite={L.Superior_Articular_Right,L.Superior_Articular_Left,L.Inferior_Articular_Right,L.Inferior_Articular_Left,L.Vertebra_Direction_Inferior},
+                 start_point = L.Vertebra_Corpus,prerequisite=_pre,
                  direction="R",normal_vector_points ="P",
      ) # 122
 Strategy_Pattern(L.Additional_Vertebral_Body_Middle_Inferior_Right, strategy=S, regions_loc =[L.Vertebra_Corpus, L.Vertebra_Corpus_border],
-                 start_point = L.Vertebra_Corpus,prerequisite={L.Superior_Articular_Right,L.Superior_Articular_Left,L.Inferior_Articular_Right,L.Inferior_Articular_Left,L.Vertebra_Direction_Inferior},
+                 start_point = L.Vertebra_Corpus,prerequisite=_pre,
                  direction="R",normal_vector_points ="I",
      ) # 123
 Strategy_Pattern(L.Additional_Vertebral_Body_Anterior_Central_Right, strategy=S, regions_loc =[L.Vertebra_Corpus, L.Vertebra_Corpus_border],
-                 start_point = L.Vertebra_Corpus,prerequisite={L.Superior_Articular_Right,L.Superior_Articular_Left,L.Inferior_Articular_Right,L.Inferior_Articular_Left,L.Vertebra_Direction_Inferior},
+                 start_point = L.Vertebra_Corpus,prerequisite=_pre,
                  direction="R",normal_vector_points ="A",
      ) # 124
 
 Strategy_Pattern(L.Additional_Vertebral_Body_Middle_Superior_Left, strategy=S, regions_loc =[L.Vertebra_Corpus, L.Vertebra_Corpus_border],
-                 start_point = L.Vertebra_Corpus,prerequisite={L.Superior_Articular_Right,L.Superior_Articular_Left,L.Inferior_Articular_Right,L.Inferior_Articular_Left,L.Vertebra_Direction_Inferior},
+                 start_point = L.Vertebra_Corpus,prerequisite=_pre,
                  direction="L",normal_vector_points ="S",
      ) # 113
 Strategy_Pattern(L.Additional_Vertebral_Body_Posterior_Central_Left, strategy=S, regions_loc =[L.Vertebra_Corpus, L.Vertebra_Corpus_border],
-                 start_point = L.Vertebra_Corpus,prerequisite={L.Superior_Articular_Right,L.Superior_Articular_Left,L.Inferior_Articular_Right,L.Inferior_Articular_Left,L.Vertebra_Direction_Inferior},
+                 start_point = L.Vertebra_Corpus,prerequisite=_pre,
                  direction="L",normal_vector_points ="P",
      ) # 114
 Strategy_Pattern(L.Additional_Vertebral_Body_Middle_Inferior_Left, strategy=S, regions_loc =[L.Vertebra_Corpus, L.Vertebra_Corpus_border],
@@ -1111,7 +1145,7 @@ Strategy_Pattern(L.Additional_Vertebral_Body_Middle_Inferior_Left, strategy=S, r
                  direction="L",normal_vector_points ="I",
      ) # 115
 Strategy_Pattern(L.Additional_Vertebral_Body_Anterior_Central_Left, strategy=S, regions_loc =[L.Vertebra_Corpus, L.Vertebra_Corpus_border],
-                 start_point = L.Vertebra_Corpus,prerequisite={L.Superior_Articular_Right,L.Superior_Articular_Left,L.Inferior_Articular_Right,L.Inferior_Articular_Left,L.Vertebra_Direction_Inferior},
+                 start_point = L.Vertebra_Corpus,prerequisite=_pre,
                  direction="L",normal_vector_points ="A",
      ) # 116
 
@@ -1153,10 +1187,10 @@ Strategy_Pattern(L.Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Lef
     vec1= L.Additional_Vertebral_Body_Posterior_Central_Left,vec2 = L.Additional_Vertebral_Body_Middle_Inferior_Left,prio=100,shift_direction="L") #112
 S = strategy_ligament_attachment_point_flava
 Strategy_Pattern(L.Ligament_Attachment_Point_Flava_Superior_Median,goal = L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Median,strategy=S,prio=200,
-                 prerequisite={L.Spinosus_Process}
+                 prerequisite={L.Spinosus_Process,L.Arcus_Vertebrae}
                  ) #125
 Strategy_Pattern(L.Ligament_Attachment_Point_Flava_Inferior_Median,goal = L.Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Median,strategy=S,prio=200,
-                 prerequisite={L.Spinosus_Process}) #127
+                 prerequisite={L.Spinosus_Process,L.Arcus_Vertebrae}) #127
 #Strategy_Pattern_Side_Effect(L.Ligament_Attachment_Point_Flava_Superior_Median,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Left)
 #Strategy_Pattern_Side_Effect(L.Ligament_Attachment_Point_Flava_Inferior_Median,L.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Left)
 
@@ -1235,15 +1269,7 @@ def compute_non_centroid_pois(
         a = a.apply_crop(bb)
         s = [Location.Vertebra_Corpus, Location.Vertebra_Corpus_border]
         if a.sum() != 0:
-            strategy_extreme_points(
-                poi,
-                a,
-                location=Location.Dens_axis,
-                direction=["S", "P"],
-                vert_id=2,
-                subreg_id=s,
-                bb=bb,
-            )
+            strategy_extreme_points(poi, a, location=Location.Dens_axis, direction=["S", "P"], vert_id=2, subreg_id=s, bb=bb)
     ### STEP 2 (Other global non centroid poi; Spinal heights ###
 
     if Location.Spinal_Canal in locations:
