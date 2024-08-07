@@ -59,13 +59,7 @@ _Centroid_DictList = Sequence[_Orientation | _Point3D]
 
 ### CURRENT TYPE DEFFINITONS
 C = TypeVar("C", bound="POI")
-POI_Reference = (
-    bids_files.BIDS_FILE
-    | Path
-    | str
-    | tuple[Image_Reference, Image_Reference, Sequence[int]]
-    | C
-)
+POI_Reference = bids_files.BIDS_FILE | Path | str | tuple[Image_Reference, Image_Reference, Sequence[int]] | C
 ctd_info_blacklist = [
     "zoom",
     "shape",
@@ -157,15 +151,9 @@ class POI(Abstract_POI):
 
     @property
     def affine(self):
-        assert (
-            self.zoom is not None
-        ), "Attribute 'zoom' must be set before calling affine."
-        assert (
-            self.rotation is not None
-        ), "Attribute 'rotation' must be set before calling affine."
-        assert (
-            self.origin is not None
-        ), "Attribute 'origin' must be set before calling affine."
+        assert self.zoom is not None, "Attribute 'zoom' must be set before calling affine."
+        assert self.rotation is not None, "Attribute 'rotation' must be set before calling affine."
+        assert self.origin is not None, "Attribute 'origin' must be set before calling affine."
         aff = np.eye(4)
         aff[:3, :3] = self.rotation @ np.diag(self.zoom)
         aff[:3, 3] = self.origin
@@ -188,10 +176,7 @@ class POI(Abstract_POI):
         centroids: POI_DICT | POI_Descriptor | None = None,
         orientation: AX_CODES | None = None,
         zoom: ZOOMS | None | Sentinel = Sentinel(),  # noqa: B008
-        shape: tuple[float, float, float]
-        | tuple[float, ...]
-        | None
-        | Sentinel = Sentinel(),  # noqa: B008
+        shape: tuple[float, float, float] | tuple[float, ...] | None | Sentinel = Sentinel(),  # noqa: B008
         rotation: ROTATION | None | Sentinel = Sentinel(),  # noqa: B008
         origin: COORDINATE | None | Sentinel = Sentinel(),  # noqa: B008
     ) -> Self:
@@ -221,9 +206,7 @@ class POI(Abstract_POI):
             shape = tuple(round(float(v), 7) for v in shape)  # type: ignore
 
         return POI(
-            centroids=centroids.copy()
-            if centroids is not None
-            else self.centroids.copy(),
+            centroids=centroids.copy() if centroids is not None else self.centroids.copy(),
             orientation=orientation if orientation is not None else self.orientation,
             zoom=zoom if not isinstance(zoom, Sentinel) else self.zoom,
             shape=shape if not isinstance(shape, Sentinel) else self.shape,  # type: ignore
@@ -256,15 +239,9 @@ class POI(Abstract_POI):
             >>> local_coordinate = (1.0, 2.0, 3.0)
             >>> global_coordinate = centroid_obj.local_to_global(local_coordinate)
         """
-        assert (
-            self.zoom is not None
-        ), "Attribute 'zoom' must be set before calling local_to_global."
-        assert (
-            self.rotation is not None
-        ), "Attribute 'rotation' must be set before calling local_to_global."
-        assert (
-            self.origin is not None
-        ), "Attribute 'origin' must be set before calling local_to_global."
+        assert self.zoom is not None, "Attribute 'zoom' must be set before calling local_to_global."
+        assert self.rotation is not None, "Attribute 'rotation' must be set before calling local_to_global."
+        assert self.origin is not None, "Attribute 'origin' must be set before calling local_to_global."
 
         a = self.rotation @ (np.array(x) * np.array(self.zoom)) + self.origin
         # return tuple(a.tolist())
@@ -293,15 +270,9 @@ class POI(Abstract_POI):
             >>> global_coordinate = (20.0, 30.0, 40.0)
             >>> local_coordinate = centroid_obj.global_to_local(global_coordinate)
         """
-        assert (
-            self.zoom is not None
-        ), "Attribute 'zoom' must be set before calling global_to_local."
-        assert (
-            self.rotation is not None
-        ), "Attribute 'rotation' must be set before calling global_to_local."
-        assert (
-            self.origin is not None
-        ), "Attribute 'origin' must be set before calling global_to_local."
+        assert self.zoom is not None, "Attribute 'zoom' must be set before calling global_to_local."
+        assert self.rotation is not None, "Attribute 'rotation' must be set before calling global_to_local."
+        assert self.origin is not None, "Attribute 'origin' must be set before calling global_to_local."
 
         a = self.rotation.T @ (np.array(x) - self.origin) / np.array(self.zoom)
         # return tuple(a.tolist())
@@ -323,16 +294,11 @@ class POI(Abstract_POI):
     ):
         """A Poi crop can be trivially reversed with out any loss. See apply_crop for more information"""
         return self.apply_crop(
-            tuple(
-                slice(-shift.start, sh - shift.start)
-                for shift, sh in zip(o_shift, shape, strict=True)
-            ),
+            tuple(slice(-shift.start, sh - shift.start) for shift, sh in zip(o_shift, shape, strict=True)),
             inplace=inplace,
         )
 
-    def apply_crop(
-        self: Self, o_shift: tuple[slice, slice, slice] | Sequence[slice], inplace=False
-    ):
+    def apply_crop(self: Self, o_shift: tuple[slice, slice, slice] | Sequence[slice], inplace=False):
         """When you crop an image, you have to also crop the centroids.
         There are actually no boundary to be moved, but the origin must be moved to the new 0,0,0
         Points outside the frame are NOT removed. See NII.compute_crop_slice()
@@ -392,9 +358,7 @@ class POI(Abstract_POI):
                     else:
                         return end + in_shape[i]
 
-                shape: TRIPLE | None = tuple(
-                    int(map_v(o_shift[i], i) - o_shift[i].start) for i in range(3)
-                )  # type: ignore
+                shape: TRIPLE | None = tuple(int(map_v(o_shift[i], i) - o_shift[i].start) for i in range(3))  # type: ignore
             if self.origin is not None:
                 origin = self.local_to_global(tuple(float(y.start) for y in o_shift))  # type: ignore
                 # origin = tuple(float(x + y.start) for x, y in zip(self.origin, o_shift))
@@ -501,9 +465,7 @@ class POI(Abstract_POI):
         ornt_to = nio.axcodes2ornt(axcodes_to)
 
         if (ornt_fr == ornt_to).all():
-            log.print(
-                "ctd is already rotated to image with ", axcodes_to, verbose=verbose
-            )
+            log.print("ctd is already rotated to image with ", axcodes_to, verbose=verbose)
             return self if inplace else self.copy()
         trans = nio.ornt_transform(ornt_fr, ornt_to).astype(int)
         perm: list[int] = trans[:, 0].tolist()
@@ -512,14 +474,10 @@ class POI(Abstract_POI):
             shape = tuple([self.shape[perm.index(i)] for i in range(len(perm))])
 
             if _shape != shape and _shape is not None:
-                raise ValueError(
-                    f"Different shapes {shape} <-> {_shape}, types {type(shape)} <-> {type(_shape)}"
-                )
+                raise ValueError(f"Different shapes {shape} <-> {_shape}, types {type(shape)} <-> {type(_shape)}")
         else:
             shape = _shape
-        assert (
-            shape is not None
-        ), "Require shape information for flipping dimensions. Set self.shape or use reorient_centroids_to"
+        assert shape is not None, "Require shape information for flipping dimensions. Set self.shape or use reorient_centroids_to"
         shp = np.asarray(shape)
         ctd_arr[perm] = ctd_arr.copy()
         for ax in trans:
@@ -588,9 +546,7 @@ class POI(Abstract_POI):
         verbose: logging = False,
         _shape=None,
     ):
-        return self.reorient(
-            axcodes_to, decimals=decimals, verbose=verbose, inplace=True, _shape=_shape
-        )
+        return self.reorient(axcodes_to, decimals=decimals, verbose=verbose, inplace=True, _shape=_shape)
 
     def reorient_centroids_to(
         self,
@@ -611,12 +567,8 @@ class POI(Abstract_POI):
             _shape=img.shape,
         )
 
-    def reorient_centroids_to_(
-        self, img: Image_Reference, decimals=ROUNDING_LVL, verbose: logging = False
-    ) -> Self:
-        return self.reorient_centroids_to(
-            img, decimals=decimals, verbose=verbose, inplace=True
-        )
+    def reorient_centroids_to_(self, img: Image_Reference, decimals=ROUNDING_LVL, verbose: logging = False) -> Self:
+        return self.reorient_centroids_to(img, decimals=decimals, verbose=verbose, inplace=True)
 
     def rescale(
         self,
@@ -644,17 +596,13 @@ class POI(Abstract_POI):
             >>> new_voxel_spacing = (2.0, 2.0, 2.0)  # Desired voxel spacing for rescaling
             >>> rescaled_centroid_obj = centroid_obj.rescale(voxel_spacing=new_voxel_spacing, decimals=4, inplace=False)
         """
-        assert (
-            self.zoom is not None
-        ), "This Centroids instance doesn't have a zoom set. Use centroid.zoom = nii.zoom"
+        assert self.zoom is not None, "This Centroids instance doesn't have a zoom set. Use centroid.zoom = nii.zoom"
 
         zms = self.zoom
         shp = list(self.shape) if self.shape is not None else None
         ctd_arr = np.transpose(np.asarray(list(self.centroids.values())))
         v_list = list(self.centroids.keys())
-        voxel_spacing = tuple(
-            [v if v != -1 else z for v, z in zip(voxel_spacing, zms, strict=True)]
-        )
+        voxel_spacing = tuple([v if v != -1 else z for v, z in zip(voxel_spacing, zms, strict=True)])
         for i in range(3):
             fkt = zms[i] / voxel_spacing[i]
             if len(v_list) != 0:
@@ -681,9 +629,7 @@ class POI(Abstract_POI):
             return self
         return self.copy(centroids=points, zoom=voxel_spacing, shape=shp)
 
-    def rescale_(
-        self, voxel_spacing: ZOOMS = (1, 1, 1), decimals=3, verbose: logging = False
-    ) -> Self:
+    def rescale_(self, voxel_spacing: ZOOMS = (1, 1, 1), decimals=3, verbose: logging = False) -> Self:
         return self.rescale(
             voxel_spacing=voxel_spacing,
             decimals=decimals,
@@ -744,13 +690,9 @@ class POI(Abstract_POI):
         self.sort()
         out_path = str(out_path)
         if len(self.centroids) == 0:
-            log.print(
-                "POIs empty, not saved:", out_path, ltype=Log_Type.FAIL, verbose=verbose
-            )
+            log.print("POIs empty, not saved:", out_path, ltype=Log_Type.FAIL, verbose=verbose)
             return
-        json_object, print_add = _poi_to_dict_list(
-            self, additional_info, save_hint, verbose
-        )
+        json_object, print_add = _poi_to_dict_list(self, additional_info, save_hint, verbose)
 
         # Problem with python 3 and int64 serialization.
         def convert(o):
@@ -764,9 +706,7 @@ class POI(Abstract_POI):
 
         with open(out_path, "w") as f:
             json.dump(json_object, f, default=convert, indent=4)
-        log.print(
-            "POIs saved:", out_path, print_add, ltype=Log_Type.SAVE, verbose=verbose
-        )
+        log.print("POIs saved:", out_path, print_add, ltype=Log_Type.SAVE, verbose=verbose)
 
     def make_point_cloud_nii(self, affine=None, s=8, sphere=False):
         """Create point cloud NIfTI images from the centroid coordinates.
@@ -808,35 +748,21 @@ class POI(Abstract_POI):
                 coords = np.ogrid[: self.shape[0], : self.shape[1], : self.shape[2]]
                 zoom = self.zoom
                 distance = np.sqrt(
-                    ((coords[0] - int(x)) * zoom[0]) ** 2
-                    + ((coords[1] - int(y)) * zoom[1]) ** 2
-                    + ((coords[2] - int(z)) * zoom[2]) ** 2
+                    ((coords[0] - int(x)) * zoom[0]) ** 2 + ((coords[1] - int(y)) * zoom[1]) ** 2 + ((coords[2] - int(z)) * zoom[2]) ** 2
                 )
                 arr += np.asarray(region * (distance <= s / 2), dtype=np.uint16)
                 arr2 += np.asarray(subregion * (distance <= s / 2), dtype=np.uint16)
         else:
             for region, subregion, (x, y, z) in self.items():
                 arr[
-                    max(int(floor(x - s1 / self.zoom[0])) + 1, 0) : min(
-                        int(ceil(x + s2 / self.zoom[0] + 1)), self.shape[0]
-                    ),
-                    max(int(floor(y - s1 / self.zoom[1])) + 1, 0) : min(
-                        int(ceil(y + s2 / self.zoom[1] + 1)), self.shape[1]
-                    ),
-                    max(int(floor(z - s1 / self.zoom[2])) + 1, 0) : min(
-                        int(ceil(z + s2 / self.zoom[2] + 1)), self.shape[2]
-                    ),
+                    max(int(floor(x - s1 / self.zoom[0])) + 1, 0) : min(int(ceil(x + s2 / self.zoom[0] + 1)), self.shape[0]),
+                    max(int(floor(y - s1 / self.zoom[1])) + 1, 0) : min(int(ceil(y + s2 / self.zoom[1] + 1)), self.shape[1]),
+                    max(int(floor(z - s1 / self.zoom[2])) + 1, 0) : min(int(ceil(z + s2 / self.zoom[2] + 1)), self.shape[2]),
                 ] = region
                 arr2[
-                    max(int(floor(x - s1 / self.zoom[0])) + 1, 0) : min(
-                        int(ceil(x + s2 / self.zoom[0] + 1)), self.shape[0]
-                    ),
-                    max(int(floor(y - s1 / self.zoom[1])) + 1, 0) : min(
-                        int(ceil(y + s2 / self.zoom[1] + 1)), self.shape[1]
-                    ),
-                    max(int(floor(z - s1 / self.zoom[2])) + 1, 0) : min(
-                        int(ceil(z + s2 / self.zoom[2] + 1)), self.shape[2]
-                    ),
+                    max(int(floor(x - s1 / self.zoom[0])) + 1, 0) : min(int(ceil(x + s2 / self.zoom[0] + 1)), self.shape[0]),
+                    max(int(floor(y - s1 / self.zoom[1])) + 1, 0) : min(int(ceil(y + s2 / self.zoom[1] + 1)), self.shape[1]),
+                    max(int(floor(z - s1 / self.zoom[2])) + 1, 0) : min(int(ceil(z + s2 / self.zoom[2] + 1)), self.shape[2]),
                 ] = subregion
         nii = nib.Nifti1Image(arr, affine=affine)
         nii2 = nib.Nifti1Image(arr2, affine=affine)
@@ -856,17 +782,11 @@ class POI(Abstract_POI):
             >>> filtered_centroids = centroid_obj.filter_points_inside_shape()
         """
         if self.shape is None:
-            raise ValueError(
-                "Cannot filter points outside shape as the shape attribute is not defined."
-            )
+            raise ValueError("Cannot filter points outside shape as the shape attribute is not defined.")
 
         filtered_centroids = POI_Descriptor()
         for region, subregion, (x, y, z) in self.centroids.items():
-            if (
-                0 <= x < self.shape[0]
-                and 0 <= y < self.shape[1]
-                and 0 <= z < self.shape[2]
-            ):
+            if 0 <= x < self.shape[0] and 0 <= y < self.shape[1] and 0 <= z < self.shape[2]:
                 filtered_centroids[(region, subregion)] = (x, y, z)
         if inplace:
             self.centroids = filtered_centroids
@@ -965,75 +885,47 @@ class POI(Abstract_POI):
             )
             if not other_match:
                 found_errors.append(f"object mismatch {self!s}, {other!s}")
-        if affine is not None and (
-            not ignore_missing_values or self.affine is not None
-        ):
+        if affine is not None and (not ignore_missing_values or self.affine is not None):
             if self.affine is None:
                 found_errors.append(f"affine mismatch {self.affine}, {affine}")
             else:
                 affine_diff = self.affine - affine
-                affine_match = np.all(
-                    [abs(a) <= error_tolerance for a in affine_diff.flatten()]
-                )
-                found_errors.append(
-                    f"affine mismatch {self.affine}, {affine}"
-                ) if not affine_match else None
-        if rotation is not None and (
-            not ignore_missing_values or self.rotation is not None
-        ):
+                affine_match = np.all([abs(a) <= error_tolerance for a in affine_diff.flatten()])
+                found_errors.append(f"affine mismatch {self.affine}, {affine}") if not affine_match else None
+        if rotation is not None and (not ignore_missing_values or self.rotation is not None):
             if self.rotation is None:
                 found_errors.append(f"rotation mismatch {self.rotation}, {rotation}")
             else:
                 rotation_diff = self.rotation - rotation
-                rotation_match = np.all(
-                    [abs(a) <= error_tolerance for a in rotation_diff.flatten()]
-                )
-                found_errors.append(
-                    f"rotation mismatch {self.rotation}, {rotation}"
-                ) if not rotation_match else None
+                rotation_match = np.all([abs(a) <= error_tolerance for a in rotation_diff.flatten()])
+                found_errors.append(f"rotation mismatch {self.rotation}, {rotation}") if not rotation_match else None
         if zoom is not None and (not ignore_missing_values or self.zoom is not None):
             if self.zoom is None:
                 found_errors.append(f"zoom mismatch {self.zoom}, {zoom}")
             else:
                 zms_diff = (self.zoom[i] - zoom[i] for i in range(3))
                 zms_match = np.all([abs(a) <= error_tolerance for a in zms_diff])
-                found_errors.append(
-                    f"zoom mismatch {self.zoom}, {zoom}"
-                ) if not zms_match else None
-        if orientation is not None and (
-            not ignore_missing_values or self.affine is not None
-        ):
+                found_errors.append(f"zoom mismatch {self.zoom}, {zoom}") if not zms_match else None
+        if orientation is not None and (not ignore_missing_values or self.affine is not None):
             if self.orientation is None:
-                found_errors.append(
-                    f"orientation mismatch {self.orientation}, {orientation}"
-                )
+                found_errors.append(f"orientation mismatch {self.orientation}, {orientation}")
             else:
-                orientation_match = np.all(
-                    [i == orientation[idx] for idx, i in enumerate(self.orientation)]
-                )
-                found_errors.append(
-                    f"orientation mismatch {self.orientation}, {orientation}"
-                ) if not orientation_match else None
-        if origin is not None and (
-            not ignore_missing_values or self.origin is not None
-        ):
+                orientation_match = np.all([i == orientation[idx] for idx, i in enumerate(self.orientation)])
+                found_errors.append(f"orientation mismatch {self.orientation}, {orientation}") if not orientation_match else None
+        if origin is not None and (not ignore_missing_values or self.origin is not None):
             if self.origin is None:
                 found_errors.append(f"origin mismatch {self.origin}, {origin}")
             else:
                 origin_diff = (self.origin[i] - origin[i] for i in range(3))
                 origin_match = np.all([abs(a) <= origin_tolerance for a in origin_diff])
-                found_errors.append(
-                    f"origin mismatch {self.origin}, {origin}"
-                ) if not origin_match else None
+                found_errors.append(f"origin mismatch {self.origin}, {origin}") if not origin_match else None
         if shape is not None and (not ignore_missing_values or self.shape is not None):
             if self.shape is None:
                 found_errors.append(f"shape mismatch {self.shape}, {shape}")
             else:
                 shape_diff = (float(self.shape[i]) - float(shape[i]) for i in range(3))
                 shape_match = np.all([abs(a) <= shape_tolerance for a in shape_diff])
-                found_errors.append(
-                    f"shape mismatch {self.shape}, {shape}"
-                ) if not shape_match else None
+                found_errors.append(f"shape mismatch {self.shape}, {shape}") if not shape_match else None
 
         # Print errors
         for err in found_errors:
@@ -1060,9 +952,7 @@ format_key = {FORMAT_DOCKER: "docker", FORMAT_GRUBER: "guber", FORMAT_POI: "POI"
 format_key2value = {value: key for key, value in format_key.items()}
 
 
-def _poi_to_dict_list(
-    ctd: POI, additional_info: dict | None, save_hint=0, verbose: logging = False
-):  # noqa: C901
+def _poi_to_dict_list(ctd: POI, additional_info: dict | None, save_hint=0, verbose: logging = False):  # noqa: C901
     ori: dict[str, str | COORDINATE | AX_CODES] = {"direction": ctd.orientation}
     print_out = ""
     if ctd.zoom is not None:
@@ -1091,24 +981,16 @@ def _poi_to_dict_list(
     dict_list: list[_Orientation | (_Point3D | dict)] = [ori]
 
     if save_hint == FORMAT_OLD_POI:
-        ctd = ctd.rescale((1, 1, 1), verbose=verbose).reorient_(
-            ("R", "P", "I"), verbose=verbose
-        )
+        ctd = ctd.rescale((1, 1, 1), verbose=verbose).reorient_(("R", "P", "I"), verbose=verbose)
         dict_list = []
 
     temp_dict = {}
     ctd.sort()
     for vert_id, subreg_id, (x, y, z) in ctd.items():
         if save_hint == FORMAT_DOCKER:
-            dict_list.append(
-                {"label": subreg_id * LABEL_MAX + vert_id, "X": x, "Y": y, "Z": z}
-            )
+            dict_list.append({"label": subreg_id * LABEL_MAX + vert_id, "X": x, "Y": y, "Z": z})
         elif save_hint == FORMAT_GRUBER:
-            v = (
-                v_idx2name[vert_id].replace("T", "TH")
-                + "_"
-                + conversion_poi2text[subreg_id]
-            )
+            v = v_idx2name[vert_id].replace("T", "TH") + "_" + conversion_poi2text[subreg_id]
             dict_list.append({"label": v, "X": x, "Y": y, "Z": z})
         elif save_hint == FORMAT_POI:
             v_name = ctd.level_one_info._get_name(vert_id, no_raise=True)
@@ -1171,13 +1053,9 @@ def load_poi(ctd_path: POI_Reference, verbose=True) -> POI:  # noqa: ARG001
         raise TypeError(f"{type(ctd_path)}\n{ctd_path}")
     ### format_POI_old has no META header
     if "direction" not in dict_list[0] and "vert_label" in dict_list[0]:
-        return _load_format_POI_old(
-            dict_list
-        )  # This file if used in the old POI-pipeline and is deprecated
+        return _load_format_POI_old(dict_list)  # This file if used in the old POI-pipeline and is deprecated
 
-    assert (
-        "direction" in dict_list[0]
-    ), f'File format error: first index must be a "Direction" but got {dict_list[0]}'
+    assert "direction" in dict_list[0], f'File format error: first index must be a "Direction" but got {dict_list[0]}'
     axcode: AX_CODES = tuple(dict_list[0]["direction"])  # type: ignore
     zoom: ZOOMS = dict_list[0].get("zoom", None)  # type: ignore
     shape = dict_list[0].get("shape", None)  # type: ignore
@@ -1186,12 +1064,8 @@ def load_poi(ctd_path: POI_Reference, verbose=True) -> POI:  # noqa: ARG001
     origin = dict_list[0].get("origin", None)
     origin = tuple(origin) if origin is not None else None
     rotation = dict_list[0].get("rotation", None)
-    level_one_info = _register_lvl[
-        dict_list[0].get("level_one_info", Vertebra_Instance.__name__)
-    ]
-    level_two_info = _register_lvl[
-        dict_list[0].get("level_two_info", Location.__name__)
-    ]
+    level_one_info = _register_lvl[dict_list[0].get("level_one_info", Vertebra_Instance.__name__)]
+    level_two_info = _register_lvl[dict_list[0].get("level_two_info", Location.__name__)]
 
     info = {k: v for k, v in dict_list[0].items() if k not in ctd_info_blacklist}
 
@@ -1219,9 +1093,7 @@ def load_poi(ctd_path: POI_Reference, verbose=True) -> POI:  # noqa: ARG001
 
 def _load_docker_centroids(dict_list, centroids: POI_Descriptor, format_):  # noqa: ARG001
     for d in dict_list[1:]:
-        assert (
-            "direction" not in d
-        ), f'File format error: only first index can be a "direction" but got {dict_list[0]}'
+        assert "direction" not in d, f'File format error: only first index can be a "direction" but got {dict_list[0]}'
         if "nan" in str(d):  # skipping NaN centroids
             continue
         elif _is_Point3D(d):
@@ -1239,9 +1111,7 @@ def _load_docker_centroids(dict_list, centroids: POI_Descriptor, format_):  # no
                     subreg_id = conversion_poi[subreg]
                     centroids[vert_id, subreg_id] = (d["X"], d["Y"], d["Z"])
                 except Exception:
-                    print(
-                        f'Label {d["label"]} is not an integer and cannot be converted to an int'
-                    )
+                    print(f'Label {d["label"]} is not an integer and cannot be converted to an int')
                     centroids[0, d["label"]] = (d["X"], d["Y"], d["Z"])
         else:
             raise ValueError(d)
@@ -1285,7 +1155,7 @@ def _load_POI_centroids(
     assert len(dict_list) == 2
     d: dict[int | str, dict[int | str, tuple[float, float, float]]] = dict_list[1]
     for vert_id, v in d.items():
-        vert_id = level_one_info._get_id(vert_id, no_raise=True)
+        vert_id = level_one_info._get_id(vert_id, no_raise=True)  # noqa: PLW2901
         for sub_id, t in v.items():
             sub_id = level_two_info._get_id(sub_id)  # noqa: PLW2901
             centroids[vert_id, sub_id] = tuple(t)
@@ -1395,9 +1265,7 @@ def calc_poi_labeled_buffered(
             verbose=verbose,
         )
     else:
-        assert not isinstance(
-            subreg_id, Sequence
-        ), "Missing instance+semantic map for multiple Values"
+        assert not isinstance(subreg_id, Sequence), "Missing instance+semantic map for multiple Values"
         ctd = calc_centroids(msk_nii, subreg_id=loc2int(subreg_id), decimals=decimals)
 
     ctd.save(out_path, verbose=verbose)
@@ -1566,11 +1434,7 @@ def calc_poi_from_subreg_vert(
     buffer_file: str | Path | None = None,  # used by wrapper  # noqa: ARG001
     save_buffer_file=False,  # used by wrapper  # noqa: ARG001
     decimals=2,
-    subreg_id: int
-    | Location
-    | Sequence[int | Location]
-    | Sequence[Location]
-    | Sequence[int] = 50,
+    subreg_id: int | Location | Sequence[int | Location] | Sequence[Location] | Sequence[int] = 50,
     verbose: logging = True,
     extend_to: POI | None = None,
     # use_vertebra_special_action=True,
@@ -1598,11 +1462,7 @@ def calc_poi_from_subreg_vert(
         crop = subreg_msk.compute_crop(maximum_size=crop)
     # crop = (slice(0, subreg_msk.shape[0]), slice(0, subreg_msk.shape[1]), slice(0, subreg_msk.shape[2]))
     except ValueError:
-        return (
-            POI({}, **vert_msk._extract_affine(), format=FORMAT_POI)
-            if extend_to is None
-            else extend_to.copy()
-        )
+        return POI({}, **vert_msk._extract_affine(), format=FORMAT_POI) if extend_to is None else extend_to.copy()
     vert_msk.assert_affine(subreg_msk)
     vert_msk = vert_msk.apply_crop(crop)
     subreg_msk = subreg_msk.apply_crop(crop)
@@ -1621,30 +1481,22 @@ def calc_poi_from_subreg_vert(
     if _vert_ids is None:
         _vert_ids = vert_msk.unique()
 
-    from TPTBox.core.poi_fun.vertebra_pois_non_centroids import (
-        add_prerequisites,
-        compute_non_centroid_pois,
-    )
+    from TPTBox.core.poi_fun.vertebra_pois_non_centroids import add_prerequisites, compute_non_centroid_pois
 
-    subreg_id = add_prerequisites(
-        int2loc(subreg_id if isinstance(subreg_id, Sequence) else [subreg_id])
-    )  # type: ignore
+    subreg_id = add_prerequisites(int2loc(subreg_id if isinstance(subreg_id, Sequence) else [subreg_id]))  # type: ignore
 
-    log.print(
-        "Calc centroids from subregion id", subreg_id, vert_msk.shape, verbose=verbose
-    )
+    log.print("Calc centroids from subregion id", subreg_id, vert_msk.shape, verbose=verbose)
     subreg_id_int = set(loc2int_list(subreg_id))
     subreg_id_int_phase_1 = tuple(
         filter(
-            lambda i: i < 60
-            and i not in [Location.Vertebra_Full.value, Location.Dens_axis.value],
+            lambda i: i < 60 and i not in [Location.Vertebra_Full.value, Location.Dens_axis.value],
             subreg_id_int,
         )
     )
     # Step 1 get all required locations, crop vert/subreg
     # Step 2 calc centroids
 
-    # print("step 2", subreg_id_int)
+    print("step 2", subreg_id_int)
     if len(subreg_id_int_phase_1) != 0:
         arr = vert_msk.get_array()
         arr[arr >= 100] = 0
@@ -1663,7 +1515,7 @@ def calc_poi_from_subreg_vert(
         )
         [subreg_id_int.remove(i) for i in subreg_id_int_phase_1]
     # Step 3 Vertebra_Full
-    # print("step 3", subreg_id_int)
+    print("step 3", subreg_id_int)
     if Location.Vertebra_Full.value in subreg_id_int:
         log.print("Calc centroid from subregion id", "Vertebra_Full", verbose=verbose)
         full = Location.Vertebra_Full.value
@@ -1682,7 +1534,7 @@ def calc_poi_from_subreg_vert(
             )
         subreg_id_int.remove(full)
     # Step 4 IVD / Endplates Superior / Endplate Inferior
-    # print("step 4", subreg_id_int)
+    print("step 4", subreg_id_int)
     mapping_vert = {
         Location.Vertebra_Disc.value: 100,
         Location.Vertebral_Body_Endplate_Superior.value: 200,
@@ -1690,9 +1542,7 @@ def calc_poi_from_subreg_vert(
     }
     for loc, v in mapping_vert.items():
         if loc in subreg_id_int:
-            log.print(
-                "Calc centroid from subregion id", Location(loc).name, verbose=verbose
-            )
+            log.print("Calc centroid from subregion id", Location(loc).name, verbose=verbose)
             vert_arr = vert_msk.get_seg_array()
             subreg_arr = subreg_msk.get_seg_array()
             # IVD / Endplates Superior / Endplate Inferior
@@ -1711,12 +1561,10 @@ def calc_poi_from_subreg_vert(
             subreg_id_int.remove(loc)
     # Step 5 call non_centroid_pois
     # Prepare mask to binary mask
-    # print("step 5", subreg_id_int)
+    print("step 5", subreg_id_int)
     vert_arr = vert_msk.get_seg_array()
     subreg_arr = subreg_msk.get_seg_array()
-    assert subreg_msk.shape == vert_arr.shape, (
-        "Shape miss-match" + str(subreg_msk.shape) + str(vert_arr.shape)
-    )
+    assert subreg_msk.shape == vert_arr.shape, "Shape miss-match" + str(subreg_msk.shape) + str(vert_arr.shape)
     vert_arr[subreg_arr >= 100] = 0
     subreg_arr[subreg_arr >= 100] = 0
 
@@ -1791,15 +1639,11 @@ def calc_centroids_from_two_masks(
             exclusive_mask = vert_msk.get_seg_array()
             exclusive_mask[subreg_msk.get_seg_array() != subreg_id] = 0
             # check if the point exists if extend_to is used
-            is_not_yet_computed = _is_not_yet_computed(
-                np.unique(exclusive_mask), extend_to, subreg_id
-            )  # type: ignore
+            is_not_yet_computed = _is_not_yet_computed(np.unique(exclusive_mask), extend_to, subreg_id)  # type: ignore
             if is_not_yet_computed:
                 # calc poi for individual subreg
                 nii = NII((exclusive_mask, vert_msk.affine, vert_msk.header), True)
-                poi = calc_centroids(
-                    nii, decimals=decimals, subreg_id=subreg_id, extend_to=poi
-                )
+                poi = calc_centroids(nii, decimals=decimals, subreg_id=subreg_id, extend_to=poi)
             else:
                 continue
     # reverse crop
@@ -1807,9 +1651,7 @@ def calc_centroids_from_two_masks(
     return poi
 
 
-def _is_not_yet_computed(
-    ids_in_arr: Sequence[int], extend_to: POI | None, subreg_id: int
-):
+def _is_not_yet_computed(ids_in_arr: Sequence[int], extend_to: POI | None, subreg_id: int):
     is_not_yet_computed = True
     if extend_to is not None and subreg_id in extend_to.centroids.keys_subregion():
         is_not_yet_computed = False
@@ -1881,6 +1723,4 @@ def calc_centroids(
             ctd_list[vert_id, int(i)] = tuple(round(x, decimals) for x in ctr_mass)
         else:
             ctd_list[int(i), subreg_id] = tuple(round(x, decimals) for x in ctr_mass)
-    return POI(
-        ctd_list, orientation=axc, **msk_nii._extract_affine(rm_key=["orientation"])
-    )
+    return POI(ctd_list, orientation=axc, **msk_nii._extract_affine(rm_key=["orientation"]))

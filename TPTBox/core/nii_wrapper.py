@@ -68,13 +68,7 @@ warnings.formatwarning = formatwarning_tb
 
 N = TypeVar("N", bound="NII")
 Image_Reference = bids_files.BIDS_FILE | Nifti1Image | Path | str | N
-Interpolateable_Image_Reference = (
-    bids_files.BIDS_FILE
-    | tuple[Nifti1Image, bool]
-    | tuple[Path, bool]
-    | tuple[str, bool]
-    | N
-)
+Interpolateable_Image_Reference = bids_files.BIDS_FILE | tuple[Nifti1Image, bool] | tuple[Path, bool] | tuple[str, bool] | N
 
 Proxy = tuple[tuple[int, int, int], np.ndarray]
 suppress_dtype_change_printout_in_set_array = False
@@ -1296,7 +1290,7 @@ class NII(NII_Math):
                 label = label.value
             if isinstance(label,str):
                 label = int(label)
-                    
+
             assert label != 0, 'Zero label does not make sens. This is the background'
             seg_arr[seg_arr != label] = 0
             seg_arr[seg_arr == label] = 1
