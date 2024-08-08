@@ -50,6 +50,19 @@ class Test_bids_file(unittest.TestCase):
                         msg=f"{volume}, {volume2}",
                     )
 
+    def test_erodedilate_notpresentlabel(self):
+        for value in range(repeats):
+            nii, points, orientation, sizes = get_nii()
+            arr = nii.get_seg_array()
+            volume = np_utils.np_volume(arr)
+            label = max(list(volume.keys())) + 1
+            func = np_utils.np_erode_msk if value % 2 == 0 else np_utils.np_dilate_msk
+            arr2 = func(arr, mm=1, connectivity=1, label_ref=label)
+            volume2 = np_utils.np_volume(arr2)
+
+            for k, v in volume.items():
+                self.assertEqual(v, volume2[k])
+
     def test_maplabels(self):
         for _value in range(repeats):
             nii, points, orientation, sizes = get_nii()
