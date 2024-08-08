@@ -13,7 +13,7 @@ import numpy as np
 
 from TPTBox import POI, calc_centroids
 from TPTBox.core.nii_wrapper import NII
-from TPTBox.core.poi import LABEL_MAX, VertebraCentroids, _poi_to_dict_list, calc_poi_from_subreg_vert, calc_poi_labeled_buffered, load_poi
+from TPTBox.core.poi import LABEL_MAX, _poi_to_dict_list, calc_poi_from_subreg_vert, calc_poi_labeled_buffered, load_poi
 from TPTBox.core.vert_constants import Location, v_idx2name
 from TPTBox.tests.test_utils import get_nii, get_poi, get_random_ax_code, overlap, repeats
 from unit_tests.test_centroids_save import get_centroids

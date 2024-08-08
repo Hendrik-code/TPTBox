@@ -8,6 +8,8 @@ from skimage.metrics import peak_signal_noise_ratio as psnr
 from skimage.metrics import structural_similarity as ssim
 from typing_extensions import Self
 
+from .nii_poi_abstract import Has_Affine
+
 # fmt: off
 if TYPE_CHECKING:
     from nibabel.nifti1 import Nifti1Header
@@ -40,7 +42,7 @@ else:
     class NII_Proxy:
         pass
     C = Self|Number|np.ndarray
-class NII_Math(NII_Proxy):
+class NII_Math(NII_Proxy,Has_Affine):
     def _binary_opt(self, other:C, opt,inplace = False)-> Self:
         if isinstance(other,NII_Math):
             other = other.get_array()

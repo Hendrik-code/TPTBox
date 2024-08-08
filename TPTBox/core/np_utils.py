@@ -5,15 +5,19 @@ from typing import Any, TypeVar
 
 import numpy as np
 import scipy
-from cc3d import connected_components, contacts, region_graph, voxel_connectivity_graph
+from cc3d import (
+    connected_components,  # pip install connected-components-3d
+    contacts,
+    region_graph,
+    voxel_connectivity_graph,
+)
 from cc3d import statistics as _cc3dstats
 from fill_voids import fill
 from numpy.typing import NDArray
 from scipy.ndimage import binary_erosion, center_of_mass, generate_binary_structure
 from skimage.measure import euler_number, label
 
-from TPTBox.core.vert_constants import COORDINATE, LABEL_MAP, LABEL_REFERENCE, log
-from TPTBox.logger import Log_Type
+from TPTBox.core.vert_constants import COORDINATE, LABEL_MAP, LABEL_REFERENCE
 
 UINT = TypeVar("UINT", bound=np.unsignedinteger[Any])
 INT = TypeVar("INT", bound=np.signedinteger[Any])
@@ -239,7 +243,11 @@ def np_dice(seg: np.ndarray, gt: np.ndarray, binary_compare: bool = False, label
 
 
 def np_dilate_msk(
-    arr: np.ndarray, label_ref: LABEL_REFERENCE = None, mm: int = 5, connectivity: int = 3, mask: np.ndarray | None = None
+    arr: np.ndarray,
+    label_ref: LABEL_REFERENCE = None,
+    mm: int = 5,
+    connectivity: int = 3,
+    mask: np.ndarray | None = None,
 ) -> np.ndarray:
     """
     Dilates the given array by the specified number of voxels (not including the zero).
@@ -257,14 +265,14 @@ def np_dilate_msk(
 
     """
     labels: list[int] = _to_labels(arr, label_ref)
-    present_labels = np_unique(arr)
+    # present_labels = np_unique(arr)
 
     if mask is not None:
         mask[mask != 0] = 1
 
     struct = generate_binary_structure(arr.ndim, connectivity)
 
-    labels: list[int] = [l for l in labels if l != 0 and l in present_labels]
+    labels: list[int] = [l for l in labels if l != 0]  # and l in present_labels]
 
     out = arr.copy()
     for _ in range(mm):
@@ -278,7 +286,13 @@ def np_dilate_msk(
     return out
 
 
-def np_erode_msk(arr: np.ndarray, label_ref: LABEL_REFERENCE = None, mm: int = 5, connectivity: int = 3) -> np.ndarray:
+def np_erode_msk(
+    arr: np.ndarray,
+    label_ref: LABEL_REFERENCE = None,
+    mm: int = 5,
+    connectivity: int = 3,
+    border_value=0,
+) -> np.ndarray:
     """
     Erodes the given array by the specified number of voxels.
 
@@ -293,17 +307,17 @@ def np_erode_msk(arr: np.ndarray, label_ref: LABEL_REFERENCE = None, mm: int = 5
         The method uses binary erosion with a 3D structuring element to erode the mask by the specified number of voxels.
     """
     labels: list[int] = _to_labels(arr, label_ref)
-    present_labels = np_unique(arr)
+    # present_labels = np_unique(arr)
 
     struct = generate_binary_structure(arr.ndim, connectivity)
     msk_i_data = arr.copy()
     out = arr.copy()
     for i in labels:
-        if i == 0 or i not in present_labels:
+        if i == 0:  # or i not in present_labels:
             continue
         data = msk_i_data.copy()
         data[i != data] = 0
-        msk_ibe_data = binary_erosion(data, structure=struct, iterations=mm)
+        msk_ibe_data = binary_erosion(data, structure=struct, iterations=mm, border_value=border_value)
         data[~msk_ibe_data] = 0  # type: ignore
         out[(msk_i_data == i) & (data == 0)] = 0
     return out
@@ -705,7 +719,7 @@ def np_calc_convex_hull(
         return h
 
 
-def _select_axis_dynamically(axis: int, index: int, n_dims: int = 3):
+def _select_axis_dynamically(axis: int, index: int | slice, n_dims: int = 3):
     slices = tuple([slice(None) if i != axis else index for i in range(n_dims)])
     return slices
 

@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 
 from TPTBox.core.poi import POI
-from TPTBox.core.poi_global import POI_Global
+from TPTBox.core.poi_fun.poi_global import POI_Global
 
 
 class TestPOI(unittest.TestCase):
