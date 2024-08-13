@@ -466,11 +466,7 @@ class Abstract_POI(Has_Affine):
         )
         assert len(x_sample) != 0, x_sample.shape
         # Perform cubic spline interpolation
-        tck, u = interpolate.splprep(
-            [x_sample, y_sample, z_sample],
-            k=3 if len(x_sample) > 3 else len(x_sample) - 1,
-            s=smoothness,
-        )
+        tck, u = interpolate.splprep([x_sample, y_sample, z_sample], k=3 if len(x_sample) > 3 else len(x_sample) - 1, s=smoothness)
         u_fine = np.linspace(0, 1, num_sample_pts)
         x_fine, y_fine, z_fine = interpolate.splev(u_fine, tck)
 
@@ -652,10 +648,10 @@ class Abstract_POI(Has_Affine):
 
         assert self.is_global == target_point.is_global
         if not keep_zoom and not self.is_global:
-            self = self.rescale((1, 1, 1), verbose=False)
+            self = self.rescale((1, 1, 1), verbose=False)  # type: ignore
         if not self.is_global:
             if target_point.zoom != self.zoom or target_point.shape != self.zoom:
-                target_point = target_point.resample_from_to(self)
+                target_point = target_point.resample_from_to(self)  # type: ignore
             else:
                 target_point.assert_affine(self)
 
@@ -671,7 +667,7 @@ class Abstract_POI(Has_Affine):
     def join_left(self, pois: Self, inplace=False, _right_join=False) -> Self:
         """
         Left join operation to combine the centroids from another set of points into the current set.
-        Existing values are NOT overritten
+        Existing values are NOT overwritten
 
         Args:
             pois (Self): Another set of points (centroids) to be combined.
@@ -710,7 +706,7 @@ class Abstract_POI(Has_Affine):
     def join_right(self, *args, **qargs):
         """
         Rights join operation to combine the centroids from another set of points into the current set.
-        Existing values are overritten.
+        Existing values are overwritten.
 
         Args:
             pois (Self): Another set of points (centroids) to be combined.

@@ -1457,6 +1457,7 @@ def calc_poi_from_subreg_vert(
     extend_to: POI | None = None,
     # use_vertebra_special_action=True,
     _vert_ids=None,
+    _print_phases=False,
 ) -> POI:
     """
     Calculates the centroids of a subregion within a vertebral mask. This function is spine opinionated, the general implementation is "calc_centroids_from_two_masks".
@@ -1493,7 +1494,7 @@ def calc_poi_from_subreg_vert(
             level_two_info=Location,
         )
         if extend_to is None
-        else extend_to.apply_crop(crop)
+        else extend_to.apply_crop(crop, inplace=True)
     )
 
     if _vert_ids is None:
@@ -1507,14 +1508,14 @@ def calc_poi_from_subreg_vert(
     subreg_id_int = set(loc2int_list(subreg_id))
     subreg_id_int_phase_1 = tuple(
         filter(
-            lambda i: i < 60 and i not in [Location.Vertebra_Full.value, Location.Dens_axis.value],
+            lambda i: i < 53 and i not in [Location.Vertebra_Full.value, Location.Dens_axis.value],
             subreg_id_int,
         )
     )
     # Step 1 get all required locations, crop vert/subreg
     # Step 2 calc centroids
 
-    # print("step 2", subreg_id_int)
+    print("step 2", subreg_id_int) if _print_phases else None
     if len(subreg_id_int_phase_1) != 0:
         arr = vert_msk.get_array()
         arr[arr >= 100] = 0
@@ -1533,7 +1534,7 @@ def calc_poi_from_subreg_vert(
         )
         [subreg_id_int.remove(i) for i in subreg_id_int_phase_1]
     # Step 3 Vertebra_Full
-    # print("step 3", subreg_id_int)
+    print("step 3", subreg_id_int) if _print_phases else None
     if Location.Vertebra_Full.value in subreg_id_int:
         log.print("Calc centroid from subregion id", "Vertebra_Full", verbose=verbose)
         full = Location.Vertebra_Full.value
@@ -1552,7 +1553,7 @@ def calc_poi_from_subreg_vert(
             )
         subreg_id_int.remove(full)
     # Step 4 IVD / Endplates Superior / Endplate Inferior
-    # print("step 4", subreg_id_int)
+    print("step 4", subreg_id_int) if _print_phases else None
     mapping_vert = {
         Location.Vertebra_Disc.value: 100,
         Location.Vertebral_Body_Endplate_Superior.value: 200,
@@ -1579,7 +1580,7 @@ def calc_poi_from_subreg_vert(
             subreg_id_int.remove(loc)
     # Step 5 call non_centroid_pois
     # Prepare mask to binary mask
-    # print("step 5", subreg_id_int)
+    print("step 5", subreg_id_int) if _print_phases else None
     vert_arr = vert_msk.get_seg_array()
     subreg_arr = subreg_msk.get_seg_array()
     assert subreg_msk.shape == vert_arr.shape, "Shape miss-match" + str(subreg_msk.shape) + str(vert_arr.shape)
