@@ -236,7 +236,7 @@ Strategy_Computed_Before(L.Spinal_Canal,L.Vertebra_Corpus)
 
 
 # fmt: on
-def compute_non_centroid_pois(
+def compute_non_centroid_pois(  # noqa: C901
     poi: POI,
     locations: Sequence[Location] | Location,
     vert: NII,

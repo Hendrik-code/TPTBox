@@ -475,7 +475,7 @@ def plot_sag_centroids(
     if "text_sag" in ctd.info:
         for color, x in ctd.info["text_sag"]:
             if not isinstance(color, int) and len(color) == 2:
-                color, curve_location = color
+                color, curve_location = color  # noqa: PLW2901
             if isinstance(x, str) or len(x) == 1:
                 (text) = x
                 a = zms[1] * ctd[color, curve_location][1]
@@ -526,7 +526,7 @@ def plot_cor_centroids(
     if "text_cor" in ctd.info:
         for color, x in ctd.info["text_cor"]:
             if len(color) == 2:
-                color, curve_location = color
+                color, curve_location = color  # noqa: PLW2901
             if isinstance(x, str) or len(x) == 1:
                 (text) = x
                 a = zms[2] * ctd[color, curve_location][2]
