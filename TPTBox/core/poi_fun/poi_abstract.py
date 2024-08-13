@@ -638,8 +638,8 @@ class Abstract_POI(Has_Affine):
             distances[(region, subregion)] = distance
         return distances
 
-    def calculate_distances_poi(self, target_point: Self) -> dict[tuple[int, int], float]:
-        """Calculate the distances between the target point and each centroid.
+    def calculate_distances_poi(self, target_point: Self, keep_zoom=False) -> dict[tuple[int, int], float]:
+        """Calculate the distances between all points and each centroid in local spacing of the first POI.
 
         Args:
             target_point (Tuple[float, float, float]): The target point represented as a tuple of x, y, and z coordinates.
@@ -649,11 +649,20 @@ class Abstract_POI(Has_Affine):
             The keys are tuples of two integers representing the region and subregion labels of the centroids,
             and the values are the distances (in millimeters) between the target point and each centroid.
         """
-        target_point.assert_affine(self)
+
         assert self.is_global == target_point.is_global
+        if not keep_zoom and not self.is_global:
+            self = self.rescale((1, 1, 1), verbose=False)
+        if not self.is_global:
+            if target_point.zoom != self.zoom or target_point.shape != self.zoom:
+                target_point = target_point.resample_from_to(self)
+            else:
+                target_point.assert_affine(self)
 
         distances = {}
-        for region, subregion, (x, y, z) in self.intersect(target_point).items():
+        for region, subregion, (x, y, z) in target_point.intersect(self).items():
+            if (region, subregion) not in self:
+                continue
             c = self[region, subregion]
             distance = ((c[0] - x) ** 2 + (c[1] - y) ** 2 + (c[2] - z) ** 2) ** 0.5
             distances[(region, subregion)] = float(distance)

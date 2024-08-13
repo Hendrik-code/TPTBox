@@ -2,8 +2,13 @@ import numpy as np
 from numpy.linalg import norm
 from scipy.interpolate import RegularGridInterpolator
 
-from TPTBox import NII, POI
-from TPTBox.core.vert_constants import COORDINATE
+from TPTBox import NII, POI, Print_Logger, Vertebra_Instance
+from TPTBox.core.poi_fun._help import sacrum_w_o_arcus, to_local_np
+from TPTBox.core.poi_fun.pixel_based_point_finder import _get_direction
+from TPTBox.core.vert_constants import COORDINATE, DIRECTIONS, Location
+from TPTBox.logger.log_file import Logger_Interface
+
+_log = Print_Logger()
 
 
 def unit_vector(vector):
@@ -26,9 +31,7 @@ def max_distance_ray_cast_convex(
     normal_vector = np.asarray(direction_vector)
     normal_vector = normal_vector / norm(normal_vector)
     # Create a function to interpolate within the mask array
-    interpolator = RegularGridInterpolator(
-        [np.arange(region.shape[i]) for i in range(3)], region.get_array()
-    )
+    interpolator = RegularGridInterpolator([np.arange(region.shape[i]) for i in range(3)], region.get_array())
 
     def is_inside(distance):
         coords = [start_point_np[i] + normal_vector[i] * distance for i in [0, 1, 2]]
@@ -68,9 +71,7 @@ def ray_cast_pixel_lvl(
     def _calc_pixels(normal_vector, start_point_np):
         # Make a plane through start_point with the norm of "normal_vector", which is shifted by "shift" along the norm
         start_point_np = start_point_np.copy()
-        num_pixel = np.abs(
-            np.floor(np.max((np.array(shape) - start_point_np) / normal_vector))
-        ).item()
+        num_pixel = np.abs(np.floor(np.max((np.array(shape) - start_point_np) / normal_vector))).item()
         arange = np.arange(0, min(num_pixel, 1000), step=1, dtype=float)
         coords = [start_point_np[i] + normal_vector[i] * arange for i in [0, 1, 2]]
 
@@ -107,15 +108,11 @@ def add_ray_to_img(
     dilate=1,
 ):
     start_point = np.array(start_point)
-    plane_coords, arange = ray_cast_pixel_lvl(
-        start_point, normal_vector, shape=seg.shape
-    )
+    plane_coords, arange = ray_cast_pixel_lvl(start_point, normal_vector, shape=seg.shape)
     if plane_coords is None:
         return None
     selected_arr = np.zeros(seg.shape, dtype=seg.dtype)
-    selected_arr[plane_coords[..., 0], plane_coords[..., 1], plane_coords[..., 2]] = (
-        arange if value == 0 else value
-    )
+    selected_arr[plane_coords[..., 0], plane_coords[..., 1], plane_coords[..., 2]] = arange if value == 0 else value
     ray = seg.set_array(selected_arr)
     if dilate != 0:
         ray.dilate_msk_(dilate)
@@ -151,3 +148,86 @@ def add_spline_to_img(
             seg[cond] = spline[cond]
         return seg
     return spline
+
+
+def shift_point(
+    poi: POI,
+    vert_id: int,
+    bb,
+    start_point: Location = Location.Vertebra_Corpus,
+    direction: DIRECTIONS | None = "R",
+    log: Logger_Interface = _log,
+):
+    if vert_id in sacrum_w_o_arcus:
+        return
+
+    if direction is None:
+        return to_local_np(start_point, bb, poi, vert_id, log)
+    sup_articular_right = sup_articular_left = None
+    if Vertebra_Instance.is_sacrum(vert_id):
+        if (vert_id, Location.Costal_Process_Left) not in poi:
+            return
+        sup_articular_right = to_local_np(Location.Costal_Process_Right, bb, poi, vert_id, log)
+        sup_articular_left = to_local_np(Location.Costal_Process_Left, bb, poi, vert_id, log)
+        factor = 6.0
+    if sup_articular_left is None or sup_articular_right is None:
+        sup_articular_right = to_local_np(Location.Superior_Articular_Right, bb, poi, vert_id, log, verbose=False)
+        sup_articular_left = to_local_np(Location.Superior_Articular_Left, bb, poi, vert_id, log, verbose=False)
+        factor = 3.0
+    if sup_articular_left is None or sup_articular_right is None:
+        sup_articular_right = to_local_np(Location.Inferior_Articular_Right, bb, poi, vert_id, log)
+        sup_articular_left = to_local_np(Location.Inferior_Articular_Left, bb, poi, vert_id, log)
+        factor = 2.0
+    if sup_articular_left is None or sup_articular_right is None:
+        return
+    if vert_id <= 11:
+        factor *= (12 - vert_id) / 11 + 1
+    vertebra_width = np.linalg.norm(sup_articular_right - sup_articular_left)
+    shift = vertebra_width / factor
+    normal_vector = _get_direction(direction, poi, vert_id)  # / np.array(poi.zoom)
+    normal_vector = normal_vector / norm(normal_vector)
+    start_point_np = to_local_np(start_point, bb, poi, vert_id, log) if isinstance(start_point, Location) else start_point
+    if start_point_np is None:
+        return None
+    return start_point_np + normal_vector * shift
+
+
+def max_distance_ray_cast_convex_poi(
+    poi: POI,
+    region: NII,
+    vert_id: int,
+    bb: tuple[slice, slice, slice],
+    normal_vector_points: tuple[Location, Location] | DIRECTIONS = "R",
+    start_point: Location | np.ndarray = Location.Vertebra_Corpus,
+    log: Logger_Interface = _log,
+    acc_delta: float = 0.00005,
+):
+    start_point_np = to_local_np(start_point, bb, poi, vert_id, log) if isinstance(start_point, Location) else start_point
+    if start_point_np is None:
+        return None
+
+    """Convex assumption!"""
+    # Compute a normal vector, that defines the plane direction
+    if isinstance(normal_vector_points, str):
+        try:
+            normal_vector = _get_direction(normal_vector_points, poi, vert_id)
+        except KeyError:
+            if vert_id not in sacrum_w_o_arcus:
+                log.on_fail(f"region={vert_id},DIRECTIONS={normal_vector_points} is missing")
+            return
+            # raise KeyError(f"region={label},subregion={loc.value} is missing.")
+        normal_vector /= norm(normal_vector)
+
+    else:
+        try:
+            b = to_local_np(normal_vector_points[1], bb, poi, vert_id, log)
+            if b is None:
+                return None
+            a = to_local_np(normal_vector_points[0], bb, poi, vert_id, log)
+            normal_vector = b - a
+            normal_vector = normal_vector / norm(normal_vector)
+            log.on_fail(f"ray_cast used with old normal_vector_points {normal_vector_points}")
+        except TypeError as e:
+            log.on_fail("TypeError", e)
+            return None
+    return max_distance_ray_cast_convex(region, start_point_np, normal_vector, acc_delta)
