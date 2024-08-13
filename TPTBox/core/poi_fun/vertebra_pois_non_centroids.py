@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 
 from TPTBox import NII, POI, Logger_Interface, Print_Logger, Vertebra_Instance, calc_poi_from_subreg_vert
+from TPTBox.core.poi_fun.ivd_pois import calculate_IVD_POI
 from TPTBox.core.poi_fun.strategies import (
     strategy_extreme_points,
     strategy_find_corner,
@@ -19,6 +20,8 @@ _log = Print_Logger()
 all_poi_functions: dict[int, "Strategy_Pattern"] = {}
 pois_computed_by_side_effect: dict[int, Location] = {}
 _sacrum = set(Vertebra_Instance.sacrum())
+
+ivd_pois_list = (Location.Vertebra_Disc_Inferior, Location.Vertebra_Disc_Superior, Location.Vertebra_Disc)
 
 
 def run_poi_pipeline(vert: NII, subreg: NII, poi_path: Path, logger: Logger_Interface = _log):
@@ -301,6 +304,8 @@ def compute_non_centroid_pois(
                 poi, subreg, source_subreg_point_id=Location.Vertebra_Disc, subreg_id=Location.Spinal_Canal_ivd_lvl, add_dense=True
             )
     # Step 3 Compute on individual Vertebras
+    ivd_location = set()
+
     for vert_id in _vert_ids:
         if vert_id >= 39:
             continue
@@ -308,6 +313,7 @@ def compute_non_centroid_pois(
         bb = current_vert.compute_crop()
         current_vert.apply_crop_(bb)
         current_subreg = subreg.apply_crop(bb) * current_vert
+        print(locations)
         for location in locations:
             # TODO IVD STUFF
             if location.value <= 50:
@@ -322,6 +328,9 @@ def compute_non_centroid_pois(
                 Location.Spinal_Canal,
             ]:
                 continue
+            if location in ivd_pois_list:
+                ivd_location.add(location)
+                continue
             if location.value in all_poi_functions:
                 fun = all_poi_functions[location.value]
 
@@ -331,6 +340,9 @@ def compute_non_centroid_pois(
                 fun(poi, current_subreg, vert_id, bb=bb, log=log)
             else:
                 warnings.warn(f"NotImplementedError: {location}", stacklevel=0)
+    # Step 4 IVD points
+    if len(ivd_location) != 0:
+        poi = calculate_IVD_POI(vert, subreg, poi, ivd_location)
 
 
 def _print_prerequisites():
