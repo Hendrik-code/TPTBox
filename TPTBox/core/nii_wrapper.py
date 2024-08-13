@@ -1,5 +1,6 @@
 import traceback
 import warnings
+import zlib
 from collections.abc import Sequence
 from enum import Enum
 from math import ceil, floor
@@ -204,6 +205,10 @@ class NII(NII_Math):
             self.__unpacked = True
         except EOFError as e:
             raise EOFError(f"{self.nii.get_filename()}: {e!s}\nThe file is probably brocken beyond repair, due killing a software during nifty saving.") from None
+        except zlib.error as e:
+            raise zlib.error(f"{self.nii.get_filename()}: {e!s}\nThe file is probably brocken beyond repair, due killing a software during nifty saving.") from None
+        except OSError as e:
+            raise zlib.error(f"{self.nii.get_filename()}: {e!s}\nThe file is probably brocken beyond repair, due killing a software during nifty saving.") from None
     @property
     def nii_abstract(self) -> Nifti1Image|_unpacked_nii:
         if self.__unpacked:
