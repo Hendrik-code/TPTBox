@@ -198,8 +198,8 @@ def n4_bias_field_correction(
         import ants.utils.bias_correction as bc  # pip install antspyx==0.4.2
         from ants.utils.convert_nibabel import from_nibabel, to_nibabel
 
-    except ModuleNotFoundError:
-        raise ModuleNotFoundError("n4 bias field correction uses ants install it with pip install antspyx==0.4.2 a") from None
+    except ModuleNotFoundError as err:
+        raise ModuleNotFoundError("n4 bias field correction uses ants install it with pip install antspyx==0.4.2") from err
         # 5.3 or higher
         import ants
         import ants.ops.bias_correction as bc  # pip install antspyx
