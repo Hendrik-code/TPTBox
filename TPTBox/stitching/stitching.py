@@ -193,8 +193,55 @@ def n4_bias_field_correction(
     weight_mask=None,
     crop=False,
 ):
-    import ants.utils.bias_correction as bc  # pip install antspyx
-    from ants.utils.convert_nibabel import from_nibabel
+    try:
+        import ants.utils.bias_correction as bc  # pip install antspyx
+        from ants.utils.convert_nibabel import from_nibabel, to_nibabel
+
+    except ModuleNotFoundError:
+        # 5.3 or higher
+        # import ants
+        import ants.ops.bias_correction as bc  # pip install antspyx
+
+        def from_nibabel(nib_image):
+            """
+            Converts a given Nifti image into an ANTsPy image
+
+            Parameters
+            ----------
+                img: NiftiImage
+
+            Returns
+            -------
+                ants_image: ANTsImage
+            """
+            ndim = nib_image.ndim
+
+            if ndim < 3:
+                print("Dimensionality is less than 3.")
+                return None
+
+            q_form = nib_image.get_qform()
+            spacing = nib_image.header["pixdim"][1 : ndim + 1]
+
+            origin = np.zeros(ndim)
+            origin[:3] = q_form[:3, 3]
+
+            direction = np.diag(np.ones(ndim))
+            direction[:3, :3] = q_form[:3, :3] / spacing[:3]
+
+            ants_img = ants.from_numpy(data=nib_image.get_fdata(), origin=origin.tolist(), spacing=spacing.tolist(), direction=direction)
+
+            return ants_img
+
+        def to_nibabel(img: "ants.core.ants_image.ANTsImage"):
+            try:
+                from nibabel.nifti1 import Nifti1Image
+            except ModuleNotFoundError as e:
+                raise ModuleNotFoundError(
+                    "Could not import nibabel, for conversion to nibabel. Install nibabel with pip install nibabel"
+                ) from e
+            affine = get_ras_affine(rotation=img.direction, spacing=img.spacing, origin=img.origin)
+            return Nifti1Image(img.numpy(), affine, nib.header)
 
     if convergence is None:
         convergence = {"iters": [50, 50, 50, 50], "tol": 1e-07}
@@ -217,10 +264,10 @@ def n4_bias_field_correction(
         verbose=verbose,
         weight_mask=weight_mask,
     )
-    out_nib = out.to_nibabel()
+    out_nib = to_nibabel(out)
     if crop:
         # Crop to regions that had a normalization applied. Removes a lot of dead space
-        dif = (input_ants - out).to_nibabel()
+        dif = to_nibabel(input_ants - out)
         da = get_array(dif)
         da[da != 0] = 1
         dif = set_array(dif, da)
