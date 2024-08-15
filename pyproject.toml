@@ -2,11 +2,14 @@
 name = "TPTBox"
 version = "0.0.0"
 description = "A Torso Processing Toolbox capable of processing BIDS-compatible datasets, singular niftys, points of interests, segmentations, and much more."
-authors = ["Robert Graf <robert.graf@tum.de>", "Hendrik Möller <hendrik.moeller@tum.de>"]
+authors = [
+    "Robert Graf <robert.graf@tum.de>",
+    "Hendrik Möller <hendrik.moeller@tum.de>",
+]
 repository = "https://github.com/Hendrik-code/TPTBox"
 license = "GNU AFFERO GENERAL PUBLIC LICENSE v3.0, 19 November 2007"
 readme = "README.md"
-packages = [{include = "TPTBox"}]
+packages = [{ include = "TPTBox" }]
 
 [tool.poetry.dependencies]
 python = "^3.10 || ^3.11 || ^3.12"
@@ -23,7 +26,7 @@ scikit-image = "^0.22.0"
 fill-voids = "^2.0.6"
 pyvista = "^0.43.2"
 connected-components-3d = "^3.12.3"
-antspyx = "*"
+antspyx = "4.2.0"
 tqdm = "*"
 
 [tool.poetry.dev-dependencies]
@@ -136,9 +139,10 @@ ignore = [
     "SIM105",
     "TRY003",
     "UP038",
-    "N999","E741",
-    "SIM118", # dictionay keys
-    "N802", # function name lowercase
+    "N999",
+    "E741",
+    "SIM118",  # dictionay keys
+    "N802",    # function name lowercase
     "F811",
 ]
 
@@ -170,7 +174,6 @@ skip-magic-trailing-comma = false
 
 # Enable reformatting of code snippets in docstrings.
 docstring-code-format = true
-
 
 
 # Like Black, automatically detect the appropriate line ending.
