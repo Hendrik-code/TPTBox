@@ -8,6 +8,9 @@ from TPTBox.core.nii_wrapper import to_nii
 from TPTBox.core.vert_constants import DIRECTIONS, Location, Vertebra_Instance
 from TPTBox.spine.snapshot2D.snapshot_modular import Snapshot_Frame, create_snapshot
 
+IVD_MORE_ACCURATE = 15
+VERT_START_COBB = Vertebra_Instance.C2
+
 
 class MoveTo(Enum):
     TOP = auto()
@@ -176,6 +179,7 @@ def compute_angel_between_two_points_(
     vert_id1_mv: MoveTo = MoveTo.CENTER,
     vert_id2_mv: MoveTo = MoveTo.CENTER,
     project_2d=False,
+    use_ivd_direction=False,
 ) -> float | None:
     """
     Computes the 2D and 3D angles between two points in a given anatomical structure,
@@ -228,7 +232,9 @@ def compute_angel_between_two_points_(
         id1, id2 = id2, id1
     # Reorient and rescale the POI data
     poi.reorient_().rescale_()
+    recompute_use_ivd_direction = False
     # Determine direction-specific settings
+    location2 = None
     if direction in ["P", "A"]:
         # Note: inf - The value of the direction does noting
         location = Location.Vertebra_Direction_Posterior
@@ -236,15 +242,40 @@ def compute_angel_between_two_points_(
     elif direction in ["R", "L"]:
         location = Location.Vertebra_Direction_Right
         inv = 1 if direction == "R" else -1
+        if use_ivd_direction:
+            location = Location.Vertebra_Disc_Inferior if id1 > IVD_MORE_ACCURATE else Location.Vertebra_Direction_Right
+            location2 = Location.Vertebra_Disc_Inferior if id2 > IVD_MORE_ACCURATE else Location.Vertebra_Direction_Right
+            recompute_use_ivd_direction = True
     elif direction in ["S", "I"]:
-        location = Location.Vertebra_Direction_Inferior
+        if use_ivd_direction:
+            location = Location.Vertebra_Disc_Inferior if id1 > IVD_MORE_ACCURATE else Location.Vertebra_Direction_Inferior
+            location2 = Location.Vertebra_Disc_Inferior if id2 > IVD_MORE_ACCURATE else Location.Vertebra_Direction_Inferior
+        else:
+            location = Location.Vertebra_Direction_Inferior
         inv = 1 if direction == "I" else -1
     else:
         raise NotImplementedError(f"Direction '{direction}' is not recognized.")
         # Calculate normals for the vertebrae
-
+    if location2 is None:
+        location2 = location
     norm1_vert = _get_norm(poi, id1, vert_id1_mv, location, inv=inv)
-    norm2_vert = _get_norm(poi, id2, vert_id2_mv, location, inv=inv)
+    norm2_vert = _get_norm(poi, id2, vert_id2_mv, location2, inv=inv)
+    if norm1_vert is None or norm2_vert is None:
+        return None
+    if recompute_use_ivd_direction:
+        # Compute right from Post (Vert) + Inferior (Disc)
+        if Location.Vertebra_Disc_Inferior == location:
+            norm1_post = _get_norm(poi, id1, vert_id1_mv, Location.Vertebra_Direction_Posterior)
+            if norm1_post is None:
+                return None
+
+            norm1_vert = np.cross(norm1_vert, norm1_post)
+        if Location.Vertebra_Disc_Inferior == location2:
+            norm2_post = _get_norm(poi, id2, vert_id2_mv, Location.Vertebra_Direction_Posterior)
+            if norm2_post is None:
+                return None
+            norm2_vert = np.cross(norm2_vert, norm2_post)
+
     assert norm1_vert is not None
     assert norm2_vert is not None
     # if _debug_plot is not None:
@@ -330,7 +361,13 @@ def compute_lordosis_and_kyphosis(poi: POI, project_2d=False):
     last_l = _get_last_lumbar(poi)
     poi = poi.copy()
     cervical = compute_angel_between_two_points_(
-        poi, Vertebra_Instance.C2, Vertebra_Instance.C7, "P", MoveTo.TOP, MoveTo.BOTTOM, project_2d
+        poi,
+        Vertebra_Instance.C2,
+        Vertebra_Instance.C7,
+        "P",
+        MoveTo.TOP,
+        MoveTo.BOTTOM,
+        project_2d,
     )
     thoracic = compute_angel_between_two_points_(poi, Vertebra_Instance.T1, last_t, "P", MoveTo.TOP, MoveTo.BOTTOM, project_2d)
     lumbar = compute_angel_between_two_points_(poi, Vertebra_Instance.L1, last_l, "P", MoveTo.TOP, MoveTo.BOTTOM, project_2d)
@@ -341,10 +378,19 @@ def compute_lordosis_and_kyphosis(poi: POI, project_2d=False):
     }
 
 
-def _get_norm(poi: POI, id1, mv: MoveTo, location, inv=1):  # noqa: ARG001
+def _get_norm(poi: POI, id1, mv: MoveTo, location: Location, inv=1):  # noqa: ARG001
     if isinstance(id1, int):
         id1 = Vertebra_Instance(id1)
-    norm1_vert = unit_vector(np.array(poi[id1, 50]) - np.array(poi[id1, location])) * inv
+    subreg = 50
+    if location in [Location.Vertebra_Disc_Inferior, Location.Vertebra_Disc_Superior]:
+        subreg = 100
+    if (id1, subreg) not in poi or (id1, location) not in poi:
+        return None
+    a = np.array(poi[id1, subreg])
+    b = np.array(poi[id1, location])
+    if (a == b).all():
+        return None
+    norm1_vert = unit_vector(a - b) * inv
     # if mix:
     #    # This would mix the angle of two adjacent Vertebra.
     #    if mv == MoveTo.CENTER:
@@ -378,14 +424,29 @@ def _get_last_thoracic(poi: POI):
 
 
 def compute_max_cobb_angle(
-    poi: POI, vertebrae_list=None, vert_id1_mv: MoveTo = MoveTo.TOP, vert_id2_mv: MoveTo = MoveTo.BOTTOM, project_2d=False
+    poi: POI,
+    vertebrae_list=None,
+    vert_id1_mv: MoveTo = MoveTo.TOP,
+    vert_id2_mv: MoveTo = MoveTo.BOTTOM,
+    project_2d=False,
+    use_ivd_direction=False,
 ):
     """
     Calculates the maximum Cobb angle from a list of vertebrae using the points of interest (POI).
 
     The Cobb angle is a measure commonly used to quantify the degree of spinal curvature, particularly for scoliosis.
     This function identifies the maximum Cobb angle by comparing angles between pairs of vertebrae in the specified list.
-
+    You must compute have computed pois in the following structures:
+    Version 1:
+        poi = calc_poi_from_subreg_vert(nii, nii_subreg, subreg_id=[Location.Vertebra_Corpus,Location.Vertebra_Direction_Right])
+        ivd position will be interpolated.
+    Version 2:
+        poi = calc_poi_from_subreg_vert(nii, nii_subreg, subreg_id=[Location.Vertebra_Corpus,Location.Vertebra_Direction_Right,Location.Vertebra_Disc])
+        ivd (Vertebra_Disc) will be computed by the segmentation
+    Version 3 (best):
+        poi = calc_poi_from_subreg_vert(nii, nii_subreg, subreg_id=[Location.Vertebra_Corpus,Location.Vertebra_Direction_Right,Location.Vertebra_Disc,Location.Vertebra_Disc_Superior])
+        ivd (Vertebra_Disc) will be computed by the segmentation
+        + use_ivd_direction = True will use the disc direction and will note if there is a large shift between vertebra without rotation.
     Args:
         poi (POI): The points of interest object containing 3D coordinates for various vertebrae.
         vertebrae_list (list, optional): A list of vertebra instances to consider for Cobb angle calculation.
@@ -423,7 +484,7 @@ def compute_max_cobb_angle(
     if vertebrae_list is None:
         # Define the range of vertebrae to consider (e.g., from T1 to L5)
         vertebrae_list = list(Vertebra_Instance.cervical()) + list(Vertebra_Instance.thoracic()) + list(Vertebra_Instance.lumbar())
-
+        vertebrae_list = vertebrae_list[vertebrae_list.index(VERT_START_COBB) :]
     # Iterate through pairs of adjacent vertebrae
     for i in range(len(vertebrae_list)):
         vert_id1: int = vertebrae_list[i].value
@@ -432,7 +493,16 @@ def compute_max_cobb_angle(
             # Ensure that both vertebrae are present in the POI
             if vert_id1 in poi.keys_region() and vert_id2 in poi.keys_region():
                 # Compute cobblanar angles for both right and left directions
-                angle = compute_angel_between_two_points_(poi, vert_id1, vert_id2, "R", vert_id1_mv, vert_id2_mv, project_2d)
+                angle = compute_angel_between_two_points_(
+                    poi,
+                    vert_id1,
+                    vert_id2,
+                    "R",
+                    vert_id1_mv,
+                    vert_id2_mv,
+                    project_2d,
+                    use_ivd_direction=use_ivd_direction,
+                )
                 if angle is None:
                     continue
                 # Update max_angle if a larger angle is found
@@ -449,6 +519,8 @@ def compute_max_cobb_angle(
         for i in vertebrae_list[vertebrae_list.index(Vertebra_Instance(from_vert)) : vertebrae_list.index(Vertebra_Instance(to_vert)) + 1]:
             try:
                 a = _get_norm(poi, i, vert_id2_mv, Location.Vertebra_Direction_Right, 1)
+                if a is None:
+                    continue
             except KeyError:
                 continue
             cos_new = cosine_distance(a, apex_v)
@@ -465,6 +537,7 @@ def compute_max_cobb_angle_multi(
     out_list=None,
     vert_id1_mv: MoveTo = MoveTo.TOP,
     vert_id2_mv: MoveTo = MoveTo.BOTTOM,
+    use_ivd_direction=False,
 ):
     """
     Identifies multiple Cobb angles along the spine that exceed a given threshold.
@@ -472,7 +545,17 @@ def compute_max_cobb_angle_multi(
     This function calculates Cobb angles for a list of vertebrae and recursively finds multiple
     spinal curvatures that are large enough, as determined by a threshold angle. It is useful for
     detecting and evaluating scoliosis or other spinal deformities with multiple curves.
-
+    You must compute have computed pois in the following structures:
+    Version 1:
+        poi = calc_poi_from_subreg_vert(nii, nii_subreg, subreg_id=[Location.Vertebra_Corpus,Location.Vertebra_Direction_Right])
+        ivd position will be interpolated.
+    Version 2:
+        poi = calc_poi_from_subreg_vert(nii, nii_subreg, subreg_id=[Location.Vertebra_Corpus,Location.Vertebra_Direction_Right,Location.Vertebra_Disc])
+        ivd (Vertebra_Disc) will be computed by the segmentation
+    Version 3 (best):
+        poi = calc_poi_from_subreg_vert(nii, nii_subreg, subreg_id=[Location.Vertebra_Corpus,Location.Vertebra_Direction_Right,Location.Vertebra_Disc,Location.Vertebra_Disc_Inferior])
+        ivd (Vertebra_Disc) will be computed by the segmentation
+        + use_ivd_direction = True will use the disc direction and will note if there is a large shift between vertebra without rotation.
     Args:
         poi (POI): The points of interest object containing 3D coordinates for various vertebrae.
         vertebrae_list (list, optional): A list of vertebra instances to consider for Cobb angle calculation.
@@ -483,6 +566,7 @@ def compute_max_cobb_angle_multi(
             If not provided, an empty list will be created and used.
         vert_id1_mv (MoveTo): Enum indicating the move direction for the first vertebra (default is MoveTo.TOP).
         vert_id2_mv (MoveTo): Enum indicating the move direction for the second vertebra (default is MoveTo.BOTTOM).
+        use_ivd_direction: Uses the IVD direction instead of the Vertebra direction for Lumbar and Thorax region.
 
     Returns:
         list: A list of tuples, each containing:
@@ -505,14 +589,20 @@ def compute_max_cobb_angle_multi(
         Angle: 18.2, From: 2, To: 6, Apex: 4
         Angle: 12.4, From: 7, To: 10, Apex: 8
     """
+
     if out_list is None:
         out_list = []
     if vertebrae_list is None:
         vertebrae_list = list(Vertebra_Instance.cervical()) + list(Vertebra_Instance.thoracic()) + list(Vertebra_Instance.lumbar())
+        vertebrae_list = vertebrae_list[vertebrae_list.index(VERT_START_COBB) :]
     if len(vertebrae_list) <= 2:
         return out_list
     max_angle, from_vert, to_vert, apex = compute_max_cobb_angle(
-        poi, vertebrae_list=vertebrae_list, vert_id1_mv=vert_id1_mv, vert_id2_mv=vert_id2_mv
+        poi,
+        vertebrae_list=vertebrae_list,
+        vert_id1_mv=vert_id1_mv,
+        vert_id2_mv=vert_id2_mv,
+        use_ivd_direction=use_ivd_direction,
     )  # type: ignore
     # split
     if threshold_deg <= max_angle:
@@ -523,10 +613,22 @@ def compute_max_cobb_angle_multi(
         above = vertebrae_list[: vertebrae_list.index(Vertebra_Instance(from_vert))]
         below = vertebrae_list[vertebrae_list.index(Vertebra_Instance(to_vert)) :]
         compute_max_cobb_angle_multi(
-            poi, above, vert_id1_mv=vert_id1_mv, vert_id2_mv=vert_id2_mv, threshold_deg=threshold_deg, out_list=out_list
+            poi,
+            above,
+            vert_id1_mv=vert_id1_mv,
+            vert_id2_mv=vert_id2_mv,
+            threshold_deg=threshold_deg,
+            out_list=out_list,
+            use_ivd_direction=use_ivd_direction,
         )
         compute_max_cobb_angle_multi(
-            poi, below, vert_id1_mv=vert_id1_mv, vert_id2_mv=vert_id2_mv, threshold_deg=threshold_deg, out_list=out_list
+            poi,
+            below,
+            vert_id1_mv=vert_id1_mv,
+            vert_id2_mv=vert_id2_mv,
+            threshold_deg=threshold_deg,
+            out_list=out_list,
+            use_ivd_direction=use_ivd_direction,
         )
 
     return out_list
@@ -647,6 +749,7 @@ def plot_cobb_angle(
     threshold_deg=10,
     vert_id1_mv: MoveTo = MoveTo.TOP,
     vert_id2_mv: MoveTo = MoveTo.BOTTOM,
+    use_ivd_direction=False,
 ):
     """
     Visualizes the cobb angles for a given spinal image by plotting the angle measurements on the image.
@@ -684,24 +787,46 @@ def plot_cobb_angle(
 
     out = []
     text_out = []
-    copps = compute_max_cobb_angle_multi(poi, threshold_deg=threshold_deg, vert_id1_mv=vert_id1_mv, vert_id2_mv=vert_id2_mv)
+    copps = compute_max_cobb_angle_multi(
+        poi,
+        threshold_deg=threshold_deg,
+        vert_id1_mv=vert_id1_mv,
+        vert_id2_mv=vert_id2_mv,
+        use_ivd_direction=use_ivd_direction,
+    )
     for max_angle, from_vert, to_vert, apex in copps:
         if from_vert is not None:
             for id1, mv in zip([from_vert, to_vert], [vert_id1_mv, vert_id2_mv], strict=False):
                 c = mv.get_location(id1, poi)
-                a = _get_norm(poi, id1, mv, Location.Vertebra_Direction_Right)
-                print(a, id1, mv, c)
+
+                if use_ivd_direction and id1 > IVD_MORE_ACCURATE:
+                    norm1_post = _get_norm(poi, id1, mv, Location.Vertebra_Direction_Posterior)
+                    a = _get_norm(poi, id1, mv, Location.Vertebra_Disc_Inferior)
+                    a = np.cross(a, norm1_post)
+                else:
+                    a = _get_norm(poi, id1, mv, Location.Vertebra_Direction_Right)
+
+                # print(a, id1, mv, c)
 
                 assert a is not None
                 out.append((apex, c, (-a[2] * line_len, a[1] * line_len)))
                 out.append((apex, c, (a[2] * line_len, -a[1] * line_len)))
+                # a = _get_norm(poi, id1, mv, Location.Vertebra_Disc_Inferior)
+                # out.append((apex, c, (a[2] * line_len, -a[1] * line_len)))
         if apex is not None:
             cord = poi[apex, 50]
             s = f"copp angle: {max_angle:.1f}° {Vertebra_Instance(from_vert)} - {Vertebra_Instance(to_vert)}"
             text_out.append((apex, (s, 25, cord[1])))
         poi.info["line_segments_cor"] = out + poi.info.get("line_segments_cor", [])
         poi.info["text_cor"] = text_out + poi.info.get("text_cor", [])
-    frame = Snapshot_Frame(img, seg, centroids=poi, sagittal=False, coronal=True, show_these_subreg_poi=[100])
+    frame = Snapshot_Frame(
+        img,
+        seg,
+        centroids=poi,
+        sagittal=False,
+        coronal=True,
+        show_these_subreg_poi=[100],
+    )
     if img_path is not None:
         create_snapshot(img_path, [frame])
     return copps, frame
@@ -761,7 +886,15 @@ def plot_cobb_and_lordosis_and_kyphosis(
         >>> print(lordosis_kyphosis)
         {'cervical_lordosis': 35.2, 'thoracic_kyphosis': 41.5, 'lumbar_lordosis': 48.1}
     """
-    out_cobb, frame1 = plot_cobb_angle(None, poi, img, seg, line_len=line_len, threshold_deg=threshold_deg)
+    out_cobb, frame1 = plot_cobb_angle(
+        None,
+        poi,
+        img,
+        seg,
+        line_len=line_len,
+        threshold_deg=threshold_deg,
+        use_ivd_direction=True,
+    )
     out_lak, frame2 = plot_compute_lordosis_and_kyphosis(None, poi, img, seg, line_len=line_len)
     if img_path is not None:
         create_snapshot(img_path, [frame1, frame2])
@@ -770,6 +903,7 @@ def plot_cobb_and_lordosis_and_kyphosis(
 
 if __name__ == "__main__":
     from TPTBox import POI, calc_poi_from_subreg_vert
+    from TPTBox.spine.statistics.ivd_pois import compute_fake_ivd
 
     # poi = POI.load(
     #    "/DATA/NAS/datasets_processed/CT_spine/dataset-Cancer/derivatives_spineps/sub-mc0034/ses-20240312/sub-mc0034_ses-20240312_sequ-206_mod-ct_seg-spine_msk.nii.gz"
@@ -786,26 +920,60 @@ if __name__ == "__main__":
         "/DATA/NAS/datasets_processed/CT_spine/dataset-Cancer/rawdata/sub-mc0034/ses-20240312/sub-mc0034_ses-20240312_sequ-206_ct.nii.gz",
         False,
     )
-    poi = calc_poi_from_subreg_vert(nii, nii_subreg, subreg_id=Location.Vertebra_Direction_Right)
-    print(poi.extract_vert(24))
+    poi = calc_poi_from_subreg_vert(nii, nii_subreg, subreg_id=[Location.Vertebra_Direction_Right])
+
+    nii = compute_fake_ivd(nii, nii_subreg, poi=poi)
+    nii.save("/DATA/NAS/datasets_processed/CT_spine/dataset-Cancer/derivatives_spineps/sub-mc0034/ses-20240312/test.nii.gz")
+    print(nii.unique())
+    poi = calc_poi_from_subreg_vert(
+        nii,
+        nii_subreg,
+        subreg_id=[
+            Location.Vertebra_Direction_Right,
+            Location.Vertebra_Disc_Inferior,
+            Location.Vertebra_Disc,
+        ],
+    )
+    idx = 23
+
+    print(poi.extract_vert(idx))
     # print(_get_norm(poi.rescale(), 24, None, Location.Vertebra_Direction_Right))
-    plot_compute_lordosis_and_kyphosis("test_2.png", poi, nii)
-    plot_cobb_angle("test.png", poi, nii2, nii)
+    # plot_compute_lordosis_and_kyphosis("test_2.png", poi, nii)
+    plot_cobb_angle("test.png", poi, nii2, nii, use_ivd_direction=True)
+    plot_cobb_angle("test_old.png", poi, nii2, nii, use_ivd_direction=False)
     from TPTBox.core.poi_fun.ray_casting import add_ray_to_img
 
     cor, _ = poi.fit_spline(location=50, vertebra=False)
     print(nii.shape)
-    print(poi[24, 50], unit_vector(np.array(poi[24, 50]) - np.array(poi[24, Location.Vertebra_Direction_Right])))
+    print(
+        poi[idx, 50],
+        unit_vector(np.array(poi[idx, 50]) - np.array(poi[idx, Location.Vertebra_Direction_Right])),
+    )
     a = add_ray_to_img(
-        poi[24, 50], np.array(poi[24, 50]) - np.array(poi[24, Location.Vertebra_Direction_Right]), nii, True, value=99, dilate=2
+        poi[idx, 50],
+        -np.array(poi[idx, 50]) + np.array(poi[idx, Location.Vertebra_Direction_Right]),
+        nii,
+        True,
+        value=99,
+        dilate=2,
     )
     assert a is not None
     a = add_ray_to_img(
-        poi[24, 50], np.array(poi[24, 50]) - np.array(poi[24, Location.Vertebra_Direction_Posterior]), a, True, value=100, dilate=2
+        poi[idx, 50],
+        -np.array(poi[idx, 50]) + np.array(poi[idx, Location.Vertebra_Direction_Posterior]),
+        a,
+        True,
+        value=100,
+        dilate=2,
     )
     assert a is not None
     a = add_ray_to_img(
-        poi[24, 50], np.array(poi[24, 50]) - np.array(poi[24, Location.Vertebra_Direction_Inferior]), a, True, value=101, dilate=2
+        poi[idx, 100],
+        -np.array(poi[idx, 100]) + np.array(poi[idx, Location.Vertebra_Disc_Inferior]),
+        a,
+        True,
+        value=101,
+        dilate=2,
     )
     assert a is not None
     spline = a.copy() * 0

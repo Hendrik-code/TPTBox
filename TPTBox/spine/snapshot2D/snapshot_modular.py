@@ -1,5 +1,6 @@
 import copy
 import warnings
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
@@ -525,7 +526,7 @@ def plot_cor_centroids(
             axs.add_patch(FancyArrow(v[2] * zms[2], v[0] * zms[0], c, d, color=cmap(color - 1 % LABEL_MAX % cmap.N)))
     if "text_cor" in ctd.info:
         for color, x in ctd.info["text_cor"]:
-            if len(color) == 2:
+            if isinstance(color, Sequence) and len(color) == 2:
                 color, curve_location = color  # noqa: PLW2901
             if isinstance(x, str) or len(x) == 1:
                 (text) = x

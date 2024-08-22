@@ -6,7 +6,7 @@ from scipy.interpolate import RegularGridInterpolator
 
 from TPTBox import NII, POI, Logger_Interface, Print_Logger
 from TPTBox.core.poi_fun._help import sacrum_w_o_arcus, to_local_np
-from TPTBox.core.poi_fun.pixel_based_point_finder import _get_direction, get_extreme_point_by_vert_direction
+from TPTBox.core.poi_fun.pixel_based_point_finder import get_direction, get_extreme_point_by_vert_direction
 from TPTBox.core.poi_fun.ray_casting import max_distance_ray_cast_convex_poi, shift_point
 from TPTBox.core.vert_constants import DIRECTIONS, Location
 
@@ -190,10 +190,10 @@ def strategy_ligament_attachment_point_flava(
     if vert_id in sacrum_w_o_arcus:
         return
     try:
-        normal_vector1 = _get_direction("S", poi, vert_id)  # / np.array(poi.zoom)
+        normal_vector1 = get_direction("S", poi, vert_id)  # / np.array(poi.zoom)
         v1 = normal_vector1 / norm(normal_vector1)
 
-        normal_vector2 = _get_direction("A", poi, vert_id)  # / np.array(poi.zoom)
+        normal_vector2 = get_direction("A", poi, vert_id)  # / np.array(poi.zoom)
         v2 = normal_vector2 / norm(normal_vector2)
     except KeyError:
         return

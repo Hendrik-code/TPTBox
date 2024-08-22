@@ -4,7 +4,7 @@ from scipy.interpolate import RegularGridInterpolator
 
 from TPTBox import NII, POI, Print_Logger, Vertebra_Instance
 from TPTBox.core.poi_fun._help import sacrum_w_o_arcus, to_local_np
-from TPTBox.core.poi_fun.pixel_based_point_finder import _get_direction
+from TPTBox.core.poi_fun.pixel_based_point_finder import get_direction
 from TPTBox.core.vert_constants import COORDINATE, DIRECTIONS, Location
 from TPTBox.logger.log_file import Logger_Interface
 
@@ -184,7 +184,7 @@ def shift_point(
         factor *= (12 - vert_id) / 11 + 1
     vertebra_width = np.linalg.norm(sup_articular_right - sup_articular_left)
     shift = vertebra_width / factor
-    normal_vector = _get_direction(direction, poi, vert_id)  # / np.array(poi.zoom)
+    normal_vector = get_direction(direction, poi, vert_id)  # / np.array(poi.zoom)
     normal_vector = normal_vector / norm(normal_vector)
     start_point_np = to_local_np(start_point, bb, poi, vert_id, log) if isinstance(start_point, Location) else start_point
     if start_point_np is None:
@@ -210,7 +210,7 @@ def max_distance_ray_cast_convex_poi(
     # Compute a normal vector, that defines the plane direction
     if isinstance(normal_vector_points, str):
         try:
-            normal_vector = _get_direction(normal_vector_points, poi, vert_id)
+            normal_vector = get_direction(normal_vector_points, poi, vert_id)
         except KeyError:
             if vert_id not in sacrum_w_o_arcus:
                 log.on_fail(f"region={vert_id},DIRECTIONS={normal_vector_points} is missing")

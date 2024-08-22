@@ -1,16 +1,15 @@
-from collections.abc import Sequence
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np
 from sklearn.decomposition import PCA
 from tqdm import tqdm
 
-from TPTBox import Print_Logger, Vertebra_Instance
+from TPTBox import Print_Logger, Vertebra_Instance, calc_poi_from_subreg_vert
 from TPTBox.core.nii_wrapper import NII
 from TPTBox.core.poi import POI
 from TPTBox.core.poi_fun._help import paint_into_NII, to_local_np
-from TPTBox.core.poi_fun.ray_casting import add_ray_to_img, max_distance_ray_cast_convex, unit_vector
-from TPTBox.core.vert_constants import DIRECTIONS, Location
+from TPTBox.core.poi_fun.ray_casting import max_distance_ray_cast_convex
+from TPTBox.core.vert_constants import Location
 
 _log = Print_Logger()
 
@@ -70,97 +69,126 @@ def _crop(i: int, verts_ids: list[int], vert_full: NII, spine_full: NII, out: np
     return i, verts_ids, vert, spine, out, crop, next_id
 
 
-def _process_vertebra(
-    i: int, verts_ids: list[int], vert: NII, spine: NII, out: np.ndarray
-) -> tuple[np.ndarray, tuple[slice, slice, slice]] | None:
-    """Process a single vertebra index."""
-    result = _crop(i, verts_ids, vert, spine, out)
-    if result is None:
+def _process_vertebra_A(idx, vert: NII, spine: NII, next_id, poi) -> NII | None:
+    from TPTBox.spine.statistics import endplate_extraction
+
+    try:
+        a = endplate_extraction(idx, vert, spine, poi)
+        b = endplate_extraction(next_id.value, vert, spine, poi)
+        if a is None or b is None:
+            return None
+        a = a.extract_label(Location.Vertebral_Body_Endplate_Inferior)
+        b = b.extract_label(Location.Vertebral_Body_Endplate_Superior)
+    except ValueError:
         return None
-    i, verts_ids, vert, spine, out, crop, next_id = result
-    above = vert.extract_label(i) * spine
+    ivd: NII = (a + b).calc_convex_hull(None)
+    ivd[spine != 0] = 0
+    ivd = ivd.filter_connected_components(1, max_count_component=1, connectivity=1)
+    ivd = ivd * (100 + idx)
+    return ivd
+
+
+def _process_vertebra_B(idx: int, vert: NII, spine: NII, next_id):
+    spine = spine.extract_label([49, 50, 26])
+    spine_full = spine.extract_label([49, 50, 26, 41, 43, 44])
+    spine_full = spine_full.calc_convex_hull("S")
+    above = vert.extract_label(idx) * spine
     below = vert.extract_label(next_id.value) * spine
     a = above.erode_msk(2, verbose=False) + below
     hull = a.calc_convex_hull("A")
-    hull = hull.erode_msk(1, verbose=False).dilate_msk(1, verbose=False)
+    hull = hull.erode_msk(2, verbose=False).dilate_msk(1, verbose=False)
     hull[a != 0] = 0
     b = above + below.erode_msk(2, verbose=False)
     hull_b = b.calc_convex_hull("A")
-    hull_b = hull_b.erode_msk(1, verbose=False).dilate_msk(1, verbose=False)
+    hull_b = hull_b.erode_msk(2, verbose=False).dilate_msk(1, verbose=False)
     hull_b[b != 0] = 0
     hull = hull * hull_b
     hull = hull.filter_connected_components(1, max_count_component=1)
-    hull = hull.dilate_msk(1, verbose=False) * (-spine + 1)
-    out_c = out[crop]
-    out_c[out_c == 0] = hull[out_c == 0] * (100 + i)
-    return out_c, crop
+    hull = hull.dilate_msk(1, verbose=False) * (-spine_full + 1)
+    s2 = hull.sum()
+    for j in range(2, 0, -1):
+        hull2 = hull.copy()
+        while True:
+            hull2 = hull2.erode_msk(j, verbose=False).filter_connected_components(1, max_count_component=1, connectivity=1)
+            hull2 = hull2 * (-spine_full + 1)
+            hull2 = hull2.dilate_msk(j, verbose=False)
+            s = hull2.sum()
+            if s == s2:
+                if 1 in hull2.unique():
+                    hull *= hull2
+                break
+            s2 = s
+    hull = hull.filter_connected_components(1, max_count_component=1, connectivity=1)
+    # hull = hull.dilate_msk(1, verbose=False) * (-spine_full + 1)
+    # out_c = out[crop]
+    # out_c[out_c == 0] = hull[out_c == 0] * (100 + idx)
+    return hull * (100 + idx)
 
 
-def compute_fake_ivd(vert_full: NII, subreg_full: NII):
+def _process_vertebra(
+    idx: int, verts_ids: list[int], vert: NII, spine: NII, poi: POI, out: np.ndarray
+) -> tuple[NII, tuple[slice, slice, slice]] | None:
+    """Process a single vertebra index."""
+    # POI is not cropped, as we only need the vertebra direction
+    result = _crop(idx, verts_ids, vert, spine, out)
+    if result is None:
+        return None
+    idx, verts_ids, vert, spine, out, crop, next_id = result
+    ivd_1 = _process_vertebra_A(idx, vert, spine, next_id, poi)
+    ivd_2 = _process_vertebra_B(idx, vert, spine, next_id)
+    if ivd_1 is not None:
+        ivd_2[ivd_2 == 0] = ivd_1[ivd_2 == 0]
+    return ivd_2, crop
+
+
+def compute_fake_ivd(vert_full: NII, subreg_full: NII, poi: POI):
     verts_ids: list[int] = vert_full.unique()
-    spine_full = subreg_full.extract_label([49, 50, 26])
-    out = vert_full.get_array()
+    crop = vert_full.compute_crop(dist=2)
+    vert_full_cropped = vert_full.apply_crop(crop)
+    subreg_full = subreg_full.apply_crop(crop)
+
+    out = vert_full_cropped.get_array()
 
     with ProcessPoolExecutor() as executor:
-        futures = {executor.submit(_process_vertebra, i, verts_ids, vert_full, spine_full, out): i for i in vert_full.unique()}
+        futures = {
+            executor.submit(
+                _process_vertebra,
+                i,
+                verts_ids,
+                vert_full_cropped,
+                subreg_full,
+                poi,
+                out,
+            ): i
+            for i in vert_full.unique()
+        }
 
-        for future in tqdm(as_completed(futures), total=len(futures)):
+        for future in tqdm(as_completed(futures), total=len(futures), desc="add artifical IVD to seg"):
             result = future.result()
             if result is not None:
                 out_c, slices = result
+                out_c = out_c.get_array()
                 out[slices][out_c != 0] = out_c[out_c != 0]
-
-    return vert_full.set_array(out)
-
-
-def compute_fake_ivd_old(vert_full: NII, subreg_full: NII):
-    from tqdm import tqdm
-
-    vert_full = vert_full.copy()
-    verts_ids: list[int] = vert_full.unique()
-    spine_full = subreg_full.extract_label([49, 50, 26])
-    out = vert_full.get_array()
-    print(verts_ids)
-    for i in tqdm(vert_full.unique()):
-        if i >= 100:
-            continue
-        if i + 100 in verts_ids:
-            continue
-
-        next_id = Vertebra_Instance(i).get_next_poi(verts_ids)
-        if next_id is None:
-            continue
-        crop = vert_full.extract_label([i, next_id.value]).compute_crop(dist=3)
-        vert = vert_full.apply_crop(crop)
-        spine = spine_full.apply_crop(crop)
-        above = vert.extract_label(i) * spine
-        below = vert.extract_label(next_id.value) * spine
-        a = above.erode_msk(2, verbose=False) + below
-        hull = a.calc_convex_hull("A")  # - a
-        hull = hull.erode_msk(1, verbose=False).dilate_msk(1, verbose=False)
-        hull[a != 0] = 0
-        b = above + below.erode_msk(2, verbose=False)
-        hull_b = b.calc_convex_hull("A")  # - a
-        hull_b = hull_b.erode_msk(1, verbose=False).dilate_msk(1, verbose=False)
-        hull_b[b != 0] = 0
-        hull = hull * hull_b
-        hull = hull.filter_connected_components(1, max_count_component=1)
-        hull = hull.dilate_msk(1, verbose=False) * (-spine + 1)
-        out_c = out[crop]
-        out_c[out_c == 0] = hull[out_c == 0] * (100 + i)
-    return vert.set_array(out)
+    vert_full[crop] = out
+    return vert_full
 
 
 def calculate_IVD_POI(vert: NII, subreg: NII, poi: POI, ivd_location: set[Location] | None = None):
     if ivd_location is None:
         ivd_location = {Location.Vertebra_Disc_Superior, Location.Vertebra_Disc}
     # Note: currently we always need point 100, so it is computed if any Location is in ivd_location
-    from TPTBox import calc_poi_from_subreg_vert
 
     if len(ivd_location) == 0:
         return poi
     if 100 not in subreg.unique():
-        vert = compute_fake_ivd(vert, subreg)
+        if Location.Vertebra_Direction_Inferior.value not in poi.keys_subregion():
+            poi = calc_poi_from_subreg_vert(
+                vert,
+                subreg,
+                extend_to=poi,
+                subreg_id=Location.Vertebra_Direction_Inferior.value,
+            )
+        vert = compute_fake_ivd(vert, subreg, poi=poi)
         subreg[vert >= 100] = 100
 
     calc_poi_from_subreg_vert(vert, subreg, subreg_id=100, extend_to=poi)
