@@ -897,8 +897,7 @@ def _to_labels(arr: np.ndarray, labels: LABEL_REFERENCE = None) -> Sequence[int]
 def _generate_binary_structure(n_dim: int, connectivity: int, kernel_size: int = 3):
     assert kernel_size >= 3, f"kernel_size must be >= 3, got {kernel_size}"
     assert kernel_size % 2 == 1, f"kernel_size must be an odd number, got {kernel_size}"
-    if connectivity < 1:
-        connectivity = 1
+    connectivity = max(connectivity, 1)
     kernel_delta = (kernel_size - 3) // 2
     if n_dim < 1:
         return np.array(True, dtype=bool)

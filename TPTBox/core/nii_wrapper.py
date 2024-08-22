@@ -808,11 +808,11 @@ class NII(NII_Math):
     def normalize_to_range_(self, min_value: int = 0, max_value: int = 1500, verbose:logging=True):
         assert not self.seg
         mi, ma = self.min(), self.max()
-        self += -mi + min_value  # min = 0
+        self += -mi + min_value  # min = 0  # noqa: PLW0642
         self_dtype = self.dtype
         max_value2 = ma
         if max_value2 > max_value:
-            self *= max_value / max_value2
+            self *= max_value / max_value2  # noqa: PLW0642
             self.set_dtype_(self_dtype)
         log.print(f"Shifted from range {mi, ma} to range {self.min(), self.max()}", verbose=verbose)
 
