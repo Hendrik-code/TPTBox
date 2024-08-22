@@ -6,7 +6,7 @@ from scipy.spatial.distance import cdist
 
 from TPTBox import NII, POI, Logger_Interface, Print_Logger
 from TPTBox.core.poi_fun._help import to_local_np
-from TPTBox.core.poi_fun.vertebra_direction import _get_direction, _get_sub_array_by_direction, get_vert_direction_matrix
+from TPTBox.core.poi_fun.vertebra_direction import _get_sub_array_by_direction, get_direction, get_vert_direction_matrix
 from TPTBox.core.vert_constants import DIRECTIONS, Location
 
 _log = Print_Logger()
@@ -112,7 +112,7 @@ def ray_cast_pixel_level_from_poi(
 
     # Compute a normal vector, that defines the plane direction
     if isinstance(normal_vector_points, str):
-        normal_vector = _get_direction(normal_vector_points, poi, vert_id)  # / np.array(poi.zoom)
+        normal_vector = get_direction(normal_vector_points, poi, vert_id)  # / np.array(poi.zoom)
         normal_vector = normal_vector / norm(normal_vector)
     else:
         try:
@@ -145,8 +145,10 @@ def get_extreme_point_by_vert_direction(poi: POI, region: NII, vert_id, directio
         Uses `_get_sub_array_by_direction` internally.
     """
     direction_: Sequence[DIRECTIONS] = direction if isinstance(direction, Sequence) else (direction,)  # type: ignore
-
-    to_reference_frame, from_reference_frame = get_vert_direction_matrix(poi, vert_id=vert_id)
+    try:
+        to_reference_frame, from_reference_frame = get_vert_direction_matrix(poi, vert_id=vert_id)
+    except KeyError:
+        return None
     pc = np.stack(np.where(region.get_array() == 1))
     cords = to_reference_frame @ pc  # 3,n; 3 = P,I,R of vert
     a = [_get_sub_array_by_direction(d, cords) for d in direction_]

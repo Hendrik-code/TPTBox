@@ -2,10 +2,7 @@ import warnings
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-import numpy as np
-
 from TPTBox import NII, POI, Logger_Interface, Print_Logger, Vertebra_Instance, calc_poi_from_subreg_vert
-from TPTBox.core.poi_fun.ivd_pois import calculate_IVD_POI
 from TPTBox.core.poi_fun.strategies import (
     strategy_extreme_points,
     strategy_find_corner,
@@ -14,7 +11,8 @@ from TPTBox.core.poi_fun.strategies import (
     strategy_shifted_line_cast,
 )
 from TPTBox.core.poi_fun.vertebra_direction import calc_center_spinal_cord, calc_orientation_of_vertebra_PIR
-from TPTBox.core.vert_constants import Location, _plane_dict, vert_directions
+from TPTBox.core.vert_constants import Location, vert_directions
+from TPTBox.spine.statistics import calculate_IVD_POI
 
 _log = Print_Logger()
 all_poi_functions: dict[int, "Strategy_Pattern"] = {}
@@ -233,7 +231,7 @@ Strategy_Computed_Before(L.Dens_axis,L.Vertebra_Direction_Inferior)
 Strategy_Computed_Before(L.Spinal_Canal_ivd_lvl,L.Vertebra_Disc,L.Vertebra_Corpus,L.Dens_axis)
 Strategy_Computed_Before(L.Spinal_Cord,L.Vertebra_Disc,L.Vertebra_Corpus,L.Dens_axis)
 Strategy_Computed_Before(L.Spinal_Canal,L.Vertebra_Corpus)
-
+Strategy_Computed_Before(L.Vertebra_Disc_Inferior,L.Vertebra_Disc_Inferior)
 
 # fmt: on
 def compute_non_centroid_pois(  # noqa: C901
@@ -313,7 +311,6 @@ def compute_non_centroid_pois(  # noqa: C901
         bb = current_vert.compute_crop()
         current_vert.apply_crop_(bb)
         current_subreg = subreg.apply_crop(bb) * current_vert
-        print(locations)
         for location in locations:
             # TODO IVD STUFF
             if location.value <= 50:

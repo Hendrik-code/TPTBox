@@ -153,7 +153,7 @@ def calc_orientation_of_vertebra_PIR(
                 _log.on_fail(f"calc_orientation_of_vertebra_PIR {vert_id=} - KeyError=", e)
 
     # if make_thicker:
-    ret.remove_centroid(*ret.extract_subregion(subreg_id).keys())
+    ret.remove(*ret.extract_subregion(subreg_id).keys())
 
     if spine_plot_path is not None:
         make_spine_plot(ret, body_spline, vert, spine_plot_path)
@@ -190,7 +190,7 @@ def _get_sub_array_by_direction(d: DIRECTIONS, cords: np.ndarray) -> np.ndarray:
         never_called(d)
 
 
-def _get_direction(d: DIRECTIONS, poi: POI, vert_id: int) -> np.ndarray:
+def get_direction(d: DIRECTIONS, poi: POI, vert_id: int) -> np.ndarray:
     """Get the sub-array of coordinates along a specified direction.
     cords must be in PIR direction
     Returns:

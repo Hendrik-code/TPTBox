@@ -544,6 +544,21 @@ class Abstract_POI(Has_Affine):
         return self.remove_centroid(*label, inplace=True)
 
     def remove_centroid(self, *label: tuple[int, int], inplace=False):
+        import warnings
+
+        warnings.warn("remove_centroid id deprecated use remove instead", stacklevel=5)  # TODO remove in version 1.0
+
+        obj: Self = self.copy() if inplace is False else self
+        for loc in label:
+            if isinstance(loc, Location):
+                loc = loc.value  # noqa: PLW2901
+            obj.centroids.pop(loc, None)
+        return obj
+
+    def remove_(self, *label: tuple[int, int]):
+        return self.remove(*label, inplace=True)
+
+    def remove(self, *label: tuple[int, int], inplace=False):
         obj: Self = self.copy() if inplace is False else self
         for loc in label:
             if isinstance(loc, Location):
@@ -648,7 +663,7 @@ class Abstract_POI(Has_Affine):
 
         assert self.is_global == target_point.is_global
         if not keep_zoom and not self.is_global:
-            self = self.rescale((1, 1, 1), verbose=False)  # type: ignore
+            self = self.rescale((1, 1, 1), verbose=False)  # type: ignore  # noqa: PLW0642
         if not self.is_global:
             if target_point.zoom != self.zoom or target_point.shape != self.zoom:
                 target_point = target_point.resample_from_to(self)  # type: ignore
@@ -663,6 +678,16 @@ class Abstract_POI(Has_Affine):
             distance = ((c[0] - x) ** 2 + (c[1] - y) ** 2 + (c[2] - z) ** 2) ** 0.5
             distances[(region, subregion)] = float(distance)
         return distances
+
+    def calculate_distances_poi_two_locations(self, a: Location | int, b: Location | int, keep_zoom=False) -> dict[int, float]:
+        if isinstance(a, Enum):
+            a = a.value
+        if isinstance(b, Enum):
+            b = b.value
+        p1 = self.extract_subregion(a)
+        p2 = self.extract_subregion(b).map_labels(label_map_subregion={b: a})
+        out = p2.calculate_distances_poi(p1, keep_zoom=keep_zoom)
+        return {a: c for (a, _), c in out.items()}
 
     def join_left(self, pois: Self, inplace=False, _right_join=False) -> Self:
         """
