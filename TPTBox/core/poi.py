@@ -1043,7 +1043,7 @@ def load_poi(ctd_path: POI_Reference, verbose=True) -> POI:  # noqa: ARG001
     format_ = dict_list[0].get("format", None)
     origin = dict_list[0].get("origin", None)
     origin = tuple(origin) if origin is not None else None
-    rotation = dict_list[0].get("rotation", None)
+    rotation: ROTATION = dict_list[0].get("rotation", None)
     info = {k: v for k, v in dict_list[0].items() if k not in ctd_info_blacklist}
 
     format_ = format_key2value[format_] if format_ is not None else None
