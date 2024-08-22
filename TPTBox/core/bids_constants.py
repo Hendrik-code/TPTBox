@@ -35,6 +35,7 @@ formats = [
     "R2star",
     "radiomics",
     "MPR",  # Rapid gradient-echo (MP RAGE) sampling
+    "stat",
 ]
 formats_relaxed = [*formats, "t2", "t1", "t2c", "t1c", "cta", "mr", "snapshot", "t1dixon"]
 # Recommended writing style: T1c, T2c; This list is not official and can be extended.
@@ -54,7 +55,7 @@ formats_relaxed = [*formats, "t2", "t1", "t2c", "t1c", "cta", "mr", "snapshot", 
 # micr (microscopy)
 
 
-file_types = ["nii.gz", "json", "png", "jpg", "tsv", "backup", "ply", "npz", "log", "txt", "stl", "csv", "subvar", "pkl"]
+file_types = ["nii.gz", "json", "png", "jpg", "tsv", "backup", "ply", "npz", "log", "txt", "stl", "csv", "subvar", "pkl", "xlsx"]
 # Description see: https://bids-specification.readthedocs.io/en/stable/99-appendices/09-entities.html
 
 # Order of Entities defines order of file naming
