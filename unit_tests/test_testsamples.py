@@ -78,12 +78,11 @@ class Test_testsamples(unittest.TestCase):
 
         self.assertFalse(Path(td).exists() and not keep_images)
 
-    def make_POIs(self, vert_nii: NII, subreg_nii: NII, vert_id: int, ignore_list: list[Location]):
-        n = 5
-
+    def make_POIs(self, vert_nii: NII, subreg_nii: NII, vert_id: int, ignore_list: list[Location], locs: None | list[Location] = None, n=5):
         for i in range(n):
-            locs = [l for l in Location if l not in ignore_list and random.random() < (i + 1) / n * 3]
-            poi = calc_poi_from_subreg_vert(vert_nii, subreg_nii, subreg_id=locs, verbose=False).extract_vert(vert_id)
+            if locs is None:
+                locs = [l for l in Location if l not in ignore_list and random.random() < (i + 1) / n * 3]
+            poi = calc_poi_from_subreg_vert(vert_nii, subreg_nii, subreg_id=locs, verbose=False, _print_phases=True).extract_vert(vert_id)
             for l in locs:
                 self.assertIn((vert_id, l.value), poi)
             poi.assert_affine(
@@ -102,15 +101,12 @@ class Test_testsamples(unittest.TestCase):
             Location.Vertebra_Corpus_border,
             Location.Dens_axis,
             Location.Unknown,
-            Location.Vertebra_Disc_Superior,
-            Location.Vertebra_Disc_Inferior,
             Location.Endplate,
             Location.Spinal_Cord,
             Location.Spinal_Canal,
             Location.Spinal_Canal_ivd_lvl,
             Location.Vertebral_Body_Endplate_Superior,
             Location.Vertebral_Body_Endplate_Inferior,
-            Location.Vertebra_Disc,
             Location.Rib_Left,
             Location.Rib_Right,
         ]
@@ -129,8 +125,6 @@ class Test_testsamples(unittest.TestCase):
             Location.Dens_axis,
             Location.Unknown,
             Location.Spinal_Cord,
-            Location.Vertebra_Disc_Superior,
-            Location.Vertebra_Disc_Inferior,
             Location.Endplate,
             Location.Vertebral_Body_Endplate_Superior,
             Location.Vertebral_Body_Endplate_Inferior,
@@ -138,6 +132,12 @@ class Test_testsamples(unittest.TestCase):
             Location.Rib_Right,
         ]
         self.make_POIs(vert_nii, subreg_nii, label, ignore_list)
+
+    def test_POIs_MR_disc(self):
+        _, subreg_nii, vert_nii, label = get_test_mri()
+
+        locs = [Location.Vertebra_Disc_Superior, Location.Vertebra_Disc_Inferior]
+        self.make_POIs(vert_nii, subreg_nii, label, [], locs, n=1)
 
     def test_pad_crop(self):
         for _, _, vert_nii, label in [get_test_mri(), get_test_ct()]:
