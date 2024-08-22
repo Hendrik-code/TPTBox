@@ -24,15 +24,18 @@ matplotlib = "^3.8.2"
 dill = "^0.3.7"
 scikit-image = "^0.22.0"
 fill-voids = "^2.0.6"
-pyvista = "^0.43.2"
 connected-components-3d = "^3.12.3"
-antspyx = "0.4.2"
 tqdm = "*"
+joblib = "*"
+scikit-learn = "*"
+antspyx = "0.4.2"
 
 [tool.poetry.dev-dependencies]
 pytest = "^7.4.4"
 vtk = "*"
 pre-commit = "*"
+pyvista = "^0.43.2"
+
 
 [build-system]
 requires = ["poetry-core>=1.0.0", "poetry-dynamic-versioning>=1.0.0,<2.0.0"]

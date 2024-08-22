@@ -1,3 +1,4 @@
+import typing
 from collections.abc import Sequence
 from enum import Enum
 from typing import TYPE_CHECKING, Literal, NoReturn
@@ -32,7 +33,7 @@ LABEL_MAP = dict[int | str, int | str] | dict[str, str] | dict[int, int]
 LABEL_REFERENCE = int | Sequence[int] | None
 
 if TYPE_CHECKING:
-    from TPTBox import POI
+    from TPTBox import NII, POI
 _plane_dict: dict[DIRECTIONS, str] = {
     "S": "ax",
     "I": "ax",
@@ -195,8 +196,8 @@ class Vertebra_Instance(Abstract_lvl):
     def order_dict(cls) -> dict[int, int]:
         return {a.value: e for e, a in enumerate(cls.order())}
 
-    def get_next_poi(self, poi: "POI"):
-        r = poi.keys_region()
+    def get_next_poi(self, poi: typing.Union["POI", "NII", list[int]]):
+        r = poi if isinstance(poi, list) else poi.keys_region() if hasattr(poi, "keys_region") else poi.unique()  # type: ignore
         o = self.order()
         idx = o.index(self)
         for vert in o[idx + 1 :]:
@@ -204,8 +205,8 @@ class Vertebra_Instance(Abstract_lvl):
                 return vert
         return None
 
-    def get_previous_poi(self, poi: "POI"):
-        r = poi.keys_region()
+    def get_previous_poi(self, poi: typing.Union["POI", "NII", list[int]]):
+        r = poi if isinstance(poi, list) else poi.keys_region() if hasattr(poi, "keys_region") else poi.unique()  # type: ignore
         o = self.order()
         idx = o.index(self)
         for vert in reversed(o[:idx]):

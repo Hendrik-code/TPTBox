@@ -1,5 +1,6 @@
 import traceback
 import warnings
+import zlib
 from collections.abc import Sequence
 from enum import Enum
 from math import ceil, floor
@@ -146,6 +147,7 @@ class NII(NII_Math):
         #return NII(nib.load(path), seg, c_val) #type: ignore
     @classmethod
     def load_bids(cls, nii_bids: bids_files.BIDS_FILE):
+        nifty = None
         if "nii" in nii_bids.file:
             path = nii_bids.file['nii']
             nifty = nib.load(path)
@@ -169,6 +171,7 @@ class NII(NII_Math):
         else:
             seg = False
             c_val = -1024 if "ct" in nii_bids.format.lower() else 0
+        assert nifty is not None, f"could not find {nii_bids}"
         return NII(nifty,seg,c_val) # type: ignore
     def _unpack(self):
         try:
@@ -204,6 +207,10 @@ class NII(NII_Math):
             self.__unpacked = True
         except EOFError as e:
             raise EOFError(f"{self.nii.get_filename()}: {e!s}\nThe file is probably brocken beyond repair, due killing a software during nifty saving.") from None
+        except zlib.error as e:
+            raise zlib.error(f"{self.nii.get_filename()}: {e!s}\nThe file is probably brocken beyond repair, due killing a software during nifty saving.") from None
+        except OSError as e:
+            raise zlib.error(f"{self.nii.get_filename()}: {e!s}\nThe file is probably brocken beyond repair, due killing a software during nifty saving.") from None
     @property
     def nii_abstract(self) -> Nifti1Image|_unpacked_nii:
         if self.__unpacked:
@@ -492,7 +499,7 @@ class NII(NII_Math):
         msk_bin[np.isnan(msk_bin)] = 0
         cor_msk = np.where(msk_bin > 0)
         if cor_msk[0].shape[0] == 0:
-            raise ValueError('Array would be reduced to zero size')
+            raise ValueError(f'Array would be reduced to zero size; Before {self}; {self.unique()=}')
         c_min = [cor_msk[0].min(), cor_msk[1].min(), cor_msk[2].min()]
         c_max = [cor_msk[0].max(), cor_msk[1].max(), cor_msk[2].max()]
         x0 = max(0, c_min[0] - d[0])
@@ -801,11 +808,11 @@ class NII(NII_Math):
     def normalize_to_range_(self, min_value: int = 0, max_value: int = 1500, verbose:logging=True):
         assert not self.seg
         mi, ma = self.min(), self.max()
-        self += -mi + min_value  # min = 0
+        self += -mi + min_value  # min = 0  # noqa: PLW0642
         self_dtype = self.dtype
         max_value2 = ma
         if max_value2 > max_value:
-            self *= max_value / max_value2
+            self *= max_value / max_value2  # noqa: PLW0642
             self.set_dtype_(self_dtype)
         log.print(f"Shifted from range {mi, ma} to range {self.min(), self.max()}", verbose=verbose)
 
@@ -943,9 +950,9 @@ class NII(NII_Math):
 
     def calc_convex_hull(
         self,
-        axis: DIRECTIONS = "S",
+        axis: DIRECTIONS|None = "S",
         inplace: bool = False,
-        verbose: bool = False,
+        verbose: bool = False
     ):
         """Calculates the convex hull of this segmentation nifty
 
@@ -953,7 +960,7 @@ class NII(NII_Math):
             axis (int | None, optional): If given axis, will calculate convex hull along that axis (remaining dimension must be at least 2). Defaults to None.
         """
         assert self.seg, "To calculate the convex hull, this must be a segmentation"
-        axis_int = self.get_axis(axis)
+        axis_int = self.get_axis(axis) if axis is not None else None
         convex_hull_arr = np_calc_convex_hull(self.get_seg_array(), axis=axis_int, verbose=verbose)
         if inplace:
             return self.set_array_(convex_hull_arr)

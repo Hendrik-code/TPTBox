@@ -95,7 +95,8 @@ class Test_Centroids(unittest.TestCase):
 
     def test_calc_centroids_labeled_bufferd2(self):
         msk, cent, order, sizes = get_nii(num_point=random.randint(1, 7))
-        msk2, cent2, order2, sizes2 = get_nii(num_point=len(cent) - 1)
+        msk2, cent2, order2, sizes2 = get_nii(x=msk.shape, num_point=len(cent) - 1)
+        assert msk.shape == msk2.shape, (msk.shape, msk2.shape)
         msk2.origin = msk.origin
         arr = msk.get_array()
         arr[arr != 0] = 50
