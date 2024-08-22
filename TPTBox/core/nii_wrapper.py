@@ -147,6 +147,7 @@ class NII(NII_Math):
         #return NII(nib.load(path), seg, c_val) #type: ignore
     @classmethod
     def load_bids(cls, nii_bids: bids_files.BIDS_FILE):
+        nifty = None
         if "nii" in nii_bids.file:
             path = nii_bids.file['nii']
             nifty = nib.load(path)
@@ -170,6 +171,7 @@ class NII(NII_Math):
         else:
             seg = False
             c_val = -1024 if "ct" in nii_bids.format.lower() else 0
+        assert nifty is not None, f"could not find {nii_bids}"
         return NII(nifty,seg,c_val) # type: ignore
     def _unpack(self):
         try:
@@ -497,7 +499,7 @@ class NII(NII_Math):
         msk_bin[np.isnan(msk_bin)] = 0
         cor_msk = np.where(msk_bin > 0)
         if cor_msk[0].shape[0] == 0:
-            raise ValueError('Array would be reduced to zero size')
+            raise ValueError(f'Array would be reduced to zero size; Before {self}; {self.unique()=}')
         c_min = [cor_msk[0].min(), cor_msk[1].min(), cor_msk[2].min()]
         c_max = [cor_msk[0].max(), cor_msk[1].max(), cor_msk[2].max()]
         x0 = max(0, c_min[0] - d[0])
@@ -948,9 +950,9 @@ class NII(NII_Math):
 
     def calc_convex_hull(
         self,
-        axis: DIRECTIONS = "S",
+        axis: DIRECTIONS|None = "S",
         inplace: bool = False,
-        verbose: bool = False,
+        verbose: bool = False
     ):
         """Calculates the convex hull of this segmentation nifty
 
@@ -958,7 +960,7 @@ class NII(NII_Math):
             axis (int | None, optional): If given axis, will calculate convex hull along that axis (remaining dimension must be at least 2). Defaults to None.
         """
         assert self.seg, "To calculate the convex hull, this must be a segmentation"
-        axis_int = self.get_axis(axis)
+        axis_int = self.get_axis(axis) if axis is not None else None
         convex_hull_arr = np_calc_convex_hull(self.get_seg_array(), axis=axis_int, verbose=verbose)
         if inplace:
             return self.set_array_(convex_hull_arr)
