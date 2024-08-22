@@ -3,7 +3,7 @@ from copy import deepcopy
 from typing_extensions import Self
 
 from TPTBox.core import poi
-from TPTBox.core.poi_abstract import Abstract_POI, POI_Descriptor
+from TPTBox.core.poi_fun.poi_abstract import Abstract_POI, POI_Descriptor
 
 ###### GLOBAL POI #####
 

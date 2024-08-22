@@ -6,7 +6,7 @@ from collections.abc import Sequence
 import numpy as np
 
 from TPTBox import AX_CODES, POI, POI_Global
-from TPTBox.core.poi_abstract import POI_Descriptor
+from TPTBox.core.poi_fun.poi_abstract import POI_Descriptor
 from TPTBox.tests.test_utils import get_poi, get_random_ax_code
 
 

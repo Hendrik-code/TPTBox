@@ -1,15 +1,16 @@
 import copy
-import sys
 import warnings
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.axes import Axes
 from matplotlib.colors import ListedColormap, Normalize
-from matplotlib.patches import Circle
+from matplotlib.patches import Circle, FancyArrow
 from scipy import ndimage
 from scipy.interpolate import RegularGridInterpolator, interp1d
 from scipy.signal import savgol_filter
@@ -150,7 +151,9 @@ def sag_cor_curve_projection(
 
     if 26 in ctd_list.centroids.keys_region() and cor_savgol_filter:
         warnings.warn(
-            "Sacrum centroid present with cor_savgol_filter might overshadow the sacrum in coronal view", UserWarning, stacklevel=4
+            "Sacrum centroid present with cor_savgol_filter might overshadow the sacrum in coronal view",
+            UserWarning,
+            stacklevel=4,
         )
     # Sagittal and coronal projections of a curved plane defined by centroids
     # Note: Will assume IPL orientation!
@@ -227,7 +230,11 @@ def curve_projected_slice(x_ctd, img_data, y_cord, z_cord, axial_heights):
         else:
             cor_plane[x, :] = img_data[x, y_cord[x - min(x_ctd)], :]
             sag_plane[x, :] = img_data[x, :, z_cord[x - min(x_ctd)]]
-    return sag_plane, cor_plane, curve_projection_axial_fallback(img_data, x_ctd, heights=axial_heights)
+    return (
+        sag_plane,
+        cor_plane,
+        curve_projection_axial_fallback(img_data, x_ctd, heights=axial_heights),
+    )
 
 
 def curve_projected_mean(
@@ -268,7 +275,11 @@ def curve_projected_mean(
         sag_plane[x, :] = div0(sag, np.count_nonzero(img_data[x, :, :], 1), fill=0)
         cor = np.nansum(cor_cut, 0, where=plane_bool)
         cor_plane[x, :] = div0(cor, np.count_nonzero(plane_bool, 0), fill=0)
-    return sag_plane, cor_plane, curve_projection_axial_fallback(img_data, x_ctd, heights=axial_heights)
+    return (
+        sag_plane,
+        cor_plane,
+        curve_projection_axial_fallback(img_data, x_ctd, heights=axial_heights),
+    )
 
 
 def curve_projected_mip(
@@ -335,7 +346,11 @@ def curve_projected_mip(
         cor_plane = cmap(cor_m_plane)[..., :3]
         sag_plane = cmap(sag_m_plane)[..., :3]
 
-    return sag_plane, cor_plane, curve_projection_axial_fallback(img_data, x_ctd, heights=axial_heights)
+    return (
+        sag_plane,
+        cor_plane,
+        curve_projection_axial_fallback(img_data, x_ctd, heights=axial_heights),
+    )
 
 
 def normalize_image(img, v_range: tuple[float, float] | None = None):
@@ -420,8 +435,6 @@ def create_figure(dpi, planes: list, has_title=True):
     fig, axs = plt.subplots(1, len(planes), figsize=(fig_w, fig_h))
 
     if not isinstance(axs, np.ndarray):
-        from matplotlib.axes import Axes
-
         axs: list[Axes] = [axs]  # type: ignore
     for a in axs:
         a.axis("off")
@@ -431,16 +444,20 @@ def create_figure(dpi, planes: list, has_title=True):
 
 
 def plot_sag_centroids(
-    axs,
+    axs: Axes,
     ctd: POI,
     zms,
     poi_labelmap: dict[int, str],
     hide_centroid_labels: bool,
     cmap: ListedColormap = cm_itk,
     curve_location: Location = Location.Vertebra_Corpus,
+    show_these_subreg_poi=None,
 ):
     # requires v_dict = dictionary of mask labels
-    for k1, k2, v in ctd.items():
+    ctd2 = ctd
+    if show_these_subreg_poi is not None:
+        ctd2 = ctd.extract_subregion(*show_these_subreg_poi)
+    for k1, k2, v in ctd2.items():
         # print(k, v, (v[1] * zms[1], v[0] * zms[0]), zms)
         try:
             axs.add_patch(Circle((v[1] * zms[1], v[0] * zms[0]), 2, color=cmap((k1 - 1) % LABEL_MAX % cmap.N)))
@@ -448,6 +465,28 @@ def plot_sag_centroids(
                 axs.text(4, v[0] * zms[0], poi_labelmap[k1], fontdict={"color": cmap(k1 - 1), "weight": "bold"})
         except Exception as e:
             print(e)
+    if "line_segments_sag" in ctd.info:
+        for color, x, (c, d) in ctd.info["line_segments_sag"]:
+            if len(x) == 2:
+                v = ctd[x]
+            elif len(x) == 4:
+                v = (np.array(ctd[x[0], x[1]]) + np.array(ctd[x[2], x[3]])) / 2
+
+            axs.add_patch(FancyArrow(v[1] * zms[1], v[0] * zms[0], c, d, color=cmap(color - 1 % LABEL_MAX % cmap.N)))
+    if "text_sag" in ctd.info:
+        for color, x in ctd.info["text_sag"]:
+            if not isinstance(color, int) and len(color) == 2:
+                color, curve_location = color  # noqa: PLW2901
+            if isinstance(x, str) or len(x) == 1:
+                (text) = x
+                a = zms[1] * ctd[color, curve_location][1]
+                b = zms[0] * ctd[color, curve_location][0]
+            elif len(x) == 3:
+                (text, a, b) = x
+            elif len(x) == 2:
+                (text, a) = x
+                b = zms[0] * ctd[color, curve_location][0]
+            axs.text(a, b, text, fontdict={"color": cmap(color - 1), "weight": "bold"})
 
 
 def plot_cor_centroids(
@@ -458,15 +497,47 @@ def plot_cor_centroids(
     hide_centroid_labels: bool,
     cmap: ListedColormap = cm_itk,
     curve_location: Location = Location.Vertebra_Corpus,
+    show_these_subreg_poi=None,
 ):
+    ctd2 = ctd
+    if show_these_subreg_poi is not None:
+        ctd2 = ctd.extract_subregion(*show_these_subreg_poi)
+
     # requires v_dict = dictionary of mask labels
-    for k1, k2, v in ctd.items():
+    for k1, k2, v in ctd2.items():
         try:
-            axs.add_patch(Circle((v[2] * zms[2], v[0] * zms[0]), 2, color=cmap((k1 - 1) % LABEL_MAX % cmap.N)))
+            axs.add_patch(
+                Circle(
+                    (v[2] * zms[2], v[0] * zms[0]),
+                    2,
+                    color=cmap((k1 - 1) % LABEL_MAX % cmap.N),
+                )
+            )
             if not hide_centroid_labels and k2 == curve_location.value and k1 in poi_labelmap:
                 axs.text(4, v[0] * zms[0], poi_labelmap[k1], fontdict={"color": cmap(k1 - 1), "weight": "bold"})
         except Exception:
             pass
+    if "line_segments_cor" in ctd.info:
+        for color, x, (c, d) in ctd.info["line_segments_cor"]:
+            if len(x) == 2:
+                v = ctd[x]
+            elif len(x) == 4:
+                v = (np.array(ctd[x[0], x[1]]) + np.array(ctd[x[2], x[3]])) / 2
+            axs.add_patch(FancyArrow(v[2] * zms[2], v[0] * zms[0], c, d, color=cmap(color - 1 % LABEL_MAX % cmap.N)))
+    if "text_cor" in ctd.info:
+        for color, x in ctd.info["text_cor"]:
+            if isinstance(color, Sequence) and len(color) == 2:
+                color, curve_location = color  # noqa: PLW2901
+            if isinstance(x, str) or len(x) == 1:
+                (text) = x
+                a = zms[2] * ctd[color, curve_location][2]
+                b = zms[0] * ctd[color, curve_location][0]
+            elif len(x) == 3:
+                (text, a, b) = x
+            elif len(x) == 2:
+                (text, a) = x
+                b = zms[0] * ctd[color, curve_location][0]
+            axs.text(a, b, text, fontdict={"color": cmap(color - 1), "weight": "bold"})
 
 
 def make_2d_slice(
@@ -512,7 +583,12 @@ def make_2d_slice(
             )
         elif visualization_type == Visualization_Type.Maximum_Intensity:
             sag, cor, axl = curve_projected_mip(
-                img_data=img_data, zms=zms, x_ctd=x_ctd, y_cord=y_cord, ctd_list=ctd_reo, axial_heights=axial_heights
+                img_data=img_data,
+                zms=zms,
+                x_ctd=x_ctd,
+                y_cord=y_cord,
+                ctd_list=ctd_reo,
+                axial_heights=axial_heights,
             )
         elif visualization_type == Visualization_Type.Maximum_Intensity_Colored_Depth:
             sag, cor, axl = curve_projected_mip(
@@ -527,7 +603,12 @@ def make_2d_slice(
         # make isotropic
         elif visualization_type == Visualization_Type.Mean_Intensity:
             sag, cor, axl = curve_projected_mean(
-                img_data=img_data, zms=zms, x_ctd=x_ctd, y_cord=y_cord, ctd_list=ctd_reo, axial_heights=axial_heights
+                img_data=img_data,
+                zms=zms,
+                x_ctd=x_ctd,
+                y_cord=y_cord,
+                ctd_list=ctd_reo,
+                axial_heights=axial_heights,
             )
 
     # elif visualization_type == visualization_type.Mean_Intensity:
@@ -610,7 +691,8 @@ class Snapshot_Frame:
     hide_centroid_labels: bool = False
     poi_labelmap: dict[int, str] = field(default_factory=lambda: v_idx2name)
     force_show_cdt: bool = False  # Shows the centroid computed by a segmentation, if no centroids are provided
-    curve_location: Location = Location.Vertebra_Corpus
+    curve_location: Location | None = None  # Location.Vertebra_Corpus
+    show_these_subreg_poi: list[int | Location] | None = None
 
 
 def to_cdt(ctd_bids: POI_Reference | None) -> POI | None:
@@ -741,6 +823,12 @@ def create_snapshot(  # noqa: C901
         except Exception:
             print("did not manage to calc ctd_tmp\n", frame)
             raise
+        if frame.curve_location is None:
+            if frame.show_these_subreg_poi is not None:
+                l = frame.show_these_subreg_poi[0]
+                frame.curve_location = Location(l) if isinstance(l, int) else l
+            else:
+                frame.curve_location = Location.Vertebra_Corpus
         try:
             sag_img, cor_img, axl_img = make_2d_slice(
                 img,
@@ -837,6 +925,7 @@ def create_snapshot(  # noqa: C901
                     frame.poi_labelmap,
                     frame.hide_centroid_labels,
                     frame.title[0],
+                    frame,
                 )
             )
         if frame.coronal:
@@ -855,6 +944,7 @@ def create_snapshot(  # noqa: C901
                     frame.poi_labelmap,
                     frame.hide_centroid_labels,
                     frame.title[1],
+                    frame,
                 )
             )
         if frame.axial:
@@ -873,11 +963,12 @@ def create_snapshot(  # noqa: C901
                     frame.poi_labelmap,
                     frame.hide_centroid_labels,
                     frame.title[2],
+                    frame,
                 )
             )
 
     fig, axs = create_figure(dpi, img_list, has_title=frame.title is None)
-    for ax, (img, msk, ctd, wdw, is_sag, alpha, cmap, zms, curve_location, poi_labelmap, hide_centroid_labels, title) in zip(
+    for ax, (img, msk, ctd, wdw, is_sag, alpha, cmap, zms, curve_location, poi_labelmap, hide_centroid_labels, title, frame) in zip(
         axs, frame_list, strict=False
     ):
         if title is not None:
@@ -888,6 +979,7 @@ def create_snapshot(  # noqa: C901
             ax.imshow(img, cmap=plt.cm.gray, norm=wdw)  # type: ignore
         if msk is not None:
             ax.imshow(msk, cmap=cmap, alpha=alpha, vmin=1, vmax=cmap.N)
+        frame: Snapshot_Frame
         if ctd is not None:
             if is_sag:
                 plot_sag_centroids(
@@ -898,6 +990,7 @@ def create_snapshot(  # noqa: C901
                     hide_centroid_labels=hide_centroid_labels,
                     cmap=cmap,
                     curve_location=curve_location,
+                    show_these_subreg_poi=frame.show_these_subreg_poi,
                 )
             else:
                 plot_cor_centroids(
@@ -908,6 +1001,7 @@ def create_snapshot(  # noqa: C901
                     hide_centroid_labels=hide_centroid_labels,
                     cmap=cmap,
                     curve_location=curve_location,
+                    show_these_subreg_poi=frame.show_these_subreg_poi,
                 )
 
     if not isinstance(snp_path, list):

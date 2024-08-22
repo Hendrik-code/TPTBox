@@ -9,13 +9,20 @@ import numpy as np
 from scipy import interpolate
 from typing_extensions import Self
 
-from TPTBox.core.nii_wrapper import NII
-
-from . import vert_constants
-from .vert_constants import COORDINATE, POI_DICT, Location, Sentinel, log, log_file, logging
+from TPTBox.core import vert_constants
+from TPTBox.core.nii_poi_abstract import Has_Affine
+from TPTBox.core.vert_constants import COORDINATE, POI_DICT, Abstract_lvl, Location, Vertebra_Instance, log, log_file, logging
 
 ROUNDING_LVL = 7
-POI_ID = tuple[int, int] | slice | tuple[Location, Location] | tuple[Location, int] | tuple[int, Location]
+POI_ID = (
+    tuple[int, int]
+    | slice
+    | tuple[Location, Location]
+    | tuple[Location, int]
+    | tuple[int, Location]
+    | tuple[Vertebra_Instance, Location]
+    | tuple[Vertebra_Instance, int]
+)
 
 MAPPING = dict[int | str, int | str] | dict[int, int] | dict[int, int | None] | dict[int, None] | dict[int | str, int | str | None] | None
 DIMENSIONS = 3
@@ -23,7 +30,10 @@ DIMENSIONS = 3
 
 class Abstract_POI_Definition:
     def __init__(
-        self, path: str | Path | None = None, region: dict[int, str] | None = None, subregion: dict[int, str] | None = None
+        self,
+        path: str | Path | None = None,
+        region: dict[int, str] | None = None,
+        subregion: dict[int, str] | None = None,
     ) -> None:
         """Place holder class to move string names to integer with multiple definitions"""
         if path is not None:
@@ -76,7 +86,10 @@ class POI_Descriptor(AbstractSet, MutableMapping):
         definition: Abstract_POI_Definition | None = None,
     ):
         if definition is None:
-            definition = Abstract_POI_Definition(region=vert_constants.v_idx2name, subregion=vert_constants.subreg_idx2name)
+            definition = Abstract_POI_Definition(
+                region=vert_constants.v_idx2name,
+                subregion=vert_constants.subreg_idx2name,
+            )
         if default is None:
             default = {}
         self.pois = default
@@ -101,15 +114,17 @@ class POI_Descriptor(AbstractSet, MutableMapping):
 
         return POI_Descriptor(default=deepcopy(self.pois))
 
-    def sort(self: Self, inplace=True):
+    def _sort(self: Self, inplace=True, order_dict: dict | None = None):
         """Sort vertebra dictionary by sorting_list"""
+        if order_dict is None:
+            order_dict = {}
 
         def order_cardinal(elem: tuple[int, ...]):
             key1, key2 = elem[0], elem[1]
-            return key1 * vert_constants.LABEL_MAX * 64 + key2
+            return order_dict.get(key1, key1) * vert_constants.LABEL_MAX * 64 + key2
 
         poi_new = {}
-        for k1, k2, v in sorted(self.items(sort=False), key=order_cardinal):  # type: ignore
+        for k1, k2, v in sorted(self.items(), key=order_cardinal):  # type: ignore
             if k1 not in poi_new:
                 poi_new[k1] = {}
             poi_new[k1][k2] = v
@@ -118,8 +133,7 @@ class POI_Descriptor(AbstractSet, MutableMapping):
             return self
         return POI_Descriptor(default=poi_new)
 
-    def items(self, sort=True):
-        self.sort() if sort else None
+    def items(self):
         i = 0
         for region, sub in self.pois.items():
             for subregion, coords in sub.items():
@@ -128,7 +142,6 @@ class POI_Descriptor(AbstractSet, MutableMapping):
         self._len = i
 
     def items_2d(self):
-        self.sort()
         return self.pois.copy().items()
 
     def _apply_all(self, fun: Callable[[float, float, float], COORDINATE], inplace=False):
@@ -154,7 +167,12 @@ class POI_Descriptor(AbstractSet, MutableMapping):
         region, subregion = unpack_poi_id(key, self.definition)
         return self.pois[region][subregion]
 
+    def get(self, key: POI_ID):
+        return np.array(self[key])
+
     def __setitem__(self, key: POI_ID, value: COORDINATE):
+        if isinstance(value, np.ndarray):
+            value = tuple(value.tolist())
         self._len = None
         region, subregion = unpack_poi_id(key, self.definition)
         if region not in self.pois:
@@ -263,11 +281,13 @@ class POI_Descriptor(AbstractSet, MutableMapping):
 
 
 @dataclass
-class Abstract_POI:
+class Abstract_POI(Has_Affine):
     _centroids: POI_Descriptor = field(default_factory=lambda: POI_Descriptor(), repr=False, kw_only=True)
     centroids: POI_Descriptor = field(repr=False, hash=False, compare=False, default=None)  # type: ignore
     format: int | None = field(default=None, repr=False, compare=False)
     info: dict = field(default_factory=dict, compare=False)  # additional info (key,value pairs)
+    level_one_info: type[Abstract_lvl] = Vertebra_Instance  # Must be Enum and must has order_dict
+    level_two_info: type[Abstract_lvl] = Location
 
     @property
     def centroids(self) -> POI_Descriptor:
@@ -294,14 +314,12 @@ class Abstract_POI:
         return self.copy(ctd)
 
     @property
-    def is_global(self) -> bool:
-        ...
+    def is_global(self) -> bool: ...
 
     def clone(self, **qargs):
         return self.copy(**qargs)
 
-    def copy(self, centroids: POI_Descriptor | None = None, **qargs) -> Self:
-        ...
+    def copy(self, centroids: POI_Descriptor | None = None, **qargs) -> Self: ...
 
     def map_labels(
         self,
@@ -393,17 +411,22 @@ class Abstract_POI:
             inplace=True,
         )
 
-    def sort(self, inplace=True) -> Self:
+    def sort(self, inplace=True, order_dict: dict | None = None) -> Self:
         """Sort vertebra dictionary by sorting_list"""
-        poi = self.centroids.sort(inplace=inplace)
-
+        if self.level_one_info is not None:
+            order_dict = self.level_one_info.order_dict()
+        poi = self.centroids._sort(inplace=inplace, order_dict=order_dict)
         if inplace:
             self.centroids = poi
             return self
         return self.copy(centroids=poi)
 
     def fit_spline(
-        self, smoothness: int = 10, samples_per_poi=20, location: int | Location = Location.Vertebra_Corpus, vertebra=False
+        self,
+        smoothness: int = 10,
+        samples_per_poi=20,
+        location: int | Location = Location.Vertebra_Corpus,
+        vertebra=False,
     ) -> tuple[np.ndarray, np.ndarray]:
         """
         Fits a spline interpolation through a set of centroids and calculates the first derivative of the spline curve.
@@ -413,7 +436,7 @@ class Abstract_POI:
             smoothness (int, optional): Smoothing parameter for the spline interpolation. Default is 10.
             samples_per_poi (int, optional): Number of sample points to generate per centroid. Default is 20.
             location (int, optional): Location parameter for subregion extraction. Default is 50.
-            vertebra (bool, optional): Indicates whether to perform VertebraCentroids sorting. Default is False.
+            vertebra (bool, optional): Indicates whether to perform VertebraCentroids sorting. Default is True.
 
         Returns:
             tuple[np.ndarray, np.ndarray]: A tuple containing two NumPy arrays:
@@ -428,16 +451,7 @@ class Abstract_POI:
         # Extract subregion based on the provided location
         poi = self.extract_subregion(*location) if isinstance(location, Sequence) else self.extract_subregion(location)
         # If vertebra sorting is requested, perform it
-        if vertebra:
-            from TPTBox.core.poi import POI, VertebraCentroids
-
-            if isinstance(poi, (VertebraCentroids, POI)):
-                poi = VertebraCentroids.from_pois(poi).sort()  # Set sorting
-            else:
-                raise ValueError("global POI does not supprot Vertebra sorting")
-        else:
-            poi = poi.sort(inplace=False)
-
+        poi = poi.sort(inplace=False, order_dict=Vertebra_Instance.order_dict() if vertebra else None)
         # Convert centroids to NumPy array for processing
         centroids_coords = np.asarray(list(poi.values()))
 
@@ -445,7 +459,11 @@ class Abstract_POI:
         num_sample_pts = len(centroids_coords) * samples_per_poi
 
         # Extract coordinates for interpolation
-        x_sample, y_sample, z_sample = centroids_coords[:, 0], centroids_coords[:, 1], centroids_coords[:, 2]
+        x_sample, y_sample, z_sample = (
+            centroids_coords[:, 0],
+            centroids_coords[:, 1],
+            centroids_coords[:, 2],
+        )
         assert len(x_sample) != 0, x_sample.shape
         # Perform cubic spline interpolation
         tck, u = interpolate.splprep([x_sample, y_sample, z_sample], k=3 if len(x_sample) > 3 else len(x_sample) - 1, s=smoothness)
@@ -472,6 +490,7 @@ class Abstract_POI:
         return iter(self.centroids.keys())
 
     def __contains__(self, key: POI_ID) -> bool:
+        key = unpack_poi_id(key, self.centroids.definition)
         return key in self.centroids
 
     def __getitem__(self, key: POI_ID) -> COORDINATE:
@@ -485,35 +504,61 @@ class Abstract_POI:
     def __len__(self) -> int:
         return self.centroids.__len__()
 
-    def items(self):
-        self.sort()
+    def items(self, sort=True):
+        if sort:
+            self.sort()
         return self.centroids.items()
 
-    def items_2D(self):
-        self.sort()
+    def items_2D(self, sort=True):
+        if sort:
+            self.sort()
         return self.centroids.items_2d()
 
-    def items_flatten(self):
-        self.sort()
+    def items_flatten(self, sort=True):
+        if sort:
+            self.sort()
         for x1, x2, y in self.centroids.items():
             yield x2 * vert_constants.LABEL_MAX + x1, y
 
-    def keys(self):
+    def keys(self, sort=False):
+        if sort:
+            self.sort()
         return self.centroids.keys()
 
-    def keys_region(self):
+    def keys_region(self, sort=False):
+        if sort:
+            self.sort()
         return self.centroids.keys_region()
 
-    def keys_subregion(self):
+    def keys_subregion(self, sort=False):
+        if sort:
+            self.sort()
         return list(self.centroids.keys_subregion())
 
-    def values(self) -> list[COORDINATE]:
+    def values(self, sort=False) -> list[COORDINATE]:
+        if sort:
+            self.sort()
         return self.centroids.values()
 
     def remove_centroid_(self, *label: tuple[int, int]):
         return self.remove_centroid(*label, inplace=True)
 
     def remove_centroid(self, *label: tuple[int, int], inplace=False):
+        import warnings
+
+        warnings.warn("remove_centroid id deprecated use remove instead", stacklevel=5)  # TODO remove in version 1.0
+
+        obj: Self = self.copy() if inplace is False else self
+        for loc in label:
+            if isinstance(loc, Location):
+                loc = loc.value  # noqa: PLW2901
+            obj.centroids.pop(loc, None)
+        return obj
+
+    def remove_(self, *label: tuple[int, int]):
+        return self.remove(*label, inplace=True)
+
+    def remove(self, *label: tuple[int, int], inplace=False):
         obj: Self = self.copy() if inplace is False else self
         for loc in label:
             if isinstance(loc, Location):
@@ -583,9 +628,9 @@ class Abstract_POI:
     def round_(self, ndigits):
         return self.round(ndigits=ndigits, inplace=True)
 
-    def assert_affine(self, nii: NII | Self):
-        assert not isinstance(nii, NII)
-        assert self.is_global == nii.is_global
+    # def assert_affine(self, nii: NII | Self):
+    #    assert not isinstance(nii, NII)
+    #    assert self.is_global == nii.is_global
 
     def calculate_distances_cord(self, target_point: tuple[float, float, float] | Sequence[float]) -> dict[tuple[int, int], float]:
         """Calculate the distances between the target point and each centroid.
@@ -604,8 +649,8 @@ class Abstract_POI:
             distances[(region, subregion)] = distance
         return distances
 
-    def calculate_distances_poi(self, target_point: Self) -> dict[tuple[int, int], float]:
-        """Calculate the distances between the target point and each centroid.
+    def calculate_distances_poi(self, target_point: Self, keep_zoom=False) -> dict[tuple[int, int], float]:
+        """Calculate the distances between all points and each centroid in local spacing of the first POI.
 
         Args:
             target_point (Tuple[float, float, float]): The target point represented as a tuple of x, y, and z coordinates.
@@ -615,20 +660,39 @@ class Abstract_POI:
             The keys are tuples of two integers representing the region and subregion labels of the centroids,
             and the values are the distances (in millimeters) between the target point and each centroid.
         """
-        target_point.assert_affine(self)
+
         assert self.is_global == target_point.is_global
+        if not keep_zoom and not self.is_global:
+            self = self.rescale((1, 1, 1), verbose=False)  # type: ignore  # noqa: PLW0642
+        if not self.is_global:
+            if target_point.zoom != self.zoom or target_point.shape != self.zoom:
+                target_point = target_point.resample_from_to(self)  # type: ignore
+            else:
+                target_point.assert_affine(self)
 
         distances = {}
-        for region, subregion, (x, y, z) in self.intersect(target_point).items():
+        for region, subregion, (x, y, z) in target_point.intersect(self).items():
+            if (region, subregion) not in self:
+                continue
             c = self[region, subregion]
             distance = ((c[0] - x) ** 2 + (c[1] - y) ** 2 + (c[2] - z) ** 2) ** 0.5
             distances[(region, subregion)] = float(distance)
         return distances
 
+    def calculate_distances_poi_two_locations(self, a: Location | int, b: Location | int, keep_zoom=False) -> dict[int, float]:
+        if isinstance(a, Enum):
+            a = a.value
+        if isinstance(b, Enum):
+            b = b.value
+        p1 = self.extract_subregion(a)
+        p2 = self.extract_subregion(b).map_labels(label_map_subregion={b: a})
+        out = p2.calculate_distances_poi(p1, keep_zoom=keep_zoom)
+        return {a: c for (a, _), c in out.items()}
+
     def join_left(self, pois: Self, inplace=False, _right_join=False) -> Self:
         """
         Left join operation to combine the centroids from another set of points into the current set.
-        Existing values are NOT overritten
+        Existing values are NOT overwritten
 
         Args:
             pois (Self): Another set of points (centroids) to be combined.
@@ -667,7 +731,7 @@ class Abstract_POI:
     def join_right(self, *args, **qargs):
         """
         Rights join operation to combine the centroids from another set of points into the current set.
-        Existing values are overritten.
+        Existing values are overwritten.
 
         Args:
             pois (Self): Another set of points (centroids) to be combined.
