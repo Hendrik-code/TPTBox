@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TypedDict, TypeGuard, TypeVar, Union
+from typing import TypedDict, TypeGuard, TypeVar
 
 import nibabel as nib
 import nibabel.orientations as nio
@@ -13,11 +13,10 @@ import numpy as np
 from scipy.ndimage import center_of_mass
 from typing_extensions import Self
 
-from ..logger import Log_Type  # noqa: TID252
-from . import bids_files
-from .nii_wrapper import NII, Image_Reference, to_nii, to_nii_optional
-from .poi_abstract import ROUNDING_LVL, Abstract_POI, POI_Descriptor, Sentinel
-from .vert_constants import (
+from TPTBox.core import bids_files
+from TPTBox.core.nii_wrapper import NII, Image_Reference, to_nii, to_nii_optional
+from TPTBox.core.poi_fun.poi_abstract import ROUNDING_LVL, Abstract_POI, POI_Descriptor
+from TPTBox.core.vert_constants import (
     AFFINE,
     AX_CODES,
     COORDINATE,
@@ -28,18 +27,22 @@ from .vert_constants import (
     SHAPE,
     TRIPLE,
     ZOOMS,
+    Abstract_lvl,
     Location,
+    Sentinel,
+    Vertebra_Instance,
+    _register_lvl,
     conversion_poi,
     conversion_poi2text,
     log,
-    log_file,
     logging,
     v_idx2name,
     v_name2idx,
 )
+from TPTBox.logger import Log_Type
 
 
-### LAGACY DEFINITONS ###
+### LEGACY DEFINITIONS ###
 class _Point3D(TypedDict):
     X: float
     Y: float
@@ -57,7 +60,16 @@ _Centroid_DictList = Sequence[_Orientation | _Point3D]
 ### CURRENT TYPE DEFFINITONS
 C = TypeVar("C", bound="POI")
 POI_Reference = bids_files.BIDS_FILE | Path | str | tuple[Image_Reference, Image_Reference, Sequence[int]] | C
-ctd_info_blacklist = ["zoom", "shape", "direction", "format", "rotation", "origin"]  # "location"
+ctd_info_blacklist = [
+    "zoom",
+    "shape",
+    "direction",
+    "format",
+    "rotation",
+    "origin",
+    "level_one_info",
+    "level_two_info",
+]  # "location"
 
 
 @dataclass
@@ -122,22 +134,22 @@ class POI(Abstract_POI):
     """
 
     orientation: AX_CODES = ("R", "A", "S")
-    zoom: None | ZOOMS = field(init=True, default=None)  # type: ignore
-    shape: TRIPLE | None = field(default=None, repr=True, compare=False)
-    rotation: ROTATION | None = field(default=None, repr=False, compare=False)
-    origin: COORDINATE | None = None
+    zoom: ZOOMS = field(init=True, default=None)  # type: ignore
+    shape: TRIPLE = field(default=None, repr=True, compare=False)  # type: ignore
+    rotation: ROTATION = field(default=None, repr=False, compare=False)  # type: ignore
+    origin: COORDINATE = None  # type: ignore
     # internal
-    _zoom: None | ZOOMS = field(init=False, default=None, repr=False, compare=False)
+    _rotation: ROTATION = field(init=False, default=None, repr=False, compare=False)
+    _zoom: ZOOMS = field(init=False, default=(1, 1, 1), repr=False, compare=False)
     _vert_orientation_pir = {}  # Elusive; will not be saved; will not be copied. For Buffering results  # noqa: RUF012
-
-    @property
-    def shape_int(self):
-        assert self.shape is not None, "need shape information"
-        return tuple(np.rint(list(self.shape)).astype(int))
 
     @property
     def is_global(self):
         return False
+
+    @property
+    def rotation(self):
+        return self._rotation
 
     @property
     def zoom(self):
@@ -153,6 +165,15 @@ class POI(Abstract_POI):
         aff[:3, 3] = self.origin
         return np.round(aff, ROUNDING_LVL)
 
+    @rotation.setter
+    def rotation(self, value):
+        if isinstance(value, property):
+            pass
+        elif value is None:
+            self._rotation = None
+        else:
+            self._rotation = np.array(value)
+
     @zoom.setter
     def zoom(self, value):
         if isinstance(value, property):
@@ -165,17 +186,14 @@ class POI(Abstract_POI):
     def clone(self, **qargs):
         return self.copy(**qargs)
 
-    def _extract_affine(self):
-        return {"zoom": self.zoom, "origin": self.origin, "shape": self.shape, "rotation": self.rotation, "orientation": self.orientation}
-
     def copy(
         self,
         centroids: POI_DICT | POI_Descriptor | None = None,
         orientation: AX_CODES | None = None,
-        zoom: ZOOMS | None | Sentinel = Sentinel(),  # noqa: B008
-        shape: tuple[float, float, float] | tuple[float, ...] | None | Sentinel = Sentinel(),  # noqa: B008
-        rotation: ROTATION | None | Sentinel = Sentinel(),  # noqa: B008
-        origin: COORDINATE | None | Sentinel = Sentinel(),  # noqa: B008
+        zoom: ZOOMS | Sentinel = Sentinel(),  # noqa: B008
+        shape: tuple[float, float, float] | tuple[float, ...] | Sentinel = Sentinel(),  # noqa: B008
+        rotation: ROTATION | Sentinel = Sentinel(),  # noqa: B008
+        origin: COORDINATE | Sentinel = Sentinel(),  # noqa: B008
     ) -> Self:
         """Create a copy of the POI object with optional attribute overrides.
 
@@ -276,7 +294,11 @@ class POI(Abstract_POI):
         return tuple(round(float(v), ROUNDING_LVL) for v in a)  # type: ignore
 
     def crop_centroids(self, **qargs):
-        warnings.warn("crop_centroids id deprecated use apply_crop instead", DeprecationWarning, stacklevel=4)
+        warnings.warn(
+            "crop_centroids id deprecated use apply_crop instead",
+            DeprecationWarning,
+            stacklevel=4,
+        )
         return self.apply_crop(**qargs)
 
     def apply_crop_reverse(
@@ -287,7 +309,8 @@ class POI(Abstract_POI):
     ):
         """A Poi crop can be trivially reversed with out any loss. See apply_crop for more information"""
         return self.apply_crop(
-            tuple(slice(-shift.start, sh - shift.start) for shift, sh in zip(o_shift, shape, strict=True)), inplace=inplace
+            tuple(slice(-shift.start, sh - shift.start) for shift, sh in zip(o_shift, shape, strict=True)),
+            inplace=inplace,
         )
 
     def apply_crop(self: Self, o_shift: tuple[slice, slice, slice] | Sequence[slice], inplace=False):
@@ -331,7 +354,11 @@ class POI(Abstract_POI):
         try:
 
             def shift(x, y, z):
-                return float(x - o_shift[0].start), float(y - o_shift[1].start), float(z - o_shift[2].start)
+                return (
+                    float(x - o_shift[0].start),
+                    float(y - o_shift[1].start),
+                    float(z - o_shift[2].start),
+                )
 
             poi_out = self.apply_all(shift, inplace=inplace)
             if self.shape is not None:
@@ -371,14 +398,21 @@ class POI(Abstract_POI):
             self.origin = origin
             # centroids already replaced
             return self
-        out = self.copy(centroids=poi_out.centroids, shape=shape, rotation=self.rotation, origin=origin)
+        out = self.copy(
+            centroids=poi_out.centroids,
+            shape=shape,
+            rotation=self.rotation,
+            origin=origin,
+        )
         return out
 
     def crop_centroids_(self, o_shift: tuple[slice, slice, slice]):
         import warnings
 
         warnings.warn(
-            "crop_centroids_ id deprecated use apply_crop instead", DeprecationWarning, stacklevel=4
+            "crop_centroids_ id deprecated use apply_crop instead",
+            DeprecationWarning,
+            stacklevel=4,
         )  # TODO remove in version 1.0
 
         return self.apply_crop(o_shift, inplace=True)
@@ -396,7 +430,14 @@ class POI(Abstract_POI):
             return self
         return self.apply_crop(translation_vector, inplace=inplace, **kwargs)
 
-    def reorient(self, axcodes_to: AX_CODES = ("P", "I", "R"), decimals=ROUNDING_LVL, verbose: logging = False, inplace=False, _shape=None):
+    def reorient(
+        self,
+        axcodes_to: AX_CODES = ("P", "I", "R"),
+        decimals=ROUNDING_LVL,
+        verbose: logging = False,
+        inplace=False,
+        _shape=None,
+    ):
         """Reorients the centroids of an image from the current orientation to the specified orientation.
 
         This method updates the position of the centroids, zoom level, and shape of the image accordingly.
@@ -431,7 +472,7 @@ class POI(Abstract_POI):
             log.print(
                 "No centroids present",
                 verbose=verbose if not isinstance(verbose, bool) else True,
-                ltype=log_file.Log_Type.WARNING,
+                ltype=Log_Type.WARNING,
             )
             return self if inplace else self.copy()
 
@@ -463,7 +504,13 @@ class POI(Abstract_POI):
         for v, point in zip(v_list, ctd_arr, strict=True):
             points[v] = tuple(point)
 
-        log.print("[*] Centroids reoriented from", nio.ornt2axcodes(ornt_fr), "to", axcodes_to, verbose=verbose)
+        log.print(
+            "[*] Centroids reoriented from",
+            nio.ornt2axcodes(ornt_fr),
+            "to",
+            axcodes_to,
+            verbose=verbose,
+        )
         if self.zoom is not None:
             zoom_i = np.array(self.zoom)
             zoom_i[perm] = zoom_i.copy()
@@ -498,22 +545,53 @@ class POI(Abstract_POI):
             self.origin = origin
             self.rotation = rotation
             return self
-        return self.copy(orientation=axcodes_to, centroids=points, zoom=zoom, shape=shape, origin=origin, rotation=rotation)
+        return self.copy(
+            orientation=axcodes_to,
+            centroids=points,
+            zoom=zoom,
+            shape=shape,
+            origin=origin,
+            rotation=rotation,
+        )
 
-    def reorient_(self, axcodes_to: AX_CODES = ("P", "I", "R"), decimals=3, verbose: logging = False, _shape=None):
+    def reorient_(
+        self,
+        axcodes_to: AX_CODES = ("P", "I", "R"),
+        decimals=3,
+        verbose: logging = False,
+        _shape=None,
+    ):
         return self.reorient(axcodes_to, decimals=decimals, verbose=verbose, inplace=True, _shape=_shape)
 
-    def reorient_centroids_to(self, img: Image_Reference, decimals=ROUNDING_LVL, verbose: logging = False, inplace=False) -> Self:
+    def reorient_centroids_to(
+        self,
+        img: Image_Reference,
+        decimals=ROUNDING_LVL,
+        verbose: logging = False,
+        inplace=False,
+    ) -> Self:
         # reorient centroids to image orientation
         if not isinstance(img, NII):
             img = to_nii(img)
         axcodes_to: AX_CODES = nio.aff2axcodes(img.affine)  # type: ignore
-        return self.reorient(axcodes_to, decimals=decimals, verbose=verbose, inplace=inplace, _shape=img.shape)
+        return self.reorient(
+            axcodes_to,
+            decimals=decimals,
+            verbose=verbose,
+            inplace=inplace,
+            _shape=img.shape,
+        )
 
     def reorient_centroids_to_(self, img: Image_Reference, decimals=ROUNDING_LVL, verbose: logging = False) -> Self:
         return self.reorient_centroids_to(img, decimals=decimals, verbose=verbose, inplace=True)
 
-    def rescale(self, voxel_spacing: ZOOMS = (1, 1, 1), decimals=ROUNDING_LVL, verbose: logging = True, inplace=False) -> Self:
+    def rescale(
+        self,
+        voxel_spacing: ZOOMS = (1, 1, 1),
+        decimals=ROUNDING_LVL,
+        verbose: logging = True,
+        inplace=False,
+    ) -> Self:
         """Rescale the centroid coordinates to a new voxel spacing in the current x-y-z-orientation.
 
         Args:
@@ -550,7 +628,12 @@ class POI(Abstract_POI):
         ctd_arr = np.transpose(ctd_arr).tolist()
         for v, point in zip(v_list, ctd_arr, strict=True):
             points[v] = tuple(point)
-        log.print("Rescaled centroid coordinates to spacing (x, y, z) =", voxel_spacing, "mm", verbose=verbose)
+        log.print(
+            "Rescaled centroid coordinates to spacing (x, y, z) =",
+            voxel_spacing,
+            "mm",
+            verbose=verbose,
+        )
         if shp is not None:
             shp = tuple(float(v) for v in shp)
 
@@ -562,7 +645,12 @@ class POI(Abstract_POI):
         return self.copy(centroids=points, zoom=voxel_spacing, shape=shp)
 
     def rescale_(self, voxel_spacing: ZOOMS = (1, 1, 1), decimals=3, verbose: logging = False) -> Self:
-        return self.rescale(voxel_spacing=voxel_spacing, decimals=decimals, verbose=verbose, inplace=True)
+        return self.rescale(
+            voxel_spacing=voxel_spacing,
+            decimals=decimals,
+            verbose=verbose,
+            inplace=True,
+        )
 
     def to_global(self):
         """Converts the Centroids object to a global POI_Global object.
@@ -577,7 +665,7 @@ class POI(Abstract_POI):
             >>> centroid_obj = Centroids(...)
             >>> global_obj = centroid_obj.to_global()
         """
-        import TPTBox.core.poi_global as pg
+        import TPTBox.core.poi_fun.poi_global as pg
 
         return pg.POI_Global(self)
 
@@ -585,7 +673,12 @@ class POI(Abstract_POI):
         return self.to_global().to_other(ref)
 
     def save(
-        self, out_path: Path | str, make_parents=False, additional_info: dict | None = None, verbose: logging = True, save_hint=2
+        self,
+        out_path: Path | str,
+        make_parents=False,
+        additional_info: dict | None = None,
+        verbose: logging = True,
+        save_hint=2,
     ) -> None:
         """
         Saves the centroids to a JSON file.
@@ -612,12 +705,7 @@ class POI(Abstract_POI):
         self.sort()
         out_path = str(out_path)
         if len(self.centroids) == 0:
-            log.print(
-                "Centroids empty, not saved:",
-                out_path,
-                ltype=log_file.Log_Type.FAIL,
-                verbose=verbose,
-            )
+            log.print("POIs empty, not saved:", out_path, ltype=Log_Type.FAIL, verbose=verbose)
             return
         json_object, print_add = _poi_to_dict_list(self, additional_info, save_hint, verbose)
 
@@ -633,13 +721,7 @@ class POI(Abstract_POI):
 
         with open(out_path, "w") as f:
             json.dump(json_object, f, default=convert, indent=4)
-        log.print(
-            "Centroids saved:",
-            out_path,
-            print_add,
-            ltype=log_file.Log_Type.SAVE,
-            verbose=verbose,
-        )
+        log.print("POIs saved:", out_path, print_add, ltype=Log_Type.SAVE, verbose=verbose)
 
     def make_point_cloud_nii(self, affine=None, s=8, sphere=False):
         """Create point cloud NIfTI images from the centroid coordinates.
@@ -700,10 +782,6 @@ class POI(Abstract_POI):
         nii = nib.Nifti1Image(arr, affine=affine)
         nii2 = nib.Nifti1Image(arr2, affine=affine)
         return NII(nii, seg=True), NII(nii2, seg=True)
-
-    def make_empty_nii(self, seg=False):
-        nii = nib.Nifti1Image(np.zeros(self.shape_int), affine=self.affine)
-        return NII(nii, seg=seg)
 
     def filter_points_inside_shape(self, inplace=False) -> Self:
         """Filter out centroid points that are outside the defined shape.
@@ -875,48 +953,14 @@ class POI(Abstract_POI):
 
         return not has_errors
 
-
-class VertebraCentroids(POI):
-    def __init__(
-        self,
-        _centroids,
-        _orientation: AX_CODES,
-        _shape: TRIPLE | None,
-        zoom=None,
-        **qargs,
-    ):
-        assert isinstance(_orientation, (tuple, list)), "_orientation is not a list or a tuple. Did you swap _centroids and _orientation"
-        super().__init__(orientation=_orientation, centroids=_centroids, shape=_shape, zoom=zoom, **qargs)
-        self.sort()
-        self.remove_centroid(*[(a, b) for a, b, c in self.items() if a >= 40 or b != 50], inplace=True)
-
-    @classmethod
-    def from_pois(cls, ctd: POI):
-        a = ctd.centroids.copy()
-        a = {(k, k2): v for k, k2, v in a.items() if k <= 30}  # filter all non Vertebra_Centroids
-        return cls(
-            a,
-            ctd.orientation,
-            _shape=ctd.shape,
-            zoom=ctd.zoom,
-            rotation=ctd.rotation,
-            origin=ctd.origin,
-            format=ctd.format,
-            info=ctd.info,
-        )
-
-    def get_sorted_regions(self, subreg_id=50):
-        """
-
-        Args:
-            index:
-
-        Returns:
-            the <index>-th vertebra in this Centroid list (if index == -1, returns the last one)
-        """
-        self.sort()
-        centroid_keys = [k for k, k2 in list(self.keys()) if subreg_id == k2]
-        return centroid_keys
+    def __eq__(self, value: object) -> bool:
+        if not isinstance(value, POI):
+            return False
+        else:
+            value2: Self = value  # type: ignore
+        if not self.assert_affine(value2, raise_error=False):
+            return False
+        return self.centroids == value2.centroids
 
 
 ######## Saving #######
@@ -933,12 +977,10 @@ format_key2value = {value: key for key, value in format_key.items()}
 
 
 def _poi_to_dict_list(ctd: POI, additional_info: dict | None, save_hint=0, verbose: logging = False):  # noqa: C901
-    ori: _Orientation = {"direction": ctd.orientation}
+    ori: dict[str, str | COORDINATE | AX_CODES] = {"direction": ctd.orientation}
     print_out = ""
-    # if hasattr(ctd, "location") and ctd.location != Location.Unknown:
-    #    ori["location"] = ctd.location_str  # type: ignore
     if ctd.zoom is not None:
-        ori["zoom"] = ctd.zoom  # type: ignore
+        ori["zoom"] = ctd.zoom
     if ctd.origin is not None:
         ori["origin"] = ctd.origin  # type: ignore
     if ctd.rotation is not None:
@@ -949,6 +991,8 @@ def _poi_to_dict_list(ctd: POI, additional_info: dict | None, save_hint=0, verbo
         ori["format"] = format_key[save_hint]  # type: ignore
         print_out = "in format " + format_key[save_hint]
 
+    ori["level_one_info"] = str(ctd.level_one_info.__name__)
+    ori["level_two_info"] = str(ctd.level_two_info.__name__)
     if additional_info is not None:
         for k, v in additional_info.items():
             if k not in ori:
@@ -973,7 +1017,7 @@ def _poi_to_dict_list(ctd: POI, additional_info: dict | None, save_hint=0, verbo
             v = v_idx2name[vert_id].replace("T", "TH") + "_" + conversion_poi2text[subreg_id]
             dict_list.append({"label": v, "X": x, "Y": y, "Z": z})
         elif save_hint == FORMAT_POI:
-            v_name = v_idx2name[vert_id] if vert_id in v_idx2name else str(vert_id)
+            v_name = ctd.level_one_info._get_name(vert_id, no_raise=True)
             # sub_name = v_idx2name[subreg_id]
             if v_name not in temp_dict:
                 temp_dict[v_name] = {}
@@ -1044,6 +1088,9 @@ def load_poi(ctd_path: POI_Reference, verbose=True) -> POI:  # noqa: ARG001
     origin = dict_list[0].get("origin", None)
     origin = tuple(origin) if origin is not None else None
     rotation: ROTATION = dict_list[0].get("rotation", None)
+    level_one_info = _register_lvl[dict_list[0].get("level_one_info", Vertebra_Instance.__name__)]
+    level_two_info = _register_lvl[dict_list[0].get("level_two_info", Location.__name__)]
+
     info = {k: v for k, v in dict_list[0].items() if k not in ctd_info_blacklist}
 
     format_ = format_key2value[format_] if format_ is not None else None
@@ -1051,10 +1098,21 @@ def load_poi(ctd_path: POI_Reference, verbose=True) -> POI:  # noqa: ARG001
     if format_ in (FORMAT_DOCKER, FORMAT_GRUBER) or format_ is None:
         _load_docker_centroids(dict_list, centroids, format_)
     elif format_ == FORMAT_POI:
-        _load_POI_centroids(dict_list, centroids)
+        _load_POI_centroids(dict_list, centroids, level_one_info, level_two_info)
     else:
         raise NotImplementedError(format_)
-    return POI(centroids, orientation=axcode, zoom=zoom, shape=shape, format=format_, info=info, origin=origin, rotation=rotation)
+    return POI(
+        centroids,
+        orientation=axcode,
+        zoom=zoom,
+        shape=shape,  # type: ignore
+        format=format_,
+        info=info,
+        origin=origin,  # type: ignore
+        rotation=rotation,  # type: ignore
+        level_one_info=level_one_info,
+        level_two_info=level_two_info,
+    )  # type: ignore
 
 
 def _load_docker_centroids(dict_list, centroids: POI_Descriptor, format_):  # noqa: ARG001
@@ -1065,7 +1123,10 @@ def _load_docker_centroids(dict_list, centroids: POI_Descriptor, format_):  # no
         elif _is_Point3D(d):
             try:
                 a = int(d["label"])
-                centroids[a % LABEL_MAX, a // LABEL_MAX] = (d["X"], d["Y"], d["Z"])
+                subreg = a // LABEL_MAX
+                if subreg == 0:
+                    subreg = 50
+                centroids[a % LABEL_MAX, subreg] = (d["X"], d["Y"], d["Z"])
             except Exception:
                 try:
                     number, subreg = str(d["label"]).split("_", maxsplit=1)
@@ -1100,29 +1161,21 @@ def _load_format_POI_old(dict_list):
             t = v.replace("(", "").replace(")", "").replace(" ", "").split(",")
             t = tuple(float(x) for x in t)
             centroids[vert_id, sub_id] = t
-    return POI(
-        centroids,
-        orientation=("R", "P", "I"),
-        zoom=(1, 1, 1),
-        shape=None,
-        format=FORMAT_OLD_POI,
-    )
+    return POI(centroids, orientation=("R", "P", "I"), zoom=(1, 1, 1), shape=None, format=FORMAT_OLD_POI, rotation=None)  # type: ignore
 
 
-def _to_int(vert_id):
-    try:
-        return int(vert_id)
-    except Exception:
-        return v_name2idx[vert_id]
-
-
-def _load_POI_centroids(dict_list, centroids: POI_Descriptor):
+def _load_POI_centroids(
+    dict_list,
+    centroids: POI_Descriptor,
+    level_one_info: Abstract_lvl,
+    level_two_info: Abstract_lvl,
+):
     assert len(dict_list) == 2
     d: dict[int | str, dict[int | str, tuple[float, float, float]]] = dict_list[1]
     for vert_id, v in d.items():
-        vert_id = _to_int(vert_id)  # noqa: PLW2901
+        vert_id = level_one_info._get_id(vert_id, no_raise=True)  # noqa: PLW2901
         for sub_id, t in v.items():
-            sub_id = _to_int(sub_id)  # noqa: PLW2901
+            sub_id = level_two_info._get_id(sub_id)  # noqa: PLW2901
             centroids[vert_id, sub_id] = tuple(t)
 
 
@@ -1404,6 +1457,7 @@ def calc_poi_from_subreg_vert(
     extend_to: POI | None = None,
     # use_vertebra_special_action=True,
     _vert_ids=None,
+    _print_phases=False,
 ) -> POI:
     """
     Calculates the centroids of a subregion within a vertebral mask. This function is spine opinionated, the general implementation is "calc_centroids_from_two_masks".
@@ -1431,26 +1485,37 @@ def calc_poi_from_subreg_vert(
     vert_msk.assert_affine(subreg_msk)
     vert_msk = vert_msk.apply_crop(crop)
     subreg_msk = subreg_msk.apply_crop(crop)
-    extend_to = POI({}, **vert_msk._extract_affine(), format=FORMAT_POI) if extend_to is None else extend_to.apply_crop(crop)
+    extend_to = (
+        POI(
+            {},
+            **vert_msk._extract_affine(),
+            format=FORMAT_POI,
+            level_one_info=Vertebra_Instance,
+            level_two_info=Location,
+        )
+        if extend_to is None
+        else extend_to.apply_crop(crop, inplace=True)
+    )
 
     if _vert_ids is None:
         _vert_ids = vert_msk.unique()
 
-    from TPTBox.core.vertebra_pois_non_centroids import add_prerequisites, compute_non_centroid_pois
+    from TPTBox.core.poi_fun.vertebra_pois_non_centroids import add_prerequisites, compute_non_centroid_pois
 
-    # print(subreg_id)
     subreg_id = add_prerequisites(int2loc(subreg_id if isinstance(subreg_id, Sequence) else [subreg_id]))  # type: ignore
-    # print(subreg_id)
 
     log.print("Calc centroids from subregion id", subreg_id, vert_msk.shape, verbose=verbose)
     subreg_id_int = set(loc2int_list(subreg_id))
     subreg_id_int_phase_1 = tuple(
-        filter(lambda i: i < 60 and i not in [Location.Vertebra_Full.value, Location.Dens_axis.value], subreg_id_int)
+        filter(
+            lambda i: i < 53 and i not in [Location.Vertebra_Full.value, Location.Dens_axis.value],
+            subreg_id_int,
+        )
     )
     # Step 1 get all required locations, crop vert/subreg
     # Step 2 calc centroids
 
-    # print("step 2", subreg_id_int)
+    print("step 2", subreg_id_int) if _print_phases else None
     if len(subreg_id_int_phase_1) != 0:
         arr = vert_msk.get_array()
         arr[arr >= 100] = 0
@@ -1469,7 +1534,7 @@ def calc_poi_from_subreg_vert(
         )
         [subreg_id_int.remove(i) for i in subreg_id_int_phase_1]
     # Step 3 Vertebra_Full
-    # print("step 3", subreg_id_int)
+    print("step 3", subreg_id_int) if _print_phases else None
     if Location.Vertebra_Full.value in subreg_id_int:
         log.print("Calc centroid from subregion id", "Vertebra_Full", verbose=verbose)
         full = Location.Vertebra_Full.value
@@ -1479,10 +1544,16 @@ def calc_poi_from_subreg_vert(
             arr[arr >= v_name2idx["Cocc"]] = 0
             # arr[arr >= Location.Vertebra_Corpus.value] = 0
             # arr[arr != 0] = full
-            extend_to = calc_centroids(vert_msk.set_array(arr), decimals=decimals, subreg_id=full, extend_to=extend_to, inplace=True)
+            extend_to = calc_centroids(
+                vert_msk.set_array(arr),
+                decimals=decimals,
+                subreg_id=full,
+                extend_to=extend_to,
+                inplace=True,
+            )
         subreg_id_int.remove(full)
     # Step 4 IVD / Endplates Superior / Endplate Inferior
-    # print("step 4", subreg_id_int)
+    print("step 4", subreg_id_int) if _print_phases else None
     mapping_vert = {
         Location.Vertebra_Disc.value: 100,
         Location.Vertebral_Body_Endplate_Superior.value: 200,
@@ -1499,11 +1570,17 @@ def calc_poi_from_subreg_vert(
             vert_arr[vert_arr >= v + 100] = 0
             vert_arr[vert_arr < v] = 0
             vert_arr[vert_arr != 0] -= v
-            extend_to = calc_centroids(vert_msk.set_array(vert_arr), decimals=decimals, subreg_id=v, extend_to=extend_to, inplace=True)
+            extend_to = calc_centroids(
+                vert_msk.set_array(vert_arr),
+                decimals=decimals,
+                subreg_id=v,
+                extend_to=extend_to,
+                inplace=True,
+            )
             subreg_id_int.remove(loc)
     # Step 5 call non_centroid_pois
     # Prepare mask to binary mask
-    # print("step 5", subreg_id_int)
+    print("step 5", subreg_id_int) if _print_phases else None
     vert_arr = vert_msk.get_seg_array()
     subreg_arr = subreg_msk.get_seg_array()
     assert subreg_msk.shape == vert_arr.shape, "Shape miss-match" + str(subreg_msk.shape) + str(vert_arr.shape)
@@ -1514,7 +1591,14 @@ def calc_poi_from_subreg_vert(
         extend_to = POI({}, **vert_msk._extract_affine(), format=FORMAT_POI)
     if len(subreg_id_int) != 0:
         # print("step 6", subreg_id_int)
-        compute_non_centroid_pois(extend_to, int2loc(list(subreg_id_int)), vert_msk, subreg_msk, _vert_ids=_vert_ids, log=log)
+        compute_non_centroid_pois(
+            extend_to,
+            int2loc(list(subreg_id_int)),
+            vert_msk,
+            subreg_msk,
+            _vert_ids=_vert_ids,
+            log=log,
+        )
     extend_to.apply_crop_reverse(crop, org_shape, inplace=True)
     return extend_to
 
@@ -1601,7 +1685,12 @@ def _is_not_yet_computed(ids_in_arr: Sequence[int], extend_to: POI | None, subre
 
 
 def calc_centroids(
-    msk: Image_Reference, decimals=3, vert_id=-1, subreg_id: int | Location = 50, extend_to: POI | None = None, inplace: bool = False
+    msk: Image_Reference,
+    decimals=3,
+    vert_id=-1,
+    subreg_id: int | Location = 50,
+    extend_to: POI | None = None,
+    inplace: bool = False,
 ) -> POI:
     """
     Calculates the centroid coordinates of each region in the given mask image.

@@ -247,27 +247,31 @@ class TestNII(unittest.TestCase):
     # Test that the get_plane method returns the correct plane of the image.
     def test_get_plane(self):
         # Create a NII object with a known affine matrix
-        affine = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
+        affine = np.array([[1.0, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
         nii = NII(Nifti1Image(np.zeros((10, 10, 10)), affine), seg=False)
 
         # Test for sagittal plane
-        nii.affine[0, 0] = 0.5
-        assert nii.get_plane() == "sag"
+        affine[0, 0] = 0.5
+        nii.affine = affine
+        assert nii.get_plane() == "sag", nii.get_plane()
 
         # Test for coronal plane
-        nii.affine[0, 0] = 1
-        nii.affine[1, 1] = 0.5
+        affine[0, 0] = 1
+        affine[1, 1] = 0.5
+        nii.affine = affine
         assert nii.get_plane() == "cor"
 
         # Test for axial plane
-        nii.affine[1, 1] = 1.0
-        nii.affine[2, 2] = 0.5
+        affine[1, 1] = 1.0
+        affine[2, 2] = 0.5
+        nii.affine = affine
         assert nii.get_plane() == "ax"
 
         # Test for isometric plane
-        nii.affine[0, 0] = 1
-        nii.affine[1, 1] = 1
-        nii.affine[2, 2] = 1
+        affine[0, 0] = 1
+        affine[1, 1] = 1
+        affine[2, 2] = 1
+        nii.affine = affine
         assert nii.get_plane() == "iso"
 
     # Test that the erode_msk method correctly erodes the segmentation mask.

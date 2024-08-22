@@ -1,6 +1,7 @@
+import typing
 from collections.abc import Sequence
 from enum import Enum
-from typing import Literal, NoReturn
+from typing import TYPE_CHECKING, Literal, NoReturn
 
 import numpy as np
 
@@ -31,9 +32,24 @@ LABEL_MAP = dict[int | str, int | str] | dict[str, str] | dict[int, int]
 
 LABEL_REFERENCE = int | Sequence[int] | None
 
-
-_plane_dict: dict[DIRECTIONS, str] = {"S": "ax", "I": "ax", "L": "sag", "R": "sag", "A": "cor", "P": "cor"}
-_same_direction: dict[DIRECTIONS, DIRECTIONS] = {"S": "I", "I": "S", "L": "R", "R": "L", "A": "P", "P": "A"}
+if TYPE_CHECKING:
+    from TPTBox import NII, POI
+_plane_dict: dict[DIRECTIONS, str] = {
+    "S": "ax",
+    "I": "ax",
+    "L": "sag",
+    "R": "sag",
+    "A": "cor",
+    "P": "cor",
+}
+_same_direction: dict[DIRECTIONS, DIRECTIONS] = {
+    "S": "I",
+    "I": "S",
+    "L": "R",
+    "R": "L",
+    "A": "P",
+    "P": "A",
+}
 
 
 def never_called(args: NoReturn) -> NoReturn:  # noqa: ARG001
@@ -53,8 +69,39 @@ VERTEBRA_INSTANCE_ENDPLATE_LABEL_OFFSET = 200  # 201 - 225
 _vidx2name = None
 _vname2idx = None
 
+_register_lvl = {}
 
-class Vertebra_Instance(Enum):
+
+class Abstract_lvl(Enum):
+    def __init_subclass__(cls, **kwargs):
+        _register_lvl[str(cls.__name__)] = cls
+
+    @classmethod
+    def order_dict(cls) -> dict[int, int]:
+        return {}  # Default integer order
+
+    @classmethod
+    def _get_name(cls, i: int, no_raise=True) -> str:
+        try:
+            return cls(i).name
+        except ValueError:
+            if not no_raise:
+                raise
+            return str(i)
+
+    @classmethod
+    def _get_id(cls, s: str | int, no_raise=True) -> int:
+        if isinstance(s, int):
+            return s
+        try:
+            return cls[s].value
+        except KeyError:
+            if not no_raise:
+                raise
+            return int(s)
+
+
+class Vertebra_Instance(Abstract_lvl):
     def __new__(cls, *args):
         obj = object.__new__(cls)
         obj._value_ = args[0]
@@ -66,7 +113,6 @@ class Vertebra_Instance(Enum):
         has_rib: bool = False,
         has_ivd: bool = True,
     ):
-        #
         self._rib = None
         self._ivd = None
         self._endplate = None
@@ -118,6 +164,55 @@ class Vertebra_Instance(Enum):
             return _vidx2name
         _vidx2name = {value: key for key, value in Vertebra_Instance.name2idx().items()}
         return _vidx2name
+
+    @classmethod
+    def is_sacrum(cls, i: int):
+        try:
+            return cls(i) in cls.sacrum()
+        except KeyError:
+            return False
+
+    @classmethod
+    def cervical(cls):
+        return (cls.C1, cls.C2, cls.C3, cls.C4, cls.C5, cls.C6, cls.C7)
+
+    @classmethod
+    def thoracic(cls):
+        return (cls.T1, cls.T2, cls.T3, cls.T4, cls.T5, cls.T6, cls.T7, cls.T8, cls.T9, cls.T10, cls.T11, cls.T12, cls.T13)
+
+    @classmethod
+    def lumbar(cls):
+        return (cls.L1, cls.L2, cls.L3, cls.L4, cls.L5, cls.L6)
+
+    @classmethod
+    def sacrum(cls):
+        return (cls.S1, cls.S2, cls.S3, cls.S4, cls.S5, cls.S6, cls.COCC)
+
+    @classmethod
+    def order(cls):
+        return cls.cervical() + cls.thoracic() + cls.lumbar() + cls.sacrum()
+
+    @classmethod
+    def order_dict(cls) -> dict[int, int]:
+        return {a.value: e for e, a in enumerate(cls.order())}
+
+    def get_next_poi(self, poi: typing.Union["POI", "NII", list[int]]):
+        r = poi if isinstance(poi, list) else poi.keys_region() if hasattr(poi, "keys_region") else poi.unique()  # type: ignore
+        o = self.order()
+        idx = o.index(self)
+        for vert in o[idx + 1 :]:
+            if vert.value in r:
+                return vert
+        return None
+
+    def get_previous_poi(self, poi: typing.Union["POI", "NII", list[int]]):
+        r = poi if isinstance(poi, list) else poi.keys_region() if hasattr(poi, "keys_region") else poi.unique()  # type: ignore
+        o = self.order()
+        idx = o.index(self)
+        for vert in reversed(o[:idx]):
+            if vert.value in r:
+                return vert
+        return None
 
     C1 = 1
     C2 = 2
@@ -181,7 +276,7 @@ class Vertebra_Instance(Enum):
         return str(self.name)
 
 
-class Location(Enum):
+class Location(Abstract_lvl):
     Unknown = 0
     # S1 = 26  # SACRUM
     # Vertebral subregions
@@ -352,6 +447,10 @@ conversion_poi = {
     "ITL_S": 142,
     "ITL_D": 144,
 }
-vert_directions = [Location.Vertebra_Direction_Inferior, Location.Vertebra_Direction_Right, Location.Vertebra_Direction_Posterior]
+vert_directions = [
+    Location.Vertebra_Direction_Inferior,
+    Location.Vertebra_Direction_Right,
+    Location.Vertebra_Direction_Posterior,
+]
 
 conversion_poi2text = {k: v for v, k in conversion_poi.items()}

@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 
 from TPTBox.core.poi import POI
-from TPTBox.core.poi_global import POI_Global
+from TPTBox.core.poi_fun.poi_global import POI_Global
 
 
 class TestPOI(unittest.TestCase):
@@ -15,13 +15,12 @@ class TestPOI(unittest.TestCase):
     def test_default_values(self):
         poi = POI()
         assert poi.orientation == ("R", "A", "S")
-        assert poi.zoom is None
+        assert poi.zoom == (1, 1, 1)
         assert poi.shape is None
         assert poi.format is None
         assert poi.info == {}
         assert poi.rotation is None
         assert poi.origin is None
-        assert poi._zoom is None
 
     # Test that the 'zoom' attribute is properly set to a valid value.
     def test_set_zoom_attribute(self):
@@ -352,13 +351,12 @@ class TestPOI(unittest.TestCase):
         poi = POI()
 
         assert poi.orientation == ("R", "A", "S")
-        assert poi.zoom is None
+        assert poi.zoom == (1, 1, 1)
         assert poi.shape is None
         assert poi.format is None
         assert poi.info == {}
         assert poi.rotation is None
         assert poi.origin is None
-        assert poi._zoom is None
         assert not poi.is_global
 
     # Test that the 'origin' attribute is properly set to None when assigned the value of None.
@@ -366,7 +364,7 @@ class TestPOI(unittest.TestCase):
         poi = POI()
         poi.origin = (1, 2, 3)
         assert poi.origin is not None
-        poi.origin = None
+        poi.origin = None  # type: ignore
         assert poi.origin is None
 
     # Test that setting the 'zoom' attribute to None correctly updates the internal '_zoom' attribute to None.
@@ -434,8 +432,8 @@ class TestPOI(unittest.TestCase):
     # Test that the 'rescale' method raises an AssertionError when called with None as the voxel_spacing.
     def test_rescale_with_none_voxel_spacing(self):
         poi = POI()
-        with self.assertRaises(AssertionError):
-            poi.rescale(voxel_spacing=None)
+        with self.assertRaises(TypeError):
+            poi.rescale(voxel_spacing=None)  # type: ignore
 
     # Test that calling the 'map_labels' method with an invalid label_map raises a ValueError.
     def test_invalid_label_map(self):
@@ -461,7 +459,7 @@ class TestPOI(unittest.TestCase):
         # Create a POI object with centroids outside the shape and shape attribute set to None
         poi = POI()
         poi.centroids = {(1, 1): (10, 10, 10), (2, 2): (20, 20, 20), (3, 3): (30, 30, 30)}
-        poi.shape = None
+        poi.shape = None  # type: ignore
         with self.assertRaises(ValueError):
             # Call the 'filter_points_inside_shape' method
             _ = poi.filter_points_inside_shape()

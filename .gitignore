@@ -159,3 +159,4 @@ tmp/*
 !/TPTBox/tests/sample_ct/*
 poetry.lock
 *.dcm
+*.pkl
