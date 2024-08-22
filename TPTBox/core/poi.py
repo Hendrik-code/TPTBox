@@ -1087,7 +1087,7 @@ def load_poi(ctd_path: POI_Reference, verbose=True) -> POI:  # noqa: ARG001
     format_ = dict_list[0].get("format", None)
     origin = dict_list[0].get("origin", None)
     origin = tuple(origin) if origin is not None else None
-    rotation = dict_list[0].get("rotation", None)
+    rotation: ROTATION = dict_list[0].get("rotation", None)
     level_one_info = _register_lvl[dict_list[0].get("level_one_info", Vertebra_Instance.__name__)]
     level_two_info = _register_lvl[dict_list[0].get("level_two_info", Location.__name__)]
 
