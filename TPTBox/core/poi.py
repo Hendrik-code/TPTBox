@@ -1743,3 +1743,41 @@ def calc_centroids(
         else:
             ctd_list[int(i), subreg_id] = tuple(round(x, decimals) for x in ctr_mass)
     return POI(ctd_list, orientation=axc, **msk_nii._extract_affine(rm_key=["orientation"]))
+
+
+######## Utility #######
+
+
+def calc_poi_average(
+    pois: list[POI],
+    keep_points_not_present_in_all_pois: bool = False,
+) -> POI:
+    """Calculates average of POI across list of POIs and removes all points that are not fully present in all given POIs
+
+    Args:
+        pois (list[POI]): _description_
+
+    Returns:
+        POI: _description_
+    """
+    # Get the keys that are present in all POIs
+    keys = set(pois[0].keys())
+    for ctd in pois:
+        keys = keys.union(set(ctd.keys())) if keep_points_not_present_in_all_pois else keys.intersection(set(ctd.keys()))
+    keys = list(keys)
+
+    # Make average array
+    ctd = {}
+    for key in keys:
+        #
+        ctd[key] = tuple(np.array([reg_ctd[key] for reg_ctd in pois if key in reg_ctd]).mean(axis=0))
+
+    # Sort the new ctd by keys
+    ctd = dict(sorted(ctd.items()))
+    return POI(
+        centroids=ctd,
+        orientation=pois[0].orientation,
+        zoom=pois[0].zoom,
+        shape=pois[0].shape,
+        rotation=pois[0].rotation,
+    )
