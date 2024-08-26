@@ -42,7 +42,7 @@ from TPTBox.core.vert_constants import (
 from TPTBox.logger import Log_Type
 
 
-### LAGACY DEFINITONS ###
+### LEGACY DEFINITIONS ###
 class _Point3D(TypedDict):
     X: float
     Y: float
@@ -67,7 +67,8 @@ ctd_info_blacklist = [
     "format",
     "rotation",
     "origin",
-    "level_one_info" "level_two_info",
+    "level_one_info",
+    "level_two_info",
 ]  # "location"
 
 
@@ -134,16 +135,21 @@ class POI(Abstract_POI):
 
     orientation: AX_CODES = ("R", "A", "S")
     zoom: ZOOMS = field(init=True, default=None)  # type: ignore
-    shape: TRIPLE = field(default=None, repr=True, compare=False)
-    rotation: ROTATION = field(default=None, repr=False, compare=False)
+    shape: TRIPLE = field(default=None, repr=True, compare=False)  # type: ignore
+    rotation: ROTATION = field(default=None, repr=False, compare=False)  # type: ignore
     origin: COORDINATE = None  # type: ignore
     # internal
-    _zoom: ZOOMS = field(init=False, default=None, repr=False, compare=False)
+    _rotation: ROTATION = field(init=False, default=None, repr=False, compare=False)
+    _zoom: ZOOMS = field(init=False, default=(1, 1, 1), repr=False, compare=False)
     _vert_orientation_pir = {}  # Elusive; will not be saved; will not be copied. For Buffering results  # noqa: RUF012
 
     @property
     def is_global(self):
         return False
+
+    @property
+    def rotation(self):
+        return self._rotation
 
     @property
     def zoom(self):
@@ -158,6 +164,15 @@ class POI(Abstract_POI):
         aff[:3, :3] = self.rotation @ np.diag(self.zoom)
         aff[:3, 3] = self.origin
         return np.round(aff, ROUNDING_LVL)
+
+    @rotation.setter
+    def rotation(self, value):
+        if isinstance(value, property):
+            pass
+        elif value is None:
+            self._rotation = None
+        else:
+            self._rotation = np.array(value)
 
     @zoom.setter
     def zoom(self, value):
@@ -175,10 +190,10 @@ class POI(Abstract_POI):
         self,
         centroids: POI_DICT | POI_Descriptor | None = None,
         orientation: AX_CODES | None = None,
-        zoom: ZOOMS | None | Sentinel = Sentinel(),  # noqa: B008
-        shape: tuple[float, float, float] | tuple[float, ...] | None | Sentinel = Sentinel(),  # noqa: B008
-        rotation: ROTATION | None | Sentinel = Sentinel(),  # noqa: B008
-        origin: COORDINATE | None | Sentinel = Sentinel(),  # noqa: B008
+        zoom: ZOOMS | Sentinel = Sentinel(),  # noqa: B008
+        shape: tuple[float, float, float] | tuple[float, ...] | Sentinel = Sentinel(),  # noqa: B008
+        rotation: ROTATION | Sentinel = Sentinel(),  # noqa: B008
+        origin: COORDINATE | Sentinel = Sentinel(),  # noqa: B008
     ) -> Self:
         """Create a copy of the POI object with optional attribute overrides.
 
@@ -938,6 +953,15 @@ class POI(Abstract_POI):
 
         return not has_errors
 
+    def __eq__(self, value: object) -> bool:
+        if not isinstance(value, POI):
+            return False
+        else:
+            value2: Self = value  # type: ignore
+        if not self.assert_affine(value2, raise_error=False):
+            return False
+        return self.centroids == value2.centroids
+
 
 ######## Saving #######
 def _is_Point3D(obj) -> TypeGuard[_Point3D]:
@@ -1063,7 +1087,7 @@ def load_poi(ctd_path: POI_Reference, verbose=True) -> POI:  # noqa: ARG001
     format_ = dict_list[0].get("format", None)
     origin = dict_list[0].get("origin", None)
     origin = tuple(origin) if origin is not None else None
-    rotation = dict_list[0].get("rotation", None)
+    rotation: ROTATION = dict_list[0].get("rotation", None)
     level_one_info = _register_lvl[dict_list[0].get("level_one_info", Vertebra_Instance.__name__)]
     level_two_info = _register_lvl[dict_list[0].get("level_two_info", Location.__name__)]
 
@@ -1081,11 +1105,11 @@ def load_poi(ctd_path: POI_Reference, verbose=True) -> POI:  # noqa: ARG001
         centroids,
         orientation=axcode,
         zoom=zoom,
-        shape=shape,
+        shape=shape,  # type: ignore
         format=format_,
         info=info,
-        origin=origin,
-        rotation=rotation,
+        origin=origin,  # type: ignore
+        rotation=rotation,  # type: ignore
         level_one_info=level_one_info,
         level_two_info=level_two_info,
     )  # type: ignore
@@ -1137,13 +1161,7 @@ def _load_format_POI_old(dict_list):
             t = v.replace("(", "").replace(")", "").replace(" ", "").split(",")
             t = tuple(float(x) for x in t)
             centroids[vert_id, sub_id] = t
-    return POI(
-        centroids,
-        orientation=("R", "P", "I"),
-        zoom=(1, 1, 1),
-        shape=None,
-        format=FORMAT_OLD_POI,
-    )  # type: ignore
+    return POI(centroids, orientation=("R", "P", "I"), zoom=(1, 1, 1), shape=None, format=FORMAT_OLD_POI, rotation=None)  # type: ignore
 
 
 def _load_POI_centroids(
@@ -1439,6 +1457,7 @@ def calc_poi_from_subreg_vert(
     extend_to: POI | None = None,
     # use_vertebra_special_action=True,
     _vert_ids=None,
+    _print_phases=False,
 ) -> POI:
     """
     Calculates the centroids of a subregion within a vertebral mask. This function is spine opinionated, the general implementation is "calc_centroids_from_two_masks".
@@ -1475,7 +1494,7 @@ def calc_poi_from_subreg_vert(
             level_two_info=Location,
         )
         if extend_to is None
-        else extend_to.apply_crop(crop)
+        else extend_to.apply_crop(crop, inplace=True)
     )
 
     if _vert_ids is None:
@@ -1489,14 +1508,14 @@ def calc_poi_from_subreg_vert(
     subreg_id_int = set(loc2int_list(subreg_id))
     subreg_id_int_phase_1 = tuple(
         filter(
-            lambda i: i < 60 and i not in [Location.Vertebra_Full.value, Location.Dens_axis.value],
+            lambda i: i < 53 and i not in [Location.Vertebra_Full.value, Location.Dens_axis.value],
             subreg_id_int,
         )
     )
     # Step 1 get all required locations, crop vert/subreg
     # Step 2 calc centroids
 
-    print("step 2", subreg_id_int)
+    print("step 2", subreg_id_int) if _print_phases else None
     if len(subreg_id_int_phase_1) != 0:
         arr = vert_msk.get_array()
         arr[arr >= 100] = 0
@@ -1515,7 +1534,7 @@ def calc_poi_from_subreg_vert(
         )
         [subreg_id_int.remove(i) for i in subreg_id_int_phase_1]
     # Step 3 Vertebra_Full
-    print("step 3", subreg_id_int)
+    print("step 3", subreg_id_int) if _print_phases else None
     if Location.Vertebra_Full.value in subreg_id_int:
         log.print("Calc centroid from subregion id", "Vertebra_Full", verbose=verbose)
         full = Location.Vertebra_Full.value
@@ -1534,7 +1553,7 @@ def calc_poi_from_subreg_vert(
             )
         subreg_id_int.remove(full)
     # Step 4 IVD / Endplates Superior / Endplate Inferior
-    print("step 4", subreg_id_int)
+    print("step 4", subreg_id_int) if _print_phases else None
     mapping_vert = {
         Location.Vertebra_Disc.value: 100,
         Location.Vertebral_Body_Endplate_Superior.value: 200,
@@ -1561,7 +1580,7 @@ def calc_poi_from_subreg_vert(
             subreg_id_int.remove(loc)
     # Step 5 call non_centroid_pois
     # Prepare mask to binary mask
-    print("step 5", subreg_id_int)
+    print("step 5", subreg_id_int) if _print_phases else None
     vert_arr = vert_msk.get_seg_array()
     subreg_arr = subreg_msk.get_seg_array()
     assert subreg_msk.shape == vert_arr.shape, "Shape miss-match" + str(subreg_msk.shape) + str(vert_arr.shape)

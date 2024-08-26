@@ -1,5 +1,6 @@
 import copy
 import warnings
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
@@ -473,7 +474,18 @@ def plot_sag_centroids(
 
             axs.add_patch(FancyArrow(v[1] * zms[1], v[0] * zms[0], c, d, color=cmap(color - 1 % LABEL_MAX % cmap.N)))
     if "text_sag" in ctd.info:
-        for color, (text, a, b) in ctd.info["text_sag"]:
+        for color, x in ctd.info["text_sag"]:
+            if not isinstance(color, int) and len(color) == 2:
+                color, curve_location = color  # noqa: PLW2901
+            if isinstance(x, str) or len(x) == 1:
+                (text) = x
+                a = zms[1] * ctd[color, curve_location][1]
+                b = zms[0] * ctd[color, curve_location][0]
+            elif len(x) == 3:
+                (text, a, b) = x
+            elif len(x) == 2:
+                (text, a) = x
+                b = zms[0] * ctd[color, curve_location][0]
             axs.text(a, b, text, fontdict={"color": cmap(color - 1), "weight": "bold"})
 
 
@@ -494,7 +506,13 @@ def plot_cor_centroids(
     # requires v_dict = dictionary of mask labels
     for k1, k2, v in ctd2.items():
         try:
-            axs.add_patch(Circle((v[2] * zms[2], v[0] * zms[0]), 2, color=cmap((k1 - 1) % LABEL_MAX % cmap.N)))
+            axs.add_patch(
+                Circle(
+                    (v[2] * zms[2], v[0] * zms[0]),
+                    2,
+                    color=cmap((k1 - 1) % LABEL_MAX % cmap.N),
+                )
+            )
             if not hide_centroid_labels and k2 == curve_location.value and k1 in poi_labelmap:
                 axs.text(4, v[0] * zms[0], poi_labelmap[k1], fontdict={"color": cmap(k1 - 1), "weight": "bold"})
         except Exception:
@@ -507,7 +525,18 @@ def plot_cor_centroids(
                 v = (np.array(ctd[x[0], x[1]]) + np.array(ctd[x[2], x[3]])) / 2
             axs.add_patch(FancyArrow(v[2] * zms[2], v[0] * zms[0], c, d, color=cmap(color - 1 % LABEL_MAX % cmap.N)))
     if "text_cor" in ctd.info:
-        for color, (text, a, b) in ctd.info["text_cor"]:
+        for color, x in ctd.info["text_cor"]:
+            if isinstance(color, Sequence) and len(color) == 2:
+                color, curve_location = color  # noqa: PLW2901
+            if isinstance(x, str) or len(x) == 1:
+                (text) = x
+                a = zms[2] * ctd[color, curve_location][2]
+                b = zms[0] * ctd[color, curve_location][0]
+            elif len(x) == 3:
+                (text, a, b) = x
+            elif len(x) == 2:
+                (text, a) = x
+                b = zms[0] * ctd[color, curve_location][0]
             axs.text(a, b, text, fontdict={"color": cmap(color - 1), "weight": "bold"})
 
 
