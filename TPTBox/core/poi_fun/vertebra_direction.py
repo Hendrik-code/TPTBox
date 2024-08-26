@@ -245,8 +245,8 @@ def get_vert_direction_PIR(poi: POI, vert_id, do_norm=True, to_pir=True) -> Vert
     return out
 
 
-def get_vert_direction_matrix(poi: POI, vert_id: int):
-    P, I, R = get_vert_direction_PIR(poi, vert_id=vert_id)  # noqa: N806
+def get_vert_direction_matrix(poi: POI, vert_id: int, to_pir=False):
+    P, I, R = get_vert_direction_PIR(poi, vert_id=vert_id, to_pir=to_pir)  # noqa: N806
     from_vert_orient = np.stack([P, I, R], axis=1)
     to_vert_orient = np.linalg.inv(from_vert_orient)
     return to_vert_orient, from_vert_orient
