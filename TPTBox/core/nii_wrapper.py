@@ -808,11 +808,11 @@ class NII(NII_Math):
     def normalize_to_range_(self, min_value: int = 0, max_value: int = 1500, verbose:logging=True):
         assert not self.seg
         mi, ma = self.min(), self.max()
-        self += -mi + min_value  # min = 0  # noqa: PLW0642
+        self += -mi + min_value  # min = 0
         self_dtype = self.dtype
         max_value2 = ma
         if max_value2 > max_value:
-            self *= max_value / max_value2  # noqa: PLW0642
+            self *= max_value / max_value2
             self.set_dtype_(self_dtype)
         log.print(f"Shifted from range {mi, ma} to range {self.min(), self.max()}", verbose=verbose)
 
@@ -1180,8 +1180,8 @@ class NII(NII_Math):
                 out.set_data_dtype(np.uint16)
             else:
                 out.set_data_dtype(np.int32)
-        log.print(f"Save {file} as {out.get_data_dtype()}",verbose=verbose,ltype=Log_Type.SAVE)
         nib.save(out, file) #type: ignore
+        log.print(f"Save {file} as {out.get_data_dtype()}",verbose=verbose,ltype=Log_Type.SAVE)
     def __str__(self) -> str:
         return f"shp={self.shape}; ori={self.orientation}, zoom={tuple(np.around(self.zoom, decimals=2))}, seg={self.seg}" # type: ignore
     def __repr__(self)-> str:
