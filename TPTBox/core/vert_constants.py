@@ -422,6 +422,22 @@ v_idx_order = list(v_idx2name.keys())
 
 # fmt: on
 
+"""
+Abbreviations:
+- SSL: Supraspinous Ligament
+- ALL: Anterior Longitudinal Ligament
+- PLL: Posterior Longitudinal Ligament
+- FL: Flavum Ligament
+- ISL: Interspinous Ligament
+- ITL: Intertransverse Ligament
+
+- CR: Cranial / Superior
+- CA: Caudal / Inferior
+
+- S: Sinistra / Left
+- D: Dextra / Right
+"""
+# TODO clean this shit up (some values not defined in Location, some different values I think)
 conversion_poi = {
     "SSL": 81,  # this POI is not included in our POI list
     "ALL_CR_S": 109,
