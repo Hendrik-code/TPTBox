@@ -8,7 +8,6 @@ import pydicom
 from tqdm import tqdm
 
 from TPTBox import BIDS_FILE, NII, BIDS_Global_info, Print_Logger
-from TPTBox.core.dicom.dicom_extract import extract_folder
 
 # source_folder = Path("/DATA/NAS/datasets_source/epi/NAKO/NAKO-732_Nachlieferung_20_25/")
 source_folder = Path("/DATA/NAS/datasets_source/epi/NAKO/NAKO_2D_issue/")
@@ -99,6 +98,8 @@ source_folder_encrypted_alternative = Path(
 
 
 def test_and_replace(out_folder="/media/data/NAKO/dataset-nako2"):
+    from TPTBox.core.dicom.dicom_extract import extract_folder
+
     with open("/run/user/1000/gvfs/smb-share:server=172.21.251.64,share=nas/tools/TPTBox/broken.pkl", "rb") as w:
         brocken = pickle.load(w)
     print(len(brocken))
