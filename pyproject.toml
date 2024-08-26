@@ -125,6 +125,7 @@ select = [
 
 
 ignore = [
+    "RUF100",
     "F401",
     "BLE001",
     "E501",

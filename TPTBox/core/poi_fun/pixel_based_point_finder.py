@@ -129,7 +129,12 @@ def ray_cast_pixel_level_from_poi(
     return ray_cast_pixel_lvl(start_point_np, normal_vector, region.shape, two_sided=two_sided)
 
 
-def get_extreme_point_by_vert_direction(poi: POI, region: NII, vert_id, direction: Sequence[DIRECTIONS] | DIRECTIONS = "I"):
+def get_extreme_point_by_vert_direction(
+    poi: POI,
+    region: NII,
+    vert_id,
+    direction: Sequence[DIRECTIONS] | DIRECTIONS | tuple[DIRECTIONS, float] | Sequence[tuple[DIRECTIONS, float]] = "I",
+):
     """
     Get the extreme point in a specified direction.
 
@@ -144,13 +149,17 @@ def get_extreme_point_by_vert_direction(poi: POI, region: NII, vert_id, directio
         Assumes `region` contains binary values indicating the presence of points.
         Uses `_get_sub_array_by_direction` internally.
     """
-    direction_: Sequence[DIRECTIONS] = direction if isinstance(direction, Sequence) else (direction,)  # type: ignore
+    direction_: Sequence[DIRECTIONS] | Sequence[tuple[DIRECTIONS, float]] = direction if isinstance(direction, Sequence) else (direction,)  # type: ignore
+
+    direction_weight: list[tuple[DIRECTIONS, float]] = [(d[0], 1.0) if isinstance(d, str) else (d[0], d[1]) for d in direction_]  # type: ignore
+    assert poi.orientation == region.orientation, (poi.orientation, region.orientation)
     try:
-        to_reference_frame, from_reference_frame = get_vert_direction_matrix(poi, vert_id=vert_id)
+        to_reference_frame, from_reference_frame = get_vert_direction_matrix(poi, vert_id=vert_id, to_pir=False)
     except KeyError:
         return None
     pc = np.stack(np.where(region.get_array() == 1))
     cords = to_reference_frame @ pc  # 3,n; 3 = P,I,R of vert
-    a = [_get_sub_array_by_direction(d, cords) for d in direction_]
+    a = [_get_sub_array_by_direction(d, cords) * poi.zoom[poi.get_axis(d)] * w for d, w in direction_weight]
+
     idx = np.argmax(sum(a))
     return pc[:, idx]
