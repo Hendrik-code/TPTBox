@@ -4,7 +4,6 @@ from pathlib import Path
 from tqdm import tqdm
 
 from TPTBox import BIDS_FILE, NII, BIDS_Global_info, Print_Logger
-from TPTBox.core.dicom.dicom_extract import extract_folder
 
 ###
 # _find_all_broken(), opens all files and checks if they can be read. (Some T2Haste are 2D an are considered brocken by our software)
@@ -86,6 +85,8 @@ source_folder_encrypted_alternative = Path("Nachlieferung")
 
 
 def _test_and_replace(out_folder="~/dataset-nako"):
+    from TPTBox.core.dicom.dicom_extract import extract_folder
+
     with open("TODO", "rb") as w:
         brocken = pickle.load(w)
     print(len(brocken))

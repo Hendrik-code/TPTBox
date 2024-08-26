@@ -156,7 +156,8 @@ Strategy_Pattern_Side_Effect(L.Vertebra_Direction_Posterior,L.Vertebra_Direction
 Strategy_Pattern_Side_Effect(L.Vertebra_Direction_Right,L.Vertebra_Direction_Inferior)
 Strategy_Pattern_Side_Effect(L.Vertebra_Direction_Inferior,L.Vertebra_Corpus)
 S = strategy_extreme_points
-Strategy_Pattern(L.Muscle_Inserts_Spinosus_Process, strategy=S, subreg_id=L.Spinosus_Process, direction=("P","I"))  # 81
+
+Strategy_Pattern(L.Muscle_Inserts_Spinosus_Process, strategy=S, subreg_id=L.Spinosus_Process, direction=(("P",.2),"I"))  # 81
 Strategy_Pattern(L.Muscle_Inserts_Transverse_Process_Right, strategy=S, subreg_id=L.Costal_Process_Right, direction=("P","R"))  # 82
 Strategy_Pattern(L.Muscle_Inserts_Transverse_Process_Left, strategy=S, subreg_id=L.Costal_Process_Left, direction=("P","L"))  # 83
 Strategy_Pattern(L.Muscle_Inserts_Articulate_Process_Inferior_Left, strategy=S, subreg_id=L.Inferior_Articular_Left, direction=("I")) # 86
