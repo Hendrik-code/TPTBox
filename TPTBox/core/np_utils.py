@@ -334,6 +334,10 @@ def np_map_labels(arr: UINTARRAY, label_map: LABEL_MAP) -> np.ndarray:
     k = np.array(list(label_map.keys()))
     v = np.array(list(label_map.values()))
 
+    assert len(k) == len(v)
+    if len(k) == 0:
+        return arr
+
     max_value = max(arr.max(), *k, *v) + 1
 
     mapping_ar = np.arange(max_value, dtype=arr.dtype)
