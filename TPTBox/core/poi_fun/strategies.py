@@ -103,16 +103,7 @@ def strategy_find_corner(
 
 # @timing
 def _find_corner_point(
-    poi: POI,
-    region,
-    vert_id,
-    bb,
-    start_point,
-    vec1: Location,
-    vec2: Location,
-    log: Logger_Interface = _log,
-    delta=0.00000005,
-    location=None,
+    poi: POI, region, vert_id, bb, start_point, vec1, vec2, log: Logger_Interface = _log, delta=0.00000005, location=None
 ):
     # Convert start point and vectors to local numpy coordinates
     start_point_np = to_local_np(start_point, bb, poi, vert_id, log) if isinstance(start_point, Location) else start_point
