@@ -33,7 +33,10 @@ def strategy_calculate_up_vector(poi: POI, current_subreg: NII, vert_id: int, bb
     center = to_local_np(Location.Vertebra_Disc, bb, poi, vert_id, log)
     if center is None:
         return poi
-    normal_vector = calculate_up_vector_np(current_subreg.rescale().extract_label(vert_id + 100).get_array())
+    try:
+        normal_vector = calculate_up_vector_np(current_subreg.rescale().extract_label(vert_id + 100).get_array())
+    except ValueError:
+        return poi
     normal_vector = normal_vector / np.array(poi.zoom)
     extreme_point = center + normal_vector * 10
 

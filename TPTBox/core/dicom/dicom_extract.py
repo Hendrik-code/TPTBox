@@ -54,10 +54,10 @@ def generate_bids_path(
         _subject_folder_prefix + keys["sub"],  # Subject folder
     )
     args = {"file_type": "json", "parent": parent, "make_parent": True, "additional_folder": mri_format, "bids_format": mri_format}
-    fname = BIDS_FILE(Path(p, "sub-000_ct.nii.gz"), nifti_dir).get_changed_path(**args, info=keys)
+    fname = BIDS_FILE(Path(p, "sub-000_ct.nii.gz"), nifti_dir).get_changed_path(**args, info=keys, non_strict_mode=True)
     while test_name_conflict(simp_json, fname):
         _inc_key(keys)
-        fname = BIDS_FILE(Path(p, "sub-000_ct.nii.gz"), nifti_dir).get_changed_path(**args, info=keys)
+        fname = BIDS_FILE(Path(p, "sub-000_ct.nii.gz"), nifti_dir).get_changed_path(**args, info=keys, non_strict_mode=True)
     return fname
 
 
@@ -105,14 +105,17 @@ def find_all_files(dcm_dirs: Path | list[Path]):
             for root, _, files in os.walk(dcm_dir):
                 for file in files:
                     if str(file).endswith(".dcm"):
-                        yield Path(file).parent
+                        yield Path(root, file).absolute().parent
                         break
                     else:
-                        yield Path(root) / file
+                        yield Path(root, file)
+                if "." not in str(file):
+                    yield Path(root, file).absolute().parent
+
         elif dcm_dir.name.endswith(".dcm"):
-            yield Path(file).parent
+            yield Path(root, file).absolute().parent
         else:
-            yield dcm_dir
+            yield dcm_dir.absolute()
 
 
 def unzip_files(dicom_zip_path: Path, out_dir: str | Path) -> Path:
@@ -168,7 +171,7 @@ def extract_folder(dicom_folder: Path | list[Path], dataset_path_out: Path, make
             continue
         temp_dir = None
         try:
-            # logger.print("Start", dicom_zip_path) if not str(dicom_zip_path).endswith(".dcm") else None
+            logger.print("Start", p)
             if str(dicom_path).endswith(".zip"):
                 temp_dir = tempfile.mkdtemp(prefix="dicom_export_from_zip_")
                 dicom_path = unzip_files(dicom_path, temp_dir)

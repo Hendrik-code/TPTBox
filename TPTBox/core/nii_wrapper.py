@@ -208,9 +208,9 @@ class NII(NII_Math):
         except EOFError as e:
             raise EOFError(f"{self.nii.get_filename()}: {e!s}\nThe file is probably brocken beyond repair, due killing a software during nifty saving.") from None
         except zlib.error as e:
-            raise zlib.error(f"{self.nii.get_filename()}: {e!s}\nThe file is probably brocken beyond repair, due killing a software during nifty saving.") from None
+            raise EOFError(f"{self.nii.get_filename()}: {e!s}\nThe file is probably brocken beyond repair, due killing a software during nifty saving.") from None
         except OSError as e:
-            raise zlib.error(f"{self.nii.get_filename()}: {e!s}\nThe file is probably brocken beyond repair, due killing a software during nifty saving.") from None
+            raise EOFError(f"{self.nii.get_filename()}: {e!s}\nThe file is probably brocken beyond repair, due killing a software during nifty saving.") from None
     @property
     def nii_abstract(self) -> Nifti1Image|_unpacked_nii:
         if self.__unpacked:
@@ -243,19 +243,22 @@ class NII(NII_Math):
             arr, aff, header = nii
             self._arr = arr
             self._aff = aff
-            header = header.copy()
-            header.set_sform(aff, code='aligned')
-            header.set_qform(aff, code='unknown')
-            header.set_data_dtype(arr.dtype)
-            rotation_zoom = aff[:3, :3]
-            zoom = np.sqrt(np.sum(rotation_zoom * rotation_zoom, axis=0))
-            header.set_zooms(zoom)
-            self._header = header
             self._checked_dtype = True
-        else:
-            self.__unpacked = False
-            self.__divergent = False
-            self._nii = nii
+            if header is not None:
+                header = header.copy()
+                header.set_sform(aff, code='aligned')
+                header.set_qform(aff, code='unknown')
+                header.set_data_dtype(arr.dtype)
+                rotation_zoom = aff[:3, :3]
+                zoom = np.sqrt(np.sum(rotation_zoom * rotation_zoom, axis=0))
+                header.set_zooms(zoom)
+                self._header = header
+                return
+            else:
+                nii = Nifti1Image(arr,aff)
+        self.__unpacked = False
+        self.__divergent = False
+        self._nii = nii
 
     @property
     def shape(self) -> tuple[int, int, int]:
@@ -295,7 +298,9 @@ class NII(NII_Math):
         zoom = np.sqrt(np.sum(rotation_zoom * rotation_zoom, axis=0)) if self.__divergent else self.header.get_zooms()
 
         z = tuple(np.round(zoom,7))
-        assert len(z) == 3
+        if len(z) == 4:
+            z = z[:3]
+        assert len(z) == 3,z
         return z # type: ignore
     @property
     def origin(self) -> tuple[float, float, float]:
@@ -319,6 +324,19 @@ class NII(NII_Math):
     @orientation.setter
     def orientation(self, value: AX_CODES):
         self.reorient_(value, verbose=False)
+
+
+    def get_num_dims(self):
+        return len(self.shape)
+    def split_4D_image_to_3D(self):
+        assert self.get_num_dims() == 4,self.get_num_dims()
+        arr_4d = self.get_array()
+        out:list[NII] = []
+        for i in range(self.shape[-1]):
+            arr = arr_4d[...,i]
+            out.append(NII(Nifti1Image(arr, self.affine, self.header.copy()),self.seg,self.c_val,self.header['descrip']))
+        return out
+
 
     @property
     def orientation_ornt(self):
@@ -698,7 +716,7 @@ class NII(NII_Math):
     def rescale_(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:logging=False,mode='constant'):
         return self.rescale( voxel_spacing=voxel_spacing, c_val=c_val, verbose=verbose,mode=mode, inplace=True)
 
-    def resample_from_to(self, to_vox_map:Image_Reference|Proxy, mode='constant', c_val=None, inplace = False,verbose:logging=True,align_corners:bool=False):
+    def resample_from_to(self, to_vox_map:Image_Reference|tuple[SHAPE,AFFINE,ZOOMS], mode='constant', c_val=None, inplace = False,verbose:logging=True,align_corners:bool=False):
         """self will be resampled in coordinate of given other image. Adheres to global space not to local pixel space
         Args:
             to_vox_map (Image_Reference|Proxy): If object, has attributes shape giving input voxel shape, and affine giving mapping of input voxels to output space. If length 2 sequence, elements are (shape, affine) with same meaning as above. The affine is a (4, 4) array-like.\n
@@ -711,8 +729,7 @@ class NII(NII_Math):
             NII:
         """        ''''''
         c_val = self.get_c_val(c_val)
-
-        mapping = to_nii_optional(to_vox_map,seg=self.seg,default=to_vox_map)
+        mapping = to_vox_map if isinstance(to_vox_map, tuple) else to_nii_optional(to_vox_map, seg=self.seg, default=to_vox_map)
         assert mapping is not None
         log.print(f"resample_from_to: {self} to {mapping}",verbose=verbose)
         nii = _resample_from_to(self, mapping,order=0 if self.seg else 3, mode=mode,align_corners=align_corners)
@@ -721,7 +738,7 @@ class NII(NII_Math):
             return self
         else:
             return NII(nii,self.seg,self.c_val)
-    def resample_from_to_(self, to_vox_map:Image_Reference|Proxy, mode='constant', c_val:float|None=None,verbose:logging=True,aline_corners=False):
+    def resample_from_to_(self, to_vox_map:Image_Reference|tuple[SHAPE,AFFINE,ZOOMS], mode='constant', c_val:float|None=None,verbose:logging=True,aline_corners=False):
         return self.resample_from_to(to_vox_map,mode=mode,c_val=c_val,inplace=True,verbose=verbose,align_corners=aline_corners)
 
     def n4_bias_field_correction(
@@ -808,11 +825,11 @@ class NII(NII_Math):
     def normalize_to_range_(self, min_value: int = 0, max_value: int = 1500, verbose:logging=True):
         assert not self.seg
         mi, ma = self.min(), self.max()
-        self += -mi + min_value  # min = 0  # noqa: PLW0642
+        self += -mi + min_value  # min = 0
         self_dtype = self.dtype
         max_value2 = ma
         if max_value2 > max_value:
-            self *= max_value / max_value2  # noqa: PLW0642
+            self *= max_value / max_value2
             self.set_dtype_(self_dtype)
         log.print(f"Shifted from range {mi, ma} to range {self.min(), self.max()}", verbose=verbose)
 
@@ -915,7 +932,7 @@ class NII(NII_Math):
         return self.dilate_msk(mm=mm, labels=labels, connectivity=connectivity, mask=mask, inplace=True, verbose=verbose)
 
 
-    def fill_holes(self, labels: LABEL_REFERENCE = None, slice_wise_dim: int | None = None, verbose:logging=True, inplace=False):
+    def fill_holes(self, labels: LABEL_REFERENCE = None, slice_wise_dim: int | None = None, verbose:logging=False, inplace=False):
         """Fills holes in segmentation
 
         Args:
@@ -942,7 +959,6 @@ class NII(NII_Math):
         #    log.print(f"Filled holes in {changes_in_labels}", verbose=verbose)
         #else:
         #    log.print("Fill holes: No holes have been filled", verbose=verbose)
-        log.print("Fill holes called", verbose=verbose)
         return self.set_array(filled, inplace=inplace)
 
     def fill_holes_(self, labels: LABEL_REFERENCE = None, slice_wise_dim: int | None = None, verbose:logging=True):
