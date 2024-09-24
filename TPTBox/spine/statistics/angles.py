@@ -408,8 +408,8 @@ def _get_norm(poi: POI, id1, mv: MoveTo, location: Location, inv=1):  # noqa: AR
 
 
 def _get_last_lumbar(poi: POI):
-    if Vertebra_Instance.S1.value not in poi.keys_region():
-        return None
+    # if Vertebra_Instance.S1.value not in poi.keys_region():
+    #    return None
     for i in list(reversed(Vertebra_Instance.lumbar()))[:5]:
         if (i.value, 50) in poi:
             return i
