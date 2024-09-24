@@ -156,6 +156,114 @@ def get_values_from_name(
     return bids_format, dic, bids_key, file_type
 
 
+def Buffered_BIDS_Global_info(
+    datasets: Sequence[Path] | Sequence[str] | str | Path,
+    parents: Sequence[str] | str = ["rawdata", "derivatives"],
+    additional_key: Sequence[str] = ["sequ", "seg", "ovl"],
+    verbose: bool = True,
+    file_name_manipulation: typing.Callable[[str], str] | None = None,
+    sequence_splitting_keys: list[str] | None = None,
+    filter_file: typing.Callable[[Path], bool] | None = None,
+    max_age_days=30,
+    recompute_parents=None,
+):
+    import pickle
+
+    if recompute_parents is None:
+        recompute_parents = []
+    buffer_name = ".filepaths"
+    if isinstance(datasets, (str, Path)):
+        datasets = [datasets]
+    files = {ds: [] for ds in datasets}
+
+    def save_buffer(f: Path, buffer_name):
+        global cont
+        new_buffer = [
+            Path(f.path) for f in _scan_tree(f, verbose=True) if Path(f.path).is_file()
+        ]
+        try:
+            with open(str(f / buffer_name), "wb") as b:
+                pickle.dump(new_buffer, b)
+                print("\n[ ] Save Buffer:", f) if verbose else None
+        except OSError:
+            print("Saving not allowed")
+
+        cont = 0
+        return new_buffer
+
+    for dataset in datasets:
+        for parent in parents:
+            assert "/" not in parent, "only top parent folder allowed"
+            folder = Path(dataset, parent)
+            if not folder.exists():
+                print("[ ] Dose not exist:", (folder), f"{' ':20}") if verbose else None
+                continue
+            if (folder / buffer_name).exists():
+                import datetime
+
+                file_mod_time = datetime.datetime.fromtimestamp(
+                    os.path.getmtime(folder / buffer_name)
+                )
+                today = datetime.datetime.today()
+
+                age = today - file_mod_time
+                if age.days >= int(max_age_days):
+                    print(
+                        "[ ] Delete Buffer - to old:",
+                        (folder / buffer_name),
+                        f"{' ':20}",
+                    ) if verbose else None
+                    (folder / buffer_name).unlink()
+            if (folder / buffer_name).exists() and parent not in recompute_parents:
+                with open((folder / buffer_name), "rb") as b:
+                    l = pickle.load(b)
+                    print(
+                        f"[{len(l):8}] Read Buffer:",
+                        (folder / buffer_name),
+                        f"{' ':20}",
+                    ) if verbose else None
+                    files[dataset] += l
+            else:
+                print(
+                    f"[{cont:8}] Create new Buffer:",
+                    (folder / buffer_name),
+                    f"{' ':20}",
+                    end="\r",
+                ) if verbose else None
+                files[dataset] += save_buffer((folder), buffer_name)
+    if filter_file is not None:
+        files = {d: [g for g in f if filter_file(g)] for d, f in files.items()}
+    return BIDS_Global_info(
+        datasets,
+        parents,
+        additional_key,
+        verbose=verbose,
+        file_name_manipulation=file_name_manipulation,
+        sequence_splitting_keys=sequence_splitting_keys,
+        filter_folder=lambda x, y: False,
+        additional_file_list=files,
+    )
+
+
+cont = 0
+
+
+def _scan_tree(path, lvl=1, filter_folder=lambda x, y: True, verbose=False):
+    global cont
+    """Recursively yield DirEntry objects for given directory."""
+    for entry in os.scandir(path):
+        if entry.is_dir(follow_symlinks=False):
+            if filter_folder is not None and not filter_folder(Path(entry.path), lvl):
+                continue
+            yield from _scan_tree(entry.path, lvl=lvl + 1, verbose=verbose)
+        elif entry.name[0] != ".":
+            if verbose:
+                print(f"[{cont:8}]", end="\r")
+                cont += 1
+
+            yield entry
+
+
 class BIDS_Global_info:
     def __init__(
         self,
@@ -166,6 +274,7 @@ class BIDS_Global_info:
         file_name_manipulation: typing.Callable[[str], str] | None = None,
         sequence_splitting_keys: list[str] | None = None,
         filter_folder: typing.Callable[[Path, int], bool] | None = None,
+        additional_file_list: dict[Path, list[Path]] | None = None,
     ):
         """This Objects creates a datastructures reflecting BIDS-folders.
 
@@ -221,25 +330,17 @@ class BIDS_Global_info:
                 path = Path(ds, ps)
                 if path.exists():
                     self.search_folder(path, ds, filter_folder)
+        if additional_file_list is not None:
+            for ds, file_list in additional_file_list.items():
+                for f in file_list:
+                    # if Path(f).is_file():
+                    self.add_file_2_subject(f, ds)
+
         self.entities_keys = entities_keys
 
     def search_folder(self, path: Path, ds, filter_folder) -> None:
-        def scantree(path, lvl=1):
-            """Recursively yield DirEntry objects for given directory."""
-            for entry in os.scandir(path):
-                if entry.is_dir(follow_symlinks=False):
-                    if filter_folder is not None and not filter_folder(
-                        Path(entry.path), lvl
-                    ):
-                        continue
-                    yield from scantree(entry.path, lvl=lvl + 1)
-                else:
-                    yield entry
-
-        for entry in scantree(path):
+        for entry in _scan_tree(path, filter_folder=filter_folder):
             if entry.is_file():
-                if entry.name[0] == ".":
-                    continue
                 self.add_file_2_subject(Path(entry.path), ds)
 
     def add_file_2_subject(self, bids: BIDS_FILE | Path, ds=None) -> None:
@@ -250,9 +351,13 @@ class BIDS_Global_info:
                 ds = bids.dataset
             else:
                 raise AssertionError("Dataset-path required")
-        if isinstance(bids, Path):
+
+        if isinstance(bids, (Path, str)):
             try:
-                bids_key, file_type = bids.name.split(".", maxsplit=1)
+                bids_key, file_type = (
+                    str(bids).rsplit("/", maxsplit=1)[-1].split(".", maxsplit=1)
+                )
+                # print(bids_key)
             except Exception:
                 print("[!] skip file with out a type declaration:", bids.name)
                 # raise e
@@ -267,6 +372,7 @@ class BIDS_Global_info:
                 verbose=self.verbose,
                 file_name_manipulation=self.file_name_manipulation,
             )
+
         subject = bids.info.get("sub", "unsorted")
         if subject not in self.subjects:
             self.subjects[subject] = Subject_Container(
@@ -276,7 +382,7 @@ class BIDS_Global_info:
         print(
             f"Found: {subject}, total file keys {(self.count_file)},  total subjects = {len(self.subjects)}    ",
             end="\r",
-        )
+        ) if self.verbose else None
         self.subjects[subject].add(bids)
 
     def enumerate_subjects(self, sort=False) -> list[tuple[str, Subject_Container]]:
@@ -432,8 +538,8 @@ class BIDS_FILE:
             dataset (Path): Top Folder of the dataset
             verbose (bool, optional): You will be informed of non-conform Bids names/keys. Defaults to True.
         """
-        file = Path(file)
-        self.dataset = Path(dataset)
+        file = Path(file) if not isinstance(file, Path) else file
+        self.dataset = Path(dataset) if not isinstance(dataset, Path) else dataset
         self.verbose = verbose
         if file_name_manipulation is not None:
             if "WS_" in str(file):
@@ -447,16 +553,13 @@ class BIDS_FILE:
 
         if bids_ds is not None:
             bids_ds.add_file_2_subject(bids=self, ds=self.dataset)
-        self.file = {
-            file_type: Path(file),
-        }
-        bids_key, _ = Path(file).name.split(".", maxsplit=1)
+        self.file = {file_type: file}
+        bids_key, _ = file.name.split(".", maxsplit=1)
         for file_type in ["nii.gz", "json", "png"]:
             if file_type in self.file:
                 continue
-            p = Path(Path(file).parent, bids_key + "." + file_type)
-            if p.exists():
-                self.file[file_type] = p
+            if os.path.exists(os.path.join(file.parent, bids_key + "." + file_type)):
+                self.file[file_type] = Path(file.parent, bids_key + "." + file_type)
         self.file = dict(sorted(self.file.items()))
 
     def __str__(self) -> str:
@@ -584,6 +687,7 @@ class BIDS_FILE:
         additional_folder: str | None = None,
         dataset_path: str | None = None,
         make_parent=True,
+        non_strict_mode=False,
     ):
         ds = dataset_path if dataset_path is not None else self.get_path_decomposed()[0]
         return BIDS_FILE(
@@ -598,6 +702,7 @@ class BIDS_FILE:
                 additional_folder=additional_folder,
                 dataset_path=dataset_path,
                 make_parent=make_parent,
+                non_strict_mode=non_strict_mode,
             ),
             ds,
         )
@@ -648,6 +753,8 @@ class BIDS_FILE:
         """ """"""
         if info is None:
             info = {}
+        if non_strict_mode and not self.BIDS_key.startswith("sub"):
+            info["sub"] = self.BIDS_key.replace("_", "-")
         if isinstance(file_type, str) and file_type.startswith("."):
             file_type = file_type[1:]
         path = self.insert_info_into_path(path)
@@ -722,7 +829,7 @@ class BIDS_FILE:
             assert (
                 file_type in file_types
             ), f"[!] {file_type} is not in list of file types. Legal file types are: {list(file_types)}. \nFor use see https://bids-specification.readthedocs.io/en/stable/99-appendices/09-entities.html"
-            if bids_format not in formats:
+            if bids_format not in formats and not non_strict_mode:
                 raise ValueError(
                     f"[!] {bids_format} is not in list of formats. Legal formats are: {list(formats)}. \nFor use see https://bids-specification.readthedocs.io/en/stable/99-appendices/09-entities.html"
                 )
