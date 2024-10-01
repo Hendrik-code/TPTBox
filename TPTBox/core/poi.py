@@ -1278,8 +1278,8 @@ def _buffer_it(func):
 
     @functools.wraps(func)
     def wrap(*args, **kwargs):
-        buffer_file = kwargs.get("buffer_file", None)
-        extend_to = kwargs.get("extend_to", None)
+        buffer_file = kwargs.get("buffer_file")
+        extend_to = kwargs.get("extend_to")
         save_buffer_file = kwargs.get("save_buffer_file", False)
         len_pref = 0
         if buffer_file is not None and Path(buffer_file).exists():
