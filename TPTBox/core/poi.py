@@ -156,6 +156,10 @@ class POI(Abstract_POI):
         return self._zoom
 
     @property
+    def spacing(self):
+        return self._zoom
+
+    @property
     def affine(self):
         assert self.zoom is not None, "Attribute 'zoom' must be set before calling affine."
         assert self.rotation is not None, "Attribute 'rotation' must be set before calling affine."
