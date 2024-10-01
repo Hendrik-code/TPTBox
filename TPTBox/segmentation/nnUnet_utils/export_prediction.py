@@ -30,8 +30,6 @@ def convert_predicted_logits_to_segmentation_with_correct_shape(
         if len(configuration_manager.spacing) == len(properties_dict["shape_after_cropping_and_before_resampling"])
         else [properties_dict["spacing"][0], *configuration_manager.spacing]
     )
-    print("shape_after_cropping_and_before_resampling", properties_dict["shape_after_cropping_and_before_resampling"])
-    print(current_spacing, properties_dict["spacing"])
     predicted_logits = configuration_manager.resampling_fn_probabilities(
         predicted_logits,
         properties_dict["shape_after_cropping_and_before_resampling"],
@@ -62,7 +60,7 @@ def convert_predicted_logits_to_segmentation_with_correct_shape(
     if return_probabilities:
         # revert cropping
         try:
-            predicted_probabilities = label_manager.revert_cropping_on_probabilities(
+            predicted_probabilities = label_manager.revert_cropping_on_probabilities(  # type: ignore
                 predicted_probabilities,
                 properties_dict["bbox_used_for_cropping"],
                 properties_dict["shape_before_cropping"],
