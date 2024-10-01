@@ -97,7 +97,7 @@ def run_inference(
     predictor: nnUNetPredictor,
     reorient_PIR: bool = False,  # noqa: N803
     logits=False,
-    verbose=False,
+    verbose=False,  # noqa: ARG001
 ) -> tuple[NII, NII | None, np.ndarray | None]:
     """Runs nnUnet model inference on one input.
 
@@ -149,7 +149,6 @@ def run_inference(
     out = predictor.predict_single_npy_array(img, props, save_or_return_probabilities=logits)
     if logits:
         segmentation, _, softmax_logits = out  # type: ignore
-        print("logits", segmentation.shape, softmax_logits.shape) if verbose else None
         softmax_logits = np.expand_dims(softmax_logits.astype(np.float16), 0)
         # softmax_logits = np.swapaxes(softmax_logits, 0, 3)
         # PRI label
@@ -157,7 +156,6 @@ def run_inference(
     else:
         segmentation, _ = out  # type: ignore
         softmax_logits = None
-    print("Start Post") if verbose else None
     itk_image = sitk.GetImageFromArray(segmentation.astype(np.uint8))
     itk_image.SetSpacing(sitk_nii.GetSpacing())
     itk_image.SetOrigin(sitk_nii.GetOrigin())

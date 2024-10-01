@@ -104,7 +104,7 @@ select = [
     "TID",
     "INT",
     "ARG",
-    "PTH",
+    #"PTH",
     "TD005",
     "FIX003",
     "FIX004",
