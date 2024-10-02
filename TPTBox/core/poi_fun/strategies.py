@@ -90,17 +90,11 @@ def strategy_find_corner(
         return
 
     start_point = shift_point(poi, vert_id, bb, start_point, direction=shift_direction, log=log)
-    corner_point = _find_corner_point(
-        poi,
-        current_subreg,
-        vert_id,
-        bb,
-        start_point,
-        vec1=vec1,
-        vec2=vec2,
-        log=log,
-        location=location,
-    )
+    location2 = [Location.Vertebra_Corpus, Location.Vertebra_Corpus_border]
+    current_subreg = current_subreg.extract_label(location2, keep_label=False)
+    if current_subreg.sum() == 0:
+        return
+    corner_point = _find_corner_point(poi, current_subreg, vert_id, bb, start_point, vec1=vec1, vec2=vec2, log=log, location=location)
 
     if corner_point is None:
         return
@@ -109,16 +103,7 @@ def strategy_find_corner(
 
 # @timing
 def _find_corner_point(
-    poi: POI,
-    region,
-    vert_id,
-    bb,
-    start_point,
-    vec1,
-    vec2,
-    log: Logger_Interface = _log,
-    delta=0.00000005,
-    location=None,
+    poi: POI, region, vert_id, bb, start_point, vec1, vec2, log: Logger_Interface = _log, delta=0.00000005, location=None
 ):
     # Convert start point and vectors to local numpy coordinates
     start_point_np = to_local_np(start_point, bb, poi, vert_id, log) if isinstance(start_point, Location) else start_point
@@ -152,14 +137,11 @@ def _find_corner_point(
     # Adjust factors until inside region
     while not is_inside():
         factor1 = factor2 = factor2 * 0.98
-
-    v1_n: float = 1 / norm(v1)  # type: ignore
-    v2_n: float = 1 / norm(v2)  # type: ignore
-
+    v1_n = v2_n = 1.0
     f1 = f2 = 0
 
     # Refine factors using delta
-    while delta > (v1_n + v2_n) / 2:
+    while delta < (v1_n + v2_n) / 2:
         changed = False
         if is_inside(v1_n + f1, f2):
             f1 += v1_n
