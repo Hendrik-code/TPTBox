@@ -137,7 +137,10 @@ class Mesh_Color_List:
 _color_dict = {v: getattr(Mesh_Color_List, v) for v in vars(Mesh_Color_List) if not callable(v) and not v.startswith("__")}
 
 _color_mapping_by_label: dict[int, RGB_Color] = {
-    i: _color_dict.get(f"ITK_{i}", RGB_Color.init_list([random.randint(20, 245), random.randint(20, 245), random.randint(20, 245)]))
+    i: _color_dict.get(
+        f"ITK_{i}",
+        RGB_Color.init_list([random.randint(20, 245), random.randint(20, 245), random.randint(20, 245)]),
+    )
     for i in range(1, 150)
 }
 
@@ -145,8 +148,6 @@ _color_map_in_row = np.array([v.rgb for v in _color_mapping_by_label.values()])
 
 
 def get_color_by_label(label: int):
-    if label >= 100:
-        return _color_mapping_by_label[100]
     if label not in _color_mapping_by_label:
         return _color_mapping_by_label[label % 50 + 1]
     return _color_mapping_by_label[label]
