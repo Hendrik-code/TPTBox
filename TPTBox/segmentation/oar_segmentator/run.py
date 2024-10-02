@@ -1,8 +1,6 @@
-import os
 import time
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 import GPUtil
@@ -18,7 +16,7 @@ class_map_inv = {v: k for k, v in class_map.items()}
 def save_resampled_segmentation(seg_nii: NII, in_file: BIDS_FILE, parent, org: NII | POI, idx):
     """Helper function to resample and save NIfTI file."""
     out_path = in_file.get_changed_path("nii.gz", "msk", parent=parent, info={"seg": f"oar-{idx}"}, non_strict_mode=True)
-    seg_nii.resample_from_to(org, verbose=False).save(out_path)
+    seg_nii.resample_from_to(org, verbose=False, mode="nearest").save(out_path)
 
 
 def run_oar_segmentor(
@@ -41,10 +39,11 @@ def run_oar_segmentor(
         in_file = BIDS_FILE(ct_path, dataset)
     out_path_combined = in_file.get_changed_path("nii.gz", "msk", parent=parent, info={"seg": "oar-combined"}, non_strict_mode=True)
     if out_path_combined.exists() and not override:
+        print("skip", out_path_combined.name, end="\r")
         return
     org = to_nii(in_file)
     print("resample")
-    input_nii = org.rescale((zoom, zoom, zoom)).reorient(orientation)
+    input_nii = org.rescale((zoom, zoom, zoom), mode="nearest").reorient(orientation)
     org = (org.shape, org.affine, org.zoom)
     segs: dict[int, NII] = {}
     futures = []
@@ -69,7 +68,7 @@ def run_oar_segmentor(
             if any(class_name in s for s in except_labels_combine):
                 continue
             seg_combined[seg == jdx] = class_map_inv[class_name]
-    seg_combined.resample_from_to(org, verbose=False).save(out_path_combined)
+    seg_combined.resample_from_to(org, verbose=False, mode="nearest").save(out_path_combined)
 
 
 def check_gpu_memory(gpu_id, threshold=50):
@@ -81,7 +80,7 @@ def check_gpu_memory(gpu_id, threshold=50):
     return False
 
 
-def run_oar_segmentor_in_parallel(dataset, parents: Sequence[str] = ("rawdata",), gpu_id=3, threshold=50, max_workers=16):
+def run_oar_segmentor_in_parallel(dataset, parents: Sequence[str] = ("rawdata",), gpu_id=3, threshold=50, max_workers=16, override=False):
     """Run the OAR segmentation in parallel and pause when GPU memory usage exceeds the threshold."""
     from TPTBox import BIDS_Global_info
 
@@ -103,7 +102,7 @@ def run_oar_segmentor_in_parallel(dataset, parents: Sequence[str] = ("rawdata",)
                     time.sleep(10)  # Pause for 10 seconds before checking again
 
                 # Submit run_oar_segmentor task to the executor
-                futures.append(executor.submit(run_oar_segmentor, i, gpu=gpu_id))
+                futures.append(executor.submit(run_oar_segmentor, i, gpu=gpu_id, override=override))
 
         # Wait for all tasks to complete
         for future in as_completed(futures):
@@ -117,4 +116,4 @@ if __name__ == "__main__":
     # Example usage
     bgi = "/DATA/NAS/datasets_processed/CT_spine/dataset-shockroom-without-fx/"
 
-    run_oar_segmentor_in_parallel(bgi, ("rawdata_fixed",), gpu_id=3, threshold=50, max_workers=16)
+    run_oar_segmentor_in_parallel(bgi, ("rawdata_fixed",), gpu_id=0, threshold=50, max_workers=16, override=False)
