@@ -10,7 +10,8 @@ import numpy as np
 from acvl_utils.cropping_and_padding.bounding_boxes import bounding_box_to_slice, crop_to_bbox, get_bbox_from_mask
 
 # from acvl_utils.miscellaneous.ptqdm import ptqdm
-from batchgenerators.utilities.file_and_folder_operations import *
+# from batchgenerators.utilities.file_and_folder_operations import *
+from batchgenerators.utilities.file_and_folder_operations import join
 from nnunetv2.utilities.find_class_by_name import recursive_find_python_class
 
 # from nnunetv2.preprocessing.cropping.cropping import crop_to_nonzero
@@ -63,7 +64,7 @@ class DefaultPreprocessor:
         if len(target_spacing) < len(data.shape[1:]):
             # target spacing for 2d has 2 entries but the data and original_spacing have three because everything is 3d
             # in 3d we do not change the spacing between slices
-            target_spacing = [original_spacing[0]] + target_spacing
+            target_spacing = [original_spacing[0], *target_spacing]
         new_shape = compute_new_shape(data.shape[1:], original_spacing, target_spacing)
 
         # normalize
@@ -74,8 +75,8 @@ class DefaultPreprocessor:
         # print('current shape', data.shape[1:], 'current_spacing', original_spacing,
         #       '\ntarget shape', new_shape, 'target_spacing', target_spacing)
         old_shape = data.shape[1:]
-        data = configuration_manager.resampling_fn_data(data, new_shape, original_spacing, target_spacing)
-        seg = configuration_manager.resampling_fn_seg(seg, new_shape, original_spacing, target_spacing)
+        data = configuration_manager.resampling_fn_data(data, new_shape, original_spacing, target_spacing)  # type: ignore
+        seg = configuration_manager.resampling_fn_seg(seg, new_shape, original_spacing, target_spacing)  # type: ignore
         if self.verbose:
             print(
                 f"old shape: {old_shape}, new_shape: {new_shape}, old_spacing: {original_spacing}, "
@@ -87,24 +88,24 @@ class DefaultPreprocessor:
             # reinstantiating LabelManager for each case is not ideal. We could replace the dataset_json argument
             # with a LabelManager Instance in this function because that's all its used for. Dunno what's better.
             # LabelManager is pretty light computation-wise.
-            label_manager = plans_manager.get_label_manager(dataset_json)
+            label_manager = plans_manager.get_label_manager(dataset_json)  # type: ignore
             collect_for_this = label_manager.foreground_regions if label_manager.has_regions else label_manager.foreground_labels
 
             # when using the ignore label we want to sample only from annotated regions. Therefore we also need to
             # collect samples uniformly from all classes (incl background)
             if label_manager.has_ignore_label:
-                collect_for_this.append(label_manager.all_labels)
+                collect_for_this.append(label_manager.all_labels)  # type: ignore
 
             # no need to filter background in regions because it is already filtered in handle_labels
             # print(all_labels, regions)
-            properties["class_locations"] = self._sample_foreground_locations(seg, collect_for_this, verbose=self.verbose)
-            seg = self.modify_seg_fn(seg, plans_manager, dataset_json, configuration_manager)
-        seg = seg.astype(np.int16) if np.max(seg) > 127 else seg.astype(np.int8)
+            properties["class_locations"] = self._sample_foreground_locations(seg, collect_for_this, verbose=self.verbose)  # type: ignore
+            seg = self.modify_seg_fn(seg, plans_manager, dataset_json, configuration_manager)  # type: ignore
+        seg = seg.astype(np.int16) if np.max(seg) > 127 else seg.astype(np.int8)  # type: ignore
         return data, seg
 
     @staticmethod
     def _sample_foreground_locations(
-        seg: np.ndarray, classes_or_regions: List[int] | List[tuple[int, ...]], seed: int = 1234, verbose: bool = False
+        seg: np.ndarray, classes_or_regions: list[int] | list[tuple[int, ...]], seed: int = 1234, verbose: bool = False
     ):
         num_samples = 10000
         min_percent_coverage = 0.01  # at least 1% of the class voxels need to be selected, otherwise it may be too
@@ -143,7 +144,9 @@ class DefaultPreprocessor:
             scheme = configuration_manager.normalization_schemes[c]
 
             normalizer_class = recursive_find_python_class(
-                join(nnunetv2.__path__[0], "preprocessing", "normalization"), scheme, "nnunetv2.preprocessing.normalization"
+                join(nnunetv2.__path__[0], "preprocessing", "normalization"),
+                scheme,
+                "nnunetv2.preprocessing.normalization",  # type: ignore
             )
             if normalizer_class is None:
                 raise RuntimeError(f"Unable to locate class '{scheme}' for normalization")
@@ -155,7 +158,11 @@ class DefaultPreprocessor:
         return data
 
     def modify_seg_fn(
-        self, seg: np.ndarray, plans_manager: PlansManager, dataset_json: dict, configuration_manager: ConfigurationManager
+        self,
+        seg: np.ndarray,
+        plans_manager: PlansManager,  # noqa: ARG002
+        dataset_json: dict,  # noqa: ARG002
+        configuration_manager: ConfigurationManager,  # noqa: ARG002
     ) -> np.ndarray:
         # this function will be called at the end of self.run_case. Can be used to change the segmentation
         # after resampling. Useful for experimenting with sparse annotations: I can introduce sparsity after resampling
@@ -183,7 +190,7 @@ def crop_to_nonzero(data, seg=None, nonzero_label=-1):
     :return:
     """
     nonzero_mask = create_nonzero_mask(data)
-    bbox = get_bbox_from_mask(nonzero_mask)
+    bbox = get_bbox_from_mask(nonzero_mask)  # type: ignore
 
     slicer = bounding_box_to_slice(bbox)
     data = data[(slice(None), *slicer)]
@@ -191,9 +198,9 @@ def crop_to_nonzero(data, seg=None, nonzero_label=-1):
     if seg is not None:
         seg = seg[(slice(None), *slicer)]
 
-    nonzero_mask = nonzero_mask[slicer][None]
+    nonzero_mask = nonzero_mask[slicer][None]  # type: ignore
     if seg is not None:
-        seg[(seg == 0) & (~nonzero_mask)] = nonzero_label
+        seg[(seg == 0) & (~nonzero_mask)] = nonzero_label  # type: ignore
     else:
         nonzero_mask = nonzero_mask.astype(np.int8)
         nonzero_mask[nonzero_mask == 0] = nonzero_label

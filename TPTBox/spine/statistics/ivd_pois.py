@@ -29,12 +29,12 @@ def calculate_up_vector_np(segmentation: np.ndarray, verbose=False):
     return up_vector
 
 
-def strategy_calculate_up_vector(poi: POI, current_subreg: NII, vert_id: int, bb, log=_log):
+def strategy_calculate_up_vector(poi: POI, current_vert: NII, vert_id: int, bb, log=_log):
     center = to_local_np(Location.Vertebra_Disc, bb, poi, vert_id, log)
     if center is None:
         return poi
     try:
-        normal_vector = calculate_up_vector_np(current_subreg.rescale().extract_label(vert_id + 100).get_array())
+        normal_vector = calculate_up_vector_np(current_vert.rescale().extract_label(vert_id + 100).get_array())
     except ValueError:
         return poi
     normal_vector = normal_vector / np.array(poi.zoom)
@@ -48,8 +48,8 @@ def strategy_calculate_up_vector(poi: POI, current_subreg: NII, vert_id: int, bb
     if s_is_poss + below == 1:  # xor
         normal_vector *= -1
     # max_distance_ray_cast_convex
-    extreme_point = max_distance_ray_cast_convex(current_subreg.extract_label(vert_id + 100), center, normal_vector)
-    extreme_point_sup = max_distance_ray_cast_convex(current_subreg.extract_label(vert_id + 100), center, -normal_vector)
+    extreme_point = max_distance_ray_cast_convex(current_vert.extract_label(vert_id + 100), center, normal_vector)
+    extreme_point_sup = max_distance_ray_cast_convex(current_vert.extract_label(vert_id + 100), center, -normal_vector)
     # extreme_point = center + normal_vector * 10
 
     assert extreme_point is not None

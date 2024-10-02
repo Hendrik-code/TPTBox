@@ -44,12 +44,14 @@ class ConfigurationManager:
         return self.configuration["preprocessor_name"]
 
     @property
-    @lru_cache(maxsize=1)
+    @lru_cache(maxsize=1)  # noqa: B019
     def preprocessor_class(self) -> type[DefaultPreprocessor]:
         preprocessor_class = recursive_find_python_class(
-            join(nnunetv2.__path__[0], "preprocessing"), self.preprocessor_name, current_module="nnunetv2.preprocessing"
+            join(nnunetv2.__path__[0], "preprocessing"),  # type: ignore
+            self.preprocessor_name,
+            current_module="nnunetv2.preprocessing",
         )
-        return preprocessor_class
+        return preprocessor_class  # type: ignore
 
     @property
     def batch_size(self) -> int:
@@ -80,10 +82,10 @@ class ConfigurationManager:
         return self.configuration["UNet_class_name"]
 
     @property
-    @lru_cache(maxsize=1)
+    @lru_cache(maxsize=1)  # noqa: B019
     def UNet_class(self) -> type[nn.Module]:
         unet_class = recursive_find_python_class(
-            join(dynamic_network_architectures.__path__[0], "architectures"),
+            join(dynamic_network_architectures.__path__[0], "architectures"),  # type: ignore
             self.UNet_class_name,
             current_module="dynamic_network_architectures.architectures",
         )
@@ -125,7 +127,7 @@ class ConfigurationManager:
         return self.configuration["unet_max_num_features"]
 
     @property
-    @lru_cache(maxsize=1)
+    @lru_cache(maxsize=1)  # noqa: B019
     def resampling_fn_data(
         self,
     ) -> Callable[
@@ -142,7 +144,7 @@ class ConfigurationManager:
         return fn
 
     @property
-    @lru_cache(maxsize=1)
+    @lru_cache(maxsize=1)  # noqa: B019
     def resampling_fn_probabilities(
         self,
     ) -> Callable[
@@ -159,7 +161,7 @@ class ConfigurationManager:
         return fn
 
     @property
-    @lru_cache(maxsize=1)
+    @lru_cache(maxsize=1)  # noqa: B019
     def resampling_fn_seg(
         self,
     ) -> Callable[
@@ -182,9 +184,8 @@ class ConfigurationManager:
     @property
     def next_stage_names(self) -> list[str] | None:
         ret = self.configuration.get("next_stage")
-        if ret is not None:
-            if isinstance(ret, str):
-                ret = [ret]
+        if ret is not None and isinstance(ret, str):
+            ret = [ret]
         return ret
 
     @property
@@ -209,7 +210,7 @@ class PlansManager:
     def __repr__(self):
         return self.plans.__repr__()
 
-    def _internal_resolve_configuration_inheritance(self, configuration_name: str, visited: tuple[str, ...] = None) -> dict:
+    def _internal_resolve_configuration_inheritance(self, configuration_name: str, visited: tuple[str, ...] | None = None) -> dict:
         if configuration_name not in self.plans["configurations"].keys():
             raise ValueError(
                 f"The configuration {configuration_name} does not exist in the plans I have. Valid "
@@ -236,7 +237,7 @@ class PlansManager:
             configuration = base_config
         return configuration
 
-    @lru_cache(maxsize=10)
+    @lru_cache(maxsize=10)  # noqa: B019
     def get_configuration(self, configuration_name: str):
         if configuration_name not in self.plans["configurations"].keys():
             raise RuntimeError(
@@ -264,7 +265,7 @@ class PlansManager:
         return self.plans["original_median_shape_after_transp"]
 
     @property
-    @lru_cache(maxsize=1)
+    @lru_cache(maxsize=1)  # noqa: B019
     def image_reader_writer_class(self) -> type[BaseReaderWriter]:
         return recursive_find_reader_writer_by_name(self.plans["image_reader_writer"])
 
@@ -281,20 +282,22 @@ class PlansManager:
         return list(self.plans["configurations"].keys())
 
     @property
-    @lru_cache(maxsize=1)
+    @lru_cache(maxsize=1)  # noqa: B019
     def experiment_planner_class(self) -> type[ExperimentPlanner]:
         planner_name = self.experiment_planner_name
         experiment_planner = recursive_find_python_class(
-            join(nnunetv2.__path__[0], "experiment_planning"), planner_name, current_module="nnunetv2.experiment_planning"
+            join(nnunetv2.__path__[0], "experiment_planning"),  # type: ignore
+            planner_name,
+            current_module="nnunetv2.experiment_planning",
         )
-        return experiment_planner
+        return experiment_planner  # type: ignore
 
     @property
     def experiment_planner_name(self) -> str:
         return self.plans["experiment_planner_used"]
 
     @property
-    @lru_cache(maxsize=1)
+    @lru_cache(maxsize=1)  # noqa: B019
     def label_manager_class(self) -> type[LabelManager]:
         return get_labelmanager_class_from_plans(self.plans)
 
@@ -315,7 +318,7 @@ if __name__ == "__main__":
     from nnunetv2.paths import nnUNet_preprocessed
     from nnunetv2.utilities.dataset_name_id_conversion import maybe_convert_to_dataset_name
 
-    plans = load_json(join(nnUNet_preprocessed, maybe_convert_to_dataset_name(3), "nnUNetPlans.json"))
+    plans = load_json(join(nnUNet_preprocessed, maybe_convert_to_dataset_name(3), "nnUNetPlans.json"))  # type: ignore
     # build new configuration that inherits from 3d_fullres
     plans["configurations"]["3d_fullres_bs4"] = {"batch_size": 4, "inherits_from": "3d_fullres"}
     # now get plans and configuration managers

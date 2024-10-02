@@ -15,7 +15,7 @@ class PreprocessAdapterFromNpy(DataLoader):
         list_of_images: list[np.ndarray],
         list_of_segs_from_prev_stage: list[np.ndarray] | None,
         list_of_image_properties: list[dict],
-        truncated_ofnames: list[str] | None,
+        truncated_of_names: list[str] | None,
         plans_manager: PlansManager,
         dataset_json: dict,
         configuration_manager: ConfigurationManager,
@@ -23,22 +23,22 @@ class PreprocessAdapterFromNpy(DataLoader):
         verbose: bool = False,
     ):
         preprocessor = DefaultPreprocessor(verbose=verbose)
-        self.preprocessor, self.plans_manager, self.configuration_manager, self.dataset_json, self.truncated_ofnames = (
+        self.preprocessor, self.plans_manager, self.configuration_manager, self.dataset_json, self.truncated_of_names = (
             preprocessor,
             plans_manager,
             configuration_manager,
             dataset_json,
-            truncated_ofnames,
+            truncated_of_names,
         )
         self.label_manager = plans_manager.get_label_manager(dataset_json)
 
         if list_of_segs_from_prev_stage is None:
             list_of_segs_from_prev_stage = [None] * len(list_of_images)  # type: ignore
-        if truncated_ofnames is None:
-            truncated_ofnames = [None] * len(list_of_images)  # type: ignore
+        if truncated_of_names is None:
+            truncated_of_names = [None] * len(list_of_images)  # type: ignore
 
         super().__init__(
-            list(zip(list_of_images, list_of_segs_from_prev_stage, list_of_image_properties, truncated_ofnames, strict=False)),  # type: ignore
+            list(zip(list_of_images, list_of_segs_from_prev_stage, list_of_image_properties, truncated_of_names, strict=False)),  # type: ignore
             1,
             num_threads_in_multithreaded,
             seed_for_shuffle=1,
@@ -55,7 +55,7 @@ class PreprocessAdapterFromNpy(DataLoader):
         image = self._data[idx][0]
         seg_prev_stage = self._data[idx][1]
         props = self._data[idx][2]
-        ofname = self._data[idx][3]
+        of_name = self._data[idx][3]
         # if we have a segmentation from the previous stage we have to process it together with the images so that we
         # can crop it appropriately (if needed). Otherwise it would just be resized to the shape of the data after
         # preprocessing and then there might be misalignments
@@ -68,7 +68,7 @@ class PreprocessAdapterFromNpy(DataLoader):
 
         data = torch.from_numpy(data)
 
-        return {"data": data, "data_properites": props, "ofile": ofname}
+        return {"data": data, "data_properites": props, "ofile": of_name}
 
 
 def convert_labelmap_to_one_hot(

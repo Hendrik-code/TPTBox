@@ -29,7 +29,7 @@ def get_network_from_plans(
         class_name = configuration_manager.configuration["architecture"]["network_class_name"]
         kwargs = configuration_manager.configuration["architecture"]["arch_kwargs"]
         _kw_requires_import = configuration_manager.configuration["architecture"]["_kw_requires_import"]
-        return plans(class_name, kwargs, _kw_requires_import, num_input_channels, num_output_channels, deep_supervision=deep_supervision)
+        return plans(class_name, kwargs, _kw_requires_import, num_input_channels, num_output_channels, deep_supervision=deep_supervision)  # type: ignore
     num_stages = len(configuration_manager.conv_kernel_sizes)
 
     dim = len(configuration_manager.conv_kernel_sizes[0])

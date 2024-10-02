@@ -1,3 +1,4 @@
+import sys
 import traceback
 import warnings
 import zlib
@@ -302,6 +303,10 @@ class NII(NII_Math):
             z = z[:3]
         assert len(z) == 3,z
         return z # type: ignore
+    @property
+    def spacing(self):
+        return self.zoom
+
     @property
     def origin(self) -> tuple[float, float, float]:
         z = tuple(np.round(self.affine[:3,3],7))
@@ -860,9 +865,75 @@ class NII(NII_Math):
         return self.smooth_gaussian(sigma=sigma,truncate=truncate,nth_derivative=nth_derivative,inplace=True)
 
     def to_ants(self):
-        import ants
+        try:
+            import ants
+        except Exception:
+            log.print_error()
+            log.on_fail("run 'pip install antspyx' to install deepali")
+            raise
         return ants.from_nibabel(self.nii)
 
+    def to_simpleITK(self):
+        from TPTBox.core.sitk_utils import nii_to_sitk
+        return nii_to_sitk(self)
+
+    def to_deepali(self,align_corners: bool = True,dtype=None,device = "cuda"):
+        import torch
+        try:
+            from deepali.core import Grid
+            from deepali.data import Image as deepaliImage
+        except Exception:
+            log.print_error()
+            log.on_fail("run 'pip install hf-deepali' to install deepali")
+            raise
+
+        dim = np.asarray(self.header["dim"])
+        ndim = int(dim[0])
+        d = min(ndim, 3)
+        size = self.shape  # dim[1 : D + 1]
+        spacing = np.asarray(self.zoom)
+        affine = np.asarray(self.affine)
+        origin = affine[:d, 3]
+        direction = np.divide(affine[:d, :d], spacing)
+        # Convert to ITK LPS convention
+        origin[:2] *= -1
+        direction[:2] *= -1
+        # Replace small values and -0 by 0
+        epsilon = sys.float_info.epsilon
+        origin[np.abs(origin) < epsilon] = 0
+        direction[np.abs(direction) < epsilon] = 0
+        # Image data array
+        data = self.get_array()
+        # Squeeze unused dimensions
+        # https://github.com/InsightSoftwareConsortium/ITK/blob/3454d857dc46e4333ad1178be8c186547fba87ef/Modules/IO/NIFTI/src/itkNiftiImageIO.cxx#L1112-L1156
+        intent_code = int(self.header["intent_code"]) # type: ignore
+        if intent_code in (1005, 1006, 1007):
+            # Vector or matrix valued image
+            for realdim in range(4, 1, -1):
+                if dim[realdim] > 1:
+                    break
+            else:
+                realdim = 1
+        elif intent_code == 1004:
+            raise NotImplementedError("NII has an intent code of NIFTI_INTENT_GENMATRIX which is not yet implemented")
+        else:
+            # Scalar image
+            realdim = ndim
+            while realdim > 3 and dim[realdim] == 1:
+                realdim -= 1
+        data = np.reshape(data, data.shape[:realdim] + data.shape[5:])
+        # Reverse order of axes
+        data = np.transpose(data, axes=tuple(reversed(range(data.ndim))))
+        # Add leading channel dimension
+        grid = Grid(size=size, origin=origin, spacing=spacing, direction=direction)  # type: ignore
+        if data.ndim == grid.ndim:
+            data = np.expand_dims(data, 0)
+        if data.dtype == np.uint16:
+            data = data.astype(np.int32)
+        elif data.dtype == np.uint32:
+            data = data.astype(np.int64)
+        grid = grid.align_corners_(align_corners)
+        return deepaliImage(torch.Tensor(data), grid, dtype=dtype, device=device)  # type: ignore
 
     def erode_msk(self, mm: int = 5, labels: LABEL_REFERENCE = None, connectivity: int = 3, inplace=False,verbose:logging=True,border_value=0):
         """
@@ -932,7 +1003,7 @@ class NII(NII_Math):
         return self.dilate_msk(mm=mm, labels=labels, connectivity=connectivity, mask=mask, inplace=True, verbose=verbose)
 
 
-    def fill_holes(self, labels: LABEL_REFERENCE = None, slice_wise_dim: int | None = None, verbose:logging=False, inplace=False):
+    def fill_holes(self, labels: LABEL_REFERENCE = None, slice_wise_dim: int | None = None, verbose:logging=False, inplace=False):  # noqa: ARG002
         """Fills holes in segmentation
 
         Args:
