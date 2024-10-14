@@ -178,7 +178,7 @@ def compute_angel_between_two_points_(
     direction: DIRECTIONS,
     vert_id1_mv: MoveTo = MoveTo.CENTER,
     vert_id2_mv: MoveTo = MoveTo.CENTER,
-    project_2d=False,
+    project_2D=False,
     use_ivd_direction=False,
 ) -> float | None:
     """
@@ -220,7 +220,7 @@ def compute_angel_between_two_points_(
     """
     if vert_id1 is None or vert_id2 is None:
         return None
-
+    assert project_2D, "project_2D == True"
     id1: int = vert_id1.value if isinstance(vert_id1, Enum) else vert_id1
     id2: int = vert_id2.value if isinstance(vert_id2, Enum) else vert_id2
     if (id1, 50) not in poi or (id2, 50) not in poi:
@@ -285,7 +285,7 @@ def compute_angel_between_two_points_(
     #    plot_ray(poi[id1, subreg], norm1_vert, _debug_plot, inplace=True, value=1)
     #    plot_ray(poi[id2, subreg], norm2_vert, _debug_plot, inplace=True, value=2)
     # Calculate the 3D angle between the normal
-    if not project_2d:
+    if not project_2D:
         angle_3D = angle_between(norm1_vert, norm2_vert)  # noqa: N806
         return angle_3D / np.pi * 180
     p1 = vert_id1_mv.get_point(id1, poi)
@@ -322,7 +322,7 @@ def compute_angel_between_two_points_(
     return angle_2D / np.pi * 180
 
 
-def compute_lordosis_and_kyphosis(poi: POI, project_2d=False):
+def compute_lordosis_and_kyphosis(poi: POI, project_2D=True):
     """
     Calculates the angles of cervical lordosis, thoracic kyphosis, and lumbar lordosis based on the given points of interest (POI).
 
@@ -367,10 +367,10 @@ def compute_lordosis_and_kyphosis(poi: POI, project_2d=False):
         "P",
         MoveTo.TOP,
         MoveTo.BOTTOM,
-        project_2d,
+        project_2D,
     )
-    thoracic = compute_angel_between_two_points_(poi, Vertebra_Instance.T1, last_t, "P", MoveTo.TOP, MoveTo.BOTTOM, project_2d)
-    lumbar = compute_angel_between_two_points_(poi, Vertebra_Instance.L1, last_l, "P", MoveTo.TOP, MoveTo.BOTTOM, project_2d)
+    thoracic = compute_angel_between_two_points_(poi, Vertebra_Instance.T1, last_t, "P", MoveTo.TOP, MoveTo.BOTTOM, project_2D)
+    lumbar = compute_angel_between_two_points_(poi, Vertebra_Instance.L1, last_l, "P", MoveTo.TOP, MoveTo.BOTTOM, project_2D)
     return {
         "cervical_lordosis": cervical,
         "thoracic_kyphosis": thoracic,
@@ -428,7 +428,7 @@ def compute_max_cobb_angle(
     vertebrae_list=None,
     vert_id1_mv: MoveTo = MoveTo.TOP,
     vert_id2_mv: MoveTo = MoveTo.BOTTOM,
-    project_2d=False,
+    project_2D=True,
     use_ivd_direction=False,
 ):
     """
@@ -500,7 +500,7 @@ def compute_max_cobb_angle(
                     "R",
                     vert_id1_mv,
                     vert_id2_mv,
-                    project_2d,
+                    project_2D,
                     use_ivd_direction=use_ivd_direction,
                 )
                 if angle is None:
@@ -538,6 +538,7 @@ def compute_max_cobb_angle_multi(
     vert_id1_mv: MoveTo = MoveTo.TOP,
     vert_id2_mv: MoveTo = MoveTo.BOTTOM,
     use_ivd_direction=False,
+    project_2D=True,
 ):
     """
     Identifies multiple Cobb angles along the spine that exceed a given threshold.
@@ -603,6 +604,7 @@ def compute_max_cobb_angle_multi(
         vert_id1_mv=vert_id1_mv,
         vert_id2_mv=vert_id2_mv,
         use_ivd_direction=use_ivd_direction,
+        project_2D=project_2D,
     )  # type: ignore
     # split
     if threshold_deg <= max_angle:
@@ -620,6 +622,7 @@ def compute_max_cobb_angle_multi(
             threshold_deg=threshold_deg,
             out_list=out_list,
             use_ivd_direction=use_ivd_direction,
+            project_2D=project_2D,
         )
         compute_max_cobb_angle_multi(
             poi,
@@ -629,6 +632,7 @@ def compute_max_cobb_angle_multi(
             threshold_deg=threshold_deg,
             out_list=out_list,
             use_ivd_direction=use_ivd_direction,
+            project_2D=project_2D,
         )
 
     return out_list
@@ -656,6 +660,7 @@ def plot_compute_lordosis_and_kyphosis(
     img: Image_Reference,
     seg: Image_Reference | None = None,
     line_len=100,
+    project_2D=True,
 ):
     """
     Plots and computes the angles of lordosis and kyphosis on a spinal image.
@@ -714,7 +719,7 @@ def plot_compute_lordosis_and_kyphosis(
         assert a is not None
         out.append((id1.value, s, (a[0] * line_len, a[1] * line_len)))
         out.append((id1.value, s, (-a[0] * line_len * 3, -a[1] * line_len * 3)))
-    out2 = compute_lordosis_and_kyphosis(poi)
+    out2 = compute_lordosis_and_kyphosis(poi, project_2D=project_2D)
     for (name, v), id1, id2 in zip(
         out2.items(),
         [Vertebra_Instance.C7, last_t, last_l],
@@ -750,6 +755,7 @@ def plot_cobb_angle(
     vert_id1_mv: MoveTo = MoveTo.TOP,
     vert_id2_mv: MoveTo = MoveTo.BOTTOM,
     use_ivd_direction=False,
+    project_2D=True,
 ):
     """
     Visualizes the cobb angles for a given spinal image by plotting the angle measurements on the image.
@@ -793,6 +799,7 @@ def plot_cobb_angle(
         vert_id1_mv=vert_id1_mv,
         vert_id2_mv=vert_id2_mv,
         use_ivd_direction=use_ivd_direction,
+        project_2D=project_2D,
     )
     for max_angle, from_vert, to_vert, apex in copps:
         if from_vert is not None:
@@ -839,6 +846,7 @@ def plot_cobb_and_lordosis_and_kyphosis(
     seg: Image_Reference | None = None,
     line_len=100,
     threshold_deg=10,
+    project_2D=True,
 ):
     """
     Plots Cobb angles and lordosis/kyphosis angles on a spinal image.
@@ -894,8 +902,9 @@ def plot_cobb_and_lordosis_and_kyphosis(
         line_len=line_len,
         threshold_deg=threshold_deg,
         use_ivd_direction=True,
+        project_2D=project_2D,
     )
-    out_lak, frame2 = plot_compute_lordosis_and_kyphosis(None, poi, img, seg, line_len=line_len)
+    out_lak, frame2 = plot_compute_lordosis_and_kyphosis(None, poi, img, seg, line_len=line_len, project_2D=project_2D)
     if img_path is not None:
         create_snapshot(img_path, [frame1, frame2])
     return out_cobb, out_lak, [frame1, frame2]
