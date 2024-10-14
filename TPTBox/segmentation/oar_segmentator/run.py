@@ -39,10 +39,10 @@ def run_oar_segmentor(
         in_file = BIDS_FILE(ct_path, dataset)
     out_path_combined = in_file.get_changed_path("nii.gz", "msk", parent=parent, info={"seg": "oar-combined"}, non_strict_mode=True)
     if out_path_combined.exists() and not override:
-        print("skip", out_path_combined.name, end="\r")
+        print("skip", out_path_combined.name, "    ", end="\r")
         return
     org = to_nii(in_file)
-    print("resample")
+    print("resample                                                                        ")
     input_nii = org.rescale((zoom, zoom, zoom), mode="nearest").reorient(orientation)
     org = (org.shape, org.affine, org.zoom)
     segs: dict[int, NII] = {}
