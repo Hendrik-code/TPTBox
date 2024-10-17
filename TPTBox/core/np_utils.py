@@ -42,6 +42,8 @@ def np_extract_label(arr: np.ndarray, label: int, to_label: int = 1, inplace: bo
     if not inplace:
         arr = arr.copy()
 
+    # TODO support label being a sequence
+
     if label != 0:
         arr[arr != label] = 0
         arr[arr == label] = to_label
@@ -888,6 +890,22 @@ def np_calc_overlapping_labels(
 
     # (ref, pred)
     return [(int(i % (max_ref)), int(i // (max_ref))) for i in np.unique(overlap_arr) if i > max_ref]
+
+
+def np_pad_to(arr: np.ndarray, new_size: tuple[int, ...], *args, **kwargs):
+    assert len(new_size) == arr.ndim, (arr.ndim, new_size)
+    shp = arr.shape
+    pad_width = []
+    for d in range(arr.ndim):
+        diff = shp[d] - new_size[d]
+        pad_left = diff // 2
+        pad_right = diff // 2
+        if diff % 2 == 0:
+            pad_right += 1
+        pad_width.append((pad_left, pad_right))
+    arr_padded = np.pad(arr, pad_width, *args, **kwargs)
+    assert arr_padded.shape == new_size
+    return arr_padded
 
 
 def _to_labels(arr: np.ndarray, labels: LABEL_REFERENCE = None) -> Sequence[int]:
