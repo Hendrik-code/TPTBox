@@ -136,8 +136,10 @@ def _find_corner_point(
 
     # Adjust factors until inside region
     while not is_inside():
-        factor1 = factor2 = factor2 * 0.98
-    v1_n = v2_n = 1.0
+        factor1 = factor1 * 0.9
+        factor2 = factor2 * 0.7
+    v1_n = 1.0
+    v2_n = 0.4
     f1 = f2 = 0
 
     # Refine factors using delta
