@@ -220,7 +220,7 @@ def compute_angel_between_two_points_(
     """
     if vert_id1 is None or vert_id2 is None:
         return None
-    assert project_2D, "project_2D == True"
+    # assert project_2D, "project_2D == True"
     id1: int = vert_id1.value if isinstance(vert_id1, Enum) else vert_id1
     id2: int = vert_id2.value if isinstance(vert_id2, Enum) else vert_id2
     if (id1, 50) not in poi or (id2, 50) not in poi:
