@@ -1,4 +1,3 @@
-import sys
 import traceback
 import warnings
 import zlib
@@ -303,9 +302,6 @@ class NII(NII_Math):
             z = z[:3]
         assert len(z) == 3,z
         return z # type: ignore
-    @property
-    def spacing(self):
-        return self.zoom
 
     @property
     def origin(self) -> tuple[float, float, float]:
@@ -491,13 +487,14 @@ class NII(NII_Math):
         warnings.warn("compute_crop_slice id deprecated use compute_crop instead",stacklevel=5) #TODO remove in version 1.0
         return self.compute_crop(**qargs)
 
-    def compute_crop(self,minimum: float=0, dist: float = 0, other_crop:tuple[slice,...]|None=None, maximum_size:tuple[slice,...]|int|tuple[int,...]|None=None)->tuple[slice,slice,slice]:
+    def compute_crop(self,minimum: float=0, dist: float = 0, use_mm=False, other_crop:tuple[slice,...]|None=None, maximum_size:tuple[slice,...]|int|tuple[int,...]|None=None,)->tuple[slice,slice,slice]:
         """
         Computes the minimum slice that removes unused space from the image and returns the corresponding slice tuple along with the origin shift required for centroids.
 
         Args:
             minimum (int): The minimum value of the array (0 for MRI, -1024 for CT). Default value is 0.
             dist (int): The amount of padding to be added to the cropped image. Default value is 0.
+            use_mm: dist will be mm instead of number of voxels
             other_crop (tuple[slice,...], optional): A tuple of slice objects representing the slice of an other image to be combined with the current slice. Default value is None.
 
         Returns:
@@ -513,7 +510,8 @@ class NII(NII_Math):
         """
         shp = self.shape
         zms = self.zoom
-        d = np.around(dist / np.asarray(zms)).astype(int)
+
+        d = np.around(dist / np.asarray(zms)).astype(int) if use_mm else (int(dist),int(dist),int(dist))
         array = self.get_array() #+ minimum
         msk_bin = np.zeros(array.shape,dtype=bool)
         #bool_arr[array<minimum] = 0
@@ -880,28 +878,13 @@ class NII(NII_Math):
     def to_deepali(self,align_corners: bool = True,dtype=None,device = "cuda"):
         import torch
         try:
-            from deepali.core import Grid
             from deepali.data import Image as deepaliImage
         except Exception:
             log.print_error()
             log.on_fail("run 'pip install hf-deepali' to install deepali")
             raise
-
         dim = np.asarray(self.header["dim"])
         ndim = int(dim[0])
-        d = min(ndim, 3)
-        size = self.shape  # dim[1 : D + 1]
-        spacing = np.asarray(self.zoom)
-        affine = np.asarray(self.affine)
-        origin = affine[:d, 3]
-        direction = np.divide(affine[:d, :d], spacing)
-        # Convert to ITK LPS convention
-        origin[:2] *= -1
-        direction[:2] *= -1
-        # Replace small values and -0 by 0
-        epsilon = sys.float_info.epsilon
-        origin[np.abs(origin) < epsilon] = 0
-        direction[np.abs(direction) < epsilon] = 0
         # Image data array
         data = self.get_array()
         # Squeeze unused dimensions
@@ -924,8 +907,8 @@ class NII(NII_Math):
         data = np.reshape(data, data.shape[:realdim] + data.shape[5:])
         # Reverse order of axes
         data = np.transpose(data, axes=tuple(reversed(range(data.ndim))))
+        grid = self.to_deepali_gird(align_corners=align_corners)
         # Add leading channel dimension
-        grid = Grid(size=size, origin=origin, spacing=spacing, direction=direction)  # type: ignore
         if data.ndim == grid.ndim:
             data = np.expand_dims(data, 0)
         if data.dtype == np.uint16:
@@ -935,7 +918,7 @@ class NII(NII_Math):
         grid = grid.align_corners_(align_corners)
         return deepaliImage(torch.Tensor(data), grid, dtype=dtype, device=device)  # type: ignore
 
-    def erode_msk(self, mm: int = 5, labels: LABEL_REFERENCE = None, connectivity: int = 3, inplace=False,verbose:logging=True,border_value=0):
+    def erode_msk(self, n_pixel: int = 5, labels: LABEL_REFERENCE = None, connectivity: int = 3, inplace=False,verbose:logging=True,border_value=0, use_crop=True):
         """
         Erodes the binary segmentation mask by the specified number of voxels.
 
@@ -945,7 +928,7 @@ class NII(NII_Math):
             connectivity (int, optional): Elements up to a squared distance of connectivity from the center are considered neighbors. connectivity may range from 1 (no diagonal elements are neighbors) to rank (all elements are neighbors).
             inplace (bool, optional): Whether to modify the mask in place or return a new object. Defaults to False.
             verbose (bool, optional): Whether to print a message indicating that the mask was eroded. Defaults to True.
-
+            use_crop: speed up computation by cropping and un-cropping the segmentation. Minor overhead if the segmentation fills most of the image
         Returns:
             NII: The eroded mask.
 
@@ -954,31 +937,37 @@ class NII(NII_Math):
 
         """
         log.print("erode mask",end='\r',verbose=verbose)
+        if use_crop:
+            crop = (self if labels is None else self.extract_label(labels)).compute_crop(dist=1)
+            msk_i_data_org = self.get_seg_array()
+            msk_i_data = msk_i_data_org[crop]
+        else:
+            msk_i_data = self.get_seg_array()
         labels = self.unique() if labels is None else labels
-        msk_i_data = self.get_seg_array()
-        out = np_erode_msk(msk_i_data, label_ref=labels, mm=mm, connectivity=connectivity,border_value=border_value)
-        msk_e = out.astype(np.uint16), self.affine, self.header
-        log.print("Mask eroded by", mm, "voxels",verbose=verbose)
-        if inplace:
-            self.nii = msk_e
-            return self
-        return NII(msk_e,seg=True,c_val=0)
+        out = np_erode_msk(msk_i_data, label_ref=labels, mm=n_pixel, connectivity=connectivity,border_value=border_value)
+        out = out.astype(self.dtype)
+        log.print("Mask eroded by", n_pixel, "voxels",verbose=verbose)
 
-    def erode_msk_(self, mm:int = 5, labels: LABEL_REFERENCE = None, connectivity: int=3, verbose:logging=True,border_value=0):
-        return self.erode_msk(mm=mm, labels=labels, connectivity=connectivity, inplace=True, verbose=verbose,border_value=border_value)
+        if use_crop:
+            msk_i_data_org[crop] = out
+            out = msk_i_data_org
+        return self.set_array(out,inplace=inplace)
 
-    def dilate_msk(self, mm: int = 5, labels: LABEL_REFERENCE = None, connectivity: int = 3, mask: Self | None = None, inplace=False, verbose:logging=True):
+    def erode_msk_(self, n_pixel:int = 5, labels: LABEL_REFERENCE = None, connectivity: int=3, verbose:logging=True,border_value=0,use_crop=True):
+        return self.erode_msk(n_pixel=n_pixel, labels=labels, connectivity=connectivity, inplace=True, verbose=verbose,border_value=border_value,use_crop=use_crop)
+
+    def dilate_msk(self, n_pixel: int = 5, labels: LABEL_REFERENCE = None, connectivity: int = 3, mask: Self | None = None, inplace=False, verbose:logging=True,use_crop=True):
         """
         Dilates the binary segmentation mask by the specified number of voxels.
 
         Args:
-            mm (int, optional): The number of voxels to dilate the mask by. Defaults to 5.
+            n_pixel (int, optional): The number of voxels to dilate the mask by. Defaults to 5.
             labels (list[int], optional): Labels that should be dilated. If None, will dilate all labels (not including zero!)
             connectivity (int, optional): Elements up to a squared distance of connectivity from the center are considered neighbors. connectivity may range from 1 (no diagonal elements are neighbors) to rank (all elements are neighbors).
             mask (NII, optional): If set, after each iteration, will zero out everything based on this mask
             inplace (bool, optional): Whether to modify the mask in place or return a new object. Defaults to False.
             verbose (bool, optional): Whether to print a message indicating that the mask was dilated. Defaults to True.
-
+            use_crop: speed up computation by cropping and un-cropping the segmentation. Minor overhead if the segmentation fills most of the image
         Returns:
             NII: The dilated mask.
 
@@ -989,21 +978,26 @@ class NII(NII_Math):
         log.print("dilate mask",end='\r',verbose=verbose)
         if labels is None:
             labels = self.unique()
-        msk_i_data = self.get_seg_array()
+        if use_crop:
+            crop = (self if labels is None else self.extract_label(labels)).compute_crop(dist=1)
+            msk_i_data_org = self.get_seg_array()
+            msk_i_data = msk_i_data_org[crop]
+        else:
+            msk_i_data = self.get_seg_array()
         mask_ = mask.get_seg_array() if mask is not None else None
-        out = np_dilate_msk(arr=msk_i_data, label_ref=labels, mm=mm, mask=mask_, connectivity=connectivity)
-        msk_e = out.astype(np.uint16), self.affine,self.header
-        log.print("Mask dilated by", mm, "voxels",verbose=verbose)
-        if inplace:
-            self.nii = msk_e
-            return self
-        return NII(msk_e,seg=True,c_val=0)
+        out = np_dilate_msk(arr=msk_i_data, label_ref=labels, mm=n_pixel, mask=mask_, connectivity=connectivity)
+        out = out.astype(self.dtype)
+        log.print("Mask dilated by", n_pixel, "voxels",verbose=verbose)
+        if use_crop:
+            msk_i_data_org[crop] = out
+            out = msk_i_data_org
+        return self.set_array(out,inplace=inplace)
 
-    def dilate_msk_(self, mm:int = 5, labels: LABEL_REFERENCE = None, connectivity: int=3, mask: Self | None = None, verbose:logging=True):
-        return self.dilate_msk(mm=mm, labels=labels, connectivity=connectivity, mask=mask, inplace=True, verbose=verbose)
+    def dilate_msk_(self, n_pixel:int = 5, labels: LABEL_REFERENCE = None, connectivity: int=3, mask: Self | None = None, verbose:logging=True,use_crop=True):
+        return self.dilate_msk(n_pixel=n_pixel, labels=labels, connectivity=connectivity, mask=mask, inplace=True, verbose=verbose,use_crop=use_crop)
 
 
-    def fill_holes(self, labels: LABEL_REFERENCE = None, slice_wise_dim: int | None = None, verbose:logging=False, inplace=False):  # noqa: ARG002
+    def fill_holes(self, labels: LABEL_REFERENCE = None, slice_wise_dim: int | None = None, verbose:logging=False, inplace=False,use_crop=True):  # noqa: ARG002
         """Fills holes in segmentation
 
         Args:
@@ -1012,7 +1006,7 @@ class NII(NII_Math):
             inplace (bool): Whether to modify the current NIfTI image object in place or create a new object with the mapped labels.
                 Default is False.
             slice_wise_dim (int | None, optional): If the input is 3D, the specified dimension here cna be used for 2D slice-wise filling. Defaults to None.
-
+            use_crop: speed up computation by cropping and un-cropping the segmentation. Minor overhead if the segmentation fills most of the image
         Returns:
             NII: If inplace is True, returns the current NIfTI image object with filled holes. Otherwise, returns a new NIfTI image object with filled holes.
         """
@@ -1021,19 +1015,22 @@ class NII(NII_Math):
         if isinstance(labels, int):
             labels = [labels]
 
-        seg_arr = self.get_seg_array()
-        #volumes = np_volume(seg_arr, label_ref=labels)
-        filled = np_fill_holes(seg_arr, label_ref=labels, slice_wise_dim=slice_wise_dim)
-        #volumes_filled = np_volume(filled, label_ref=labels)
-        #changes_in_labels = [i for i in labels if i in volumes_filled and i in volumes and volumes_filled[i] != volumes[i]]
-        #if len(changes_in_labels) > 0:
-        #    log.print(f"Filled holes in {changes_in_labels}", verbose=verbose)
-        #else:
-        #    log.print("Fill holes: No holes have been filled", verbose=verbose)
-        return self.set_array(filled, inplace=inplace)
+        if use_crop:
+            crop = (self if labels is None else self.extract_label(labels)).compute_crop(dist=1)
+            msk_i_data_org = self.get_seg_array()
+            seg_arr = msk_i_data_org[crop]
+        else:
+            seg_arr = self.get_seg_array()
 
-    def fill_holes_(self, labels: LABEL_REFERENCE = None, slice_wise_dim: int | None = None, verbose:logging=True):
-        return self.fill_holes(labels, slice_wise_dim, verbose, inplace=True)
+        #seg_arr = self.get_seg_array()
+        filled = np_fill_holes(seg_arr, label_ref=labels, slice_wise_dim=slice_wise_dim)
+        if use_crop:
+            msk_i_data_org[crop] = filled
+            filled = msk_i_data_org
+        return self.set_array(filled,inplace=inplace)
+
+    def fill_holes_(self, labels: LABEL_REFERENCE = None, slice_wise_dim: int | None = None, verbose:logging=True,use_crop=True):
+        return self.fill_holes(labels, slice_wise_dim, verbose, inplace=True,use_crop=use_crop)
 
     def calc_convex_hull(
         self,

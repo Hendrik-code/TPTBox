@@ -1,5 +1,4 @@
 import operator
-from math import ceil, floor
 from numbers import Number
 from typing import TYPE_CHECKING
 
@@ -8,7 +7,7 @@ from skimage.metrics import peak_signal_noise_ratio as psnr
 from skimage.metrics import structural_similarity as ssim
 from typing_extensions import Self
 
-from .nii_poi_abstract import Has_Affine
+from .nii_poi_abstract import Has_Grid
 
 # fmt: off
 if TYPE_CHECKING:
@@ -42,7 +41,7 @@ else:
     class NII_Proxy:
         pass
     C = Self|Number|np.ndarray
-class NII_Math(NII_Proxy,Has_Affine):
+class NII_Math(NII_Proxy,Has_Grid):
     def _binary_opt(self, other:C, opt,inplace = False)-> Self:
         if isinstance(other,NII_Math):
             other = other.get_array()
@@ -158,6 +157,16 @@ class NII_Math(NII_Proxy,Has_Affine):
             where=where.get_array().astype(bool)
 
         return np.sum(self.get_array(),axis=axis,keepdims=keepdims,where=where,**qargs)
+    def mean(self,axis = None,keepdims=False,where = np._NoValue, **qargs)->float:  # type: ignore
+        if hasattr(where,"get_array"):
+            where=where.get_array().astype(bool)
+
+        return np.mean(self.get_array(),axis=axis,keepdims=keepdims,where=where,**qargs)
+    def median(self,axis = None,keepdims=False,where = np._NoValue, **qargs)->float:  # type: ignore
+        if hasattr(where,"get_array"):
+            where=where.get_array().astype(bool)
+
+        return np.median(self.get_array(),axis=axis,keepdims=keepdims,where=where,**qargs)
     def threshold(self,threshold=0.5, inplace=False):
         arr = self.get_array()
         arr2 = arr.copy()

@@ -27,6 +27,7 @@ from TPTBox.core.bids_constants import (
     sequence_naming_keys,
 )
 
+_supported_nii_files = ["nii.gz", "nii", "mkd"]
 # ,
 
 file = Path(__file__).resolve()
@@ -930,7 +931,7 @@ class BIDS_FILE:
         return self.open_poi(nii)
 
     def has_nii(self) -> bool:
-        return "nii.gz" in self.file
+        return any(a in self.file for a in _supported_nii_files)
 
     def open_nii(self):
         try:
@@ -939,6 +940,22 @@ class BIDS_FILE:
             return NII.load_bids(self)
         except KeyError as e:
             raise ValueError(f"nii.gz not present. Found only {self.file.keys()}\t{self.file}\n\n{self}") from e
+
+    def get_grid_info(self):
+        from TPTBox.core.dicom.dicom_extract import add_grid_info_to_json
+        from TPTBox.core.nii_poi_abstract import Grid
+
+        nii_file = self.get_nii_file()
+        if nii_file is None:
+            return None
+        if not self.has_json():
+            self.file["json"] = Path(str(nii_file).split(".")[0] + ".json")
+        return Grid(**add_grid_info_to_json(nii_file, self.file["json"])["Grid"])
+
+    def get_nii_file(self):
+        for key in _supported_nii_files:
+            if key in self.file:
+                return self.file[key]
 
     def has_npz(self) -> bool:
         return "npz" in self.file
@@ -953,7 +970,7 @@ class BIDS_FILE:
             return None
         if filetype == "json":
             return self.open_json()
-        if filetype == "nii.gz":
+        if filetype in _supported_nii_files:
             return self.open_nii()
         return self.file[filetype]
 

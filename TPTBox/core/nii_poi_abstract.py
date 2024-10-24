@@ -1,3 +1,4 @@
+import sys
 from typing import TYPE_CHECKING
 
 import nibabel as nib
@@ -8,25 +9,39 @@ from typing_extensions import Self
 from TPTBox.core.np_utils import np_count_nonzero
 from TPTBox.logger import Log_Type
 
-from .vert_constants import AFFINE, AX_CODES, DIRECTIONS, ORIGIN, ROTATION, SHAPE, ZOOMS, _plane_dict, _same_direction, log, logging
+from .vert_constants import (
+    AFFINE,
+    AX_CODES,
+    DIRECTIONS,
+    ORIGIN,
+    ROTATION,
+    ROUNDING_LVL,
+    SHAPE,
+    ZOOMS,
+    _plane_dict,
+    _same_direction,
+    log,
+    logging,
+)
 
 if TYPE_CHECKING:
     from TPTBox import NII, POI
 
-    class AFFINE_Proxy:
+    class Grid_Proxy:
         affine: AFFINE
         rotation: ROTATION
         zoom: ZOOMS
+        spacing: ZOOMS
         origin: ORIGIN
         shape: SHAPE
         orientation: AX_CODES
 else:
 
-    class AFFINE_Proxy:
+    class Grid_Proxy:
         pass
 
 
-class Has_Affine(AFFINE_Proxy):
+class Has_Grid(Grid_Proxy):
     """Parent class for methods that are shared by POI and NII"""
 
     @property
@@ -34,14 +49,26 @@ class Has_Affine(AFFINE_Proxy):
         assert self.shape is not None, "need shape information"
         return tuple(np.rint(list(self.shape)).astype(int))
 
+    @property
+    def spacing(self):
+        return self.zoom
+
+    @spacing.setter
+    def spacing(self, value: ZOOMS):
+        self.zoom = value
+
+    @property
+    def affine(self):
+        assert self.zoom is not None, "Attribute 'zoom' must be set before calling affine."
+        assert self.rotation is not None, "Attribute 'rotation' must be set before calling affine."
+        assert self.origin is not None, "Attribute 'origin' must be set before calling affine."
+        aff = np.eye(4)
+        aff[:3, :3] = self.rotation @ np.diag(self.zoom)
+        aff[:3, 3] = self.origin
+        return np.round(aff, ROUNDING_LVL)
+
     def _extract_affine(self, rm_key=()):
-        out = {
-            "zoom": self.zoom,
-            "origin": self.origin,
-            "shape": self.shape,
-            "rotation": self.rotation,
-            "orientation": self.orientation,
-        }
+        out = {"zoom": self.zoom, "origin": self.origin, "shape": self.shape, "rotation": self.rotation, "orientation": self.orientation}
         for k in rm_key:
             out.pop(k)
         return out
@@ -150,7 +177,7 @@ class Has_Affine(AFFINE_Proxy):
 
         return not has_errors
 
-    def get_plane(self) -> str:
+    def get_plane(self, res_threshold: float | None = None) -> str:
         """Determines the orientation plane of the NIfTI image along the x, y, or z-axis.
 
         Returns:
@@ -166,7 +193,9 @@ class Has_Affine(AFFINE_Proxy):
         """
         # plane_dict = {"S": "ax", "I": "ax", "L": "sag", "R": "sag", "A": "cor", "P": "cor"}
         axc = np.array(nio.aff2axcodes(self.affine))
-        zms = np.around(self.zoom, 1)
+        zoom = self.zoom if res_threshold is None else tuple(max(i, res_threshold) for i in self.zoom)
+        zms = np.around(zoom, 1)
+
         ix_max = np.array(zms == np.amax(zms))
         num_max = np_count_nonzero(ix_max)
         if num_max == 2:
@@ -185,15 +214,44 @@ class Has_Affine(AFFINE_Proxy):
     def get_empty_POI(self):
         from TPTBox import POI
 
-        return POI(
-            {},
-            orientation=self.orientation,
-            zoom=self.zoom,
-            shape=self.shape,
-            rotation=self.rotation,
-            origin=self.origin,
-        )
+        return POI({}, orientation=self.orientation, zoom=self.zoom, shape=self.shape, rotation=self.rotation, origin=self.origin)
 
     def make_empty_nii(self, seg=False):
         nii = nib.Nifti1Image(np.zeros(self.shape_int), affine=self.affine)
         return NII(nii, seg=seg)
+
+    def to_deepali_gird(self, align_corners: bool = True):
+        try:
+            from deepali.core import Grid
+        except Exception:
+            log.print_error()
+            log.on_fail("run 'pip install hf-deepali' to install deepali")
+            raise
+        try:
+            dim = np.asarray(self.header["dim"])
+        except Exception:
+            dim = [3]
+        d = min(int(dim[0]), 3)
+        size = self.shape  # dim[1 : D + 1]
+        spacing = np.asarray(self.zoom)
+        affine = np.asarray(self.affine)
+        origin = affine[:d, 3]
+        direction = np.divide(affine[:d, :d], spacing)
+        # Convert to ITK LPS convention
+        origin[:2] *= -1
+        direction[:2] *= -1
+        # Replace small values and -0 by 0
+        epsilon = sys.float_info.epsilon
+        origin[np.abs(origin) < epsilon] = 0
+        direction[np.abs(direction) < epsilon] = 0
+        # Add leading channel dimension
+        grid = Grid(size=size, origin=origin, spacing=spacing, direction=direction)  # type: ignore
+        grid = grid.align_corners_(align_corners)
+        return grid
+
+
+class Grid(Has_Grid):
+    def __init__(self, **qargs) -> None:
+        super().__init__()
+        for k, v in qargs:
+            setattr(self, k, v)
