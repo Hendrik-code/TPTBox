@@ -7,6 +7,7 @@ import numpy as np
 
 from TPTBox.logger import log_file
 
+ROUNDING_LVL = 7
 #####################
 log = log_file.Reflection_Logger()
 logging = bool | log_file.Logger_Interface

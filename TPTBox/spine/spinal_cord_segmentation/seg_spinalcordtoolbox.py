@@ -182,8 +182,6 @@ def compute_spinal_cord_with_cut_sacrum(
         out_nib = NII(nib.Nifti1Image(out, mri_nii.affine, mri_nii.header))
         out_nib.reorient_same_as_(mri_file.open_nii(), verbose=verbose)
         out_nib.save(spinal_cord_file, verbose=verbose)
-    except Exception:  # noqa: TRY302
-        raise
     finally:
         shutil.rmtree(tmp)
     return True

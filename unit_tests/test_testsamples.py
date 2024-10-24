@@ -157,31 +157,31 @@ class Test_testsamples(unittest.TestCase):
         poi = calc_poi_from_subreg_vert(vert_nii, subreg_nii, subreg_id=locs, verbose=False)
         from TPTBox.spine.statistics import angles
 
-        a = angles.compute_angel_between_two_points_(poi, label, label + 1, "R", project_2d=True)
+        a = angles.compute_angel_between_two_points_(poi, label, label + 1, "R", project_2D=True)
         assert a is not None
         assert abs(a - 5) < 0.1, a
-        b = angles.compute_angel_between_two_points_(poi, label, label + 1, "R", project_2d=False)
+        b = angles.compute_angel_between_two_points_(poi, label, label + 1, "R", project_2D=False)
         assert b is not None
         assert abs(b - 5.06) < 0.1, b
-        a = angles.compute_angel_between_two_points_(poi, label, label + 1, "P", project_2d=True)
+        a = angles.compute_angel_between_two_points_(poi, label, label + 1, "P", project_2D=True)
         assert a is not None
         assert abs(a - 6.7) < 0.1, a
-        b = angles.compute_angel_between_two_points_(poi, label, label + 1, "P", project_2d=False)
+        b = angles.compute_angel_between_two_points_(poi, label, label + 1, "P", project_2D=False)
         assert b is not None
         assert abs(b - 6.7) < 0.1, b
 
         _, subreg_nii, vert_nii, label = get_test_ct()
         locs = [Location.Vertebra_Direction_Inferior]
         poi = calc_poi_from_subreg_vert(vert_nii, subreg_nii, subreg_id=locs, verbose=False)
-        a = angles.compute_angel_between_two_points_(poi, label, label + 1, "R", project_2d=True)
+        a = angles.compute_angel_between_two_points_(poi, label, label + 1, "R", project_2D=True)
         assert a is not None
         assert abs(a - 6.77) < 0.1, a
-        b = angles.compute_angel_between_two_points_(poi, label, label + 1, "R", project_2d=False)
+        b = angles.compute_angel_between_two_points_(poi, label, label + 1, "R", project_2D=False)
         assert b is not None
         assert abs(b - 6.8) < 0.1, b
-        a = angles.compute_angel_between_two_points_(poi, label, label + 1, "P", project_2d=True)
+        a = angles.compute_angel_between_two_points_(poi, label, label + 1, "P", project_2D=True)
         assert a is not None
         assert abs(a - 16.8) < 0.1, a
-        b = angles.compute_angel_between_two_points_(poi, label, label + 1, "P", project_2d=False)
+        b = angles.compute_angel_between_two_points_(poi, label, label + 1, "P", project_2D=False)
         assert b is not None
         assert abs(b - 16.8) < 0.1, b

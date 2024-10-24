@@ -15,7 +15,7 @@ from typing_extensions import Self
 
 from TPTBox.core import bids_files
 from TPTBox.core.nii_wrapper import NII, Image_Reference, to_nii, to_nii_optional
-from TPTBox.core.poi_fun.poi_abstract import ROUNDING_LVL, Abstract_POI, POI_Descriptor
+from TPTBox.core.poi_fun.poi_abstract import Abstract_POI, POI_Descriptor
 from TPTBox.core.vert_constants import (
     AFFINE,
     AX_CODES,
@@ -24,6 +24,7 @@ from TPTBox.core.vert_constants import (
     ORIGIN,
     POI_DICT,
     ROTATION,
+    ROUNDING_LVL,
     SHAPE,
     TRIPLE,
     ZOOMS,
@@ -57,7 +58,7 @@ class _Orientation(TypedDict):
 _Centroid_DictList = Sequence[_Orientation | _Point3D]
 
 
-### CURRENT TYPE DEFFINITONS
+### CURRENT TYPE DEFINITIONS
 C = TypeVar("C", bound="POI")
 POI_Reference = bids_files.BIDS_FILE | Path | str | tuple[Image_Reference, Image_Reference, Sequence[int]] | C
 ctd_info_blacklist = [
@@ -139,7 +140,7 @@ class POI(Abstract_POI):
     rotation: ROTATION = field(default=None, repr=False, compare=False)  # type: ignore
     origin: COORDINATE = None  # type: ignore
     # internal
-    _rotation: ROTATION = field(init=False, default=None, repr=False, compare=False)
+    _rotation: ROTATION = field(init=False, default=None, repr=False, compare=False)  # type: ignore
     _zoom: ZOOMS = field(init=False, default=(1, 1, 1), repr=False, compare=False)
     _vert_orientation_pir = {}  # Elusive; will not be saved; will not be copied. For Buffering results  # noqa: RUF012
 
@@ -156,21 +157,15 @@ class POI(Abstract_POI):
         return self._zoom
 
     @property
-    def affine(self):
-        assert self.zoom is not None, "Attribute 'zoom' must be set before calling affine."
-        assert self.rotation is not None, "Attribute 'rotation' must be set before calling affine."
-        assert self.origin is not None, "Attribute 'origin' must be set before calling affine."
-        aff = np.eye(4)
-        aff[:3, :3] = self.rotation @ np.diag(self.zoom)
-        aff[:3, 3] = self.origin
-        return np.round(aff, ROUNDING_LVL)
+    def spacing(self):
+        return self._zoom
 
     @rotation.setter
     def rotation(self, value):
         if isinstance(value, property):
             pass
         elif value is None:
-            self._rotation = None
+            self._rotation = None  # type: ignore
         else:
             self._rotation = np.array(value)
 
@@ -179,7 +174,7 @@ class POI(Abstract_POI):
         if isinstance(value, property):
             pass
         elif value is None:
-            self._zoom = None
+            self._zoom = None  # type: ignore
         else:
             self._zoom = tuple(round(float(v), ROUNDING_LVL) for v in value)  # type: ignore
 
@@ -191,7 +186,7 @@ class POI(Abstract_POI):
         centroids: POI_DICT | POI_Descriptor | None = None,
         orientation: AX_CODES | None = None,
         zoom: ZOOMS | Sentinel = Sentinel(),  # noqa: B008
-        shape: tuple[float, float, float] | tuple[float, ...] | Sentinel = Sentinel(),  # noqa: B008
+        shape: TRIPLE | tuple[float, ...] | Sentinel = Sentinel(),  # noqa: B008
         rotation: ROTATION | Sentinel = Sentinel(),  # noqa: B008
         origin: COORDINATE | Sentinel = Sentinel(),  # noqa: B008
     ) -> Self:
@@ -294,11 +289,7 @@ class POI(Abstract_POI):
         return tuple(round(float(v), ROUNDING_LVL) for v in a)  # type: ignore
 
     def crop_centroids(self, **qargs):
-        warnings.warn(
-            "crop_centroids id deprecated use apply_crop instead",
-            DeprecationWarning,
-            stacklevel=4,
-        )
+        warnings.warn("crop_centroids id deprecated use apply_crop instead", DeprecationWarning, stacklevel=4)
         return self.apply_crop(**qargs)
 
     def apply_crop_reverse(
@@ -349,8 +340,8 @@ class POI(Abstract_POI):
             >>> crop_slice = (slice(10, 20), slice(5, 15), slice(0, 8))
             >>> new_centroids = centroid_obj.crop_centroids(crop_slice)
         """
-        origin = None
-        shape = None
+        origin: COORDINATE = None  # type: ignore
+        shape = None  # type: ignore
         try:
 
             def shift(x, y, z):
@@ -373,7 +364,7 @@ class POI(Abstract_POI):
                     else:
                         return end + in_shape[i]
 
-                shape: TRIPLE | None = tuple(int(map_v(o_shift[i], i) - o_shift[i].start) for i in range(3))  # type: ignore
+                shape: TRIPLE = tuple(int(map_v(o_shift[i], i) - o_shift[i].start) for i in range(3))  # type: ignore
             if self.origin is not None:
                 origin = self.local_to_global(tuple(float(y.start) for y in o_shift))  # type: ignore
                 # origin = tuple(float(x + y.start) for x, y in zip(self.origin, o_shift))
@@ -391,19 +382,14 @@ class POI(Abstract_POI):
                 return x - o[0], y - o[1], z - o[2]
 
             poi_out = self.apply_all(shift2, inplace=inplace)
-            shape = None
+            shape = None  # type: ignore
 
         if inplace:
             self.shape = shape
             self.origin = origin
             # centroids already replaced
             return self
-        out = self.copy(
-            centroids=poi_out.centroids,
-            shape=shape,
-            rotation=self.rotation,
-            origin=origin,
-        )
+        out = self.copy(centroids=poi_out.centroids, shape=shape, rotation=self.rotation, origin=origin)
         return out
 
     def crop_centroids_(self, o_shift: tuple[slice, slice, slice]):
@@ -514,9 +500,9 @@ class POI(Abstract_POI):
         if self.zoom is not None:
             zoom_i = np.array(self.zoom)
             zoom_i[perm] = zoom_i.copy()
-            zoom: ZOOMS | None = tuple(zoom_i)
+            zoom: ZOOMS = tuple(zoom_i)
         else:
-            zoom = None
+            zoom = None  # type: ignore
         perm2 = trans[:, 0]
         flip = trans[:, 1]
         if self.origin is not None and self.shape is not None:
@@ -525,18 +511,18 @@ class POI(Abstract_POI):
             # if flip = -1 new local point is affine_matmul_(shape[1]-1) else 0
             change = ((-flip) + 1) / 2  # 1 if flip else 0
             change = tuple(a * (s - 1) for a, s in zip(change, self.shape, strict=True))
-            origin = self.local_to_global(change)
+            origin: COORDINATE = self.local_to_global(change)
         else:
-            origin = None
+            origin = None  # type: ignore
         if self.rotation is not None:
             rotation_change = np.zeros((3, 3))
             rotation_change[0, perm2[0]] = flip[0]
             rotation_change[1, perm2[1]] = flip[1]
             rotation_change[2, perm2[2]] = flip[2]
             rotation = self.rotation
-            rotation = rotation.copy() @ rotation_change
+            rotation: ROTATION = rotation.copy() @ rotation_change
         else:
-            rotation = None
+            rotation = None  # type: ignore
         if inplace:
             self.orientation = axcodes_to
             self.centroids = points
@@ -545,33 +531,21 @@ class POI(Abstract_POI):
             self.origin = origin
             self.rotation = rotation
             return self
-        return self.copy(
-            orientation=axcodes_to,
-            centroids=points,
-            zoom=zoom,
-            shape=shape,
-            origin=origin,
-            rotation=rotation,
-        )
+        return self.copy(orientation=axcodes_to, centroids=points, zoom=zoom, shape=shape, origin=origin, rotation=rotation)
 
-    def reorient_(
-        self,
-        axcodes_to: AX_CODES = ("P", "I", "R"),
-        decimals=3,
-        verbose: logging = False,
-        _shape=None,
-    ):
+    def reorient_(self, axcodes_to: AX_CODES = ("P", "I", "R"), decimals=3, verbose: logging = False, _shape=None):
         return self.reorient(axcodes_to, decimals=decimals, verbose=verbose, inplace=True, _shape=_shape)
 
     def reorient_centroids_to(
         self,
-        img: Image_Reference,
+        img: Image_Reference | Self,
         decimals=ROUNDING_LVL,
         verbose: logging = False,
         inplace=False,
     ) -> Self:
+        warnings.warn("reorient_centroids_to id deprecated use reorient instead", DeprecationWarning, stacklevel=4)
         # reorient centroids to image orientation
-        if not isinstance(img, NII):
+        if not isinstance(img, POI):
             img = to_nii(img)
         axcodes_to: AX_CODES = nio.aff2axcodes(img.affine)  # type: ignore
         return self.reorient(
@@ -579,7 +553,7 @@ class POI(Abstract_POI):
             decimals=decimals,
             verbose=verbose,
             inplace=inplace,
-            _shape=img.shape,
+            _shape=img.shape,  # type: ignore
         )
 
     def reorient_centroids_to_(self, img: Image_Reference, decimals=ROUNDING_LVL, verbose: logging = False) -> Self:
@@ -614,7 +588,7 @@ class POI(Abstract_POI):
         assert self.zoom is not None, "This Centroids instance doesn't have a zoom set. Use centroid.zoom = nii.zoom"
 
         zms = self.zoom
-        shp = list(self.shape) if self.shape is not None else None
+        shp: list[float] = list(self.shape) if self.shape is not None else None  # type: ignore
         ctd_arr = np.transpose(np.asarray(list(self.centroids.values())))
         v_list = list(self.centroids.keys())
         voxel_spacing = tuple([v if v != -1 else z for v, z in zip(voxel_spacing, zms, strict=True)])
@@ -635,7 +609,7 @@ class POI(Abstract_POI):
             verbose=verbose,
         )
         if shp is not None:
-            shp = tuple(float(v) for v in shp)
+            shp = tuple(float(v) for v in shp)  # type: ignore
 
         if inplace:
             self.centroids = points
