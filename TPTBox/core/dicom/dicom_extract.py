@@ -20,7 +20,7 @@ from TPTBox.core.nii_wrapper import NII
 
 sys.path.append(str(Path(__file__).parent))
 
-from TPTBox.core.dicom.dicom2nii_utils import get_json_from_dicom, save_json, test_name_conflict
+from TPTBox.core.dicom.dicom2nii_utils import get_json_from_dicom, load_json, save_json, test_name_conflict
 
 logger = Print_Logger()
 
@@ -54,10 +54,10 @@ def generate_bids_path(
         _subject_folder_prefix + keys["sub"],  # Subject folder
     )
     args = {"file_type": "json", "parent": parent, "make_parent": True, "additional_folder": mri_format, "bids_format": mri_format}
-    fname = BIDS_FILE(Path(p, "sub-000_ct.nii.gz"), nifti_dir).get_changed_path(**args, info=keys)
+    fname = BIDS_FILE(Path(p, "sub-000_ct.nii.gz"), nifti_dir).get_changed_path(**args, info=keys, non_strict_mode=True)
     while test_name_conflict(simp_json, fname):
         _inc_key(keys)
-        fname = BIDS_FILE(Path(p, "sub-000_ct.nii.gz"), nifti_dir).get_changed_path(**args, info=keys)
+        fname = BIDS_FILE(Path(p, "sub-000_ct.nii.gz"), nifti_dir).get_changed_path(**args, info=keys, non_strict_mode=True)
     return fname
 
 
@@ -88,14 +88,34 @@ def from_dicom_to_nii(
     dcm_data_l: list[pydicom.FileDataset], nifti_dir: str | Path, make_subject_chunks: int = 0, use_session=False, verbose=True
 ):
     simp_json = get_json_from_dicom(dcm_data_l)
-    fname, nii_path = get_paths(simp_json, dcm_data_l, nifti_dir, make_subject_chunks, use_session)
-    logger.print(fname, Log_Type.NEUTRAL, verbose=verbose)
-    exist = save_json(simp_json, fname)
+    json_file_name, nii_path = get_paths(simp_json, dcm_data_l, nifti_dir, make_subject_chunks, use_session)
+    logger.print(json_file_name, Log_Type.NEUTRAL, verbose=verbose)
+    exist = save_json(simp_json, json_file_name)
     if exist and Path(nii_path).exists():
-        logger.print("already exists:", fname, ltype=Log_Type.STRANGE, verbose=verbose)
+        logger.print("already exists:", json_file_name, ltype=Log_Type.STRANGE, verbose=verbose)
         return nii_path
     suc = convert_to_nifti(dcm_data_l, nii_path)
+    if suc:
+        add_grid_info_to_json(nii_path, json_file_name)
     return nii_path if suc else None
+
+
+def add_grid_info_to_json(nii_path: Path | str, simp_json: Path | str, force_update=False):
+    nii = NII.load(nii_path, False)
+    json_dict = load_json(simp_json) if Path(simp_json).exists() else {}
+    if "grid" in json_dict and not force_update:
+        return json_dict
+    gird = {
+        "shape": nii.shape,
+        "spacing": nii.spacing,
+        "orientation": nii.orientation,
+        "rotation": nii.rotation.reshape(-1).tolist(),
+        "origin": nii.origin,
+        "dims": nii.get_num_dims(),
+    }
+    json_dict["grid"] = gird
+    save_json(json_dict, simp_json)
+    return json_dict
 
 
 def find_all_files(dcm_dirs: Path | list[Path]):
@@ -105,14 +125,17 @@ def find_all_files(dcm_dirs: Path | list[Path]):
             for root, _, files in os.walk(dcm_dir):
                 for file in files:
                     if str(file).endswith(".dcm"):
-                        yield Path(file).parent
+                        yield Path(root, file).absolute().parent
                         break
                     else:
-                        yield Path(root) / file
+                        yield Path(root, file)
+                if "." not in str(file):
+                    yield Path(root, file).absolute().parent
+
         elif dcm_dir.name.endswith(".dcm"):
-            yield Path(file).parent
+            yield Path(root, file).absolute().parent
         else:
-            yield dcm_dir
+            yield dcm_dir.absolute()
 
 
 def unzip_files(dicom_zip_path: Path, out_dir: str | Path) -> Path:
@@ -168,7 +191,7 @@ def extract_folder(dicom_folder: Path | list[Path], dataset_path_out: Path, make
             continue
         temp_dir = None
         try:
-            # logger.print("Start", dicom_zip_path) if not str(dicom_zip_path).endswith(".dcm") else None
+            logger.print("Start", p)
             if str(dicom_path).endswith(".zip"):
                 temp_dir = tempfile.mkdtemp(prefix="dicom_export_from_zip_")
                 dicom_path = unzip_files(dicom_path, temp_dir)
