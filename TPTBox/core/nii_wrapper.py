@@ -907,7 +907,7 @@ class NII(NII_Math):
         data = np.reshape(data, data.shape[:realdim] + data.shape[5:])
         # Reverse order of axes
         data = np.transpose(data, axes=tuple(reversed(range(data.ndim))))
-        grid = self.to_deepali_gird(align_corners=align_corners)
+        grid = self.to_deepali_grid(align_corners=align_corners)
         # Add leading channel dimension
         if data.ndim == grid.ndim:
             data = np.expand_dims(data, 0)
@@ -984,7 +984,7 @@ class NII(NII_Math):
             labels = self.unique()
         if use_crop:
             try:
-                crop = (self if labels is None else self.extract_label(labels)).compute_crop(dist=1)
+                crop = (self if labels is None else self.extract_label(labels)).compute_crop(dist=1+n_pixel)
             except ValueError:
                 return self if inplace else self.copy()
             msk_i_data_org = self.get_seg_array()

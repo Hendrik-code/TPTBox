@@ -220,7 +220,7 @@ class Has_Grid(Grid_Proxy):
         nii = nib.Nifti1Image(np.zeros(self.shape_int), affine=self.affine)
         return NII(nii, seg=seg)
 
-    def to_deepali_gird(self, align_corners: bool = True):
+    def to_deepali_grid(self, align_corners: bool = True):
         try:
             from deepali.core import Grid
         except Exception:
