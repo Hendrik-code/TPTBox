@@ -66,7 +66,7 @@ map_series_description_to_file_format = {
 }
 
 
-def get_plane_dicom(dicoms: list[pydicom.FileDataset] | NII) -> str | None:
+def get_plane_dicom(dicoms: list[pydicom.FileDataset] | NII, hires_threshold=0.8) -> str | None:
     """Determines the orientation plane of the NIfTI image along the x, y, or z-axis.
 
     Returns:
@@ -81,7 +81,7 @@ def get_plane_dicom(dicoms: list[pydicom.FileDataset] | NII) -> str | None:
         'ax'
     """
     if isinstance(dicoms, NII):
-        return dicoms.get_plane()
+        return dicoms.get_plane(res_threshold=hires_threshold)
     try:
         sorted_dicoms = common.sort_dicoms(dicoms)
         affine, _ = common.create_affine(sorted_dicoms)
@@ -95,6 +95,7 @@ def get_plane_dicom(dicoms: list[pydicom.FileDataset] | NII) -> str | None:
         # Zooms can be zero, in which case all elements in the column are zero, and
         # we can leave them as they are
         zooms[zooms == 0] = 1
+        zooms = zooms if hires_threshold is None else tuple(max(i, hires_threshold) for i in zooms)
         zms = np.around(zooms, 1)
         ix_max = np.array(zms == np.amax(zms))
         num_max = np.count_nonzero(ix_max)
@@ -150,7 +151,7 @@ def extract_keys_from_json(simp_json: dict, dcm_data_l: list[pydicom.FileDataset
         keys["sub"] = _get("PatientID")
         if session:
             keys["ses"] = _get("StudyDate")
-        keys["acq"] = get_plane_dicom(dcm_data_l)
+        keys["acq"] = get_plane_dicom(dcm_data_l, 0.8)
         keys["part"] = dixon_mapping.get(_get("ProtocolName", "NO-PART").split("_")[-1], None)
         # GET MRI FORMAT
         series_description = _get("SeriesDescription", "no_series_description").lower()

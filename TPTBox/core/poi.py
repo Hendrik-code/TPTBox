@@ -15,7 +15,7 @@ from typing_extensions import Self
 
 from TPTBox.core import bids_files
 from TPTBox.core.nii_wrapper import NII, Image_Reference, to_nii, to_nii_optional
-from TPTBox.core.poi_fun.poi_abstract import ROUNDING_LVL, Abstract_POI, POI_Descriptor
+from TPTBox.core.poi_fun.poi_abstract import Abstract_POI, POI_Descriptor
 from TPTBox.core.vert_constants import (
     AFFINE,
     AX_CODES,
@@ -24,6 +24,7 @@ from TPTBox.core.vert_constants import (
     ORIGIN,
     POI_DICT,
     ROTATION,
+    ROUNDING_LVL,
     SHAPE,
     TRIPLE,
     ZOOMS,
@@ -158,16 +159,6 @@ class POI(Abstract_POI):
     @property
     def spacing(self):
         return self._zoom
-
-    @property
-    def affine(self):
-        assert self.zoom is not None, "Attribute 'zoom' must be set before calling affine."
-        assert self.rotation is not None, "Attribute 'rotation' must be set before calling affine."
-        assert self.origin is not None, "Attribute 'origin' must be set before calling affine."
-        aff = np.eye(4)
-        aff[:3, :3] = self.rotation @ np.diag(self.zoom)
-        aff[:3, 3] = self.origin
-        return np.round(aff, ROUNDING_LVL)
 
     @rotation.setter
     def rotation(self, value):
