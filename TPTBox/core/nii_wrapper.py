@@ -938,7 +938,11 @@ class NII(NII_Math):
         """
         log.print("erode mask",end='\r',verbose=verbose)
         if use_crop:
-            crop = (self if labels is None else self.extract_label(labels)).compute_crop(dist=1)
+            try:
+                crop = (self if labels is None else self.extract_label(labels)).compute_crop(dist=1)
+            except ValueError:
+                return self if inplace else self.copy()
+
             msk_i_data_org = self.get_seg_array()
             msk_i_data = msk_i_data_org[crop]
         else:
@@ -979,7 +983,10 @@ class NII(NII_Math):
         if labels is None:
             labels = self.unique()
         if use_crop:
-            crop = (self if labels is None else self.extract_label(labels)).compute_crop(dist=1)
+            try:
+                crop = (self if labels is None else self.extract_label(labels)).compute_crop(dist=1)
+            except ValueError:
+                return self if inplace else self.copy()
             msk_i_data_org = self.get_seg_array()
             msk_i_data = msk_i_data_org[crop]
         else:
@@ -1016,7 +1023,11 @@ class NII(NII_Math):
             labels = [labels]
 
         if use_crop:
-            crop = (self if labels is None else self.extract_label(labels)).compute_crop(dist=1)
+            try:
+                crop = (self if labels is None else self.extract_label(labels)).compute_crop(dist=1)
+            except ValueError:
+                return self if inplace else self.copy()
+
             msk_i_data_org = self.get_seg_array()
             seg_arr = msk_i_data_org[crop]
         else:

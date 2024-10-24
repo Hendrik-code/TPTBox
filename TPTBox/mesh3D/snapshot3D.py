@@ -71,8 +71,9 @@ def make_snapshot3D(
         The function saves the generated snapshot to the specified output path.
     """
     is_tmp = output_path is None
+    t = None
     if output_path is None:
-        t = NamedTemporaryFile(suffix="_snap3D.png")
+        t = NamedTemporaryFile(suffix="_snap3D.png")  # noqa: SIM115
         output_path = str(t.name)
     Path(output_path).parent.mkdir(exist_ok=True)
     nii = to_nii_seg(img)
@@ -109,7 +110,10 @@ def make_snapshot3D(
         scene.clear()
     if not is_tmp:
         logger.on_save("Save Snapshot3D:", output_path, verbose=verbose)
-    return Image.open(output_path)
+    out_img = Image.open(output_path)
+    if t is not None:
+        t.close()
+    return out_img
 
 
 def make_sub_snapshot_parallel(

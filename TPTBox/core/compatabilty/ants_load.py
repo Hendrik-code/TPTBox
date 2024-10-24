@@ -142,13 +142,13 @@ if __name__ == "__main__":
     nii_org = nib.load(fn)
     ants_org = ants.image_read(fn)
     temp = ants_org
-    for i in range(10):
+    for _ in range(10):
         temp = to_nibabel(ants_org)
         assert (temp.get_qform() == nii_org.get_qform()).all()
         assert (ants_mni.affine == nii_mni.affine).all()
         temp = from_nibabel(temp)
         assert ants.image_physical_space_consistency(ants_org, temp)
-    for i in range(10):
+    for _ in range(10):
         temp = from_nibabel(nii_org)
         assert ants.image_physical_space_consistency(ants_org, temp)
         temp = to_nibabel(temp)
