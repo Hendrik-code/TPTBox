@@ -28,7 +28,7 @@ from TPTBox.core.np_utils import (
     np_get_connected_components_center_of_mass,
     np_get_largest_k_connected_components,
     np_map_labels,
-    np_point_coordinates_from_array,
+    np_point_coordinates,
     np_unique,
     np_unique_withoutzero,
     np_volume,
@@ -1178,7 +1178,7 @@ class NII(NII_Math):
 
     def compute_surface_points(self, connectivity: int, dilated_surface: bool = False):
         surface = self.compute_surface_mask(connectivity, dilated_surface)
-        return np_point_coordinates_from_array(surface)
+        return np_point_coordinates(surface)
 
 
     def get_segmentation_difference_to(self, mask_gt: Self, ignore_background_tp: bool = False) -> Self:
