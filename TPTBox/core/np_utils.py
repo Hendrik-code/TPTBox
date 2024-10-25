@@ -539,7 +539,7 @@ def np_compute_surface(
         return arr - np_erode_msk(arr, mm=1, connectivity=connectivity)
 
 
-def np_point_coordinates_from_array(
+def np_point_coordinates(
     arr: UINTARRAY,
 ):
     """Extracts the coordinates of non-zero points from a 3D binary array.
@@ -963,42 +963,6 @@ def np_calc_overlapping_labels(
 
     # (ref, pred)
     return [(int(i % (max_ref)), int(i // (max_ref))) for i in np.unique(overlap_arr) if i > max_ref]
-
-
-def np_pad_to(arr: np.ndarray, new_size: tuple[int, ...], *args, **kwargs):
-    """Pads a NumPy array to a specified new size.
-
-    This function calculates the necessary padding to resize a given NumPy array to
-    a specified shape. The padding is applied evenly on both sides of each dimension.
-    If the size difference is odd, the extra pixel will be added to the right side.
-
-    Args:
-        arr (np.ndarray): The input NumPy array to be padded.
-        new_size (tuple[int, ...]): The desired shape of the output array, which must
-            match the number of dimensions of the input array.
-        *args: Additional positional arguments passed to `np.pad`.
-        **kwargs: Additional keyword arguments passed to `np.pad`.
-
-    Returns:
-        np.ndarray: The padded NumPy array, which will have the shape specified by `new_size`.
-
-    Raises:
-        AssertionError: If the length of `new_size` does not match the number of dimensions
-        of the input array, or if the padded array does not match `new_size`.
-    """
-    assert len(new_size) == arr.ndim, (arr.ndim, new_size)
-    shp = arr.shape
-    pad_width = []
-    for d in range(arr.ndim):
-        diff = shp[d] - new_size[d]
-        pad_left = diff // 2
-        pad_right = diff // 2
-        if diff % 2 == 0:
-            pad_right += 1
-        pad_width.append((pad_left, pad_right))
-    arr_padded = np.pad(arr, pad_width, *args, **kwargs)
-    assert arr_padded.shape == new_size
-    return arr_padded
 
 
 def _to_labels(arr: np.ndarray, labels: LABEL_REFERENCE = None) -> Sequence[int]:

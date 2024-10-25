@@ -253,18 +253,6 @@ class Test_bids_file(unittest.TestCase):
         # expected = [1, 1, 0]  # Adjust based on your bounding box logic
         # self.assertEqual(result, expected)
 
-    def test_np_pad_to(self):
-        arr = np.array([[1, 2], [3, 4]], dtype=np.uint8)
-        new_size = (4, 4)
-        result = np_utils.np_pad_to(arr, new_size)
-
-        expected_shape = (4, 4)
-        self.assertEqual(result.shape, expected_shape)
-
-        # Check values if padding is correct
-        # expected_result = np.array([[0, 0, 0, 0], [0, 1, 2, 0], [0, 3, 4, 0], [0, 0, 0, 0]], dtype=np.uint8)
-        # np.testing.assert_array_equal(result, expected_result)
-
 
 if __name__ == "__main__":
     unittest.main()
