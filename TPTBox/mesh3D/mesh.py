@@ -85,7 +85,7 @@ class SegmentationMesh(Mesh3D):
         self._x1 = x1
         self._y1 = y1
         self._z1 = z1
-        #
+        # make vertices
         vertices += (x1, y1, z1)  # so it has correct relative coordinates (not world coordinates!)
         self._vertices = vertices
         vfaces = np.column_stack((np.ones(len(faces)) * 3, faces)).astype(int)

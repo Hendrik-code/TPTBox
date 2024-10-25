@@ -1743,7 +1743,6 @@ def calc_poi_average(
     # Make average array
     ctd = {}
     for key in keys:
-        #
         ctd[key] = tuple(np.array([reg_ctd[key] for reg_ctd in pois if key in reg_ctd]).mean(axis=0))
 
     # Sort the new ctd by keys
