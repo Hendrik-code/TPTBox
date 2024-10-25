@@ -20,6 +20,7 @@ from TPTBox.core.np_utils import (
     np_calc_convex_hull,
     np_calc_overlapping_labels,
     np_center_of_mass,
+    np_compute_surface,
     np_connected_components,
     np_dilate_msk,
     np_erode_msk,
@@ -27,6 +28,7 @@ from TPTBox.core.np_utils import (
     np_get_connected_components_center_of_mass,
     np_get_largest_k_connected_components,
     np_map_labels,
+    np_point_coordinates,
     np_unique,
     np_unique_withoutzero,
     np_volume,
@@ -1164,6 +1166,20 @@ class NII(NII_Math):
         """
         return self.set_array(np_get_largest_k_connected_components(self.get_seg_array(), k=k, label_ref=labels, connectivity=connectivity, return_original_labels=return_original_labels))
 
+    def compute_surface_mask(self, connectivity: int, dilated_surface: bool = False):
+        """ Removes everything but surface voxels
+
+        Args:
+            connectivity (int): Connectivity for surface calculation
+            dilated_surface (bool): If False, will return msk - eroded mask. If true, will return dilated msk - msk
+        """
+        return self.set_array(np_compute_surface(self.get_seg_array(), connectivity=connectivity, dilated_surface=dilated_surface))
+
+
+    def compute_surface_points(self, connectivity: int, dilated_surface: bool = False):
+        surface = self.compute_surface_mask(connectivity, dilated_surface)
+        return np_point_coordinates(surface)
+
 
     def get_segmentation_difference_to(self, mask_gt: Self, ignore_background_tp: bool = False) -> Self:
         """Calculates an NII that represents the segmentation difference between self and given groundtruth mask
@@ -1275,8 +1291,8 @@ class NII(NII_Math):
                 out.set_data_dtype(np.uint16)
             else:
                 out.set_data_dtype(np.int32)
-        log.print(f"Save {file} as {out.get_data_dtype()}",verbose=verbose,ltype=Log_Type.SAVE)
         nib.save(out, file) #type: ignore
+        log.print(f"Save {file} as {out.get_data_dtype()}",verbose=verbose,ltype=Log_Type.SAVE)
     def __str__(self) -> str:
         return f"shp={self.shape}; ori={self.orientation}, zoom={tuple(np.around(self.zoom, decimals=2))}, seg={self.seg}" # type: ignore
     def __repr__(self)-> str:
