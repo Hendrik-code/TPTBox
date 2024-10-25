@@ -1,4 +1,9 @@
 [![PyPI version tptbox](https://badge.fury.io/py/tptbox.svg)](https://pypi.python.org/pypi/tptbox/)
+[![Python Versions](https://img.shields.io/pypi/pyversions/tptbox)](https://pypi.org/project/tptbox/)
+[![Stable Version](https://img.shields.io/pypi/v/tptbox?label=stable)](https://pypi.python.org/pypi/tptbox/)
+[![tests](https://github.com/Hendrik-code/TPTBox/actions/workflows/tests.yml/badge.svg)](https://github.com/Hendrik-code/TPTBox/actions/workflows/tests.yml)
+[![codecov](https://codecov.io/gh/Hendrik-code/TPTBox/graph/badge.svg?token=A7FWUKO9Y4)](https://codecov.io/gh/Hendrik-code/TPTBox)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
 # Torso Processing ToolBox (TPTBox)
 
@@ -15,7 +20,7 @@ It can find, filter, search any BIDS_Family and subjects, and has many functiona
 
 ## Install the package
 ```bash
-conda create -n 3.10 python=3.10 
+conda create -n 3.10 python=3.10
 conda activate 3.10
 pip install TPTBox
 ```
@@ -29,7 +34,7 @@ or:
 Develop mode is really, really nice:
 ```bash
 pip install poetry
-poetry install --with dev 
+poetry install --with dev
 ```
 
 ## Functionalities
@@ -183,9 +188,9 @@ Requires additonal python packages: vtk fury xvfbwrapper
 ```python
 from TPTBox.mesh3D.snapshot3D import make_snapshot3D
 # all segmentation; view give the rotation of an image
-make_snapshot3D("sub-101000_msk.nii.gz","snapshot3D.png",view=["A", "L", "P", "R"]) 
+make_snapshot3D("sub-101000_msk.nii.gz","snapshot3D.png",view=["A", "L", "P", "R"])
 # Select witch segmentation per panel are chosen.
-make_snapshot3D("sub-101000_msk.nii.gz","snapshot3D_v2.png",view=["A"], ids_list=[[1,2],[3]]) 
+make_snapshot3D("sub-101000_msk.nii.gz","snapshot3D_v2.png",view=["A"], ids_list=[[1,2],[3]])
 ```
 
 ### Logger
@@ -198,3 +203,13 @@ TBD
 ```python
 TBD
 ```
+
+
+> [!Note]
+> Notably, ...
+
+> [!TIP]
+> A Tip
+
+> [!IMPORTANT]
+> Importantly
