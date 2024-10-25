@@ -7,7 +7,7 @@ from scipy.spatial.distance import cdist
 from TPTBox import NII, POI, Logger_Interface, Print_Logger
 from TPTBox.core.poi_fun._help import to_local_np
 from TPTBox.core.poi_fun.vertebra_direction import _get_sub_array_by_direction, get_direction, get_vert_direction_matrix
-from TPTBox.core.vert_constants import DIRECTIONS, Location
+from TPTBox.core.vert_constants import COORDINATE, DIRECTIONS, Location
 
 _log = Print_Logger()
 
@@ -163,3 +163,62 @@ def get_extreme_point_by_vert_direction(
 
     idx = np.argmax(sum(a))
     return pc[:, idx]
+
+
+def project_pois_onto_segmentation_surface(
+    poi: POI,
+    seg: NII,
+    connectivity: int = 1,
+    dilated_surface: bool = False,
+) -> POI:
+    """Projects points of interest (POI) onto a segmentation surface.
+
+    This function computes the surface points of a segmentation volume and
+    projects the given points of interest (POI) onto these computed surface points.
+
+    Args:
+        poi (POI): The points of interest to be projected.
+        seg (NII): A segmentation volume object containing the target surface.
+        connectivity (int, optional): The connectivity level for defining the surface.
+            Default is 1, where 1 denotes face-connectivity.
+        dilated_surface (bool, optional): Whether to compute a dilated version of the
+            surface, expanding the surface area. Default is False.
+
+    Returns:
+        POI: The points of interest projected onto the segmentation surface.
+    """
+    point_set = seg.compute_surface_points(
+        connectivity=connectivity,
+        dilated_surface=dilated_surface,
+    )
+    return project_pois_onto_set_of_points(poi, point_set)
+
+
+def project_pois_onto_set_of_points(poi: POI, point_set: list[COORDINATE]) -> POI:
+    """Projects points of interest (POI) onto the nearest points in a given set.
+
+    For each point in the POI, this function finds the closest point in the
+    provided point set and updates the POI coordinates to align with the nearest points.
+
+    Args:
+        poi (POI): The points of interest to be projected.
+        point_set (list[COORDINATE]): A list of coordinates representing the target points
+            for projection.
+
+    Returns:
+        POI: The updated POI with coordinates projected onto the nearest points in
+        the provided point set.
+    """
+    poi_n = poi.copy()
+    point_arr = np.asarray(point_set)
+
+    for r, s, c in poi.items():
+        distance_to_point = cdist_to_point(c, point_arr)
+        new_coord = point_arr[np.argmin(distance_to_point)]
+        poi_n[r, s] = new_coord
+
+    return poi_n
+
+
+def cdist_to_point(point, a):
+    return cdist([point], a)[0]

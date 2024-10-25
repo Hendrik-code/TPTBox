@@ -42,6 +42,8 @@ def np_extract_label(arr: np.ndarray, label: int, to_label: int = 1, inplace: bo
     if not inplace:
         arr = arr.copy()
 
+    # TODO support label being a sequence
+
     if label != 0:
         arr[arr != label] = 0
         arr[arr == label] = to_label
@@ -334,6 +336,10 @@ def np_map_labels(arr: UINTARRAY, label_map: LABEL_MAP) -> np.ndarray:
     k = np.array(list(label_map.keys()))
     v = np.array(list(label_map.values()))
 
+    assert len(k) == len(v)
+    if len(k) == 0:
+        return arr
+
     max_value = max(arr.max(), *k, *v) + 1
 
     mapping_ar = np.arange(max_value, dtype=arr.dtype)
@@ -426,6 +432,25 @@ def np_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 
 
 
 def np_center_of_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 0):
+    """Calculates the center coordinates of the bounding box around non-zero regions in a binary image.
+
+    This function determines the bounding box of non-zero regions in a binary image,
+    optionally expanding it by a specified pixel distance. It then computes and returns
+    the center coordinates of each dimension of the bounding box.
+
+    Args:
+        img (np.ndarray): A binary image represented as a NumPy array, where non-zero values indicate
+            points of interest.
+        px_dist (int | Sequence[int] | np.ndarray, optional): The pixel distance by which to expand
+            the bounding box in each dimension. Can be a single integer or a sequence of integers
+            corresponding to each dimension. Default is 0, meaning no expansion.
+
+    Returns:
+        list[int]: A list of center coordinates for each dimension of the bounding box.
+
+    Raises:
+        ValueError: If the input image is empty or not a valid binary array.
+    """
     bbox_nd = np_bbox_binary(img, px_dist=px_dist)
     ctd_bbox = []
     for i in range(len(bbox_nd)):
@@ -482,6 +507,60 @@ def np_find_index_of_k_max_values(arr: np.ndarray, k: int = 2) -> list[int]:
     idx = np.argpartition(arr, -k)[-k:]
     indices = idx[np.argsort((-arr)[idx])]
     return list(indices)
+
+
+def np_compute_surface(
+    arr: UINTARRAY,
+    connectivity: int = 3,
+    dilated_surface: bool = False,
+):
+    """Computes the surface of a binary array based on connectivity and dilation options.
+
+    This function identifies the surface voxels of a binary array. If `dilated_surface`
+    is True, it computes a dilated surface by expanding the array and subtracting the
+    original. Otherwise, it computes a contracted surface by eroding the array and
+    subtracting the result from the original.
+
+    Args:
+        arr (UINTARRAY): A binary array representing the segmentation or mask.
+        connectivity (int, optional): The connectivity used to define neighbors for
+            surface computation, where 1 represents face-connectivity, and 3 represents
+            full connectivity. Default is 3.
+        dilated_surface (bool, optional): Whether to compute a dilated surface. If True,
+            expands the surface; if False, contracts the surface. Default is False.
+
+    Returns:
+        UINTARRAY: An array representing the computed surface voxels.
+    """
+    assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
+    if dilated_surface:
+        return np_dilate_msk(arr, mm=1, connectivity=connectivity) - arr
+    else:
+        return arr - np_erode_msk(arr, mm=1, connectivity=connectivity)
+
+
+def np_point_coordinates(
+    arr: UINTARRAY,
+):
+    """Extracts the coordinates of non-zero points from a 3D binary array.
+
+    This function locates all non-zero voxels within a 3D binary array and returns
+    their coordinates as a list of tuples.
+
+    Args:
+        arr (UINTARRAY): A 3-dimensional binary array representing the segmentation or mask.
+
+    Returns:
+        list[tuple[int, int, int]]: A list of (X, Y, Z) coordinate tuples for each non-zero
+        point in the array.
+
+    Raises:
+        AssertionError: If the input array does not have three dimensions.
+    """
+    assert arr.ndim == 3, arr.ndim
+    x, y, z = np.where(arr)
+    surface_points = [(x[i], y[i], z[i]) for i in range(len(x))]
+    return surface_points
 
 
 def np_connected_components(
