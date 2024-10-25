@@ -280,7 +280,7 @@ class TestNII(unittest.TestCase):
         nii = NII(Nifti1Image(np.array([[[0, 0, 0], [0, 1, 0], [0, 0, 0]]], dtype=np.int16), np.eye(4)), seg=True)
 
         # Erode the segmentation mask
-        nii_eroded = nii.erode_msk(mm=1)
+        nii_eroded = nii.erode_msk(n_pixel=1)
 
         # Check that the eroded mask is correct
         assert np.array_equal(nii_eroded.get_seg_array(), np.array([[[0, 0, 0], [0, 0, 0], [0, 0, 0]]]))
@@ -296,7 +296,7 @@ class TestNII(unittest.TestCase):
         nii = NII(Nifti1Image(data, np.eye(4)), seg=True)
 
         # Dilate the segmentation mask
-        nii.dilate_msk_(mm=1, connectivity=3)
+        nii.dilate_msk_(n_pixel=1, connectivity=3)
 
         # Check that the dilated mask is correct
         expected = np.zeros((10, 10, 10), dtype=np.uint16)

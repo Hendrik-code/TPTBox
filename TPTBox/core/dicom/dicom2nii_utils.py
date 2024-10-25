@@ -223,6 +223,11 @@ def save_json(json_ob, file):
     return False
 
 
+def load_json(file):
+    with open(file) as file_handel:
+        return json.load(file_handel)
+
+
 if __name__ == "__main__":
     test_and_replace()
     # find_all_broken()

@@ -3,10 +3,6 @@
 formats = [
     "ct",
     "dixon",
-    "snp",
-    "log",
-    "msk",
-    "ctd",
     "T2c",
     "T1c",
     "pd",
@@ -17,13 +13,7 @@ formats = [
     "T2star",
     "TIRM",  # (Turbo-Inversion Recovery-Magnitude)
     "STIR",  # (Short-Tau Inversion Recovery)
-    "model",
-    "poi",
-    "uncertainty",
-    "angles",
-    "subvar",
     "T2haste",
-    "logit",
     "flair",
     "DWI",  # Diffusion weighted imaging
     "IR",  # Inversion recovery
@@ -36,8 +26,18 @@ formats = [
     "radiomics",
     "MPR",  # Rapid gradient-echo (MP RAGE) sampling
     "stat",
+    "snp",
+    "log",
+    "msk",
+    "ctd",
+    "model",
+    "poi",
+    "uncertainty",
+    "angles",
+    "subvar",
+    "logit",
 ]
-formats_relaxed = [*formats, "t2", "t1", "t2c", "t1c", "cta", "mr", "snapshot", "t1dixon"]
+formats_relaxed = [*formats, "t2", "t1", "t2c", "t1c", "cta", "mr", "snapshot", "t1dixon", "dwi"]
 # Recommended writing style: T1c, T2c; This list is not official and can be extended.
 
 

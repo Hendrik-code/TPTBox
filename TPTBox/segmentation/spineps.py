@@ -1,3 +1,4 @@
+import subprocess
 import time
 from pathlib import Path
 
@@ -22,7 +23,7 @@ def segment_sagittal_image(
     instance_filter=injection_function,
     verbose=False,
     inst_vertebra="Inst_Vertebra",
-    t2w_segmentor="T2w_Segmentor",
+    t2w_segmentor="t2w",
 ):
     global model_semantic, model_instance  # noqa: PLW0603
     from spineps.models import get_instance_model, get_semantic_model
@@ -58,3 +59,27 @@ def segment_sagittal_image(
     logger.print(f"\nExecution times:{execution_time}")
 
     return (output_paths["out_vert"], output_paths["out_spine"], output_paths["out_ctd"])
+
+
+def run_spineps_all(nii_dataset: Path | str):
+    for model_semantic in ["t2w", "t1w", "vibe"]:
+        command = [
+            "spineps",
+            "dataset",
+            "-directory",
+            str(nii_dataset),
+            "-raw_name",
+            "rawdata",
+            "-der_name",
+            "derivatives",
+            "-model_semantic",
+            model_semantic,
+            "-model_instance",
+            "instance",
+        ]
+        try:
+            # Execute the command and capture output
+            result = subprocess.run(command, check=True, capture_output=True, text=True)
+            print(f"Model {model_semantic} processing complete:\n", result.stdout)
+        except subprocess.CalledProcessError as e:
+            print(f"Error during processing {model_semantic}:\n", e.stderr)

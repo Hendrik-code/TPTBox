@@ -555,7 +555,7 @@ def make_2d_slice(
 ):
     img_nii = to_nii(img)
     img_reo = img_nii.reorient_(to_ax)
-    ctd_reo = ctd.reorient_centroids_to(img_reo)
+    ctd_reo = ctd.reorient(img_reo.orientation)
     img_data = img_reo.get_array()
 
     if visualization_type in [
@@ -781,17 +781,7 @@ def create_snapshot(  # noqa: C901
                 # can't handel uint16
                 t_arr = torch.from_numpy(img_data.astype(np.int32).copy()).unsqueeze(0).to(torch.float32)
 
-            img_data_smoothed = (
-                avg_pool3d(
-                    t_arr,
-                    kernel_size=(3, 3, 3),
-                    padding=1,
-                    stride=1,
-                )
-                .squeeze(0)
-                .numpy()
-                .astype(np.int32)
-            )
+            img_data_smoothed = avg_pool3d(t_arr, kernel_size=(3, 3, 3), padding=1, stride=1).squeeze(0).numpy().astype(np.int32)
             img_data[img_data_smoothed <= frame.denoise_threshold] = 0
         img = img.set_array(img_data, verbose=False)
         # PRE-PROCESSING Done
