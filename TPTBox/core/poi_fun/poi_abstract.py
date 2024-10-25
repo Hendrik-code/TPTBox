@@ -10,10 +10,9 @@ from scipy import interpolate
 from typing_extensions import Self
 
 from TPTBox.core import vert_constants
-from TPTBox.core.nii_poi_abstract import Has_Affine
+from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.vert_constants import COORDINATE, POI_DICT, Abstract_lvl, Location, Vertebra_Instance, log, log_file, logging
 
-ROUNDING_LVL = 7
 POI_ID = (
     tuple[int, int]
     | slice
@@ -281,7 +280,7 @@ class POI_Descriptor(AbstractSet, MutableMapping):
 
 
 @dataclass
-class Abstract_POI(Has_Affine):
+class Abstract_POI(Has_Grid):
     _centroids: POI_Descriptor = field(default_factory=lambda: POI_Descriptor(), repr=False, kw_only=True)
     centroids: POI_Descriptor = field(repr=False, hash=False, compare=False, default=None)  # type: ignore
     format: int | None = field(default=None, repr=False, compare=False)

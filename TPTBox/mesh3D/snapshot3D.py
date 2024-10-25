@@ -71,9 +71,11 @@ def make_snapshot3D(
         The function saves the generated snapshot to the specified output path.
     """
     is_tmp = output_path is None
+    t = None
     if output_path is None:
-        t = NamedTemporaryFile(suffix="_snap3D.png")
+        t = NamedTemporaryFile(suffix="_snap3D.png")  # noqa: SIM115
         output_path = str(t.name)
+    Path(output_path).parent.mkdir(exist_ok=True)
     nii = to_nii_seg(img)
     if crop:
         nii.apply_crop_(nii.compute_crop())
@@ -108,33 +110,40 @@ def make_snapshot3D(
         scene.clear()
     if not is_tmp:
         logger.on_save("Save Snapshot3D:", output_path, verbose=verbose)
-    return Image.open(output_path)
+    out_img = Image.open(output_path)
+    if t is not None:
+        t.close()
+    return out_img
 
 
 def make_sub_snapshot_parallel(
-    output_paths: list[Path],
     imgs: list[Path],
+    output_paths: list[Image_Reference],
     orientation: VIEW | list[VIEW] = "A",
     ids_list: list[Sequence[int]] | None = None,
     smoothing=20,
     resolution=2,
     cpus=10,
 ):
+    ress = []
     with Pool(cpus) as p:  # type: ignore
         for out_path, img in zip(output_paths, imgs, strict=True):
-            p.apply_async(
+            res = p.apply_async(
                 make_snapshot3D,
                 kwds={
                     "output_path": out_path,
                     "img": img,
-                    "orientation": orientation,
+                    "view": orientation,
                     "ids_list": ids_list,
                     "smoothing": smoothing,
                     "resolution": resolution,
                 },
             )
-    p.close()
-    p.join()
+            ress.append(res)
+        for res in ress:
+            res.get()
+        p.close()
+        p.join()
 
 
 def _plot_sub_seg(scene: window.Scene, nii: NII, x, y, smoothing, orientation: VIEW):

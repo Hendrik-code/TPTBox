@@ -396,7 +396,7 @@ def from_dicom_json_to_extracting_nii(  # noqa: C901
                             mri_format, template, dcm_data_l, nifti_dir, acq=acq, make_subject_chunks=make_subject_chunks, root=root
                         )
                         print(f"{key}\t:\t", file)
-                    except Exception:  # noqa: TRY302
+                    except Exception:  # noqa: TRY203
                         raise
 
             while True:
