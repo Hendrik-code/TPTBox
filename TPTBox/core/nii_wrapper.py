@@ -20,6 +20,7 @@ from TPTBox.core.np_utils import (
     np_calc_convex_hull,
     np_calc_overlapping_labels,
     np_center_of_mass,
+    np_compute_surface,
     np_connected_components,
     np_dilate_msk,
     np_erode_msk,
@@ -27,6 +28,7 @@ from TPTBox.core.np_utils import (
     np_get_connected_components_center_of_mass,
     np_get_largest_k_connected_components,
     np_map_labels,
+    np_point_coordinates_from_array,
     np_unique,
     np_unique_withoutzero,
     np_volume,
@@ -1068,6 +1070,20 @@ class NII(NII_Math):
             return_original_labels (bool): If set to False, will label the components from 1 to k. Defaults to True
         """
         return self.set_array(np_get_largest_k_connected_components(self.get_seg_array(), k=k, label_ref=labels, connectivity=connectivity, return_original_labels=return_original_labels))
+
+    def compute_surface_mask(self, connectivity: int, dilated_surface: bool = False):
+        """ Removes everything but surface voxels
+
+        Args:
+            connectivity (int): Connectivity for surface calculation
+            dilated_surface (bool): If False, will return msk - eroded mask. If true, will return dilated msk - msk
+        """
+        return self.set_array(np_compute_surface(self.get_seg_array(), connectivity=connectivity, dilated_surface=dilated_surface))
+
+
+    def compute_surface_points(self, connectivity: int, dilated_surface: bool = False):
+        surface = self.compute_surface_mask(connectivity, dilated_surface)
+        return np_point_coordinates_from_array(surface)
 
 
     def get_segmentation_difference_to(self, mask_gt: Self, ignore_background_tp: bool = False) -> Self:
