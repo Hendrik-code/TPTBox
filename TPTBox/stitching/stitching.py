@@ -193,40 +193,66 @@ def n4_bias_field_correction(
     weight_mask=None,
     crop=False,
 ):
-    import ants.utils.bias_correction as bc  # pip install antspyx
-    from ants.utils.convert_nibabel import from_nibabel
-
     if convergence is None:
         convergence = {"iters": [50, 50, 50, 50], "tol": 1e-07}
-    input_ants = from_nibabel(nib)
-
     if threshold != 0:
         mask = get_array(nib)
         mask[mask < threshold] = 0
         mask[mask != 0] = 1
         mask = mask.astype(np.uint8)
         mask = dilate_msk(mask, mm=3)
-        mask = from_nibabel(set_array(nib, mask))
+        mask = set_array(nib, mask)
 
-    out = bc.n4_bias_field_correction(
-        input_ants,
-        mask=mask,
-        shrink_factor=shrink_factor,
-        convergence=convergence,
-        spline_param=spline_param,
-        verbose=verbose,
-        weight_mask=weight_mask,
-    )
-    out_nib = out.to_nibabel()
-    if crop:
-        # Crop to regions that had a normalization applied. Removes a lot of dead space
-        dif = (input_ants - out).to_nibabel()
-        da = get_array(dif)
-        da[da != 0] = 1
-        dif = set_array(dif, da)
-        ex_slice = compute_crop_slice(dif)
-        out_nib = out_nib.slicer[ex_slice]
+    try:
+        # pyants has changed names an a conversion is currently not possible
+        # This also falls back if pyants is not installed
+        import ants.utils.bias_correction as bc  # pip install antspyx
+        from ants.utils.convert_nibabel import from_nibabel
 
+        input_ants = from_nibabel(nib)
+        if mask is not None:
+            mask = from_nibabel(mask)
+
+        out = bc.n4_bias_field_correction(
+            input_ants,
+            mask=mask,
+            shrink_factor=shrink_factor,
+            convergence=convergence,
+            spline_param=spline_param,
+            verbose=verbose,
+            weight_mask=weight_mask,
+        )
+        out_nib = out.to_nibabel()
+        if crop:
+            # Crop to regions that had a normalization applied. Removes a lot of dead space
+            dif = (input_ants - out).to_nibabel()
+            da = get_array(dif)
+            da[da != 0] = 1
+            dif = set_array(dif, da)
+            ex_slice = compute_crop_slice(dif)
+            out_nib = out_nib.slicer[ex_slice]
+    except ModuleNotFoundError:
+        import sys
+
+        sys.path.append(str(Path(__file__).parent))
+        from n4_bias_field_correction import n4_bias_field_correction_nib
+
+        out_nib = n4_bias_field_correction_nib(
+            nib,
+            mask,
+            shrink_factor=shrink_factor,
+            convergence=convergence,
+            spline_param=spline_param,
+            verbose=verbose,
+            weight_mask=weight_mask,
+        )
+        if crop:
+            # Crop to regions that had a normalization applied. Removes a lot of dead space
+            dif = get_array(nib) - get_array(out_nib)
+            da[da != 0] = 1
+            dif = set_array(nib, da)
+            ex_slice = compute_crop_slice(dif)
+            out_nib = out_nib.slicer[ex_slice]
     return out_nib
 
 
