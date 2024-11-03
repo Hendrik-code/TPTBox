@@ -139,7 +139,7 @@ def ridged_points_from_poi(
         log.print("[!] To few points, skip registration", Log_Type.FAIL)
         raise ValueError("[!] To few points, skip registration")
     img_movig = ctd_m.make_empty_nii()
-    assert img_movig.shape == ctd_m.shape, (img_movig, ctd_m.shape)
+    assert img_movig.shape == ctd_m.shape_int, (img_movig, ctd_m.shape)
     assert img_movig.orientation == ctd_m.orientation
     if leave_worst_percent_out != 0.0:
         ctd_f = ctd_f.intersect(ctd_m)
