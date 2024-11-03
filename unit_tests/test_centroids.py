@@ -3,19 +3,17 @@
 # coverage report
 # coverage html
 import random
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 import nibabel as nib
-import numpy as np
 
 from TPTBox import POI, calc_centroids
 from TPTBox.core.nii_wrapper import NII
 from TPTBox.core.poi import LABEL_MAX, _poi_to_dict_list, calc_poi_from_subreg_vert, calc_poi_labeled_buffered, load_poi
-from TPTBox.core.vert_constants import Location, v_idx2name
-from TPTBox.tests.test_utils import get_nii, get_poi, get_random_ax_code, overlap, repeats
+from TPTBox.core.vert_constants import Location
+from TPTBox.tests.test_utils import get_nii, get_random_ax_code, overlap, repeats
 from unit_tests.test_centroids_save import get_centroids
 
 
@@ -63,18 +61,6 @@ class Test_Centroids(unittest.TestCase):
         c = load_poi(file)
         file.unlink(missing_ok=True)
         self.assertEqual(c, p)
-
-    # Deprecated
-    # def test_VertebraCentroids(self):
-    #    p = get_centroids(num_point=33)
-    #    vc = VertebraCentroids(p.centroids, p.orientation, (1, 1, 1)).sort()
-    #    self.assertEqual(len(vc), len(p))
-    #    for (k1, k2, _), j in zip(vc.items(), v_idx_order, strict=False):
-    #        self.assertEqual(k1, j)
-    #    self.assertEqual(
-    #        [a for a, b in list(vc)],
-    #        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 28, 20, 21, 22, 23, 24, 25, 26, 29, 30, 31, 32, 33, 27],
-    #    )
 
     def test_calc_centroids_labeled_bufferd(self):
         msk, cent, order, sizes = get_nii(num_point=random.randint(1, 7))
@@ -248,6 +234,23 @@ class Test_Centroids(unittest.TestCase):
                 self.assertEqual(k2, k2_2)
                 for v, v2 in zip(v, v2, strict=False):  # noqa: B020, PLW2901
                     self.assertAlmostEqual(v, v2, places=2)
+
+
+class Test_Registation(unittest.TestCase):
+    def test_reg(self):
+        from TPTBox.registration.ridged_points.point_registration import ridged_points_from_poi
+
+        for _ in range(repeats):
+            msk, cent, order, sizes = get_nii(num_point=random.randint(4, 7))
+            cdt = msk.get_empty_POI(cent)
+            cdt_org = cdt.copy()
+            cdt.origin = tuple(i + random.random() * 5 for i in cdt.origin)
+            cdt = cdt.resample_from_to(cdt_org)
+
+            cdt.rescale_((random.randint(1, 3), random.randint(1, 3), random.randint(1, 3)))
+            registation_obj = ridged_points_from_poi(cdt_org, cdt)
+            moved_poi = registation_obj.transform_poi(cdt).round(2)
+            assert moved_poi == cdt_org
 
 
 if __name__ == "__main__":
