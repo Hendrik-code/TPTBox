@@ -281,6 +281,22 @@ class Test_bids_file(unittest.TestCase):
                 self.assertEqual(msk.shape[i], msk3.shape[i])
             self.assertTrue(msk3.assert_affine(other=msk))
 
+    def test_errode(self):
+        for _ in range(repeats):
+            msk, cent, order, sizes = get_nii(num_point=random.randint(3, 10))
+            msk2 = msk.copy()
+
+            r = random.randint(1, 2)
+            s1 = msk.erode_msk(r, verbose=False).sum()
+            s2 = msk2.erode_msk(r, use_crop=False, verbose=False).sum()
+            assert s1 == s2, (s1, s2)
+            s1 = msk.dilate_msk(r, verbose=False).sum()
+            s2 = msk2.dilate_msk(r, use_crop=False, verbose=False).sum()
+            assert s1 == s2, (s1, s2)
+            s1 = msk.dilate_msk(r, verbose=False).erode_msk(r, verbose=False).sum()
+            s2 = msk2.dilate_msk(r, verbose=False).erode_msk(r, use_crop=False, verbose=False).sum()
+            assert s1 == s2, (s1, s2)
+
 
 if __name__ == "__main__":
     unittest.main()
