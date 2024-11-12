@@ -27,7 +27,7 @@ from TPTBox.core.bids_constants import formats
 
 sys.path.append(str(Path(__file__).parent))
 
-from TPTBox.core.dicom.dicom2nii_utils import get_json_from_dicom, get_plane_dicom, save_json, test_name_conflict
+from TPTBox.core.dicom.dicom2nii_utils import get_json_from_dicom, save_json, test_name_conflict
 
 logger = No_Logger()
 
@@ -391,13 +391,10 @@ def from_dicom_json_to_extracting_nii(  # noqa: C901
             if mri_format not in file_mapping["templates_map"]:
                 acq = get_plane_dicom(dcm_data_l)
                 for key, template in file_mapping["templates"].items():
-                    try:
-                        file = generate_general_name(
-                            mri_format, template, dcm_data_l, nifti_dir, acq=acq, make_subject_chunks=make_subject_chunks, root=root
-                        )
-                        print(f"{key}\t:\t", file)
-                    except Exception:  # noqa: TRY203
-                        raise
+                    file = generate_general_name(
+                        mri_format, template, dcm_data_l, nifti_dir, acq=acq, make_subject_chunks=make_subject_chunks, root=root
+                    )
+                    print(f"{key}\t:\t", file)
 
             while True:
                 template_name = input("pick a template, or add one. (adding a template is only possible in the code): ")

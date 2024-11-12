@@ -156,7 +156,6 @@ def clean_dicom_data(dcm_data) -> dict:
         # raise NoImageError()
     else:
         del py_dataset.PixelData
-    print(type(py_dataset))
     py_dict = py_dataset.to_json_dict(suppress_invalid_tags=True)
     for tag in ["00291010", "00291020"]:
         if tag in py_dict and "InlineBinary" in py_dict[tag]:
@@ -204,7 +203,7 @@ def test_name_conflict(json_ob, file):
     return False
 
 
-def save_json(json_ob, file):
+def save_json(json_ob, file, check_exist=False):
     """
     recieves a json object and a path and saves the object as a json file
     """
@@ -214,7 +213,7 @@ def save_json(json_ob, file):
             return int(obj)
         raise TypeError
 
-    if test_name_conflict(json_ob, file):
+    if check_exist and test_name_conflict(json_ob, file):
         raise FileExistsError(file)
     if Path(file).exists():
         return True

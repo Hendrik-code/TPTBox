@@ -7,6 +7,7 @@ from pathlib import Path
 
 import dicom2nifti
 import dicom2nifti.exceptions
+import numpy as np
 import pydicom
 from dicom2nifti import convert_dicom
 from func_timeout import func_timeout  # pip install func_timeout
@@ -45,6 +46,7 @@ def generate_bids_path(
     nifti_dir, keys: dict, mri_format, simp_json, make_subject_chunks: int, parent="rawdata", _subject_folder_prefix="sub-"
 ):
     """Generate a BIDS-compatible file path."""
+
     assert "sub" in keys, keys
     p = Path(
         nifti_dir,  # dataset path
@@ -65,12 +67,22 @@ def convert_to_nifti(dicom_out_path, nii_path):
     """Convert DICOM files to NIfTI format."""
     try:
         if isinstance(dicom_out_path, list):
+            convert_dicom.settings.validate_orthogonal = False
             convert_dicom.dicom_array_to_nifti(dicom_out_path, nii_path, True)
         else:
             func_timeout(10, dicom2nifti.dicom_series_to_nifti, (dicom_out_path, nii_path, True))
         logger.print("Save ", nii_path, Log_Type.SAVE)
-    except (dicom2nifti.exceptions.ConversionValidationError, FunctionTimedOut, ValueError):
-        logger.print_error()
+    except (dicom2nifti.exceptions.ConversionValidationError, FunctionTimedOut, ValueError) as e:
+        if isinstance(e, dicom2nifti.exceptions.ConversionValidationError):
+            if e.args[0] in ["NON_IMAGING_DICOM_FILES", "TOO_FEW_SLICES/LOCALIZER"]:
+                Path(str(nii_path).replace(".nii.gz", ".json")).unlink(missing_ok=True)
+                logger.on_debug(f"Not exportable '{Path(nii_path).name}':", e.args[0])
+                return False
+            logger.print_error()
+            logger.on_fail(Path(nii_path).name)
+        else:
+            logger.print_error()
+
         return False
     return True
 
@@ -84,9 +96,19 @@ def get_paths(
     return json_file_name, nii_path
 
 
+def filter_dicom(dcm_data_l: list[pydicom.FileDataset]):
+    dcm_data_l = [d for d in dcm_data_l if hasattr(d, "ImageOrientationPatient")]
+    return dcm_data_l
+
+
 def from_dicom_to_nii(
     dcm_data_l: list[pydicom.FileDataset], nifti_dir: str | Path, make_subject_chunks: int = 0, use_session=False, verbose=True
 ):
+    dcm_data_l = filter_dicom(dcm_data_l)
+    if len(dcm_data_l) == 0:
+        logger.on_neutral(Path(nifti_dir).name, " - not an image. Will be skipped")
+        return None
+
     simp_json = get_json_from_dicom(dcm_data_l)
     json_file_name, nii_path = get_paths(simp_json, dcm_data_l, nifti_dir, make_subject_chunks, use_session)
     logger.print(json_file_name, Log_Type.NEUTRAL, verbose=verbose)
@@ -160,6 +182,8 @@ def read_dicom_files(dicom_out_path: Path) -> dict[str, list[FileDataset]]:
         if path.is_file():
             try:
                 dcm_data = pydicom.dcmread(path, defer_size="1 KB", force=True)
+                if not hasattr(dcm_data, "ImageOrientationPatient"):
+                    continue
                 try:
                     typ = str(dcm_data.get_item((0x0008, 0x0008)).value).split("\\")[2]
                 except Exception:
@@ -191,7 +215,6 @@ def extract_folder(dicom_folder: Path | list[Path], dataset_path_out: Path, make
             continue
         temp_dir = None
         try:
-            logger.print("Start", p)
             if str(dicom_path).endswith(".zip"):
                 temp_dir = tempfile.mkdtemp(prefix="dicom_export_from_zip_")
                 dicom_path = unzip_files(dicom_path, temp_dir)
