@@ -153,6 +153,9 @@ def extract_keys_from_json(simp_json: dict, dcm_data_l: list[pydicom.FileDataset
             keys["ses"] = _get("StudyDate")
         keys["acq"] = get_plane_dicom(dcm_data_l, 0.8)
         keys["part"] = dixon_mapping.get(_get("ProtocolName", "NO-PART").split("_")[-1], None)
+        sequ = _get("SeriesNumber", None)
+        if sequ is not None:
+            keys["sequ"] = sequ
         # GET MRI FORMAT
         series_description = _get("SeriesDescription", "no_series_description").lower()
         mri_format = None
@@ -177,4 +180,5 @@ def extract_keys_from_json(simp_json: dict, dcm_data_l: list[pydicom.FileDataset
                 break
         if mri_format is None:
             mri_format = "mr"
+
         return mri_format, keys
