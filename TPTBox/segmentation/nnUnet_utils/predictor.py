@@ -3,6 +3,7 @@
 # method for deep learning-based biomedical image segmentation. Nature methods, 18(2), 203-211.
 import os
 import traceback
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -142,8 +143,7 @@ class nnUNetPredictor:
             for i, f in enumerate(use_folds):
                 f = int(f) if f != "all" else f  # noqa: PLW2901
                 checkpoint = torch.load(
-                    join(model_training_output_dir, f"fold_{f}", checkpoint_name),
-                    map_location=torch.device("cpu"),
+                    join(model_training_output_dir, f"fold_{f}", checkpoint_name), map_location=torch.device("cpu"), weights_only=False
                 )
                 if i == 0:
                     trainer_name = checkpoint["trainer_name"]

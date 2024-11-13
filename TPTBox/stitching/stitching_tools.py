@@ -9,18 +9,18 @@ logger = No_Logger()
 
 
 def stitching(
-    *bids_files: BIDS_FILE | NII,
+    *bids_files: BIDS_FILE | NII | str | Path,
     out: BIDS_FILE | str | Path,
+    is_seg=False,
+    is_ct: bool = False,
     verbose_stitching=False,
     bias_field=False,
     kick_out_fully_integrated_images=True,
     verbose=True,
     dtype: type = float,
-    ct: bool = False,
 ):
     out = str(out.file["nii.gz"]) if isinstance(out, BIDS_FILE) else str(out)
-    files = [bf.file["nii.gz"] if isinstance(bf, BIDS_FILE) else bf.nii for bf in bids_files]
-    is_seg = bids_files[0].seg if hasattr(bids_files[0], "seg") else bids_files[0].get_interpolation_order() == 0  # type: ignore
+    files = [to_nii(bf).nii for bf in bids_files]
     logger.print("stitching", out, verbose=verbose)
     return stitching_raw(
         files,
@@ -28,7 +28,7 @@ def stitching(
         False,
         False,
         verbose_stitching,
-        min_value=-1024 if ct else 0,
+        min_value=-1024 if is_ct else 0,
         bias_field=bias_field,
         kick_out_fully_integrated_images=kick_out_fully_integrated_images,
         is_segmentation=is_seg,
