@@ -122,7 +122,7 @@ def extract_keys_from_json(
     def _get(key, default=None):
         if key not in simp_json:
             return default
-        return str(simp_json[key])
+        return str(simp_json[key]).replace("_", "-").replace(" ", "-")
 
     keys: dict[str, str | None] = {}
 
@@ -165,9 +165,9 @@ def extract_keys_from_json(
         if sequ is not None:
             keys["sequ"] = sequ
         if len(parts) != 0:
-            keys["part"] = "-".join(parts)
+            keys["part"] = "-".join(parts).replace("_", "-")
         # GET MRI FORMAT
-        series_description = _get("SeriesDescription", "no_series_description").lower()
+        series_description = _get("SeriesDescription", "no-series-description").lower()
         mri_format = None
         ##################### Understand sequence by given times ####################
         # try:

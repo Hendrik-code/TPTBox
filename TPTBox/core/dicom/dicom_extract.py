@@ -3,6 +3,7 @@ import shutil
 import sys
 import tempfile
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import dicom2nifti
@@ -97,21 +98,28 @@ def _convert_to_nifti(dicom_out_path, nii_path):
     """
     try:
         if isinstance(dicom_out_path, list):
-            convert_dicom.settings.validate_orthogonal = False
             convert_dicom.dicom_array_to_nifti(dicom_out_path, nii_path, True)
         else:
             func_timeout(10, dicom2nifti.dicom_series_to_nifti, (dicom_out_path, nii_path, True))
         logger.print("Save ", nii_path, Log_Type.SAVE)
-    except (dicom2nifti.exceptions.ConversionValidationError, FunctionTimedOut, ValueError) as e:
-        if isinstance(e, dicom2nifti.exceptions.ConversionValidationError):
-            if e.args[0] in ["NON_IMAGING_DICOM_FILES", "TOO_FEW_SLICES/LOCALIZER"]:
-                Path(str(nii_path).replace(".nii.gz", ".json")).unlink(missing_ok=True)
-                logger.on_debug(f"Not exportable '{Path(nii_path).name}':", e.args[0])
+    except dicom2nifti.exceptions.ConversionValidationError as e:
+        if e.args[0] in ["NON_IMAGING_DICOM_FILES"]:
+            Path(str(nii_path).replace(".nii.gz", ".json")).unlink(missing_ok=True)
+            logger.on_debug(f"Not exportable '{Path(nii_path).name}':", e.args[0])
+            return False
+        for key, reason in [
+            ("validate_orthogonal", "NON_CUBICAL_IMAGE/GANTRY_TILT"),
+            ("validate_orientation", "IMAGE_ORIENTATION_INCONSISTENT"),
+            ("validate_slicecount", "TOO_FEW_SLICES/LOCALIZER"),
+        ]:
+            if e.args[0] == reason:
+                logger.on_debug(f"Not exported cause of {reason}, if you want try to export it anyway, set {key} = False")
                 return False
-            logger.print_error()
-            logger.on_fail(Path(nii_path).name)
-        else:
-            logger.print_error()
+        logger.print_error()
+        logger.on_fail(Path(nii_path).name)
+
+    except (FunctionTimedOut, ValueError):
+        logger.print_error()
 
         return False
     return True
@@ -310,6 +318,10 @@ def extract_dicom_folder(
     verbose=True,
     parts_mapping: dict = parts_mapping,
     map_series_description_to_file_format=None,
+    validate_slicecount=True,
+    validate_orientation=True,  # False, Not recommended
+    validate_orthogonal=False,
+    n_cpu: int | None = 1,
 ):
     """
     Extract DICOM files from a directory or list of directories, convert them to NIfTI format, and store the output.
@@ -322,11 +334,16 @@ def extract_dicom_folder(
         verbose (bool, optional): Whether to print detailed log information. Defaults to True.
         parts_mapping (dict, optional): A dictionary mapping DICOM part identifiers to specific descriptions (e.g., "f" -> "fat").
                                         Used for categorizing DICOM series. Defaults to a predefined mapping. The parts tag is only generated if the ImageType causes an image split.
+        n_cpu (int, optional): Number of CPU cores to use for parallel processing. Defaults to 1 (sequential).
 
     Returns:
         dict: A dictionary with keys representing DICOM series and values as paths to the generated NIfTI files.
     """
+    convert_dicom.settings.validate_slicecount = validate_slicecount
+    convert_dicom.settings.validate_orientation = validate_orientation
+    convert_dicom.settings.validate_orthogonal = validate_orthogonal
     outs = {}
+
     for p in _find_all_files(dicom_folder):
         dicom_path = p
         if str(dicom_path).endswith(".pkl"):
@@ -337,12 +354,14 @@ def extract_dicom_folder(
                 temp_dir = tempfile.mkdtemp(prefix="dicom_export_from_zip_")
                 dicom_path = _unzip_files(dicom_path, temp_dir)
             dicom_files_dict, parts = _read_dicom_files(dicom_path)
-            for key, files in dicom_files_dict.items():
+
+            def process_series(key, files, parts):
+                """Helper function for processing a single DICOM series."""
                 logger.print("Start", key, verbose=verbose)
                 part = parts.get(key, None)
                 if part is not None:
                     part = [parts_mapping.get(p.lower(), p.lower()) for p in part]
-                out = _from_dicom_to_nii(
+                return key, _from_dicom_to_nii(
                     files,
                     dataset_path_out,
                     make_subject_chunks,
@@ -351,22 +370,33 @@ def extract_dicom_folder(
                     parts=part,
                     map_series_description_to_file_format=map_series_description_to_file_format,
                 )
-                outs[key] = out
-                # exit()
-        except Exception:
-            logger.print_error()
+
+            # Process in parallel or sequentially based on n_cpu
+            if n_cpu is None or n_cpu > 1:
+                with ThreadPoolExecutor(max_workers=n_cpu) as executor:
+                    futures = {executor.submit(process_series, key, files, parts): key for key, files in dicom_files_dict.items()}
+                    for future in as_completed(futures):
+                        try:
+                            key, out = future.result()
+                            outs[key] = out
+                        except Exception:
+                            logger.print_error()
+            else:
+                for key, files in dicom_files_dict.items():
+                    try:
+                        key2, out = process_series(key, files, parts)
+                        outs[key2] = out
+                    except Exception:
+                        logger.print_error()
+
         finally:
             if temp_dir is not None:
                 shutil.rmtree(temp_dir)
+
     return outs
 
 
 if __name__ == "__main__":
-    path_to_dicom_dataset = "/media/data/robert/datasets/dicom_example/VR-DICOM/"
-    dataset_name = "VR-DICOM"
-    target_folder = Path(path_to_dicom_dataset).parent
-    dataset = target_folder / f"dataset-{dataset_name}2"
-    extract_dicom_folder(Path(path_to_dicom_dataset), dataset)
     import argparse
 
     arg_parser = argparse.ArgumentParser()
