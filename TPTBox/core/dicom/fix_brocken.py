@@ -85,7 +85,7 @@ source_folder_encrypted_alternative = Path("Nachlieferung")
 
 
 def _test_and_replace(out_folder="~/dataset-nako"):
-    from TPTBox.core.dicom.dicom_extract import extract_folder
+    from TPTBox.core.dicom.dicom_extract import extract_dicom_folder
 
     with open("TODO", "rb") as w:
         brocken = pickle.load(w)
@@ -114,7 +114,7 @@ def _test_and_replace(out_folder="~/dataset-nako"):
                     except StopIteration:
                         continue
                 if f2.exists():
-                    out_files.update(extract_folder(f2, Path(out_folder), make_subject_chunks=3, verbose=False))
+                    out_files.update(extract_dicom_folder(f2, Path(out_folder), make_subject_chunks=3, verbose=False))
                 else:
                     print(f, f.exists())
         else:
@@ -127,7 +127,7 @@ def _test_and_replace(out_folder="~/dataset-nako"):
                     print((source_folder_encrypted / source_folders[mod][sub_key]) / (f"{subj}*.zip"))
                     continue
             ## Call the extraction
-            out_files = extract_folder(zip_file, Path(out_folder), make_subject_chunks=3, verbose=False)
+            out_files = extract_dicom_folder(zip_file, Path(out_folder), make_subject_chunks=3, verbose=False)
         ## -- Testing ---
         # Save over brocken...
         for o in out_files.values():

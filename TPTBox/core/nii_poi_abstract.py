@@ -256,5 +256,7 @@ class Has_Grid(Grid_Proxy):
 class Grid(Has_Grid):
     def __init__(self, **qargs) -> None:
         super().__init__()
-        for k, v in qargs:
+        for k, v in qargs.items():
+            if k == "spacing":
+                k = "zoom"  # noqa: PLW2901
             setattr(self, k, v)
