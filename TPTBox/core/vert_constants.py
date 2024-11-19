@@ -290,7 +290,7 @@ class Location(Abstract_lvl):
     Superior_Articular_Right = 46
     Inferior_Articular_Left = 47
     Inferior_Articular_Right = 48
-    Vertebra_Corpus_border = 49
+    Vertebra_Corpus_border = 49 # actual corpus body
     Vertebra_Corpus = 50
     Dens_axis = 51  # TODO Unused. Should be in C2
     Vertebral_Body_Endplate_Superior = 52

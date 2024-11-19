@@ -50,6 +50,7 @@ from .vert_constants import (
     v_name2idx,
 )
 
+MODES = Literal["constant", "nearest", "reflect", "wrap"]
 _unpacked_nii = tuple[np.ndarray, AFFINE, nib.nifti1.Nifti1Header]
 _formatwarning = warnings.formatwarning
 
@@ -617,7 +618,7 @@ class NII(NII_Math):
     def apply_crop_(self,ex_slice:tuple[slice,slice,slice]|Sequence[slice]):
         return self.apply_crop(ex_slice=ex_slice,inplace=True)
 
-    def pad_to(self,target_shape:list[int]|tuple[int,int,int] | Self, mode="constant",crop=False,inplace = False):
+    def pad_to(self,target_shape:list[int]|tuple[int,int,int] | Self, mode:MODES="constant",crop=False,inplace = False):
         if isinstance(target_shape, NII):
             target_shape = target_shape.shape
         padding = []
@@ -641,7 +642,7 @@ class NII(NII_Math):
             s = s.apply_crop(tuple(crop),inplace=inplace)
         return s.apply_pad(padding,inplace=inplace,mode=mode)
 
-    def apply_pad(self,padd:Sequence[tuple[int|None,int]],mode="constant",inplace = False):
+    def apply_pad(self,padd:Sequence[tuple[int|None,int]],mode:MODES="constant",inplace = False):
         transform = np.eye(4, dtype=int)
         for i, (before,_) in enumerate(padd):
             #transform[i, i] = pad_slice.step if pad_slice.step is not None else 1
@@ -654,7 +655,7 @@ class NII(NII_Math):
             return self
         return self.copy(nii)
 
-    def rescale_and_reorient(self, axcodes_to=None, voxel_spacing=(-1, -1, -1), verbose:logging=True, inplace=False,c_val:float|None=None,mode='nearest'):
+    def rescale_and_reorient(self, axcodes_to=None, voxel_spacing=(-1, -1, -1), verbose:logging=True, inplace=False,c_val:float|None=None,mode:MODES='nearest'):
 
         ## Resample and rotate and Save Tempfiles
         if axcodes_to is None:
@@ -665,7 +666,7 @@ class NII(NII_Math):
             curr = self.reorient(axcodes_to=axcodes_to, verbose=verbose, inplace=inplace)
         return curr.rescale(voxel_spacing=voxel_spacing, verbose=verbose, inplace=inplace,c_val=c_val,mode=mode)
 
-    def rescale_and_reorient_(self,axcodes_to=None, voxel_spacing=(-1, -1, -1),c_val:float|None=None,mode='nearest', verbose:logging=True):
+    def rescale_and_reorient_(self,axcodes_to=None, voxel_spacing=(-1, -1, -1),c_val:float|None=None,mode:MODES='nearest', verbose:logging=True):
         return self.rescale_and_reorient(axcodes_to=axcodes_to,voxel_spacing=voxel_spacing,c_val=c_val,mode=mode,verbose=verbose,inplace=True)
 
     def reorient_same_as(self, img_as: Nifti1Image | Self, verbose:logging=False, inplace=False) -> Self:
@@ -673,7 +674,7 @@ class NII(NII_Math):
         return self.reorient(axcodes_to=axcodes_to, verbose=verbose, inplace=inplace)
     def reorient_same_as_(self, img_as: Nifti1Image | Self, verbose:logging=False) -> Self:
         return self.reorient_same_as(img_as=img_as,verbose=verbose,inplace=True)
-    def rescale(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:logging=False, inplace=False,mode='nearest',align_corners:bool=False):
+    def rescale(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:logging=False, inplace=False,mode:MODES='nearest',align_corners:bool=False):
         """
         Rescales the NIfTI image to a new voxel spacing.
 
@@ -716,10 +717,10 @@ class NII(NII_Math):
             return self
         return NII(new_img, self.seg,self.c_val)
 
-    def rescale_(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:logging=False,mode='nearest'):
+    def rescale_(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:logging=False,mode:MODES='nearest'):
         return self.rescale( voxel_spacing=voxel_spacing, c_val=c_val, verbose=verbose,mode=mode, inplace=True)
 
-    def resample_from_to(self, to_vox_map:Image_Reference|tuple[SHAPE,AFFINE,ZOOMS], mode='nearest', c_val=None, inplace = False,verbose:logging=True,align_corners:bool=False):
+    def resample_from_to(self, to_vox_map:Image_Reference|tuple[SHAPE,AFFINE,ZOOMS], mode:MODES='nearest', c_val=None, inplace = False,verbose:logging=True,align_corners:bool=False):
         """self will be resampled in coordinate of given other image. Adheres to global space not to local pixel space
         Args:
             to_vox_map (Image_Reference|Proxy): If object, has attributes shape giving input voxel shape, and affine giving mapping of input voxels to output space. If length 2 sequence, elements are (shape, affine) with same meaning as above. The affine is a (4, 4) array-like.\n
@@ -741,7 +742,7 @@ class NII(NII_Math):
             return self
         else:
             return NII(nii,self.seg,self.c_val)
-    def resample_from_to_(self, to_vox_map:Image_Reference|tuple[SHAPE,AFFINE,ZOOMS], mode='nearest', c_val:float|None=None,verbose:logging=True,aline_corners=False):
+    def resample_from_to_(self, to_vox_map:Image_Reference|tuple[SHAPE,AFFINE,ZOOMS], mode:MODES='nearest', c_val:float|None=None,verbose:logging=True,aline_corners=False):
         return self.resample_from_to(to_vox_map,mode=mode,c_val=c_val,inplace=True,verbose=verbose,align_corners=aline_corners)
 
     def n4_bias_field_correction(
@@ -1275,6 +1276,11 @@ class NII(NII_Math):
                 out.set_data_dtype(np.uint16)
             else:
                 out.set_data_dtype(np.int32)
+        if out.header["qform_code"] == 0: #NIFTI_XFORM_UNKNOWN Will cause an error for some rounding of the affine in ITKSnap ...
+            # 1 means Scanner coordinate system
+            # 2 means align (to something) coordinate system
+            out.header["qform_code"] = 2 if self.seg else 1
+
         log.print(f"Save {file} as {out.get_data_dtype()}",verbose=verbose,ltype=Log_Type.SAVE)
         nib.save(out, file) #type: ignore
     def __str__(self) -> str:
@@ -1489,7 +1495,7 @@ def _resample_from_to(
     from_img:NII,
     to_img:NII|tuple[SHAPE,AFFINE,ZOOMS],
     order=3,
-    mode="nearest",
+    mode:MODES="nearest",
     align_corners:bool|Sentinel=Sentinel()  # noqa: B008
 ):
     import numpy.linalg as npl
