@@ -27,7 +27,7 @@ from TPTBox.core.bids_constants import formats
 
 sys.path.append(str(Path(__file__).parent))
 
-from TPTBox.core.dicom.dicom2nii_utils import get_json_from_dicom, get_plane_dicom, save_json, test_name_conflict
+from TPTBox.core.dicom.dicom2nii_utils import get_json_from_dicom, save_json, test_name_conflict
 
 logger = No_Logger()
 

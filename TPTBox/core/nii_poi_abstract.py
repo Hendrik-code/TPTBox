@@ -211,12 +211,15 @@ class Has_Grid(Grid_Proxy):
             direction = _same_direction[direction]
         return self.orientation.index(direction)
 
-    def get_empty_POI(self):
+    def get_empty_POI(self, points: dict | None):
         from TPTBox import POI
 
-        return POI({}, orientation=self.orientation, zoom=self.zoom, shape=self.shape, rotation=self.rotation, origin=self.origin)
+        p = {} if points is None else points
+        return POI(p, orientation=self.orientation, zoom=self.zoom, shape=self.shape, rotation=self.rotation, origin=self.origin)
 
     def make_empty_nii(self, seg=False):
+        from TPTBox import NII
+
         nii = nib.Nifti1Image(np.zeros(self.shape_int), affine=self.affine)
         return NII(nii, seg=seg)
 
@@ -253,5 +256,7 @@ class Has_Grid(Grid_Proxy):
 class Grid(Has_Grid):
     def __init__(self, **qargs) -> None:
         super().__init__()
-        for k, v in qargs:
+        for k, v in qargs.items():
+            if k == "spacing":
+                k = "zoom"  # noqa: PLW2901
             setattr(self, k, v)
