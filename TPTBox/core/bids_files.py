@@ -735,7 +735,7 @@ class BIDS_FILE:
                         validate_entities(key, value, f"..._{key}-{value}_...", verbose=True)
                     else:
                         assert validate_entities(key, value, f"..._{key}-{value}_...", verbose=True)
-                    final_info[key] = value
+                    final_info[key] = value.replace("_", "-")
             for key, value in info.items():
                 # New Keys are getting checked!
                 if non_strict_mode:
@@ -1358,7 +1358,7 @@ class BIDS_Family:
         try:
             return self.data_dict[item]
         except KeyError as e:
-            raise KeyError(f"BIDS_Family does not contain key {item}, only {self.keys()}") from e
+            raise KeyError(f"BIDS_Family does not contain key {item}, only {self.keys()}\n\n {self.data_dict}") from e
 
     def __setitem__(self, key, value):
         self.data_dict[key] = value
