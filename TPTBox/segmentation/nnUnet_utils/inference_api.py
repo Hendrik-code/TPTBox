@@ -80,12 +80,15 @@ def load_inf_model(
         predictor.initialize_from_trained_model_folder(str(model_folder), checkpoint_name=check_name, use_folds=use_folds)
     except Exception as e:
         if allow_non_final:
-            predictor.initialize_from_trained_model_folder(
-                str(model_folder),
-                checkpoint_name="checkpoint_best.pth",
-                use_folds=use_folds,
-            )
-            logger.print("Checkpoint final not found, will load from best instead", Log_Type.WARNING)
+            try:
+                predictor.initialize_from_trained_model_folder(
+                    str(model_folder),
+                    checkpoint_name="checkpoint_best.pth",
+                    use_folds=use_folds,
+                )
+                logger.print("Checkpoint final not found, will load from best instead", Log_Type.WARNING)
+            except Exception:
+                raise e  # noqa: B904
         else:
             raise e  # noqa: TRY201
     logger.print(f"Inference Model loaded from {model_folder}") if verbose else None

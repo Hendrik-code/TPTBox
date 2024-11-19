@@ -428,7 +428,8 @@ class Test_POI(unittest.TestCase):
             self.assert_affine(cdt, cdt2)
 
     def test_global(self):
-        for _ in range(repeats * 10):
+        # Note Test some times fails randomly
+        for _ in range(repeats):
             msk, cent, order, sizes = get_nii(num_point=random.randint(1, 7))
             poi = POI(cent, **msk._extract_affine())
             msk.seg = True

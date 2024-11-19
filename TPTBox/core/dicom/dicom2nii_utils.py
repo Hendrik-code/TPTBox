@@ -42,19 +42,9 @@ source_folders = {
     },
     "pd": {"rule": "acq", "iso": "PD_FS_SPC_COR"},
 }
-# [
-#
-#
-#
-#    "PD_FS_SPC_COR",
-#    "3D_GRE_TRA_F",
-#
-#
-#
-# ]
 
 
-def test_nii(path: Path | str | BIDS_FILE):
+def __test_nii(path: Path | str | BIDS_FILE):
     if isinstance(path, str):
         path = Path(path)
     if path.exists():
@@ -82,7 +72,7 @@ def find_all_broken(path: str = "/DATA/NAS/datasets_processed/NAKO/dataset-nako/
         q = subj.new_query(flatten=True)
         q.filter_filetype("nii.gz")
         for f in q.loop_list():
-            if not test_nii(f):
+            if not __test_nii(f):
                 print("BROKEN:", f)
                 brocken.append(f)
                 with open("broken.pkl", "wb") as w:
@@ -97,8 +87,8 @@ source_folder_encrypted_alternative = Path(
 )
 
 
-def test_and_replace(out_folder="/media/data/NAKO/dataset-nako2"):
-    from TPTBox.core.dicom.dicom_extract import extract_folder
+def __test_and_replace(out_folder="/media/data/NAKO/dataset-nako2"):
+    from TPTBox.core.dicom.dicom_extract import extract_dicom_folder
 
     with open("/run/user/1000/gvfs/smb-share:server=172.21.251.64,share=nas/tools/TPTBox/broken.pkl", "rb") as w:
         brocken = pickle.load(w)
@@ -127,7 +117,7 @@ def test_and_replace(out_folder="/media/data/NAKO/dataset-nako2"):
                     except StopIteration:
                         continue
                 if f2.exists():
-                    out_files.update(extract_folder(f2, Path(out_folder), make_subject_chunks=3, verbose=False))
+                    out_files.update(extract_dicom_folder(f2, Path(out_folder), make_subject_chunks=3, verbose=False))
                 else:
                     print(f, f.exists())
         else:
@@ -140,11 +130,11 @@ def test_and_replace(out_folder="/media/data/NAKO/dataset-nako2"):
                     print((source_folder_encrypted / source_folders[mod][sub_key]) / (f"{subj}*.zip"))
                     continue
             ## Call the extraction
-            out_files = extract_folder(zip_file, Path(out_folder), make_subject_chunks=3, verbose=False)
+            out_files = extract_dicom_folder(zip_file, Path(out_folder), make_subject_chunks=3, verbose=False)
         ## -- Testing ---
         # Save over brocken...
         for o in out_files.values():
-            if o is not None and not test_nii(o):
+            if o is not None and not __test_nii(o):
                 Print_Logger().on_fail("Still Broken ", out_files)
 
 
@@ -156,7 +146,6 @@ def clean_dicom_data(dcm_data) -> dict:
         # raise NoImageError()
     else:
         del py_dataset.PixelData
-    print(type(py_dataset))
     py_dict = py_dataset.to_json_dict(suppress_invalid_tags=True)
     for tag in ["00291010", "00291020"]:
         if tag in py_dict and "InlineBinary" in py_dict[tag]:
@@ -204,7 +193,7 @@ def test_name_conflict(json_ob, file):
     return False
 
 
-def save_json(json_ob, file):
+def save_json(json_ob, file, check_exist=False):
     """
     recieves a json object and a path and saves the object as a json file
     """
@@ -214,7 +203,7 @@ def save_json(json_ob, file):
             return int(obj)
         raise TypeError
 
-    if test_name_conflict(json_ob, file):
+    if check_exist and test_name_conflict(json_ob, file):
         raise FileExistsError(file)
     if Path(file).exists():
         return True
@@ -229,7 +218,7 @@ def load_json(file):
 
 
 if __name__ == "__main__":
-    test_and_replace()
+    __test_and_replace()
     # find_all_broken()
     # test_and_replace(
     #    "/DATA/NAS/datasets_processed/NAKO/dataset-nako/rawdata/101/101776/mevibe/sub-101776_sequ-94_acq-ax_part-eco0-opp1_mevibe.nii.gz",

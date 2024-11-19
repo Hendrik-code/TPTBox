@@ -246,6 +246,13 @@ class Test_bids_file(unittest.TestCase):
         expected_result = np.array([[0, 0, 0, 0, 0], [0, 1, 1, 1, 0], [0, 1, 1, 1, 0], [0, 1, 1, 1, 0], [0, 0, 0, 0, 0]])
         assert np.array_equal(arr, expected_result), (arr, expected_result)
 
+    def test_np_center_of_bbox_binary(self):
+        arr = np.array([[[0, 0], [0, 0]], [[1, 0], [0, 1]]], dtype=np.uint8)
+        result = np_utils.np_center_of_bbox_binary(arr)
+        print(result)
+        # expected = [1, 1, 0]  # Adjust based on your bounding box logic
+        # self.assertEqual(result, expected)
+
 
 if __name__ == "__main__":
     unittest.main()

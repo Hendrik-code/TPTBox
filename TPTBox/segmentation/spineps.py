@@ -12,53 +12,43 @@ def injection_function(seg_nii: NII):
     return seg_nii
 
 
-model_semantic = None
-model_instance = None
-
-
-def segment_sagittal_image(
-    ref: str | Path,
-    dataset: str | Path,
-    der="derivatives",
-    instance_filter=injection_function,
+def run_spineps_single(
+    file_path: str | Path | BIDS_FILE,
+    dataset=None,
+    model_semantic="t2w",
+    model_instance="instance",
+    derivative_name="derivative",
+    override_semantic=False,
+    override_instance=False,
+    lambda_semantic=None,
+    save_debug_data=False,
     verbose=False,
-    inst_vertebra="Inst_Vertebra",
-    t2w_segmentor="t2w",
+    save_raw=False,
+    ignore_compatibility_issues=False,
+    **args,
 ):
-    global model_semantic, model_instance  # noqa: PLW0603
-    from spineps.models import get_instance_model, get_semantic_model
-    from spineps.seg_run import ErrCode, process_img_nii
+    from spineps import get_instance_model, get_semantic_model, process_img_nii
 
-    try:
-        model_semantic = get_semantic_model(t2w_segmentor) if model_semantic is None else model_semantic
-        model_instance = get_instance_model(inst_vertebra) if model_instance is None else model_instance
-    except Exception:
-        from spineps.models import modelid2folder_instance, modelid2folder_semantic
-
-        model_semantic = get_semantic_model(next(modelid2folder_semantic().keys().__iter__())) if model_semantic is None else model_semantic
-        model_instance = get_instance_model(next(modelid2folder_instance().keys().__iter__())) if model_instance is None else model_instance
-
-    start_time = time.perf_counter()
-    # Call to the pipeline
+    if not isinstance(file_path, BIDS_FILE):
+        file_path = Path(file_path)
+        file_path = BIDS_FILE(file_path, file_path.parent if dataset is None else dataset)
+    elif dataset is not None:
+        file_path.dataset = dataset
     output_paths, errcode = process_img_nii(
-        img_ref=BIDS_FILE(ref, dataset),
-        derivative_name=der,
-        model_semantic=model_semantic,
-        model_instance=model_instance,
-        override_semantic=False,
-        override_instance=False,
-        lambda_semantic=instance_filter,
-        save_debug_data=False,
+        img_ref=file_path,
+        derivative_name=derivative_name,
+        model_semantic=get_semantic_model(model_semantic),
+        model_instance=get_instance_model(model_instance),
+        override_semantic=override_semantic,
+        override_instance=override_instance,
+        lambda_semantic=lambda_semantic,
+        save_debug_data=save_debug_data,
         verbose=verbose,
+        save_raw=save_raw,
+        ignore_compatibility_issues=ignore_compatibility_issues,
+        **args,
     )
-    end_time = time.perf_counter()
-    execution_time = end_time - start_time
-    logger.print(f"Inference time is: {execution_time}", verbose=verbose)
-    if errcode not in [ErrCode.OK, ErrCode.ALL_DONE]:
-        logger.print(f"Pipeline threw errorcode {errcode}")
-    logger.print(f"\nExecution times:{execution_time}")
-
-    return (output_paths["out_vert"], output_paths["out_spine"], output_paths["out_ctd"])
+    return output_paths
 
 
 def run_spineps_all(nii_dataset: Path | str):

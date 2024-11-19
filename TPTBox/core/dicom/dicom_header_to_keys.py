@@ -28,7 +28,7 @@ dixon_mapping = {
     "wa": "water",
 }
 dixon_mapping = {**dixon_mapping, **{v: v for v in dixon_mapping.values()}}
-map_series_description_to_file_format = {
+map_series_description_to_file_format_default = {
     ".*t2w?_tse.*": "T2w",
     "t2w?_fse.*": "T2w",
     ".*t1w?_tse.*": "T1w",
@@ -47,6 +47,7 @@ map_series_description_to_file_format = {
     "b0map": "b0map",
     ".*t2.*": "T2w",
     ".*t1.*": "T1w",
+    ".*dixon.*": "dixon",
     # others
     "shim2d": "mr",
     "3-plane loc": "mr",
@@ -110,11 +111,18 @@ def get_plane_dicom(dicoms: list[pydicom.FileDataset] | NII, hires_threshold=0.8
         return None
 
 
-def extract_keys_from_json(simp_json: dict, dcm_data_l: list[pydicom.FileDataset] | NII, session=False):
+def extract_keys_from_json(
+    simp_json: dict, dcm_data_l: list[pydicom.FileDataset] | NII, session=False, parts=None, map_series_description_to_file_format=None
+):
+    if map_series_description_to_file_format is None:
+        map_series_description_to_file_format = {}
+    if parts is None:
+        parts = []
+
     def _get(key, default=None):
         if key not in simp_json:
             return default
-        return str(simp_json[key])
+        return str(simp_json[key]).replace("_", "-").replace(" ", "-")
 
     keys: dict[str, str | None] = {}
 
@@ -153,8 +161,13 @@ def extract_keys_from_json(simp_json: dict, dcm_data_l: list[pydicom.FileDataset
             keys["ses"] = _get("StudyDate")
         keys["acq"] = get_plane_dicom(dcm_data_l, 0.8)
         keys["part"] = dixon_mapping.get(_get("ProtocolName", "NO-PART").split("_")[-1], None)
+        sequ = _get("SeriesNumber", None)
+        if sequ is not None:
+            keys["sequ"] = sequ
+        if len(parts) != 0:
+            keys["part"] = "-".join(parts).replace("_", "-")
         # GET MRI FORMAT
-        series_description = _get("SeriesDescription", "no_series_description").lower()
+        series_description = _get("SeriesDescription", "no-series-description").lower()
         mri_format = None
         ##################### Understand sequence by given times ####################
         # try:
@@ -170,11 +183,19 @@ def extract_keys_from_json(simp_json: dict, dcm_data_l: list[pydicom.FileDataset
         # except Exception:
         #    pass
         #################### Understand sequence by series_description ####################
+        found = False
         for key, mri_format_new in map_series_description_to_file_format.items():
             regex = re.compile(key)
             if re.match(regex, series_description):
                 mri_format = mri_format_new
                 break
+        if not found:
+            for key, mri_format_new in map_series_description_to_file_format_default.items():
+                regex = re.compile(key)
+                if re.match(regex, series_description):
+                    mri_format = mri_format_new
+                    break
         if mri_format is None:
             mri_format = "mr"
+
         return mri_format, keys
