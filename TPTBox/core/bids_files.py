@@ -735,7 +735,7 @@ class BIDS_FILE:
                         validate_entities(key, value, f"..._{key}-{value}_...", verbose=True)
                     else:
                         assert validate_entities(key, value, f"..._{key}-{value}_...", verbose=True)
-                    final_info[key] = value
+                    final_info[key] = value.replace("_", "-")
             for key, value in info.items():
                 # New Keys are getting checked!
                 if non_strict_mode:

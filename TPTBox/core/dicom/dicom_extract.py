@@ -446,7 +446,7 @@ if __name__ == "__main__":
             ]
         ]
         for i in dcm_dir2:
-            logger.override_prefix = "exist" if i.exists() else "missing"
+            logger.prefix = "exist" if i.exists() else "missing"
             logger.print(i, ltype=Log_Type.OK if i.exists() else Log_Type.FAIL)
         dcm_dir = [c for c in dcm_dir2 if c.exists()]
 
@@ -455,9 +455,9 @@ if __name__ == "__main__":
     else:
         dcm_dir = list(Path(args.inputfolder).iterdir())
         for i in dcm_dir:
-            logger.override_prefix = "exist" if i.exists() else "missing"
+            logger.prefix = "exist" if i.exists() else "missing"
             logger.print(i, ltype=Log_Type.OK if i.exists() else Log_Type.FAIL)
-    logger.override_prefix = "exp"
+    logger.prefix = "exp"
     # extract_folder(Path("/media/data/robert/test/dicom2nii/"), "/media/data/robert/test/dataset-out/")
     logger.print("START", ltype=Log_Type.OK)
     import os
