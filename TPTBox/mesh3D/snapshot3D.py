@@ -78,7 +78,10 @@ def make_snapshot3D(
     Path(output_path).parent.mkdir(exist_ok=True)
     nii = to_nii_seg(img)
     if crop:
-        nii.apply_crop_(nii.compute_crop())
+        try:
+            nii.apply_crop_(nii.compute_crop())
+        except ValueError:
+            pass
     if resolution is None:
         resolution = min(nii.zoom)
     if isinstance(view, str):
