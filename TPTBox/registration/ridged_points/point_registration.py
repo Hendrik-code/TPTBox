@@ -47,27 +47,50 @@ class Point_Registration:
             return self.transform_nii(x)
         raise ValueError
 
-    def transform_poi(self, ctd: POI):
+    def transform_poi(self, poi_moving: POI, allow_only_same_grid_as_moving=True):
+        # output_space: POI | NII | None = None,
+        if allow_only_same_grid_as_moving:
+            text = (
+                "input image must be in the same space as moving.  If you sure that this input is in same space as the moving image you can turn of 'only_allow_grid_as_moving'",
+            )
+            poi_moving.assert_affine(self.input_poi, text=text)
         move_l = []
         keys = []
         out = dict(zip(keys, move_l, strict=True))
 
-        for key, key2, (x, y, z) in ctd.items():
+        for key, key2, (x, y, z) in poi_moving.items():
             ctr_b = self._img_moving.TransformContinuousIndexToPhysicalPoint((x, y, z))
             ctr_b = self._transform.GetInverse().TransformPoint(ctr_b)
             ctr_b = self._img_fixed.TransformPhysicalPointToContinuousIndex(ctr_b)
             out[key, key2] = ctr_b
 
-        return POI(out, **self.out_poi._extract_affine())
+        poi = POI(out, **self.out_poi._extract_affine())
+        # if output_space is not None:
+        #    poi = poi.resample_from_to(output_space)
+        return poi
 
-    def transform_nii(self, moving_img_nii: NII):
-        assert self.input_poi.shape == moving_img_nii.shape, (self.input_poi, moving_img_nii)
-        assert self.input_poi.orientation == moving_img_nii.orientation, (self.input_poi, moving_img_nii)
+    def transform_nii(self, moving_img_nii: NII, allow_only_same_grid_as_moving=True):
+        # output_space: NII | None = None,
+        # if output_space is not None:
+        #    resampler: sitk.ResampleImageFilter = sitk.ResampleImageFilter()
+        #    resampler.SetReferenceImage(nii_to_sitk(output_space))
+        #    if moving_img_nii.seg:
+        #        resampler.SetInterpolator(sitk.sitkNearestNeighbor)
+        #        resampler.SetDefaultPixelValue(0)
+        #    else:
+        #        resampler.SetDefaultPixelValue(self._resampler_seg.GetDefaultPixelValue())
+        #        resampler.SetInterpolator(sitk.sitkBSplineResampler)
+        #    resampler.SetTransform(self._transform)
+        # else:
+        resampler = self._resampler_seg if moving_img_nii.seg else self._resampler
+        if allow_only_same_grid_as_moving:
+            text = (
+                "input image must be in the same space as moving.  If you sure that this input is in same space as the moving image you can turn of 'only_allow_grid_as_moving'",
+            )
+            moving_img_nii.assert_affine(self.input_poi, text=text)
+
         img_sitk = nii_to_sitk(moving_img_nii)
-        if moving_img_nii.seg:
-            transformed_img: sitk.Image = self._resampler_seg.Execute(img_sitk)
-        else:
-            transformed_img = self._resampler.Execute(img_sitk)
+        transformed_img = resampler.Execute(img_sitk)
         if moving_img_nii.seg:
             transformed_img = sitk.Round(transformed_img)
         return sitk_to_nii(transformed_img, seg=moving_img_nii.seg)
@@ -86,10 +109,23 @@ class Point_Registration:
         A[:3, 3] = trans
         return A
 
+    def transform_nii_affine_only(self, moving_img_nii: NII, only_allow_grid_as_moving=True):
+        if only_allow_grid_as_moving:
+            text = (
+                "input image must be in the same space as moving.  If you sure that this input is in same space as the moving image you can turn of 'only_allow_grid_as_moving'",
+            )
+            assert self.input_poi.shape == moving_img_nii.shape, (self.input_poi, moving_img_nii, text)
+            assert self.input_poi.orientation == moving_img_nii.orientation, (self.input_poi, moving_img_nii, text)
+
+        affine = np.linalg.inv(self.get_affine()) @ moving_img_nii.affine
+        moving_img_nii = moving_img_nii.copy()
+        moving_img_nii.affine = affine
+        return moving_img_nii
+
 
 def ridged_points_from_poi(
-    ctd_f: POI,
-    ctd_m: POI,
+    poi_fixed: POI,
+    poi_moving: POI,
     exclusion=None,
     log: Logger_Interface = No_Logger(),  # noqa: B008
     verbose=True,
@@ -120,47 +156,49 @@ def ridged_points_from_poi(
     if exclusion is None:
         exclusion = []
     if ax_code is not None:
-        ctd_f.reorient_(ax_code)
+        poi_fixed.reorient_(ax_code)
     if zooms is not None and zooms != (-1, -1, -1):
-        ctd_f.rescale_(zooms)
-    representative_f_sitk = nii_to_sitk(ctd_f.make_empty_nii())
-    representative_m_sitk = nii_to_sitk(ctd_m.make_empty_nii())
+        poi_fixed.rescale_(zooms)
+    representative_f_sitk = nii_to_sitk(poi_fixed.make_empty_nii())
+    representative_m_sitk = nii_to_sitk(poi_moving.make_empty_nii())
 
     # Register
     # filter points by name
-    f_keys = list(filter(lambda x: x[0] not in exclusion, ctd_f.keys()))
-    m_keys = list(ctd_m.keys())
+    f_keys = list(filter(lambda x: x[0] not in exclusion, poi_fixed.keys()))
+    m_keys = list(poi_moving.keys())
     # limit to only shared labels
     inter = [x for x in f_keys if x in m_keys]
     log.print(f_keys, verbose=verbose)
-    log.print(ctd_f.orientation, verbose=verbose)
+    log.print(poi_fixed.orientation, verbose=verbose)
 
     if len(inter) <= 2:
         log.print("[!] To few points, skip registration", Log_Type.FAIL)
         raise ValueError("[!] To few points, skip registration")
-    img_movig = ctd_m.make_empty_nii()
-    assert img_movig.shape == ctd_m.shape_int, (img_movig, ctd_m.shape)
-    assert img_movig.orientation == ctd_m.orientation
+    img_movig = poi_moving.make_empty_nii()
+    assert img_movig.shape == poi_moving.shape_int, (img_movig, poi_moving.shape)
+    assert img_movig.orientation == poi_moving.orientation
     if leave_worst_percent_out != 0.0:
-        ctd_f = ctd_f.intersect(ctd_m)
+        poi_fixed = poi_fixed.intersect(poi_moving)
         init_transform, error_reg, error_natural, delta_after = _compute_versor(
-            inter, ctd_f, representative_f_sitk, ctd_m, representative_m_sitk, verbose=False, log=log
+            inter, poi_fixed, representative_f_sitk, poi_moving, representative_m_sitk, verbose=False, log=log
         )
         delta_after = sorted(delta_after.items(), key=lambda x: -x[1])
         out_str = f"Did not use the following keys for registaiton (worst {leave_worst_percent_out*100} %) "
         for i, key in enumerate(delta_after):
             if i >= len(delta_after) * leave_worst_percent_out:
                 break
-            ctd_f.remove_centroid_(key[0])
+            poi_fixed.remove_centroid_(key[0])
             out_str += f"{key}, "
         log.print(out_str, verbose=verbose)
         log.print("Error with all points", error_reg, Log_Type.STAGE, verbose=verbose)
-        f_keys = list(filter(lambda x: x[0] not in exclusion, ctd_f.keys()))
-        m_keys = list(ctd_m.keys())
+        f_keys = list(filter(lambda x: x[0] not in exclusion, poi_fixed.keys()))
+        m_keys = list(poi_moving.keys())
         # limit to only shared labels
         inter = [x for x in f_keys if x in m_keys]
 
-    return __point_register(inter, ctd_f, representative_f_sitk, ctd_m, representative_m_sitk, log=log, verbose=verbose, c_val=c_val)
+    return __point_register(
+        inter, poi_fixed, representative_f_sitk, poi_moving, representative_m_sitk, log=log, verbose=verbose, c_val=c_val
+    )
 
 
 def ridged_points_from_subreg_vert(
@@ -196,35 +234,37 @@ def ridged_points_from_subreg_vert(
 
 def __point_register(
     inter: list[tuple[int, int]],
-    ctd_f: POI,
-    img_f: sitk.Image,
-    ctd_m: POI,
-    img_m: sitk.Image,
+    poi_fixed: POI,
+    img_fixed: sitk.Image,
+    ctd_moving: POI,
+    img_moving: sitk.Image,
     verbose=True,
     log: Logger_Interface = No_Logger(),  # noqa: B008
     c_val=-1050,
 ) -> Point_Registration:
-    init_transform, error_reg, error_natural, delta_after = _compute_versor(inter, ctd_f, img_f, ctd_m, img_m, verbose=verbose, log=log)
+    init_transform, error_reg, error_natural, delta_after = _compute_versor(
+        inter, poi_fixed, img_fixed, ctd_moving, img_moving, verbose=verbose, log=log
+    )
     resampler: sitk.ResampleImageFilter = sitk.ResampleImageFilter()
-    resampler.SetReferenceImage(img_f)
+    resampler.SetReferenceImage(img_fixed)
     resampler.SetDefaultPixelValue(c_val)
     resampler.SetInterpolator(sitk.sitkBSplineResampler)
     resampler.SetTransform(init_transform)
     resampler_seg = sitk.ResampleImageFilter()
-    resampler_seg.SetReferenceImage(img_f)
+    resampler_seg.SetReferenceImage(img_fixed)
     resampler_seg.SetInterpolator(sitk.sitkNearestNeighbor)
     resampler_seg.SetTransform(init_transform)
     return Point_Registration(
         resampler,
         resampler_seg,
-        img_m,
-        img_f,
+        img_moving,
+        img_fixed,
         init_transform,
-        ctd_f.orientation,
+        poi_fixed.orientation,
         error_reg,
         error_natural,
-        ctd_m.copy(),
-        sitk_to_nii(img_f, True),
+        ctd_moving.copy(),
+        sitk_to_nii(img_fixed, True),
     )
 
 

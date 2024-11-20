@@ -11,7 +11,7 @@ except Exception:
     # raise ex
     pass
 try:
-    from .ridged_points.point_registration import Point_Registration, ridged_points_from_POI, ridged_points_from_subreg_vert
+    from .ridged_points.point_registration import Point_Registration, ridged_points_from_poi, ridged_points_from_subreg_vert
 
 except Exception:
     pass
