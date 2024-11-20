@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from enum import Enum
 from math import ceil, floor
 from pathlib import Path
-from typing import Any, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
 import nibabel as nib
 import nibabel.orientations as nio
@@ -52,6 +52,8 @@ from .vert_constants import (
     v_name2idx,
 )
 
+if TYPE_CHECKING:
+    from TPTBox import POI
 MODES = Literal["constant", "nearest", "reflect", "wrap"]
 _unpacked_nii = tuple[np.ndarray, AFFINE, nib.nifti1.Nifti1Header]
 _formatwarning = warnings.formatwarning
@@ -722,7 +724,7 @@ class NII(NII_Math):
     def rescale_(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:logging=False,mode:MODES='nearest'):
         return self.rescale( voxel_spacing=voxel_spacing, c_val=c_val, verbose=verbose,mode=mode, inplace=True)
 
-    def resample_from_to(self, to_vox_map:Image_Reference|tuple[SHAPE,AFFINE,ZOOMS], mode:MODES='nearest', c_val=None, inplace = False,verbose:logging=True,align_corners:bool=False):
+    def resample_from_to(self, to_vox_map:Image_Reference|tuple[SHAPE,AFFINE,ZOOMS]|"POI", mode:MODES='nearest', c_val=None, inplace = False,verbose:logging=True,align_corners:bool=False):
         """self will be resampled in coordinate of given other image. Adheres to global space not to local pixel space
         Args:
             to_vox_map (Image_Reference|Proxy): If object, has attributes shape giving input voxel shape, and affine giving mapping of input voxels to output space. If length 2 sequence, elements are (shape, affine) with same meaning as above. The affine is a (4, 4) array-like.\n
@@ -735,7 +737,11 @@ class NII(NII_Math):
             NII:
         """        ''''''
         c_val = self.get_c_val(c_val)
-        mapping = to_vox_map if isinstance(to_vox_map, tuple) else to_nii_optional(to_vox_map, seg=self.seg, default=to_vox_map)
+        from TPTBox import POI
+        if isinstance(to_vox_map,POI):
+            mapping = to_vox_map
+        else:
+            mapping = to_vox_map if isinstance(to_vox_map, tuple) else to_nii_optional(to_vox_map, seg=self.seg, default=to_vox_map)
         assert mapping is not None
         log.print(f"resample_from_to: {self} to {mapping}",verbose=verbose)
         nii = _resample_from_to(self, mapping,order=0 if self.seg else 3, mode=mode,align_corners=align_corners)
@@ -1102,12 +1108,28 @@ class NII(NII_Math):
         Returns:
             cc: dict[label, cc_idx, arr], cc_n: dict[label, int]
         """
+        import warnings
+        warnings.warn("get_segmentation_connected_components id deprecated",stacklevel=5) #TODO remove in version 1.0
         arr = self.get_seg_array()
         cc, cc_n = np_connected_components(arr, connectivity=connectivity, label_ref=labels, verbose=verbose)
         if transform_back_to_nii:
             cc = {i: self.set_array(k) for i,k in cc.items()}
         return cc, cc_n
-
+    
+    def get_connected_components(self, labels: int |list[int]=1, connectivity: int = 3, verbose: bool=False,inplace=False) -> Self:
+        arr = self.get_seg_array()
+        cc, _ = np_connected_components(arr, connectivity=connectivity, label_ref=labels, verbose=verbose)
+        out = None
+            
+        for i,k in cc.items():
+            if out is None:
+                out = k
+            else:
+                out += i*k
+        if out is None:
+            return self if inplace else self
+        return self.set_array(out,inplace=inplace)
+    
     def filter_connected_components(self, labels: int |list[int]|None,min_volume:int|None=None,max_volume:int|None=None, max_count_component = None, connectivity: int = 3,removed_to_label=0):
         """
         Filter connected components in a segmentation array based on specified volume constraints.
@@ -1297,7 +1319,6 @@ class NII(NII_Math):
             # 2 means align (to something) coordinate system
             out.header["qform_code"] = 2 if self.seg else 1
 
-        log.print(f"Save {file} as {out.get_data_dtype()}",verbose=verbose,ltype=Log_Type.SAVE)
         nib.save(out, file) #type: ignore
         log.print(f"Save {file} as {out.get_data_dtype()}",verbose=verbose,ltype=Log_Type.SAVE)
     def __str__(self) -> str:
