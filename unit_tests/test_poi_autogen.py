@@ -260,7 +260,7 @@ class TestPOI(unittest.TestCase):
         translation_vector = (slice(2, None), slice(3, None), slice(4, None))
 
         # Call the shift_all_centroid_coordinates method
-        result = poi.shift_all_centroid_coordinates(translation_vector)  # type: ignore
+        result = poi.shift_all_coordinates(translation_vector)  # type: ignore
 
         # Check that the centroid coordinates have been correctly shifted
         assert result.centroids == {(5, 51): (-1.0, -1.0, -1.0), (25, 12): (2.0, 2.0, 2.0)}, result.centroids
@@ -424,7 +424,7 @@ class TestPOI(unittest.TestCase):
         poi = POI()
 
         # Call the shift_all_centroid_coordinates method with None as the translation vector
-        result = poi.shift_all_centroid_coordinates(None)
+        result = poi.shift_all_coordinates(None)
 
         # Check that the POI object is not modified
         assert result == poi
