@@ -35,6 +35,7 @@ if TYPE_CHECKING:
         origin: ORIGIN
         shape: SHAPE
         orientation: AX_CODES
+
 else:
 
     class Grid_Proxy:
@@ -88,6 +89,7 @@ class Has_Grid(Grid_Proxy):
         error_tolerance: float = 1e-4,
         raise_error: bool = True,
         verbose: logging = False,
+        text: str = "",
     ):
         """Checks if the different metadata is equal to some comparison entries
 
@@ -169,11 +171,10 @@ class Has_Grid(Grid_Proxy):
         # Print errors
         for err in found_errors:
             log.print(err, ltype=Log_Type.FAIL, verbose=verbose)
-
         # Final conclusion and possible raising of AssertionError
         has_errors = len(found_errors) > 0
         if raise_error and has_errors:
-            raise AssertionError(f"assert_affine failed with {found_errors}")
+            raise AssertionError(f"{text}; assert_affine failed with {found_errors}")
 
         return not has_errors
 
@@ -211,7 +212,7 @@ class Has_Grid(Grid_Proxy):
             direction = _same_direction[direction]
         return self.orientation.index(direction)
 
-    def get_empty_POI(self, points: dict | None):
+    def get_empty_POI(self, points: dict | None = None):
         from TPTBox import POI
 
         p = {} if points is None else points
