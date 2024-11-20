@@ -171,29 +171,6 @@ class Test_Centroids(unittest.TestCase):
         msk, cent, order, sizes = get_nii(num_point=random.randint(1, 7))
         self.assertRaises(ValueError, msk.compute_crop, minimum=99)
 
-    def test_reorient_centroids_to(self):
-        for _ in range(repeats):
-            msk, cent, order, sizes = get_nii(num_point=random.randint(1, 7))
-            cdt = POI(cent, orientation=order, zoom=msk.zoom, shape=msk.shape)
-            axcode = get_random_ax_code()
-
-            msk.reorient_(axcodes_to=axcode)
-            self.assertEqual(msk.orientation, axcode)
-            cdt.reorient_centroids_to_(msk, verbose=False)
-            cdt_other = calc_centroids(msk, subreg_id=50)
-            self.assertEqual(cdt.centroids, cdt_other.centroids)
-            self.assertEqual(cdt_other.orientation, axcode)
-
-            axcode = get_random_ax_code()
-
-            msk.reorient_(axcodes_to=axcode)
-            self.assertEqual(msk.orientation, axcode)
-
-            cdt = cdt.reorient_centroids_to(msk, verbose=False)
-            cdt_other = calc_centroids(msk, subreg_id=Location.Vertebra_Corpus.value)
-            self.assertEqual(cdt.centroids, cdt_other.centroids)
-            self.assertEqual(cdt_other.orientation, axcode)
-
     def test_reorient(self):
         for _ in range(repeats):
             msk, cent, order, sizes = get_nii(num_point=random.randint(1, 7))
@@ -204,7 +181,7 @@ class Test_Centroids(unittest.TestCase):
             self.assertEqual(msk.orientation, axcode)
             cdt = cdt.reorient(axcode, verbose=False)
             self.assertEqual(cdt.shape, msk.shape)
-            cdt_other = calc_centroids(msk, subreg_id=Location.Vertebra_Corpus.value)
+            cdt_other = calc_centroids(msk, second_stage=Location.Vertebra_Corpus.value)
             self.assertEqual(cdt.centroids, cdt_other.centroids)
             self.assertEqual(cdt_other.orientation, axcode)
 
@@ -214,7 +191,7 @@ class Test_Centroids(unittest.TestCase):
             self.assertEqual(msk.orientation, axcode)
 
             cdt = cdt.reorient(axcode, verbose=False)
-            cdt_other = calc_centroids(msk, subreg_id=Location.Vertebra_Corpus.value)
+            cdt_other = calc_centroids(msk, second_stage=Location.Vertebra_Corpus.value)
             self.assertEqual(cdt.centroids, cdt_other.centroids)
             self.assertEqual(cdt_other.orientation, axcode)
             self.assertEqual(cdt.shape, msk.shape)
