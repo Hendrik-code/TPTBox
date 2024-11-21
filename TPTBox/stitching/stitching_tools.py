@@ -9,7 +9,7 @@ logger = No_Logger()
 
 
 def stitching(
-    *bids_files: BIDS_FILE | NII | str | Path,
+    bids_files: list[BIDS_FILE | NII | str | Path],
     out: BIDS_FILE | str | Path,
     is_seg=False,
     is_ct: bool = False,
