@@ -4,6 +4,7 @@ import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 from warnings import warn
 
 import numpy as np
@@ -50,6 +51,7 @@ def run_inference_on_file(
     crop=False,
     max_folds=None,
     mode="nearest",
+    ddevice: Literal["cpu", "cuda", "mps"] = "cuda",
 ) -> tuple[Image_Reference, np.ndarray | None]:
     if out_file is not None and Path(out_file).exists() and not override:
         return out_file, None
@@ -66,7 +68,9 @@ def run_inference_on_file(
     # if idx in _unets:
     #    nnunet = _unets[idx]
     # else:
-    nnunet = load_inf_model(nnunet_path, allow_non_final=True, use_folds=tuple(folds) if len(folds) != 5 else None, gpu=gpu)
+    nnunet = load_inf_model(
+        nnunet_path, allow_non_final=True, use_folds=tuple(folds) if len(folds) != 5 else None, gpu=gpu, ddevice=ddevice
+    )
     #    _unets[idx] = nnunet
     with open(Path(nnunet_path, "plans.json")) as f:
         plans_info = json.load(f)

@@ -25,6 +25,7 @@ def run_spineps_single(
     verbose=False,
     save_raw=False,
     ignore_compatibility_issues=False,
+    use_cpu=False,
     **args,
 ):
     from spineps import get_instance_model, get_semantic_model, process_img_nii
@@ -37,8 +38,8 @@ def run_spineps_single(
     output_paths, errcode = process_img_nii(
         img_ref=file_path,
         derivative_name=derivative_name,
-        model_semantic=get_semantic_model(model_semantic),
-        model_instance=get_instance_model(model_instance),
+        model_semantic=get_semantic_model(model_semantic, use_cpu=use_cpu),
+        model_instance=get_instance_model(model_instance, use_cpu=use_cpu),
         override_semantic=override_semantic,
         override_instance=override_instance,
         lambda_semantic=lambda_semantic,

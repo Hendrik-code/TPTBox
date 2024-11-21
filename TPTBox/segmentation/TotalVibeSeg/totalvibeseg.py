@@ -1,11 +1,14 @@
 from pathlib import Path
+from typing import Literal
 
 from TPTBox import Image_Reference, to_nii
 from TPTBox.segmentation.TotalVibeSeg.inference_nnunet import run_inference_on_file
 
 
-def run_totalvibeseg(i: Image_Reference, out_seg: str | Path, override=False, **args):
-    run_inference_on_file(80, [to_nii(i)], out_file=out_seg, override=override, **args)
+def run_totalvibeseg(
+    i: Image_Reference, out_seg: str | Path, override=False, gpu=0, ddevice: Literal["cpu", "cuda", "mps"] = "cuda", **args
+):
+    run_inference_on_file(80, [to_nii(i)], out_file=out_seg, override=override, gpu=gpu, ddevice=ddevice, **args)
 
 
 def extract_vertebra_bodies_from_totalVibe(
