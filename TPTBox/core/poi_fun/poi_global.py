@@ -31,6 +31,17 @@ class POI_Global(Abstract_POI):
             raise NotImplementedError(input_poi)
         self._centroids = global_points
 
+    def __str__(self) -> str:
+        return str(self._centroids)
+
+    @property
+    def zoom(self):
+        return (1, 1, 1)
+
+    @property
+    def origin(self):
+        return (0, 0, 0)
+
     @property
     def is_global(self) -> bool:
         """
