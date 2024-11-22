@@ -7,13 +7,15 @@ import sys
 import tempfile
 from pathlib import Path
 
+import numpy as np
+
 file = Path(__file__).resolve()
 sys.path.append(str(file.parents[2]))
 
 import unittest  # noqa: E402
 
 from TPTBox import NII, Location, calc_poi_from_subreg_vert  # noqa: E402
-from TPTBox.tests.test_utils import get_test_ct, get_test_mri  # noqa: E402
+from TPTBox.tests.test_utils import get_test_ct, get_test_mri, get_tests_dir  # noqa: E402
 
 
 class Test_testsamples(unittest.TestCase):
@@ -185,3 +187,54 @@ class Test_testsamples(unittest.TestCase):
         b = angles.compute_angel_between_two_points_(poi, label, label + 1, "P", project_2D=False)
         assert b is not None
         assert abs(b - 16.8) < 0.1, b
+
+    def _test_deformable(self, dim=0, save=True):  # type: ignore
+        try:
+            import deepali
+            import torch
+        except Exception:
+            return
+
+        from TPTBox.registration.deformable.deformable_reg import Deformable_Registration
+
+        test_save = get_tests_dir() / f"deformation_{dim}.pkl"
+        mri, subreg_nii, vert_nii, label = get_test_mri()
+        mov = mri.copy()
+        mov[mov != 0] = 0
+        if dim == 0:
+            mov[:-3, :, :] = mov[3:, :, :]
+        elif dim == 1:
+            mov[:, :-3, :] = mov[:, 3:, :]
+        else:
+            mov[:, :, :-3] = mov[:, :, 3:]
+
+        poi = mri.make_empty_POI()
+        poi[123, 44] = (random.randint(0, mri.shape[0] - 1), random.randint(0, mri.shape[1] - 1), random.randint(0, mri.shape[2] - 1))
+        poi[123, 45] = (random.randint(0, mri.shape[0] - 1), random.randint(0, mri.shape[1] - 1), random.randint(0, mri.shape[2] - 1))
+
+        deform = Deformable_Registration(mov, mov, reference_image=mov)
+        if save:
+            deform.save(test_save)
+            deform = Deformable_Registration.load(test_save)
+        mov2 = mov.copy()
+        mov2.seg = True
+        mov2[mov > -10000] = 0
+        mov2[int(poi[123, 44][0]), int(poi[123, 44][1]), int(poi[123, 44][2])] = 44
+        mov2[int(poi[123, 45][0]), int(poi[123, 45][1]), int(poi[123, 45][2])] = 45
+        out = deform.transform_nii(mov2)
+        poi = deform.transform_poi(poi)
+
+        for idx in [44, 45]:
+            x = tuple([float(x.item()) for x in np.where(out == idx)])
+            y = poi.round(1).resample_from_to(mov)[123, idx]
+            assert x == y, (x, y)
+
+        test_save.unlink(missing_ok=True)
+
+    def test_deformable(self):
+        self._test_deformable(dim=0, save=False)
+        self._test_deformable(dim=1, save=False)
+        self._test_deformable(dim=2, save=False)
+
+    def test_deformable_saved(self):
+        self._test_deformable(dim=0, save=True)
