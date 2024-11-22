@@ -333,7 +333,7 @@ class TestPOI(unittest.TestCase):
         poi.centroids = {(5, 51): (1.0, 2.0, 3.0), (25, 12): (4.0, 5.0, 6.0)}
 
         # Remove a centroid using the remove_centroid method
-        poi.remove_centroid_((5, 51))
+        poi.remove_((5, 51))
 
         # Check that the centroid has been removed
         assert (5, 51) not in poi.centroids, poi
@@ -449,7 +449,7 @@ class TestPOI(unittest.TestCase):
         poi.centroids = {(12, 13): (1.0, 2.0, 3.0), (19, 23): (4.0, 5.0, 6.0)}
 
         # Remove a centroid that doesn't exist
-        poi.remove_centroid((50, 50))
+        poi.remove_((50, 50))
 
         # Check that the centroids are not modified
         assert poi.centroids == {(12, 13): (1.0, 2.0, 3.0), (19, 23): (4.0, 5.0, 6.0)}
