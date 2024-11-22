@@ -4,8 +4,10 @@ import pickle
 from pathlib import Path
 from typing import Literal
 
+import numpy as np
 import torch
 import yaml
+from deepali.core import Axes
 from deepali.core import Grid as Deepali_Grid
 from deepali.core.typing import Device
 from deepali.data import Image as deepaliImage
@@ -15,7 +17,6 @@ from torch import device
 
 from TPTBox import NII, POI, Image_Reference, to_nii
 from TPTBox.core.nii_poi_abstract import Grid as TPTBox_Grid
-from TPTBox.core.nii_poi_abstract import _extract_affine
 from TPTBox.registration.deformable._deepali import deform_reg_pair
 
 cuda = device("cuda")
@@ -39,23 +40,29 @@ def _warp_image(
     return data
 
 
-def _warp_poi(poi_moving: POI, target_grid: TPTBox_Grid, transform: SpatialTransform, align_corners=False, device="cuda") -> POI:
+def _warp_poi(poi_moving: POI, target_grid: TPTBox_Grid, transform: SpatialTransform, align_corners, device="cuda") -> POI:
     keys: list[tuple[int, int]] = []
     points = []
-    print("input")
     for key, key2, (x, y, z) in poi_moving.items():
-        print("input", keys, key2, "<-", (x, y, z))
         keys.append((key, key2))
         points.append((x, y, z))
-
+        print(key, key2, (x, y, z))
     with torch.inference_mode():
         data = torch.Tensor(points)
         transform.to(device)
-        data = transform.points(data, grid=poi_moving.to_deepali_grid(), to_grid=target_grid.to_deepali_grid(align_corners))
-    print("output")
+        data2 = data
+        data = transform.inverse(update_buffers=True).points(
+            data,
+            axes=Axes.GRID,
+            to_axes=Axes.GRID,
+            grid=poi_moving.to_deepali_grid(align_corners),
+            to_grid=target_grid.to_deepali_grid(align_corners),
+        )
+        print(data2 - data)
+
     out_poi = target_grid.make_empty_POI()
     for (key, key2), (x, y, z) in zip(keys, data.cpu(), strict=True):
-        print("ass", keys, key2, "<-", (x.item(), y.item(), z.item()))
+        print(key, key2, x, y, z)
         out_poi[key, key2] = (x.item(), y.item(), z.item())
     return out_poi
 
@@ -110,28 +117,19 @@ class Deformable_Registration:
             reference_image = fix
         else:
             fix = fix.resample_from_to(reference_image)
-        ref_nii = fix if reference_image is None else to_nii(reference_image)
 
         # Resample and save images
         source = mov.resample_from_to_(reference_image)
 
         # Load configuration and perform registration
-        # deformable_config = load_config(Path(__file__).parent / "deformable_config.yaml")
         deformable_simple = _load_config(Path(__file__).parent / "settings.json")
-        self.ref_grid = ref_nii.to_gird()
-        self.target_grid = ref_nii.to_gird()
-        self.input_grid = mov.to_gird()
-        self.align_corners = align_corners
-        self.ref_grid = ref_nii.to_gird()
-        self.target_grid = ref_nii.to_gird()
+        self.target_grid = fix.to_gird()
         self.input_grid = mov.to_gird()
         self.align_corners = align_corners
 
-        transform = deform_reg_pair.register_pairwise(
+        self.transform = deform_reg_pair.register_pairwise(
             target=fix.copy(), source=source.copy(), config=deformable_simple, device=device, verbose=verbose
         )
-
-        self.transform = transform
 
     @torch.no_grad()
     def transform_nii(self, img: NII, device="cuda") -> NII:
@@ -144,17 +142,19 @@ class Deformable_Registration:
         Returns:
             NII: The transformed image as an NII object.
         """
-        target_grid = self.target_grid.to_deepali_grid(self.align_corners)
+        target_grid_nii = self.target_grid
+        target_grid = target_grid_nii.to_deepali_grid(self.align_corners)
         source_image = img.resample_from_to(self.input_grid).to_deepali()
+
         data = _warp_image(source_image, target_grid, self.transform, "nearest" if img.seg else "linear", device=device).squeeze()
         data: torch.Tensor = data.permute(*torch.arange(data.ndim - 1, -1, -1))  # type: ignore
-        out = self.ref_grid.make_nii(data.detach().cpu().numpy(), img.seg)
+        out = target_grid_nii.make_nii(data.detach().cpu().numpy(), img.seg)
         return out
 
     def transform_poi(self, poi: POI, device="cuda"):
-        source_image = poi.resample_from_to(self.input_grid)
+        source_image = poi.resample_from_to(self.target_grid)
         data = _warp_poi(source_image, self.target_grid, self.transform, self.align_corners, device=device)
-        return data.resample_from_to(self.ref_grid)
+        return data.resample_from_to(self.target_grid)
 
     def __call__(self, *args, **kwds) -> NII:
         """
@@ -172,25 +172,62 @@ class Deformable_Registration:
     def save(self, path: str | Path):
         with open(path, "wb") as w:
             pickle.dump(
-                (self.transform, self.ref_grid, self.target_grid, self.input_grid, self.align_corners),
+                (self.transform, self.target_grid, self.input_grid, self.align_corners),
                 w,
             )
 
     @classmethod
     def load(cls, path):
         with open(path, "rb") as w:
-            transform, ref, grid, mov, align_corners = pickle.load(w)
+            transform, grid, mov, align_corners = pickle.load(w)
         self = cls.__new__(cls)
-        print(ref, grid, mov)
         self.transform = transform
-        self.ref_grid = ref
         self.target_grid = grid
         self.input_grid = mov
         self.align_corners = align_corners
         return self
 
 
-def main():
+def test1(run=False):
+    """
+    Main function to test the deformable registration process.
+    Loads reference and moving images, performs registration, and saves the output.
+    """
+    from TPTBox import NII
+
+    fixed = NII.load("/media/data/robert/code/TPTBox/tmp/sub-100000_sequ-stitched_acq-ax_part-water_vibe.nii.gz", False)
+    moving = NII.load("/media/data/robert/code/TPTBox/tmp/sub-100000_sequ-me1_acq-ax_part-water_mevibe.nii.gz", False)
+    poi = moving.make_empty_POI()
+
+    poi[123, 44] = (93 - 1, 51 - 1, 26 - 1)
+    poi[123, 45] = (77 - 1, 55 - 1, 20 - 1)
+    if run:
+        deform = Deformable_Registration(fixed, moving, reference_image=moving)
+        out = deform.transform_nii(moving.copy())
+        out.save("/media/data/robert/code/TPTBox/tmp/Affine_source.nii.gz")
+        deform.save("/media/data/robert/code/TPTBox/tmp/deformation.pkl")
+    deform2 = Deformable_Registration.load("/media/data/robert/code/TPTBox/tmp/deformation.pkl")
+    out = deform2.transform_nii(moving)
+    out.save("/media/data/robert/code/TPTBox/tmp/Affine_source2.nii.gz")
+    mov = moving.copy()
+    mov.seg = True
+    mov[mov > -10000] = 0
+    mov[int(poi[123, 44][0]), int(poi[123, 44][1]), int(poi[123, 44][2])] = 1
+    mov[int(poi[123, 45][0]), int(poi[123, 45][1]), int(poi[123, 45][2])] = 2
+    poi = deform2.transform_poi(poi)
+
+    out = deform2.transform_nii(mov)
+
+    print(poi.round(1).resample_from_to(mov)[123, 44])
+    print([x.item() for x in np.where(out == 1)])
+
+    print(poi.round(1).resample_from_to(mov)[123, 45])
+    print([x.item() for x in np.where(out == 2)])
+    print("main")
+    out.save("/media/data/robert/code/TPTBox/tmp/Affine_source2_.nii.gz")
+
+
+def test2(run=False):
     """
     Main function to test the deformable registration process.
     Loads reference and moving images, performs registration, and saves the output.
@@ -200,18 +237,37 @@ def main():
     # ref = NII.load("/media/data/robert/code/TPTBox/tmp/sub-100000_sequ-stitched_acq-ax_part-water_vibe.nii.gz", False)
     mov = NII.load("/media/data/robert/code/TPTBox/tmp/sub-100000_sequ-me1_acq-ax_part-water_mevibe.nii.gz", False)
     poi = mov.make_empty_POI()
-    poi[123, 45] = (68 - 1, 61 - 1, 17 - 1)
+    poi[123, 44] = (68 - 1, 61 - 1, 17 - 1)
+    poi[123, 45] = (77 - 1, 55 - 1, 20 - 1)
+    mov2 = NII.load("/media/data/robert/code/TPTBox/tmp/sub-100000_sequ-me1_acq-ax_part-water_mevibe.nii.gz", False)
+    mov2[mov2 != 0] = 0
+    mov2[:-3, :, :] = mov2[3:, :, :]
+    # mov2[:, :-3, :] = mov2[:, 3:, :]
+    # mov2[:, :, :-3] = mov2[:, :, 3:]
 
-    # deform = Deformable_Registration(ref, mov, reference_image=mov)
-    # out = deform.transform_nii(mov.copy())
-    # out.save("/media/data/robert/code/TPTBox/tmp/Affine_source.nii.gz")
-    # deform.save("/media/data/robert/code/TPTBox/tmp/deformation.pkl")
+    # mov2 = mov2.rescale((2, 2, 2))
+    if run:
+        deform = Deformable_Registration(mov2, mov, reference_image=mov)
+        out = deform.transform_nii(mov.copy())
+        out.save("/media/data/robert/code/TPTBox/tmp/Affine_source.nii.gz")
+        deform.save("/media/data/robert/code/TPTBox/tmp/deformation.pkl")
     deform2 = Deformable_Registration.load("/media/data/robert/code/TPTBox/tmp/deformation.pkl")
-    poi = deform2.transform_poi(poi)
-    print(poi.resample_from_to(mov))
+
+    mov.seg = True
+    mov[mov > -10000] = 0
+    mov[int(poi[123, 44][0]), int(poi[123, 44][1]), int(poi[123, 44][2])] = 1
+    mov[int(poi[123, 45][0]), int(poi[123, 45][1]), int(poi[123, 45][2])] = 2
     out = deform2.transform_nii(mov)
-    out.save("/media/data/robert/code/TPTBox/tmp/Affine_source2.nii.gz")
+    poi = deform2.transform_poi(poi)
+
+    print(poi.round(1).resample_from_to(mov)[123, 44])
+    print([x.item() for x in np.where(out == 1)])
+
+    print(poi.round(1).resample_from_to(mov)[123, 45])
+    print([x.item() for x in np.where(out == 2)])
+
+    out.save("/media/data/robert/code/TPTBox/tmp/Affine_source2_.nii.gz")
 
 
 if __name__ == "__main__":
-    main()
+    test1()
