@@ -14,6 +14,7 @@ from scipy.ndimage import center_of_mass
 from typing_extensions import Self
 
 from TPTBox.core import bids_files
+from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.nii_wrapper import NII, Image_Reference, to_nii, to_nii_optional
 from TPTBox.core.poi_fun.poi_abstract import Abstract_POI, POI_Descriptor
 from TPTBox.core.vert_constants import (
@@ -580,7 +581,7 @@ class POI(Abstract_POI):
 
         return pg.POI_Global(self)
 
-    def resample_from_to(self, ref: NII | Self):
+    def resample_from_to(self, ref: Has_Grid):
         return self.to_global().to_other(ref)
 
     def save(
@@ -774,6 +775,7 @@ class POI(Abstract_POI):
         error_tolerance: float = 1e-4,
         raise_error: bool = True,
         verbose: logging = False,
+        text="",
     ):
         """Checks if the different metadata is equal to some comparison entries
 
@@ -859,7 +861,7 @@ class POI(Abstract_POI):
         # Final conclusion and possible raising of AssertionError
         has_errors = len(found_errors) > 0
         if raise_error and has_errors:
-            raise AssertionError(f"assert_affine failed with {found_errors}")
+            raise AssertionError(f"assert_affine failed with {text} {found_errors}")
 
         return not has_errors
 

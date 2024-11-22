@@ -14,6 +14,7 @@ import numpy as np
 from nibabel import Nifti1Header, Nifti1Image  # type: ignore
 from typing_extensions import Self
 
+from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.nii_wrapper_math import NII_Math
 from TPTBox.core.np_utils import (
     np_calc_boundary_mask,
@@ -430,13 +431,6 @@ class NII(NII_Math):
 
         return self
 
-    def global_to_local(self, x: COORDINATE):
-        a = self.rotation.T @ (np.array(x) - self.origin) / np.array(self.zoom)
-        return tuple(round(float(v), 7) for v in a)
-
-    def local_to_global(self, x:  COORDINATE):
-        a = self.rotation @ (np.array(x) * np.array(self.zoom)) + self.origin
-        return tuple(round(float(v), 7) for v in a)
 
     def reorient(self:Self, axcodes_to: AX_CODES = ("P", "I", "R"), verbose:logging=False, inplace=False)-> Self:
         """
@@ -487,10 +481,6 @@ class NII(NII_Math):
             return self
         return self.reorient(axcodes_to=axcodes_to, verbose=verbose,inplace=True)
 
-    def compute_crop_slice(self,**qargs):
-        import warnings
-        warnings.warn("compute_crop_slice id deprecated use compute_crop instead",stacklevel=5) #TODO remove in version 1.0
-        return self.compute_crop(**qargs)
 
     def compute_crop(self,minimum: float=0, dist: float = 0, use_mm=False, other_crop:tuple[slice,...]|None=None, maximum_size:tuple[slice,...]|int|tuple[int,...]|None=None,)->tuple[slice,slice,slice]:
         """
@@ -724,7 +714,7 @@ class NII(NII_Math):
     def rescale_(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:logging=False,mode:MODES='nearest'):
         return self.rescale( voxel_spacing=voxel_spacing, c_val=c_val, verbose=verbose,mode=mode, inplace=True)
 
-    def resample_from_to(self, to_vox_map:Image_Reference|tuple[SHAPE,AFFINE,ZOOMS]|"POI", mode:MODES='nearest', c_val=None, inplace = False,verbose:logging=True,align_corners:bool=False):
+    def resample_from_to(self, to_vox_map:Image_Reference|Has_Grid|tuple[SHAPE,AFFINE,ZOOMS], mode:MODES='nearest', c_val=None, inplace = False,verbose:logging=True,align_corners:bool=False):
         """self will be resampled in coordinate of given other image. Adheres to global space not to local pixel space
         Args:
             to_vox_map (Image_Reference|Proxy): If object, has attributes shape giving input voxel shape, and affine giving mapping of input voxels to output space. If length 2 sequence, elements are (shape, affine) with same meaning as above. The affine is a (4, 4) array-like.\n
@@ -738,7 +728,7 @@ class NII(NII_Math):
         """        ''''''
         c_val = self.get_c_val(c_val)
         from TPTBox import POI
-        if isinstance(to_vox_map,POI):
+        if isinstance(to_vox_map,Has_Grid):
             mapping = to_vox_map
         else:
             mapping = to_vox_map if isinstance(to_vox_map, tuple) else to_nii_optional(to_vox_map, seg=self.seg, default=to_vox_map)
@@ -750,7 +740,7 @@ class NII(NII_Math):
             return self
         else:
             return NII(nii,self.seg,self.c_val)
-    def resample_from_to_(self, to_vox_map:Image_Reference|tuple[SHAPE,AFFINE,ZOOMS], mode:MODES='nearest', c_val:float|None=None,verbose:logging=True,aline_corners=False):
+    def resample_from_to_(self, to_vox_map:Image_Reference|Has_Grid|tuple[SHAPE,AFFINE,ZOOMS], mode:MODES='nearest', c_val:float|None=None,verbose:logging=True,aline_corners=False):
         return self.resample_from_to(to_vox_map,mode=mode,c_val=c_val,inplace=True,verbose=verbose,align_corners=aline_corners)
 
     def n4_bias_field_correction(
@@ -925,7 +915,10 @@ class NII(NII_Math):
         elif data.dtype == np.uint32:
             data = data.astype(np.int64)
         grid = grid.align_corners_(align_corners)
-        return deepaliImage(torch.Tensor(data), grid, dtype=dtype, device=device)  # type: ignore
+        data = torch.Tensor(data)
+        #if len(torch.Tensor(data)) == 3:
+        #   data = data.unsqueeze(0)
+        return deepaliImage(data, grid, dtype=dtype, device=device)  # type: ignore
 
     def erode_msk(self, n_pixel: int = 5, labels: LABEL_REFERENCE = None, connectivity: int = 3, inplace=False,verbose:logging=True,border_value=0, use_crop=True):
         """
@@ -1115,12 +1108,12 @@ class NII(NII_Math):
         if transform_back_to_nii:
             cc = {i: self.set_array(k) for i,k in cc.items()}
         return cc, cc_n
-    
+
     def get_connected_components(self, labels: int |list[int]=1, connectivity: int = 3, verbose: bool=False,inplace=False) -> Self:
         arr = self.get_seg_array()
         cc, _ = np_connected_components(arr, connectivity=connectivity, label_ref=labels, verbose=verbose)
         out = None
-            
+
         for i,k in cc.items():
             if out is None:
                 out = k
@@ -1129,7 +1122,7 @@ class NII(NII_Math):
         if out is None:
             return self if inplace else self
         return self.set_array(out,inplace=inplace)
-    
+
     def filter_connected_components(self, labels: int |list[int]|None,min_volume:int|None=None,max_volume:int|None=None, max_count_component = None, connectivity: int = 3,removed_to_label=0):
         """
         Filter connected components in a segmentation array based on specified volume constraints.
@@ -1322,7 +1315,7 @@ class NII(NII_Math):
         nib.save(out, file) #type: ignore
         log.print(f"Save {file} as {out.get_data_dtype()}",verbose=verbose,ltype=Log_Type.SAVE)
     def __str__(self) -> str:
-        return f"shp={self.shape}; ori={self.orientation}, zoom={tuple(np.around(self.zoom, decimals=2))}, seg={self.seg}" # type: ignore
+        return f"{super().__str__()}, seg={self.seg}" # type: ignore
     def __repr__(self)-> str:
         return self.__str__()
     def __array__(self,dtype=None):
@@ -1518,7 +1511,7 @@ def to_nii_interpolateable(i_img:Interpolateable_Image_Reference) -> NII:
 
 def _resample_from_to(
     from_img:NII,
-    to_img:NII|tuple[SHAPE,AFFINE,ZOOMS],
+    to_img:tuple[SHAPE,AFFINE,ZOOMS]|Has_Grid,
     order=3,
     mode:MODES="nearest",
     align_corners:bool|Sentinel=Sentinel()  # noqa: B008

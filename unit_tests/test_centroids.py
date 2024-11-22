@@ -219,7 +219,7 @@ class Test_Registation(unittest.TestCase):
 
         for _ in range(repeats):
             msk, cent, order, sizes = get_nii(num_point=random.randint(4, 7))
-            cdt = msk.get_empty_POI(cent)
+            cdt = msk.make_empty_POI(cent)
             cdt_org = cdt.copy()
             cdt.origin = tuple(i + random.random() * 5 for i in cdt.origin)
             cdt = cdt.resample_from_to(cdt_org)
