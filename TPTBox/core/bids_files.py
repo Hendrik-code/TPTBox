@@ -1192,9 +1192,8 @@ class Searchquery:
 
     def filter_dixon_only_inphase(self):
         def json_filter(x):
-            return (
-                "ImageType" not in x
-                or "W" not in x["ImageType"]
+            return "ImageType" not in x or (
+                "W" not in x["ImageType"]
                 and "F" not in x["ImageType"]
                 and "FAT" not in x["ImageType"]
                 and "WATER" not in x["ImageType"]
