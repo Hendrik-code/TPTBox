@@ -85,7 +85,7 @@ class Deformable_Registration:
         normalize: Literal["MRI", "CT"] | None = None,
         quantile: float = 0.95,
         reference_image: Image_Reference | None = None,
-        device: Device | None = cuda,
+        device: Device | str | None = cuda,
         align_corners: bool = False,
         verbose=1,
     ) -> None:

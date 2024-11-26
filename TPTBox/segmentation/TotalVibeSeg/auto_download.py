@@ -67,6 +67,10 @@ def user_guard(func: Any) -> Any:
 def _download_weights(idx=85) -> None:
     weights_dir = get_weights_dir(idx)
     weights_url = WEIGHTS_URL_ + f"{idx:03}.zip"
+    _download(weights_url, weights_dir, text="pretrained weights")
+
+
+def _download(weights_url, weights_dir, text="") -> None:
     try:
         # Retrieve file size
         with urllib.request.urlopen(str(weights_url)) as response:
@@ -74,7 +78,7 @@ def _download_weights(idx=85) -> None:
     except Exception:
         print("Download attempt failed:", weights_url)
         return
-    print("Downloading pretrained weights...")
+    print(f"Downloading {text}...")
 
     with tqdm(total=file_size, unit="B", unit_scale=True, unit_divisor=1024, desc=Path(weights_url).name) as pbar:
 
@@ -87,7 +91,7 @@ def _download_weights(idx=85) -> None:
         # Download the file
         urllib.request.urlretrieve(str(weights_url), zip_path, reporthook=update_progress)
 
-    print("Extracting pretrained weights...")
+    print(f"Extracting {text}...")
     with zipfile.ZipFile(zip_path, "r") as zip_ref:
         zip_ref.extractall(weights_dir)
     os.remove(zip_path)  # noqa: PTH107

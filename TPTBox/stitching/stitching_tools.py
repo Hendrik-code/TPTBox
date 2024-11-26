@@ -18,6 +18,8 @@ def stitching(
     kick_out_fully_integrated_images=True,
     verbose=True,
     dtype: type = float,
+    match_histogram=False,
+    store_ramp=False,
 ):
     out = str(out.file["nii.gz"]) if isinstance(out, BIDS_FILE) else str(out)
     files = [to_nii(bf).nii for bf in bids_files]
@@ -25,9 +27,9 @@ def stitching(
     return stitching_raw(
         files,
         out,
-        False,
-        False,
-        verbose_stitching,
+        match_histogram=match_histogram,
+        store_ramp=store_ramp,
+        verbose=verbose_stitching,
         min_value=-1024 if is_ct else 0,
         bias_field=bias_field,
         kick_out_fully_integrated_images=kick_out_fully_integrated_images,
