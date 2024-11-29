@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from enum import Enum
 from math import ceil, floor
 from pathlib import Path
-from typing import Any, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
 import nibabel as nib
 import nibabel.orientations as nio
@@ -53,6 +53,8 @@ from .vert_constants import (
     v_name2idx,
 )
 
+if TYPE_CHECKING:
+    from TPTBox import POI
 MODES = Literal["constant", "nearest", "reflect", "wrap"]
 _unpacked_nii = tuple[np.ndarray, AFFINE, nib.nifti1.Nifti1Header]
 _formatwarning = warnings.formatwarning
@@ -727,6 +729,10 @@ class NII(NII_Math):
             NII:
         """        ''''''
         c_val = self.get_c_val(c_val)
+<<<<<<< HEAD
+=======
+        from TPTBox import POI
+>>>>>>> c146e97 (Dicom extreaction and deformable reg (#59))
         if isinstance(to_vox_map,Has_Grid):
             mapping = to_vox_map
         else:
