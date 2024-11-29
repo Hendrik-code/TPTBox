@@ -1,4 +1,6 @@
 import re
+from collections.abc import Callable
+from pathlib import Path
 
 import dicom2nifti.exceptions
 import nibabel.orientations as nio
@@ -6,6 +8,7 @@ import numpy as np
 import pydicom
 from dicom2nifti import common
 
+from TPTBox.core.bids_constants import formats
 from TPTBox.core.nii_wrapper import NII
 
 dixon_mapping = {
@@ -33,6 +36,10 @@ map_series_description_to_file_format_default = {
     "t2w?_fse.*": "T2w",
     ".*t1w?_tse.*": "T1w",
     ".*t1w?_vibe_tra.*": "vibe",
+    ".*scout": "localizer",
+    "localizer": "localizer",
+    ".*pilot.*": "localizer",
+    **{f".* {re.escape(k.lower())} .*": k for k in formats},
     ".*flair.*": "flair",
     ".*stir.*": "STIR",
     ".*dti.*": "DTI",
@@ -49,19 +56,10 @@ map_series_description_to_file_format_default = {
     ".*t1.*": "T1w",
     ".*dixon.*": "dixon",
     # others
-    "shim2d": "mr",
-    "3-plane loc": "mr",
-    "fgr": "mr",  # Fetal growth restriction (FGR) ????
-    "screen save": "mr",
-    ".*¶.*": "mr",
-    ".*scout": "mr",
-    "localizer": "mr",
-    ".*pilot.*": "mr",
-    ".*2d.*": "mr",
-    ".*scno.*": "mr",
-    ".*scano.*": "mr",
-    "sys2dcard": "mr",
-    "3-pl loc gr": "mr",
+    "3-plane loc": "localizer",
+    "screen save": "localizer",
+    "MobiView .*": "localizer",
+    **{f".*{re.escape(k.lower())}.*": k for k in formats},
     re.escape("?") + "*": "mr",
     ".*": "mr",
 }
@@ -111,8 +109,14 @@ def get_plane_dicom(dicoms: list[pydicom.FileDataset] | NII, hires_threshold=0.8
         return None
 
 
-def extract_keys_from_json(
-    simp_json: dict, dcm_data_l: list[pydicom.FileDataset] | NII, session=False, parts=None, map_series_description_to_file_format=None
+def extract_keys_from_json(  # noqa: C901
+    simp_json: dict,
+    dcm_data_l: list[pydicom.FileDataset],
+    session=False,
+    parts=None,
+    map_series_description_to_file_format=None,
+    override_subject_name: Callable[[dict, Path], str] | None = None,
+    chunk: int | str | None = None,
 ):
     if map_series_description_to_file_format is None:
         map_series_description_to_file_format = {}
@@ -125,7 +129,6 @@ def extract_keys_from_json(
         return str(simp_json[key]).replace("_", "-").replace(" ", "-")
 
     keys: dict[str, str | None] = {}
-
     """Extract keys from JSON based on study and series descriptions."""
     #### NAKO FIXED ####
     if "StudyDescription" in simp_json and "nako" in _get("StudyDescription", "").lower():
@@ -156,7 +159,24 @@ def extract_keys_from_json(
             raise NotImplementedError(series_description)
     # GENERAL
     else:
-        keys["sub"] = _get("PatientID")
+        if override_subject_name is not None:
+            keys["sub"] = override_subject_name(simp_json, Path(str(dcm_data_l[0].filename)))
+        else:
+            keys["sub"] = _get("PatientID")
+            if keys["sub"] is None:
+                keys["sub"] = _get("StudyInstanceUID")
+            if keys["sub"] is None:
+                keys["sub"] = (
+                    _get("PatientSex", "X")
+                    + "-"
+                    + _get("PatientAge", "")
+                    + "-"
+                    + _get("PatientSize", "")
+                    + "-"
+                    + _get("PatientSex", "")
+                    + "-"
+                    + _get("PatientWeight", "")
+                )
         if session:
             keys["ses"] = _get("StudyDate")
         keys["acq"] = get_plane_dicom(dcm_data_l, 0.8)
@@ -166,6 +186,8 @@ def extract_keys_from_json(
             keys["sequ"] = sequ
         if len(parts) != 0:
             keys["part"] = "-".join(parts).replace("_", "-")
+        if chunk is not None:
+            keys["chunk"] = str(chunk)
         # GET MRI FORMAT
         series_description = _get("SeriesDescription", "no-series-description").lower()
         mri_format = None

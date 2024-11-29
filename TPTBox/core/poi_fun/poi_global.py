@@ -3,6 +3,7 @@ from copy import deepcopy
 from typing_extensions import Self
 
 from TPTBox.core import poi
+from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.poi_fun.poi_abstract import Abstract_POI, POI_Descriptor
 
 ###### GLOBAL POI #####
@@ -29,6 +30,17 @@ class POI_Global(Abstract_POI):
         else:
             raise NotImplementedError(input_poi)
         self._centroids = global_points
+
+    def __str__(self) -> str:
+        return str(self._centroids)
+
+    @property
+    def zoom(self):
+        return (1, 1, 1)
+
+    @property
+    def origin(self):
+        return (0, 0, 0)
 
     @property
     def is_global(self) -> bool:
@@ -64,7 +76,7 @@ class POI_Global(Abstract_POI):
         """
         return self.to_other(poi.POI.load(ref))
 
-    def to_other(self, msk: poi.POI | poi.NII) -> poi.POI:
+    def to_other(self, msk: Has_Grid) -> poi.POI:
         """
         Convert the POI to another coordinate system.
 

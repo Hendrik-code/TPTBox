@@ -3,6 +3,7 @@ import shutil
 import sys
 import tempfile
 import zipfile
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -65,6 +66,8 @@ def _generate_bids_path(
     assert "sub" in keys, keys
     ses = keys.get("ses")
     ses = f"ses-{ses}" if ses is not None else ""
+
+    assert keys["sub"] is not None, keys
     p = Path(
         nifti_dir,  # dataset path
         parent,  # rawdata
@@ -73,11 +76,11 @@ def _generate_bids_path(
         ses,  # Session, if exist
     )
     args = {"file_type": "json", "parent": parent, "make_parent": True, "additional_folder": mri_format, "bids_format": mri_format}
-    fname = BIDS_FILE(Path(p, "sub-000_ct.nii.gz"), nifti_dir).get_changed_path(**args, info=keys, non_strict_mode=True)
-    while test_name_conflict(simp_json, fname):
+    fname = BIDS_FILE(Path(p, "sub-000_ct.nii.gz"), nifti_dir).get_changed_bids(**args, info=keys, non_strict_mode=True)
+    while test_name_conflict(simp_json, fname.file["json"]):
         _inc_key(keys)
-        fname = BIDS_FILE(Path(p, "sub-000_ct.nii.gz"), nifti_dir).get_changed_path(**args, info=keys, non_strict_mode=True)
-    return fname
+        fname = BIDS_FILE(Path(p, "sub-000_ct.nii.gz"), nifti_dir).get_changed_bids(**args, info=keys, non_strict_mode=True)
+    return fname.file["json"], fname
 
 
 def _convert_to_nifti(dicom_out_path, nii_path):
@@ -113,7 +116,10 @@ def _convert_to_nifti(dicom_out_path, nii_path):
             ("validate_slicecount", "TOO_FEW_SLICES/LOCALIZER"),
         ]:
             if e.args[0] == reason:
-                logger.on_debug(f"Not exported cause of {reason}, if you want try to export it anyway, set {key} = False")
+                Path(str(nii_path).replace(".nii.gz", ".json")).unlink(missing_ok=True)
+                logger.on_debug(
+                    f"Not exported cause of {reason}, if you want try to export it anyway, set {key} = False; If it already on False, than dicom2nifti does not allow the export"
+                )
                 return False
         logger.print_error()
         logger.on_fail(Path(nii_path).name)
@@ -127,17 +133,27 @@ def _convert_to_nifti(dicom_out_path, nii_path):
 
 def _get_paths(
     simp_json: dict,
-    dcm_data_l: list[pydicom.FileDataset] | NII,
+    dcm_data_l: list[pydicom.FileDataset],
     nifti_dir: str | Path,
     make_subject_chunks=0,
     use_session=False,
     parts: list | None = None,
     map_series_description_to_file_format=None,
+    override_subject_name: Callable[[dict, Path], str] | None = None,
+    chunk: int | str | None = None,
 ):
-    (mri_format, keys) = extract_keys_from_json(simp_json, dcm_data_l, use_session, parts, map_series_description_to_file_format)
-    json_file_name = _generate_bids_path(nifti_dir, keys, mri_format, simp_json, make_subject_chunks=make_subject_chunks)
+    (mri_format, keys) = extract_keys_from_json(
+        simp_json,
+        dcm_data_l,
+        use_session,
+        parts,
+        map_series_description_to_file_format,
+        override_subject_name=override_subject_name,
+        chunk=chunk,
+    )
+    json_file_name, json_bids_name = _generate_bids_path(nifti_dir, keys, mri_format, simp_json, make_subject_chunks=make_subject_chunks)
     nii_path = str(json_file_name).replace(".json", "") + ".nii.gz"
-    return json_file_name, nii_path
+    return json_file_name, json_bids_name, nii_path
 
 
 def _filter_dicom(dcm_data_l: list[pydicom.FileDataset]):
@@ -153,16 +169,49 @@ def _from_dicom_to_nii(
     verbose=True,
     parts: list | None = None,
     map_series_description_to_file_format=None,
+    override_subject_name: Callable[[dict, Path], str] | None = None,
+    chunk=None,
+    skip_localizer=False,
 ):
+    if chunk is None:
+        splitted_dcm_data_l = _classic_get_grouped_dicoms(dcm_data_l)
+        if len(splitted_dcm_data_l) != 1:
+            outs = []
+            for i, dcm in enumerate(splitted_dcm_data_l, 1):
+                o = _from_dicom_to_nii(
+                    dcm,
+                    nifti_dir=nifti_dir,
+                    make_subject_chunks=make_subject_chunks,
+                    use_session=use_session,
+                    verbose=verbose,
+                    parts=parts,
+                    map_series_description_to_file_format=map_series_description_to_file_format,
+                    override_subject_name=override_subject_name,
+                    chunk=i,
+                    skip_localizer=skip_localizer,
+                )
+                outs.append(o)
+            return outs
+
     dcm_data_l = _filter_dicom(dcm_data_l)
     if len(dcm_data_l) == 0:
         logger.on_neutral(Path(nifti_dir).name, " - not an image. Will be skipped")
         return None
 
     simp_json = get_json_from_dicom(dcm_data_l)
-    json_file_name, nii_path = _get_paths(
-        simp_json, dcm_data_l, nifti_dir, make_subject_chunks, use_session, parts, map_series_description_to_file_format
+    json_file_name, json_bids, nii_path = _get_paths(
+        simp_json,
+        dcm_data_l,
+        nifti_dir,
+        make_subject_chunks,
+        use_session,
+        parts,
+        map_series_description_to_file_format,
+        override_subject_name,
+        chunk=chunk,
     )
+    if skip_localizer and json_bids.bids_format == "localizer":
+        return
     logger.print(json_file_name, Log_Type.NEUTRAL, verbose=verbose)
     exist = save_json(simp_json, json_file_name)
     if exist and Path(nii_path).exists():
@@ -203,24 +252,25 @@ def _find_all_files(dcm_dirs: Path | list[Path]):
     Yields:
         Path: Paths to directories or individual DICOM files found during the search.
     """
+    yield dcm_dirs
     dcm_dirs = dcm_dirs if isinstance(dcm_dirs, list) else [dcm_dirs]
     for dcm_dir in dcm_dirs:
         if dcm_dir.is_dir():
             for root, _, files in os.walk(dcm_dir):
                 file = ""
                 for file in files:
-                    if str(file).endswith(".dcm"):
+                    if Path(file).is_file():  # str(file).endswith(".dcm") or str(file).endswith(".ima")
                         yield Path(root, file).absolute().parent
                         break
                     else:
                         yield Path(root, file)
-                if "." not in str(file):
-                    yield Path(root, file).absolute().parent
+                # if "." not in str(file):
+                #    yield Path(root, file).absolute().parent
 
-        elif dcm_dir.name.endswith(".dcm"):
-            yield Path(root, file).absolute().parent
-        else:
-            yield dcm_dir.absolute()
+        # elif Path(dcm_dir).is_file():  # dcm_dir.name.endswith(".dcm"):
+        #    yield Path(root, file).absolute().parent
+        # else:
+        #    yield dcm_dir.absolute()
 
 
 def _unzip_files(dicom_zip_path: Path, out_dir: str | Path) -> Path:
@@ -263,7 +313,7 @@ def _read_dicom_files(dicom_out_path: Path) -> tuple[dict[str, list[FileDataset]
                 except Exception:
                     typ = ""
                 key1 = str(dcm_data.SeriesInstanceUID)
-                # key2 = str(dcm_data.SeriesNumber)
+
                 key = f"{key1}_{typ}"
                 if key1 not in dicom_types:
                     dicom_types[key1] = []
@@ -274,8 +324,60 @@ def _read_dicom_files(dicom_out_path: Path) -> tuple[dict[str, list[FileDataset]
                 dicom_files[key].append(dcm_data)
             except AttributeError:
                 pass
-
+    for key, value in dicom_files.items():
+        dicom_files[key] = sorted(value, key=lambda dcm_data: np.array(dcm_data.ImagePositionPatient).sum())
     return dicom_files, _filter_file_type(dicom_types)
+
+
+def _classic_get_grouped_dicoms(dicom_input: list[FileDataset]) -> list[list[FileDataset]]:
+    """
+    Search all dicoms in the dicom directory, sort and validate them
+
+    fast_read = True will only read the headers not the data
+    """
+    # Order all dicom files by InstanceNumber
+    dicoms = sorted(dicom_input, key=lambda x: x.InstanceNumber)
+
+    # now group per stack
+    grouped_dicoms: list[list[FileDataset]] = [[]]  # list with first element a list
+    stack_index = 0
+
+    # loop over all sorted dicoms and sort them by stack
+    # for this we use the position and direction of the slices so we can detect a new stack easily
+    previous_position = None
+    previous_direction = None
+    for dicom_ in dicoms:
+        current_direction = None
+        # if the stack number decreases we moved to the next stack
+        if previous_position is not None:
+            current_direction = np.array(dicom_.ImagePositionPatient) - previous_position
+            current_direction = current_direction / np.linalg.norm(current_direction)
+
+        if (
+            current_direction is not None
+            and previous_direction is not None
+            and not np.allclose(current_direction, previous_direction, rtol=0.05, atol=0.05)
+        ):
+            previous_position = np.array(dicom_.ImagePositionPatient)
+            previous_direction = None
+            stack_index += 1
+        else:
+            previous_position = np.array(dicom_.ImagePositionPatient)
+            previous_direction = current_direction
+
+        if stack_index >= len(grouped_dicoms):
+            grouped_dicoms.append([])
+        grouped_dicoms[stack_index].append(dicom_)
+    others = []
+    out = []
+    for i in grouped_dicoms:
+        if len(i) <= 3:
+            others += i
+        else:
+            out.append(i)
+    if len(others) != 0:
+        out.append(others)
+    return out
 
 
 def _filter_file_type(dicom_types: dict[str, list[str]]):
@@ -319,9 +421,11 @@ def extract_dicom_folder(
     parts_mapping: dict = parts_mapping,
     map_series_description_to_file_format=None,
     validate_slicecount=True,
-    validate_orientation=True,  # False, Not recommended
+    validate_orientation=True,
     validate_orthogonal=False,
     n_cpu: int | None = 1,
+    override_subject_name: Callable[[dict, Path], str] | None = None,
+    skip_localizer=True,
 ):
     """
     Extract DICOM files from a directory or list of directories, convert them to NIfTI format, and store the output.
@@ -339,9 +443,13 @@ def extract_dicom_folder(
     Returns:
         dict: A dictionary with keys representing DICOM series and values as paths to the generated NIfTI files.
     """
-    convert_dicom.settings.validate_slicecount = validate_slicecount
-    convert_dicom.settings.validate_orientation = validate_orientation
-    convert_dicom.settings.validate_orthogonal = validate_orthogonal
+    if not validate_slicecount:
+        convert_dicom.settings.disable_validate_slicecount()
+    if not validate_orientation:
+        convert_dicom.settings.disable_validate_orientation()
+    if not validate_orthogonal:
+        convert_dicom.settings.disable_validate_orthogonal()
+
     outs = {}
 
     for p in _find_all_files(dicom_folder):
@@ -369,6 +477,8 @@ def extract_dicom_folder(
                     verbose=verbose,
                     parts=part,
                     map_series_description_to_file_format=map_series_description_to_file_format,
+                    override_subject_name=override_subject_name,
+                    skip_localizer=skip_localizer,
                 )
 
             # Process in parallel or sequentially based on n_cpu
