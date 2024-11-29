@@ -4,11 +4,120 @@ from typing import Literal
 from TPTBox import Image_Reference, to_nii
 from TPTBox.segmentation.TotalVibeSeg.inference_nnunet import run_inference_on_file
 
+total_vibe_map = {
+    1: "spleen",
+    2: "kidney_right",
+    3: "kidney_left",
+    4: "gallbladder",
+    5: "liver",
+    6: "stomach",
+    7: "pancreas",
+    8: "adrenal_gland_right",
+    9: "adrenal_gland_left",
+    10: "lung_upper_lobe_left",
+    11: "lung_lower_lobe_left",
+    12: "lung_upper_lobe_right",
+    13: "lung_middle_lobe_right",
+    14: "lung_lower_lobe_right",
+    15: "esophagus",
+    16: "trachea",
+    17: "thyroid_gland",
+    18: "intestine",
+    19: "duodenum",
+    20: "unused/rib (ct only)",
+    21: "urinary_bladder",
+    22: "prostate",
+    23: "sacrum",
+    24: "heart",
+    25: "aorta",
+    26: "pulmonary_vein",
+    27: "brachiocephalic_trunk",
+    28: "subclavian_artery_right",
+    29: "subclavian_artery_left",
+    30: "common_carotid_artery_right",
+    31: "common_carotid_artery_left",
+    32: "brachiocephalic_vein_left",
+    33: "brachiocephalic_vein_right",
+    34: "atrial_appendage_left",
+    35: "superior_vena_cava",
+    36: "inferior_vena_cava",
+    37: "portal_vein_and_splenic_vein",
+    38: "iliac_artery_left",
+    39: "iliac_artery_right",
+    40: "iliac_vena_left",
+    41: "iliac_vena_right",
+    42: "humerus_left",
+    43: "humerus_right",
+    44: "scapula_left",
+    45: "scapula_right",
+    46: "clavicula_left",
+    47: "clavicula_right",
+    48: "femur_left",
+    49: "femur_right",
+    50: "hip_left",
+    51: "hip_right",
+    52: "spinal_cord",
+    53: "gluteus_maximus_left",
+    54: "gluteus_maximus_right",
+    55: "gluteus_medius_left",
+    56: "gluteus_medius_right",
+    57: "gluteus_minimus_left",
+    58: "gluteus_minimus_right",
+    59: "autochthon_left",
+    60: "autochthon_right",
+    61: "iliopsoas_left",
+    62: "iliopsoas_right",
+    63: "sternum",
+    64: "costal_cartilages",
+    65: "subcutaneous_fat",
+    66: "muscle",
+    67: "inner_fat",
+    68: "IVD",
+    69: "vertebra_body",
+    70: "vertebra_posterior_elements",
+    71: "spinal_channel",
+    72: "bone_other",
+}
+
 
 def run_totalvibeseg(
-    i: Image_Reference, out_seg: str | Path, override=False, gpu=0, ddevice: Literal["cpu", "cuda", "mps"] = "cuda", **args
+    i: Image_Reference,
+    out_seg: str | Path,
+    override=False,
+    gpu=0,
+    ddevice: Literal["cpu", "cuda", "mps"] = "cuda",
+    dataset_id=80,
+    **args,
 ):
-    run_inference_on_file(80, [to_nii(i)], out_file=out_seg, override=override, gpu=gpu, ddevice=ddevice, **args)
+    run_inference_on_file(
+        dataset_id,
+        [to_nii(i)],
+        out_file=out_seg,
+        override=override,
+        gpu=gpu,
+        ddevice=ddevice,
+        **args,
+    )
+
+
+def run_nnunet(
+    i: list[Image_Reference],
+    out_seg: str | Path,
+    override=False,
+    gpu=0,
+    ddevice: Literal["cpu", "cuda", "mps"] = "cuda",
+    dataset_id=80,
+    **args,
+):
+    run_inference_on_file(
+        dataset_id,
+        [to_nii(i) for i in i],
+        out_file=out_seg,
+        override=override,
+        gpu=gpu,
+        ddevice=ddevice,
+        **args,
+    )
 
 
 def extract_vertebra_bodies_from_totalVibe(
@@ -67,7 +176,10 @@ def extract_vertebra_bodies_from_totalVibe(
     centroids_unsorted = calc_centroids(vert_bodys, second_stage=50)
     centroids_unsorted_srp = centroids_unsorted.reorient(("S", "R", "P"))
     centroids_sorted = dict(
-        sorted({i: centroids_unsorted_srp[i, 50][0] for i in centroids_unsorted_srp.keys_region()}.items(), key=lambda x: x[1])
+        sorted(
+            {i: centroids_unsorted_srp[i, 50][0] for i in centroids_unsorted_srp.keys_region()}.items(),
+            key=lambda x: x[1],
+        )
     )
 
     # Map centroids to labels based on thoracic and lumbar vertebra counts
@@ -99,9 +211,13 @@ if __name__ == "__main__":
     # You can also use a string/Path if you want to set the path yourself.
     dataset = "/media/data/robert/datasets/dicom_example/dataset-VR-DICOM2/"
     in_file = BIDS_FILE(
-        f"{dataset}/derivative_stiched/sub-111168222/T2w/sub-111168222_sequ-301-stiched_acq-ax_part-water_T2w.nii.gz", dataset
+        f"{dataset}/derivative_stiched/sub-111168222/T2w/sub-111168222_sequ-301-stiched_acq-ax_part-water_T2w.nii.gz",
+        dataset,
     )
     out_file = in_file.get_changed_path(
-        "nii.gz", "msk", parent="derivative", info={"seg": "TotalVibeSegmentator", "mod": in_file.bids_format}
+        "nii.gz",
+        "msk",
+        parent="derivative",
+        info={"seg": "TotalVibeSegmentator", "mod": in_file.bids_format},
     )
     run_totalvibeseg(in_file, out_file)
