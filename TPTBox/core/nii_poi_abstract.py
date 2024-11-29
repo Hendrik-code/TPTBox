@@ -1,4 +1,5 @@
 import sys
+import warnings
 from typing import TYPE_CHECKING
 
 import nibabel as nib
@@ -7,6 +8,7 @@ import numpy as np
 from typing_extensions import Self
 
 from TPTBox.core.np_utils import np_count_nonzero
+from TPTBox.core.vert_constants import COORDINATE
 from TPTBox.logger import Log_Type
 
 from .vert_constants import (
@@ -25,6 +27,8 @@ from .vert_constants import (
 )
 
 if TYPE_CHECKING:
+    from deepali.core import Grid as deepali_Grid
+
     from TPTBox import NII, POI
 
     class Grid_Proxy:
@@ -35,6 +39,7 @@ if TYPE_CHECKING:
         origin: ORIGIN
         shape: SHAPE
         orientation: AX_CODES
+
 else:
 
     class Grid_Proxy:
@@ -43,6 +48,9 @@ else:
 
 class Has_Grid(Grid_Proxy):
     """Parent class for methods that are shared by POI and NII"""
+
+    def to_gird(self) -> "Grid":
+        return Grid(**self._extract_affine())
 
     @property
     def shape_int(self):
@@ -57,6 +65,9 @@ class Has_Grid(Grid_Proxy):
     def spacing(self, value: ZOOMS):
         self.zoom = value
 
+    def __str__(self) -> str:
+        return f"shape={self.shape},spacing={tuple(np.around(self.zoom, decimals=2))}, origin={tuple(np.around(self.origin, decimals=2))}, ori={self.orientation}"  # type: ignore
+
     @property
     def affine(self):
         assert self.zoom is not None, "Attribute 'zoom' must be set before calling affine."
@@ -67,8 +78,8 @@ class Has_Grid(Grid_Proxy):
         aff[:3, 3] = self.origin
         return np.round(aff, ROUNDING_LVL)
 
-    def _extract_affine(self, rm_key=()):
-        out = {"zoom": self.zoom, "origin": self.origin, "shape": self.shape, "rotation": self.rotation, "orientation": self.orientation}
+    def _extract_affine(self: "Has_Grid", rm_key=()):
+        out = {"zoom": self.spacing, "origin": self.origin, "shape": self.shape, "rotation": self.rotation, "orientation": self.orientation}
         for k in rm_key:
             out.pop(k)
         return out
@@ -88,6 +99,7 @@ class Has_Grid(Grid_Proxy):
         error_tolerance: float = 1e-4,
         raise_error: bool = True,
         verbose: logging = False,
+        text: str = "",
     ):
         """Checks if the different metadata is equal to some comparison entries
 
@@ -169,11 +181,10 @@ class Has_Grid(Grid_Proxy):
         # Print errors
         for err in found_errors:
             log.print(err, ltype=Log_Type.FAIL, verbose=verbose)
-
         # Final conclusion and possible raising of AssertionError
         has_errors = len(found_errors) > 0
         if raise_error and has_errors:
-            raise AssertionError(f"assert_affine failed with {found_errors}")
+            raise AssertionError(f"{text}; assert_affine failed with {found_errors}")
 
         return not has_errors
 
@@ -211,17 +222,51 @@ class Has_Grid(Grid_Proxy):
             direction = _same_direction[direction]
         return self.orientation.index(direction)
 
-    def get_empty_POI(self, points: dict | None):
+    def get_empty_POI(self, points: dict | None = None):
+        warnings.warn("get_empty_POI id deprecated use make_empty_POI instead", stacklevel=5)  # TODO remove in version 1.0
+
         from TPTBox import POI
 
         p = {} if points is None else points
         return POI(p, orientation=self.orientation, zoom=self.zoom, shape=self.shape, rotation=self.rotation, origin=self.origin)
 
-    def make_empty_nii(self, seg=False):
+    def make_empty_POI(self, points: dict | None = None):
+        from TPTBox import POI
+
+        p = {} if points is None else points
+        return POI(p, orientation=self.orientation, zoom=self.zoom, shape=self.shape, rotation=self.rotation, origin=self.origin)
+
+    def make_empty_nii(self, seg=False, _arr=None):
         from TPTBox import NII
 
-        nii = nib.Nifti1Image(np.zeros(self.shape_int), affine=self.affine)
+        if _arr is None:
+            _arr = np.zeros(self.shape_int)
+        else:
+            assert (
+                _arr.shape == self.shape_int
+            ), f"Expected the correct shape for generating a image from Grid; Got {_arr.shape}, expected {self.shape_int}"
+        nii = nib.Nifti1Image(_arr, affine=self.affine)
         return NII(nii, seg=seg)
+
+    def make_nii(self, arr: np.ndarray, seg=False):
+        """Make a nii with the same grid as object. Shape must fit the Grid.
+
+        Args:
+            arr  np.ndarray: array. Defaults to None.
+            seg (bool, optional): Is it a segmentation. Defaults to False.
+
+        Returns:
+            NII
+        """
+        return self.make_empty_nii(_arr=arr, seg=seg)
+
+    def global_to_local(self, x: COORDINATE):
+        a = self.rotation.T @ (np.array(x) - self.origin) / np.array(self.zoom)
+        return tuple(round(float(v), 7) for v in a)
+
+    def local_to_global(self, x: COORDINATE):
+        a = self.rotation @ (np.array(x) * np.array(self.zoom)) + self.origin
+        return tuple(round(float(v), 7) for v in a)
 
     def to_deepali_grid(self, align_corners: bool = True):
         try:
@@ -237,7 +282,7 @@ class Has_Grid(Grid_Proxy):
         d = min(int(dim[0]), 3)
         size = self.shape  # dim[1 : D + 1]
         spacing = np.asarray(self.zoom)
-        affine = np.asarray(self.affine)
+        affine = np.asarray(self.affine).copy()
         origin = affine[:d, 3]
         direction = np.divide(affine[:d, :d], spacing)
         # Convert to ITK LPS convention

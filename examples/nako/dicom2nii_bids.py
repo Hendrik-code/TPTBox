@@ -391,13 +391,10 @@ def from_dicom_json_to_extracting_nii(  # noqa: C901
             if mri_format not in file_mapping["templates_map"]:
                 acq = get_plane_dicom(dcm_data_l)
                 for key, template in file_mapping["templates"].items():
-                    try:
-                        file = generate_general_name(
-                            mri_format, template, dcm_data_l, nifti_dir, acq=acq, make_subject_chunks=make_subject_chunks, root=root
-                        )
-                        print(f"{key}\t:\t", file)
-                    except Exception:  # noqa: TRY203
-                        raise
+                    file = generate_general_name(
+                        mri_format, template, dcm_data_l, nifti_dir, acq=acq, make_subject_chunks=make_subject_chunks, root=root
+                    )
+                    print(f"{key}\t:\t", file)
 
             while True:
                 template_name = input("pick a template, or add one. (adding a template is only possible in the code): ")
@@ -533,10 +530,8 @@ def extract_folder(  # noqa: C901
 
             else:
                 succ_all = True
-                for key in dicom_files.keys():
-                    succ = from_dicom_json_to_extracting_nii(
-                        dicom_files[key], nifti_dir, dicom_files[key], make_subject_chunks, root=dicom_zip_path
-                    )
+                for value in dicom_files.values():
+                    succ = from_dicom_json_to_extracting_nii(value, nifti_dir, value, make_subject_chunks, root=dicom_zip_path)
                     if not succ:
                         succ_all = succ
             if succ_all and del_dicom:

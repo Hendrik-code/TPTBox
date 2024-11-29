@@ -23,15 +23,8 @@ def _compute_distance(
     if key in poi.info and not recompute:
         return poi
     if not all_pois_computed:
-        if (
-            vert is None
-            or subreg is None
-            and l1.value not in poi.keys_region()
-            and l2.value in poi.keys_region()
-        ):
-            raise ValueError(
-                f"{vert=} and {subreg=} must be set or precomputed all pois; {all_pois_computed=} -- {poi.keys_region()=}"
-            )
+        if vert is None or (subreg is None and l1.value not in poi.keys_region() and l2.value in poi.keys_region()):
+            raise ValueError(f"{vert=} and {subreg=} must be set or precomputed all pois; {all_pois_computed=} -- {poi.keys_region()=}")
     else:
         all_pois_computed = True
     if not all_pois_computed:
@@ -68,7 +61,5 @@ def compute_all_distances(
     recompute=False,
 ):
     for key, (l1, l2) in distances_funs.items():
-        poi = _compute_distance(
-            poi, l1, l2, key, vert, subreg, all_pois_computed, recompute
-        )
+        poi = _compute_distance(poi, l1, l2, key, vert, subreg, all_pois_computed, recompute)
     return poi

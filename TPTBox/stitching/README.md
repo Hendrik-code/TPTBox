@@ -59,3 +59,22 @@ or
 from TPTBox.stitching import stitching_raw
 stitching_raw(["a.nii.gz", "b.nii.gz", "c.nii.gz"], "out.nii.gz", is_segmentation=False)
 ```
+
+
+### Cite
+```
+Graf, R., Platzek, PS., Riedel, E.O. et al. Generating synthetic high-resolution spinal STIR and T1w images from T2w FSE and low-resolution axial Dixon. Eur Radiol (2024). https://doi.org/10.1007/s00330-024-11047-1
+
+```
+
+```
+@article{graf2024generating,
+  title={Generating synthetic high-resolution spinal STIR and T1w images from T2w FSE and low-resolution axial Dixon},
+  author={Graf, Robert and Platzek, Paul-S{\"o}ren and Riedel, Evamaria Olga and Kim, Su Hwan and Lenhart, Nicolas and Ramsch{\"u}tz, Constanze and Paprottka, Karolin Johanna and Kertels, Olivia Ruriko and M{\"o}ller, Hendrik Kristian and Atad, Matan and others},
+  journal={European Radiology},
+  pages={1--11},
+  year={2024},
+  publisher={Springer}
+}
+
+```
