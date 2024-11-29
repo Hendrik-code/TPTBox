@@ -47,7 +47,7 @@ class Point_Registration:
             return self.transform_nii(x)
         raise ValueError
 
-    def transform_poi(self, poi_moving: POI, allow_only_same_grid_as_moving=True):
+    def transform_poi(self, poi_moving: POI, allow_only_same_grid_as_moving=True, output_space=None):
         # output_space: POI | NII | None = None,
         if allow_only_same_grid_as_moving:
             text = (
@@ -65,24 +65,23 @@ class Point_Registration:
             out[key, key2] = ctr_b
 
         poi = POI(out, **self.out_poi._extract_affine())
-        # if output_space is not None:
-        #    poi = poi.resample_from_to(output_space)
+        if output_space is not None:
+            poi = poi.resample_from_to(output_space)
         return poi
 
-    def transform_nii(self, moving_img_nii: NII, allow_only_same_grid_as_moving=True):
-        # output_space: NII | None = None,
-        # if output_space is not None:
-        #    resampler: sitk.ResampleImageFilter = sitk.ResampleImageFilter()
-        #    resampler.SetReferenceImage(nii_to_sitk(output_space))
-        #    if moving_img_nii.seg:
-        #        resampler.SetInterpolator(sitk.sitkNearestNeighbor)
-        #        resampler.SetDefaultPixelValue(0)
-        #    else:
-        #        resampler.SetDefaultPixelValue(self._resampler_seg.GetDefaultPixelValue())
-        #        resampler.SetInterpolator(sitk.sitkBSplineResampler)
-        #    resampler.SetTransform(self._transform)
-        # else:
-        resampler = self._resampler_seg if moving_img_nii.seg else self._resampler
+    def transform_nii(self, moving_img_nii: NII, allow_only_same_grid_as_moving=True, output_space: NII | None = None):
+        if output_space is not None:
+            resampler: sitk.ResampleImageFilter = sitk.ResampleImageFilter()
+            resampler.SetReferenceImage(nii_to_sitk(output_space))
+            if moving_img_nii.seg:
+                resampler.SetInterpolator(sitk.sitkNearestNeighbor)
+                resampler.SetDefaultPixelValue(0)
+            else:
+                resampler.SetDefaultPixelValue(self._resampler_seg.GetDefaultPixelValue())
+                resampler.SetInterpolator(sitk.sitkBSplineResampler)
+            resampler.SetTransform(self._transform)
+        else:
+            resampler = self._resampler_seg if moving_img_nii.seg else self._resampler
         if allow_only_same_grid_as_moving:
             text = (
                 "input image must be in the same space as moving.  If you sure that this input is in same space as the moving image you can turn of 'only_allow_grid_as_moving'",

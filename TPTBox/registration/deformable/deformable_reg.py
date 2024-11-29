@@ -17,6 +17,7 @@ from torch import device
 
 from TPTBox import NII, POI, Image_Reference, to_nii
 from TPTBox.core.nii_poi_abstract import Grid as TPTBox_Grid
+from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.registration.deformable._deepali import deform_reg_pair
 
 cuda = device("cuda")
@@ -132,7 +133,7 @@ class Deformable_Registration:
         )
 
     @torch.no_grad()
-    def transform_nii(self, img: NII, device="cuda") -> NII:
+    def transform_nii(self, img: NII, device="cuda", target: Has_Grid | None = None) -> NII:
         """
         Apply the computed transformation to a given NII image.
 
@@ -142,7 +143,7 @@ class Deformable_Registration:
         Returns:
             NII: The transformed image as an NII object.
         """
-        target_grid_nii = self.target_grid
+        target_grid_nii = self.target_grid if target is None else target
         target_grid = target_grid_nii.to_deepali_grid(self.align_corners)
         source_image = img.resample_from_to(self.input_grid).to_deepali()
 
