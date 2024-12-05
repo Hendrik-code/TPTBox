@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from enum import Enum
 from math import ceil, floor
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, TypeVar
+from typing import Any, Literal, TypeVar
 
 import nibabel as nib
 import nibabel.orientations as nio
@@ -53,8 +53,6 @@ from .vert_constants import (
     v_name2idx,
 )
 
-if TYPE_CHECKING:
-    from TPTBox import POI
 MODES = Literal["constant", "nearest", "reflect", "wrap"]
 _unpacked_nii = tuple[np.ndarray, AFFINE, nib.nifti1.Nifti1Header]
 _formatwarning = warnings.formatwarning
@@ -378,7 +376,7 @@ class NII(NII_Math):
             return self.get_seg_array()
         self._unpack()
         return self._arr.copy()
-    def set_array(self,arr:np.ndarray, inplace=False,verbose:logging=False)-> Self:  # noqa: ARG002
+    def set_array(self,arr:np.ndarray|Self, inplace=False,verbose:logging=False)-> Self:  # noqa: ARG002
         """Creates a NII where the array is replaces with the input array.
 
         Note: This function works "Out-of-place" by default, like all other methods.
@@ -390,6 +388,8 @@ class NII(NII_Math):
         Returns:
             self
         """
+        if hasattr(arr,"get_array"):
+            arr = arr.get_array() # type: ignore
         if arr.dtype == bool:
             arr = arr.astype(np.uint8)
         if arr.dtype == np.float16:
@@ -727,7 +727,6 @@ class NII(NII_Math):
             NII:
         """        ''''''
         c_val = self.get_c_val(c_val)
-        from TPTBox import POI
         if isinstance(to_vox_map,Has_Grid):
             mapping = to_vox_map
         else:
