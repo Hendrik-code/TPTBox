@@ -50,24 +50,27 @@ class Point_Registration:
     def transform_poi(self, poi_moving: POI, allow_only_same_grid_as_moving=True, output_space=None):
         # output_space: POI | NII | None = None,
         if allow_only_same_grid_as_moving:
-            text = (
-                "input image must be in the same space as moving.  If you sure that this input is in same space as the moving image you can turn of 'only_allow_grid_as_moving'",
-            )
+            text = "input image must be in the same space as moving.  If you sure that this input is in same space as the moving image you can turn of 'only_allow_grid_as_moving'"
             poi_moving.assert_affine(self.input_poi, text=text)
         move_l = []
         keys = []
         out = dict(zip(keys, move_l, strict=True))
 
         for key, key2, (x, y, z) in poi_moving.items():
-            ctr_b = self._img_moving.TransformContinuousIndexToPhysicalPoint((x, y, z))
-            ctr_b = self._transform.GetInverse().TransformPoint(ctr_b)
-            ctr_b = self._img_fixed.TransformPhysicalPointToContinuousIndex(ctr_b)
-            out[key, key2] = ctr_b
+            out[key, key2] = self.transform_cord((x, y, z))
 
         poi = POI(out, **self.out_poi._extract_affine())
         if output_space is not None:
             poi = poi.resample_from_to(output_space)
         return poi
+
+    def transform_cord(self, cord: tuple[float, ...], out: sitk.Image | None = None):
+        if out is None:
+            out = self._img_fixed
+        ctr_b = self._img_moving.TransformContinuousIndexToPhysicalPoint(cord)
+        ctr_b = self._transform.GetInverse().TransformPoint(ctr_b)
+        ctr_b = out.TransformPhysicalPointToContinuousIndex(ctr_b)
+        return ctr_b
 
     def transform_nii(self, moving_img_nii: NII, allow_only_same_grid_as_moving=True, output_space: NII | None = None):
         if output_space is not None:
@@ -83,9 +86,7 @@ class Point_Registration:
         else:
             resampler = self._resampler_seg if moving_img_nii.seg else self._resampler
         if allow_only_same_grid_as_moving:
-            text = (
-                "input image must be in the same space as moving.  If you sure that this input is in same space as the moving image you can turn of 'only_allow_grid_as_moving'",
-            )
+            text = "input image must be in the same space as moving.  If you sure that this input is in same space as the moving image you can turn of 'only_allow_grid_as_moving'"
             moving_img_nii.assert_affine(self.input_poi, text=text)
 
         img_sitk = nii_to_sitk(moving_img_nii)
@@ -101,25 +102,26 @@ class Point_Registration:
         assert isinstance(self._transform, sitk.VersorRigid3DTransform)
         A = np.eye(4)  # noqa: N806
         v = self._transform.GetInverse()
-        A[:3, :3] = np.array(v.GetMatrix()).reshape(3, 3)
-        c = np.array(v.GetCenter())
-        t = np.array(v.GetTranslation())
-        trans = -A[:3, :3] @ c + c + t
-        A[:3, 3] = trans
+        A[:3, :3] = np.array(v.GetMatrix()).reshape(3, 3)  # Rotation matrix
+        c = np.array(v.GetCenter())  # Center of rotation
+        t = np.array(v.GetTranslation())  # Translation vector
+        trans = -A[:3, :3] @ c + c + t  # Correct translation formula
+        A[:3, 3] = trans  # Set translation part
         return A
 
-    def transform_nii_affine_only(self, moving_img_nii: NII, only_allow_grid_as_moving=True):
-        if only_allow_grid_as_moving:
-            text = (
-                "input image must be in the same space as moving.  If you sure that this input is in same space as the moving image you can turn of 'only_allow_grid_as_moving'",
-            )
-            assert self.input_poi.shape == moving_img_nii.shape, (self.input_poi, moving_img_nii, text)
-            assert self.input_poi.orientation == moving_img_nii.orientation, (self.input_poi, moving_img_nii, text)
-
-        affine = np.linalg.inv(self.get_affine()) @ moving_img_nii.affine
-        moving_img_nii = moving_img_nii.copy()
-        moving_img_nii.affine = affine
-        return moving_img_nii
+    # def transform_nii_affine_only(self, moving_img_nii: NII, only_allow_grid_as_moving=True):
+    #    if only_allow_grid_as_moving:
+    #        text = (
+    #            "input image must be in the same space as moving.  If you sure that this input is in same space as the moving image you can turn of 'only_allow_grid_as_moving'",
+    #        )
+    #        assert self.input_poi.shape == moving_img_nii.shape, (self.input_poi, moving_img_nii, text)
+    #        assert self.input_poi.orientation == moving_img_nii.orientation, (self.input_poi, moving_img_nii, text)
+    #        # moving_resampled = sitk.Resample(nii_to_sitk(moving_img_nii), self._img_fixed, self._transform, sitk.sitkLinear, 0.0)
+    #    # moving_img_nii = moving_img_nii
+    #    affine = self.get_affine() @ moving_img_nii.affine
+    #    moving_img_nii = moving_img_nii.copy()
+    #    moving_img_nii.affine = affine
+    #    return moving_img_nii
 
 
 def ridged_points_from_poi(
