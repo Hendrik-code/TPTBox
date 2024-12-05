@@ -729,10 +729,6 @@ class NII(NII_Math):
             NII:
         """        ''''''
         c_val = self.get_c_val(c_val)
-<<<<<<< HEAD
-=======
-        from TPTBox import POI
->>>>>>> c146e97 (Dicom extreaction and deformable reg (#59))
         if isinstance(to_vox_map,Has_Grid):
             mapping = to_vox_map
         else:
