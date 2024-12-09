@@ -11,7 +11,7 @@ arg_parser = argparse.ArgumentParser()
 arg_parser.add_argument("-i", "--inputfolder", help="input folder (where the rawdata folder is located)", required=True)
 arg_parser.add_argument("-p", "--outparant", help="input folder (where the rawdata folder is located)", default="rawdata_stitched")
 arg_parser.add_argument("-s", "--sleep", type=float, default=0, help="sleep after each save")
-arg_parser.add_argument("-r", "--rawdata", type=str, default="rawdata", help="the rawdata folder to be searched")
+arg_parser.add_argument("-r", "--rawdata", type=str, default="rawdata/100", help="the rawdata folder to be searched")
 args = arg_parser.parse_args()
 print(f"args={args}")
 print(f"args.inputfolder={args.inputfolder}")
@@ -69,7 +69,7 @@ for name, subj in bgi.enumerate_subjects(sort=True):
     except BaseException:
         out.unlink(missing_ok=True)
         skipped.append(name + "_FAIL")
-        # raise
+        raise
 print("These subject have no T2w images:", len(skipped_no_t2w), skipped_no_t2w) if len(skipped_no_t2w) != 0 else None
 if len(skipped_to_many) != 0:
     logger.on_warning(
