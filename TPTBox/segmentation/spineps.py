@@ -1,5 +1,4 @@
 import subprocess
-import time
 from pathlib import Path
 
 from TPTBox import BIDS_FILE, NII, Print_Logger
@@ -17,6 +16,7 @@ def run_spineps_single(
     dataset=None,
     model_semantic="t2w",
     model_instance="instance",
+    model_labeling="t2w_labeling",
     derivative_name="derivative",
     override_semantic=False,
     override_instance=False,
@@ -30,6 +30,14 @@ def run_spineps_single(
 ):
     from spineps import get_instance_model, get_semantic_model, process_img_nii
 
+    try:
+        from spineps.get_models import get_labeling_model
+
+        label = {"model_labeling": get_labeling_model(model_labeling, use_cpu=use_cpu)}
+
+    except Exception:
+        label = {}  # TODO remove when spineps has officially adopted labeling
+
     if not isinstance(file_path, BIDS_FILE):
         file_path = Path(file_path)
         file_path = BIDS_FILE(file_path, file_path.parent if dataset is None else dataset)
@@ -40,6 +48,7 @@ def run_spineps_single(
         derivative_name=derivative_name,
         model_semantic=get_semantic_model(model_semantic, use_cpu=use_cpu),
         model_instance=get_instance_model(model_instance, use_cpu=use_cpu),
+        **label,
         override_semantic=override_semantic,
         override_instance=override_instance,
         lambda_semantic=lambda_semantic,
@@ -47,6 +56,7 @@ def run_spineps_single(
         verbose=verbose,
         save_raw=save_raw,
         ignore_compatibility_issues=ignore_compatibility_issues,
+        ignore_bids_filter=ignore_compatibility_issues,
         **args,
     )
     return output_paths
