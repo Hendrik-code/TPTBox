@@ -98,6 +98,8 @@ class Point_Registration:
         # VersorRigid3DTransform
         # T(x) = A ( x - c ) + (t + c)
         # T(x) = Ax (- Ac + t + c)
+        # let C = (- Ac + t + c)
+        # (C^T*(Ax)^T)
         assert isinstance(self._transform, sitk.VersorRigid3DTransform)
         A = np.eye(4)  # noqa: N806
         v = self._transform.GetInverse()

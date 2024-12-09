@@ -20,7 +20,6 @@ from TPTBox.core.bids_constants import (
     entity_format,
     entity_left_right,
     entity_on_off,
-    entity_parts,
     file_types,
     formats,
     formats_relaxed,
