@@ -1,4 +1,5 @@
 import sys
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import nibabel as nib
@@ -41,8 +42,11 @@ else:
         pass
 
 
+@dataclass
 class Has_Grid(Grid_Proxy):
     """Parent class for methods that are shared by POI and NII"""
+
+    info: dict = field(default_factory=dict, compare=False)  # additional info (key,value pairs)
 
     @property
     def shape_int(self):
