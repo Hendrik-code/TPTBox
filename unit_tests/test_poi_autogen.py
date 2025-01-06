@@ -260,7 +260,7 @@ class TestPOI(unittest.TestCase):
         translation_vector = (slice(2, None), slice(3, None), slice(4, None))
 
         # Call the shift_all_centroid_coordinates method
-        result = poi.shift_all_centroid_coordinates(translation_vector)  # type: ignore
+        result = poi.shift_all_coordinates(translation_vector)  # type: ignore
 
         # Check that the centroid coordinates have been correctly shifted
         assert result.centroids == {(5, 51): (-1.0, -1.0, -1.0), (25, 12): (2.0, 2.0, 2.0)}, result.centroids
@@ -333,7 +333,7 @@ class TestPOI(unittest.TestCase):
         poi.centroids = {(5, 51): (1.0, 2.0, 3.0), (25, 12): (4.0, 5.0, 6.0)}
 
         # Remove a centroid using the remove_centroid method
-        poi.remove_centroid_((5, 51))
+        poi.remove_((5, 51))
 
         # Check that the centroid has been removed
         assert (5, 51) not in poi.centroids, poi
@@ -424,7 +424,7 @@ class TestPOI(unittest.TestCase):
         poi = POI()
 
         # Call the shift_all_centroid_coordinates method with None as the translation vector
-        result = poi.shift_all_centroid_coordinates(None)
+        result = poi.shift_all_coordinates(None)
 
         # Check that the POI object is not modified
         assert result == poi
@@ -449,7 +449,7 @@ class TestPOI(unittest.TestCase):
         poi.centroids = {(12, 13): (1.0, 2.0, 3.0), (19, 23): (4.0, 5.0, 6.0)}
 
         # Remove a centroid that doesn't exist
-        poi.remove_centroid((50, 50))
+        poi.remove_((50, 50))
 
         # Check that the centroids are not modified
         assert poi.centroids == {(12, 13): (1.0, 2.0, 3.0), (19, 23): (4.0, 5.0, 6.0)}

@@ -73,31 +73,31 @@ def validate_entities(key: str, value: str, name: str, verbose: bool):
         if key in entity_left_right and value not in ["L", "R"]:
             print(f"[!] value for {key} must be in {['L', 'R']}. This name '{name}' is invalid, with value {value}")
             return False
-        parts = [
-            "mag",
-            "phase",
-            "real",
-            "imag",
-            "inphase",
-            "outphase",
-            "fat",
-            "water",
-            "eco0-opp1",
-            "eco0-opp1",
-            "eco1-pip1",
-            "eco2-opp2",
-            "eco3-in1",
-            "eco4-pop1",
-            "eco5-arb1",
-            "fat-outphase",
-            "water-outphase",
-            "water-fraction",
-            "fat-fraction",
-            "r2s",
-        ]
-        if key in entity_parts and value not in parts:
-            print(f'[!] value for {key} must be in {parts}. This name "{name}" is invalid, with value {value}')
-            return False
+        # parts = [
+        #    "mag",
+        #    "phase",
+        #    "real",
+        #    "imag",
+        #    "inphase",
+        #    "outphase",
+        #    "fat",
+        #    "water",
+        #    "eco0-opp1",
+        #    "eco0-opp1",
+        #    "eco1-pip1",
+        #    "eco2-opp2",
+        #    "eco3-in1",
+        #    "eco4-pop1",
+        #    "eco5-arb1",
+        #    "fat-outphase",
+        #    "water-outphase",
+        #    "water-fraction",
+        #    "fat-fraction",
+        #    "r2s",
+        # ]
+        # if key in entity_parts and value not in parts:
+        #    print(f'[!] value for {key} must be in {parts}. This name "{name}" is invalid, with value {value}')
+        #    return False
         else:
             return True
     except Exception as e:
@@ -672,7 +672,7 @@ class BIDS_FILE:
         auto_add_run_id=False,
         additional_folder: str | None = None,
         dataset_path: str | None = None,
-        make_parent=True,
+        make_parent=False,
         no_sorting_mode: bool = False,
         non_strict_mode: bool = False,
     ) -> Path:
@@ -735,7 +735,7 @@ class BIDS_FILE:
                         validate_entities(key, value, f"..._{key}-{value}_...", verbose=True)
                     else:
                         assert validate_entities(key, value, f"..._{key}-{value}_...", verbose=True)
-                    final_info[key] = value
+                    final_info[key] = value.replace("_", "-")
             for key, value in info.items():
                 # New Keys are getting checked!
                 if non_strict_mode:
@@ -942,7 +942,7 @@ class BIDS_FILE:
             raise ValueError(f"nii.gz not present. Found only {self.file.keys()}\t{self.file}\n\n{self}") from e
 
     def get_grid_info(self):
-        from TPTBox.core.dicom.dicom_extract import add_grid_info_to_json
+        from TPTBox.core.dicom.dicom_extract import _add_grid_info_to_json
         from TPTBox.core.nii_poi_abstract import Grid
 
         nii_file = self.get_nii_file()
@@ -950,7 +950,7 @@ class BIDS_FILE:
             return None
         if not self.has_json():
             self.file["json"] = Path(str(nii_file).split(".")[0] + ".json")
-        return Grid(**add_grid_info_to_json(nii_file, self.file["json"])["Grid"])
+        return Grid(**_add_grid_info_to_json(nii_file, self.file["json"])["grid"])
 
     def get_nii_file(self):
         for key in _supported_nii_files:
@@ -1192,9 +1192,8 @@ class Searchquery:
 
     def filter_dixon_only_inphase(self):
         def json_filter(x):
-            return (
-                "ImageType" not in x
-                or "W" not in x["ImageType"]
+            return "ImageType" not in x or (
+                "W" not in x["ImageType"]
                 and "F" not in x["ImageType"]
                 and "FAT" not in x["ImageType"]
                 and "WATER" not in x["ImageType"]

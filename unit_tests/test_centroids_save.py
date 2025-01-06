@@ -37,7 +37,14 @@ def get_centroids(x: tuple[int, int, int] = (50, 30, 40), num_point=3, default_s
     for _ in range(num_point):
         point = tuple(random.randint(1, a * 100) / 100.0 for a in x)
         out_points[random.randint(1, 256), random.randint(1, 256) if default_sub is None else 50] = point
-    return POI(out_points, get_random_ax_code(), zoom=(random.random() * 3, random.random() * 3, random.random() * 3), shape=x)
+    return POI(
+        out_points,
+        get_random_ax_code(),
+        zoom=(random.random() * 3, random.random() * 3, random.random() * 3),
+        shape=x,
+        origin=(0, 0, 0),
+        rotation=np.eye(3),
+    )
 
 
 def get_centroids2(x: tuple[int, int, int] = (50, 30, 40), num_point=3):
