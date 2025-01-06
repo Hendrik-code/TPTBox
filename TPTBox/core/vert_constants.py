@@ -35,6 +35,7 @@ LABEL_REFERENCE = int | Sequence[int] | None
 
 if TYPE_CHECKING:
     from TPTBox import NII, POI
+_supported_img_files = ["nii.gz", "nii", "nrrd", "mha"]
 _plane_dict: dict[DIRECTIONS, str] = {
     "S": "ax",
     "I": "ax",
@@ -43,6 +44,7 @@ _plane_dict: dict[DIRECTIONS, str] = {
     "A": "cor",
     "P": "cor",
 }
+
 _same_direction: dict[DIRECTIONS, DIRECTIONS] = {
     "S": "I",
     "I": "S",
