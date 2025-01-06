@@ -9,14 +9,9 @@ import numpy as np
 from TPTBox.core import bids_files
 
 if TYPE_CHECKING:
+    from TPTBox.core.nii_poi_abstract import Has_Grid
     from TPTBox.core.nii_wrapper import NII
-from TPTBox.core.vert_constants import (
-    AFFINE,
-    SHAPE,
-    ZOOMS,
-    Sentinel,
-    _supported_img_files,
-)
+from TPTBox.core.vert_constants import AFFINE, MODES, SHAPE, ZOOMS, Sentinel, _supported_img_files
 
 
 def secure_save(func):
@@ -90,9 +85,9 @@ def secure_save(func):
 
 def _resample_from_to(
     from_img: "NII",
-    to_img: "NII" | tuple[SHAPE, AFFINE, ZOOMS],
+    to_img: tuple[SHAPE, AFFINE, ZOOMS] | "Has_Grid",
     order=3,
-    mode="nearest",
+    mode: MODES = "nearest",
     align_corners: bool | Sentinel = Sentinel(),  # noqa: B008
 ):
     import numpy.linalg as npl

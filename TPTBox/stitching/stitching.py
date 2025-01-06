@@ -356,7 +356,7 @@ def main(  # noqa: C901
                     print("Histogram equalization with previous file") if verbose else None
                     reference = get_array(niis[-1])
             elif histogram.isdigit():
-                print("Histogram equalization with file", images[int(histogram)]) if verbose else None
+                print("Histogram equalization", images[int(histogram)]) if verbose else None
                 reference = buffer_reference(images[int(histogram)], bias_field=bias_field, crop=crop_to_bias_field)  # type: ignore
             else:
                 print("Histogram equalization with file", histogram) if verbose else None
@@ -364,7 +364,7 @@ def main(  # noqa: C901
             if reference is not None:
                 image = get_array(nii)
 
-                matched = match_histograms(image, reference)
+                matched = match_histograms(image.astype(float), reference.astype(float))
                 matched[matched <= min_value] = min_value
                 nii = set_array(nii, matched)
 

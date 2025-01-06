@@ -1,3 +1,2 @@
-from .spineps import run_spineps_all
-from .spineps import segment_sagittal_image as spineps_seg_img
-from .TotalVibeSeg import run_totalvibeseg
+from TPTBox.segmentation.spineps import run_spineps_all, run_spineps_single
+from TPTBox.segmentation.TotalVibeSeg import run_totalvibeseg

@@ -1,0 +1,26 @@
+energy:
+  be:
+  - weight: 0.001
+  - name: BSplineBending
+  - stride: 1
+  seg:
+    name: LNCC
+model:
+  name: SVFFD
+  stride:
+  - 8
+  - 8
+  - 16
+  transpose: false
+optim:
+  lr: 0.001
+  max_steps: 1000
+  min_delta: -0.0001
+  name: Adam
+pyramid:
+  dims: [x,y,z]
+  levels: 3
+  spacing: [1.40625,1.40625,3.0]
+  #spacing: [2.232 ,   2.232,   3.0]
+spacing:
+  [1.40625,1.40625,3.0]

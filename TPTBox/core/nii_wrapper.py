@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from enum import Enum
 from math import ceil, floor
 from pathlib import Path
-from typing import Any, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
 import nibabel as nib
 import nibabel.orientations as nio
@@ -14,6 +14,7 @@ from nibabel import Nifti1Header, Nifti1Image  # type: ignore
 from typing_extensions import Self
 
 from TPTBox.core.internal.nii_help import _resample_from_to, secure_save
+from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.nii_wrapper_math import NII_Math
 from TPTBox.core.np_utils import (
     np_calc_boundary_mask,
@@ -43,6 +44,7 @@ from .vert_constants import (
     DIRECTIONS,
     LABEL_MAP,
     LABEL_REFERENCE,
+    MODES,
     SHAPE,
     ZOOMS,
     Location,
@@ -52,6 +54,9 @@ from .vert_constants import (
     logging,
     v_name2idx,
 )
+
+if TYPE_CHECKING:
+    from TPTBox import POI
 
 _unpacked_nii = tuple[np.ndarray, AFFINE, nib.nifti1.Nifti1Header]
 _formatwarning = warnings.formatwarning
@@ -66,7 +71,7 @@ def formatwarning_tb(*args, **kwargs):
     return s
 
 
-_dtyp_max = {"int8": 128, "uint8": 256, "int16": 32768, "uint16": 65536}
+_dtype_max = {"int8": 128, "uint8": 256, "int16": 32768, "uint16": 65536}
 
 warnings.formatwarning = formatwarning_tb
 
@@ -276,17 +281,17 @@ class NII(NII_Math):
                     dtype = np.uint16
                 else:
                     dtype = np.int32
-                self._arr = np.asanyarray(self.nii.dataobj, dtype=self.nii.dataobj.dtype).astype(dtype).copy()
+                self._arr = np.asanyarray(self.nii.dataobj, dtype=self.nii.dataobj.dtype).astype(dtype).copy() # type: ignore
                 self._checked_dtype = True
             elif not self._checked_dtype:
                 # if the maximum is lager than the dtype, we use float.
                 self._checked_dtype = True
                 dtype = str(self.dtype)
-                if dtype not in _dtyp_max:
+                if dtype not in _dtype_max:
                     self._arr = np.asanyarray(self.nii.dataobj, dtype=self.nii.dataobj.dtype).copy() #type: ignore
                 else:
                     m = np.max(self.nii.dataobj)
-                    if m > _dtyp_max[dtype]:
+                    if m > _dtype_max[dtype]:
                         self._arr = self.nii.get_fdata()
                     else:
                         self._arr = np.asanyarray(self.nii.dataobj, dtype=self.nii.dataobj.dtype).copy() #type: ignore
@@ -371,7 +376,7 @@ class NII(NII_Math):
     @property
     def dtype(self)->type:
         if self.__unpacked:
-            return self._arr.dtype
+            return self._arr.dtype # type: ignore
         return self.nii.dataobj.dtype #type: ignore
     @property
     def header(self) -> Nifti1Header:
@@ -381,8 +386,8 @@ class NII(NII_Math):
     @property
     def affine(self) -> np.ndarray:
         if self.__unpacked:
-            return self._aff
-        return self.nii.affine
+            return self._aff # type: ignore
+        return self.nii.affine # type: ignore
 
     @affine.setter
     def affine(self,affine:np.ndarray):
@@ -415,7 +420,7 @@ class NII(NII_Math):
     def origin(self,x:tuple[float, float, float]):
         self._unpack()
         affine = self._aff
-        affine[:3,3] = np.array(x)
+        affine[:3,3] = np.array(x) # type: ignore
         self._aff = affine
     @property
     def rotation(self)->np.ndarray:
@@ -528,13 +533,6 @@ class NII(NII_Math):
 
         return self
 
-    def global_to_local(self, x: COORDINATE):
-        a = self.rotation.T @ (np.array(x) - self.origin) / np.array(self.zoom)
-        return tuple(round(float(v), 7) for v in a)
-
-    def local_to_global(self, x:  COORDINATE):
-        a = self.rotation @ (np.array(x) * np.array(self.zoom)) + self.origin
-        return tuple(round(float(v), 7) for v in a)
 
     def reorient(self:Self, axcodes_to: AX_CODES = ("P", "I", "R"), verbose:logging=False, inplace=False)-> Self:
         """
@@ -563,7 +561,7 @@ class NII(NII_Math):
             log.print("Image is already rotated to", axcodes_to,verbose=verbose)
             if inplace:
                 return self
-            return self.copy()
+            return self.copy() # type: ignore
         arr = nio.apply_orientation(arr, ornt_trans)
         aff_trans = nio.inv_ornt_aff(ornt_trans, arr.shape)
         new_aff = np.matmul(aff, aff_trans)
@@ -587,10 +585,6 @@ class NII(NII_Math):
             return self
         return self.reorient(axcodes_to=axcodes_to, verbose=verbose,inplace=True)
 
-    def compute_crop_slice(self,**qargs):
-        import warnings
-        warnings.warn("compute_crop_slice id deprecated use compute_crop instead",stacklevel=5) #TODO remove in version 1.0
-        return self.compute_crop(**qargs)
 
     def compute_crop(self,minimum: float=0, dist: float = 0, use_mm=False, other_crop:tuple[slice,...]|None=None, maximum_size:tuple[slice,...]|int|tuple[int,...]|None=None,)->tuple[slice,slice,slice]:
         """
@@ -688,7 +682,7 @@ class NII(NII_Math):
 
         crop_slices = (slice(crop_rel_x, crop_rel_x + crop_x),slice(crop_rel_y, crop_rel_y + crop_y),slice(crop_rel_z, crop_rel_z + crop_z))
         arr_cropped = arr_padded[crop_slices]
-        log.print(f"Centercropped from {arr_padded.shape} to {arr_cropped.shape}", verbose=verbose)
+        log.print(f"Center cropped from {arr_padded.shape} to {arr_cropped.shape}", verbose=verbose)
         shp_x, shp_y, shp_z = arr_cropped.shape
         assert crop_x == shp_x and crop_y == shp_y and crop_z == shp_z
         return self.set_array(arr_cropped)
@@ -722,7 +716,7 @@ class NII(NII_Math):
     def apply_crop_(self,ex_slice:tuple[slice,slice,slice]|Sequence[slice]):
         return self.apply_crop(ex_slice=ex_slice,inplace=True)
 
-    def pad_to(self,target_shape:list[int]|tuple[int,int,int] | Self, mode="constant",crop=False,inplace = False):
+    def pad_to(self,target_shape:list[int]|tuple[int,int,int] | Self, mode:MODES="constant",crop=False,inplace = False):
         if isinstance(target_shape, NII):
             target_shape = target_shape.shape
         padding = []
@@ -746,7 +740,7 @@ class NII(NII_Math):
             s = s.apply_crop(tuple(crop),inplace=inplace)
         return s.apply_pad(padding,inplace=inplace,mode=mode)
 
-    def apply_pad(self,padd:Sequence[tuple[int|None,int]],mode="constant",inplace = False):
+    def apply_pad(self,padd:Sequence[tuple[int|None,int]],mode:MODES="constant",inplace = False):
         transform = np.eye(4, dtype=int)
         for i, (before,_) in enumerate(padd):
             #transform[i, i] = pad_slice.step if pad_slice.step is not None else 1
@@ -759,7 +753,7 @@ class NII(NII_Math):
             return self
         return self.copy(nii)
 
-    def rescale_and_reorient(self, axcodes_to=None, voxel_spacing=(-1, -1, -1), verbose:logging=True, inplace=False,c_val:float|None=None,mode='nearest'):
+    def rescale_and_reorient(self, axcodes_to=None, voxel_spacing=(-1, -1, -1), verbose:logging=True, inplace=False,c_val:float|None=None,mode:MODES='nearest'):
 
         ## Resample and rotate and Save Tempfiles
         if axcodes_to is None:
@@ -770,7 +764,7 @@ class NII(NII_Math):
             curr = self.reorient(axcodes_to=axcodes_to, verbose=verbose, inplace=inplace)
         return curr.rescale(voxel_spacing=voxel_spacing, verbose=verbose, inplace=inplace,c_val=c_val,mode=mode)
 
-    def rescale_and_reorient_(self,axcodes_to=None, voxel_spacing=(-1, -1, -1),c_val:float|None=None,mode='nearest', verbose:logging=True):
+    def rescale_and_reorient_(self,axcodes_to=None, voxel_spacing=(-1, -1, -1),c_val:float|None=None,mode:MODES='nearest', verbose:logging=True):
         return self.rescale_and_reorient(axcodes_to=axcodes_to,voxel_spacing=voxel_spacing,c_val=c_val,mode=mode,verbose=verbose,inplace=True)
 
     def reorient_same_as(self, img_as: Nifti1Image | Self, verbose:logging=False, inplace=False) -> Self:
@@ -778,7 +772,7 @@ class NII(NII_Math):
         return self.reorient(axcodes_to=axcodes_to, verbose=verbose, inplace=inplace)
     def reorient_same_as_(self, img_as: Nifti1Image | Self, verbose:logging=False) -> Self:
         return self.reorient_same_as(img_as=img_as,verbose=verbose,inplace=True)
-    def rescale(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:logging=False, inplace=False,mode='nearest',align_corners:bool=False):
+    def rescale(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:logging=False, inplace=False,mode:MODES='nearest',align_corners:bool=False):
         """
         Rescales the NIfTI image to a new voxel spacing.
 
@@ -824,10 +818,10 @@ class NII(NII_Math):
             return self
         return self.copy(new_img)
 
-    def rescale_(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:logging=False,mode='nearest'):
+    def rescale_(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:logging=False,mode:MODES='nearest'):
         return self.rescale( voxel_spacing=voxel_spacing, c_val=c_val, verbose=verbose,mode=mode, inplace=True)
 
-    def resample_from_to(self, to_vox_map:Image_Reference|tuple[SHAPE,AFFINE,ZOOMS], mode='nearest', c_val=None, inplace = False,verbose:logging=True,align_corners:bool=False):
+    def resample_from_to(self, to_vox_map:Image_Reference|Has_Grid|tuple[SHAPE,AFFINE,ZOOMS], mode:MODES='nearest', c_val=None, inplace = False,verbose:logging=True,align_corners:bool=False):
         """self will be resampled in coordinate of given other image. Adheres to global space not to local pixel space
         Args:
             to_vox_map (Image_Reference|Proxy): If object, has attributes shape giving input voxel shape, and affine giving mapping of input voxels to output space. If length 2 sequence, elements are (shape, affine) with same meaning as above. The affine is a (4, 4) array-like.\n
@@ -840,7 +834,11 @@ class NII(NII_Math):
             NII:
         """        ''''''
         c_val = self.get_c_val(c_val)
-        mapping = to_vox_map if isinstance(to_vox_map, tuple) else to_nii_optional(to_vox_map, seg=self.seg, default=to_vox_map)
+        from TPTBox import POI
+        if isinstance(to_vox_map,Has_Grid):
+            mapping = to_vox_map
+        else:
+            mapping = to_vox_map if isinstance(to_vox_map, tuple) else to_nii_optional(to_vox_map, seg=self.seg, default=to_vox_map)
         assert mapping is not None
         log.print(f"resample_from_to: {self} to {mapping}",verbose=verbose)
         nii = _resample_from_to(self, mapping,order=0 if self.seg else 3, mode=mode,align_corners=align_corners)
@@ -849,13 +847,13 @@ class NII(NII_Math):
             return self
         else:
             return self.copy(nii)
-    def resample_from_to_(self, to_vox_map:Image_Reference|tuple[SHAPE,AFFINE,ZOOMS], mode='nearest', c_val:float|None=None,verbose:logging=True,aline_corners=False):
+    def resample_from_to_(self, to_vox_map:Image_Reference|Has_Grid|tuple[SHAPE,AFFINE,ZOOMS], mode:MODES='nearest', c_val:float|None=None,verbose:logging=True,aline_corners=False):
         return self.resample_from_to(to_vox_map,mode=mode,c_val=c_val,inplace=True,verbose=verbose,align_corners=aline_corners)
 
     def n4_bias_field_correction(
         self,
         threshold = 60,
-        mask=None,
+        mask=None, # type: ignore
         shrink_factor=4,
         convergence=None,
         spline_param=200,
@@ -882,7 +880,7 @@ class NII(NII_Math):
         """
         if convergence is None:
             convergence = {"iters": [50, 50, 50, 50], "tol": 1e-07}
-        assert self.seg is False, "n4 bias field correction on a segmentation doesnt make any sense"
+        assert self.seg is False, "n4 bias field correction on a segmentation does not make any sense"
         # install antspyx not ants!
         import ants
         import ants.utils.bias_correction as bc  # install antspyx not ants!
@@ -899,7 +897,7 @@ class NII(NII_Math):
             mask_arr = binary_dilation(mask_arr.copy(), structure=struct, iterations=3)
             mask_arr = mask_arr.astype(np.uint8)
             mask:ants.ANTsImage = from_nibabel(nib.nifti1.Nifti1Image(mask_arr,self.affine))#self.set_array(mask,verbose=False).nii
-            mask = mask.set_spacing(input_ants.spacing)
+            mask = mask.set_spacing(input_ants.spacing) # type: ignore
         out = bc.n4_bias_field_correction(
             input_ants,
             mask=mask,
@@ -931,7 +929,7 @@ class NII(NII_Math):
     def n4_bias_field_correction_(self,threshold = 60,mask=None,shrink_factor=4,convergence=None,spline_param=200,verbose=False,weight_mask=None,crop=False):
         if convergence is None:
             convergence = {"iters": [50, 50, 50, 50], "tol": 1e-07}
-        return self.n4_bias_field_correction(mask_arr=mask,shrink_factor=shrink_factor,convergence=convergence,spline_param=spline_param,verbose=verbose,weight_mask=weight_mask,crop=crop,inplace=True,threshold = threshold)
+        return self.n4_bias_field_correction(mask=mask,shrink_factor=shrink_factor,convergence=convergence,spline_param=spline_param,verbose=verbose,weight_mask=weight_mask,crop=crop,inplace=True,threshold = threshold)
 
     def normalize_to_range_(self, min_value: int = 0, max_value: int = 1500, verbose:logging=True):
         assert not self.seg
@@ -986,7 +984,7 @@ class NII(NII_Math):
     def to_deepali(self,align_corners: bool = True,dtype=None,device = "cuda"):
         import torch
         try:
-            from deepali.data import Image as deepaliImage
+            from deepali.data import Image as deepaliImage  # type: ignore
         except Exception:
             log.print_error()
             log.on_fail("run 'pip install hf-deepali' to install deepali")
@@ -1024,7 +1022,10 @@ class NII(NII_Math):
         elif data.dtype == np.uint32:
             data = data.astype(np.int64)
         grid = grid.align_corners_(align_corners)
-        return deepaliImage(torch.Tensor(data), grid, dtype=dtype, device=device)  # type: ignore
+        data = torch.Tensor(data)
+        #if len(torch.Tensor(data)) == 3:
+        #   data = data.unsqueeze(0)
+        return deepaliImage(data, grid, dtype=dtype, device=device)  # type: ignore
 
     def erode_msk(self, n_pixel: int = 5, labels: LABEL_REFERENCE = None, connectivity: int = 3, inplace=False,verbose:logging=True,border_value=0, use_crop=True):
         """
@@ -1202,16 +1203,32 @@ class NII(NII_Math):
         Args:
             label (int): the label(s) of the connected components
             connectivity (int, optional): Connectivity for the connected components. Defaults to 3.
-            transform_back_to_nii (bool): If True, will map the labels to niftys, not numpy arrays. Defaults to False.
+            transform_back_to_nii (bool): If True, will map the labels to nifty, not numpy arrays. Defaults to False.
 
         Returns:
             cc: dict[label, cc_idx, arr], cc_n: dict[label, int]
         """
+        import warnings
+        warnings.warn("get_segmentation_connected_components id deprecated",stacklevel=5) #TODO remove in version 1.0
         arr = self.get_seg_array()
         cc, cc_n = np_connected_components(arr, connectivity=connectivity, label_ref=labels, verbose=verbose)
         if transform_back_to_nii:
             cc = {i: self.set_array(k) for i,k in cc.items()}
         return cc, cc_n
+
+    def get_connected_components(self, labels: int |list[int]=1, connectivity: int = 3, verbose: bool=False,inplace=False) -> Self:
+        arr = self.get_seg_array()
+        cc, _ = np_connected_components(arr, connectivity=connectivity, label_ref=labels, verbose=verbose)
+        out = None
+
+        for i,k in cc.items():
+            if out is None:
+                out = k
+            else:
+                out += i*k
+        if out is None:
+            return self if inplace else self
+        return self.set_array(out,inplace=inplace)
 
     def filter_connected_components(self, labels: int |list[int]|None,min_volume:int|None=None,max_volume:int|None=None, max_count_component = None, connectivity: int = 3,removed_to_label=0):
         """
@@ -1284,7 +1301,7 @@ class NII(NII_Math):
 
     def compute_surface_points(self, connectivity: int, dilated_surface: bool = False):
         surface = self.compute_surface_mask(connectivity, dilated_surface)
-        return np_point_coordinates(surface)
+        return np_point_coordinates(surface) # type: ignore
 
 
     def get_segmentation_difference_to(self, mask_gt: Self, ignore_background_tp: bool = False) -> Self:
@@ -1319,7 +1336,7 @@ class NII(NII_Math):
 
     def get_overlapping_labels_to(
         self,
-        mask_other: Self,
+        mask_other: Self
     ) -> list[tuple[int, int]]:
         """Calculates the pairs of labels that are overlapping in at least one voxel (fast)
 
@@ -1396,6 +1413,11 @@ class NII(NII_Math):
                 out.set_data_dtype(np.uint16)
             else:
                 out.set_data_dtype(np.int32)
+        if out.header["qform_code"] == 0: #NIFTI_XFORM_UNKNOWN Will cause an error for some rounding of the affine in ITKSnap ...
+            # 1 means Scanner coordinate system
+            # 2 means align (to something) coordinate system
+            out.header["qform_code"] = 2 if self.seg else 1
+
         nib.save(out, file) #type: ignore
         log.print(f"Save {file} as {out.get_data_dtype()}",verbose=verbose,ltype=Log_Type.SAVE)
 
@@ -1458,7 +1480,7 @@ class NII(NII_Math):
         log.print(f"Save {file} as {header['type']}",verbose=verbose,ltype=Log_Type.SAVE)
 
     def __str__(self) -> str:
-        return f"shp={self.shape}; ori={self.orientation}, zoom={tuple(np.around(self.zoom, decimals=2))}, seg={self.seg}" # type: ignore
+        return f"{super().__str__()}, seg={self.seg}" # type: ignore
     def __repr__(self)-> str:
         return self.__str__()
     def __array__(self,dtype=None):
@@ -1477,13 +1499,13 @@ class NII(NII_Math):
 
             if all(isinstance(k, (slice,EllipsisType)) for k in key):
                 #if all(k.step is not None and k.step == 1 for k in key):
-                #    raise NotImplementedError(f"Slicing is not implemented. Attemted {key}")
+                #    raise NotImplementedError(f"Slicing is not implemented. Attempted {key}")
                 if len(key)!= len(self.shape) or Ellipsis in key:
-                    raise ValueError(f"Number slices must have exact number of slices like in dimension. Attemted: {key} - Shape {self.shape}")
+                    raise ValueError(f"Number slices must have exact number of slices like in dimension. Attempted: {key} - Shape {self.shape}")
                 return self.apply_crop(key) # type: ignore
             elif  all(isinstance(k, int) for k in key):
                 if len(key)!= len(self.shape):
-                    raise ValueError(f"Number ints must have exact number of slices like in dimension. Attemted: {key} - Shape {self.shape}")
+                    raise ValueError(f"Number ints must have exact number of slices like in dimension. Attempted: {key} - Shape {self.shape}")
                 self._unpack()
                 return self._arr.__getitem__(key)
             else:
@@ -1501,20 +1523,7 @@ class NII(NII_Math):
             key = key.get_array()==1
         self._unpack()
         self._arr[key] = value
-        #if isinstance(key,Sequence):
-        #    if all(isinstance(k, slice) for k in key):
-        #        #if all(k.step is not None and k.step == 1 for k in key):
-        #        #    raise NotImplementedError(f"Slicing is not implemented. Attemted {key}")
-        #        if len(key)!= len(self.shape):
-        #            raise ValueError(f"Number slices must have exact number of slices like in dimension. Attemted: {key} - Shape {self.shape}")
-        #        return self.apply_crop(key)
-        #    elif  all(isinstance(k, int) for k in key):
-        #        if len(key)!= len(self.shape):
-        #            raise ValueError(f"Number ints must have exact number of slices like in dimension. Attemted: {key} - Shape {self.shape}")
-        #        self._unpack()
-        #        self._arr[key] = value
-        #else:
-        #    raise TypeError("Invalid argument type.")
+
 
     @classmethod
     def suppress_dtype_change_printout_in_set_array(cls, value=True):
@@ -1549,11 +1558,11 @@ class NII(NII_Math):
         '''
         computes intersecting volume
         '''
-        b = b.copy()
+        b = b.copy() # type: ignore
         b.nii = Nifti1Image(b.get_array()*0+1,affine=b.affine)
         b.seg = True
         b.set_dtype_(np.uint8)
-        b = b.resample_from_to(self,c_val=0,verbose=False)
+        b = b.resample_from_to(self,c_val=0,verbose=False) # type: ignore
         return b.get_array().sum()
 
     def extract_label(self,label:int|Location|Sequence[int]|Sequence[Location], keep_label=False,inplace=False):

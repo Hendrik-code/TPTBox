@@ -36,6 +36,7 @@ LABEL_REFERENCE = int | Sequence[int] | None
 if TYPE_CHECKING:
     from TPTBox import NII, POI
 _supported_img_files = ["nii.gz", "nii", "nrrd", "mha"]
+MODES = Literal["constant", "nearest", "reflect", "wrap"]
 _plane_dict: dict[DIRECTIONS, str] = {
     "S": "ax",
     "I": "ax",
@@ -292,7 +293,7 @@ class Location(Abstract_lvl):
     Superior_Articular_Right = 46
     Inferior_Articular_Left = 47
     Inferior_Articular_Right = 48
-    Vertebra_Corpus_border = 49
+    Vertebra_Corpus_border = 49  # actual corpus body
     Vertebra_Corpus = 50
     Dens_axis = 51  # TODO Unused. Should be in C2
     Vertebral_Body_Endplate_Superior = 52

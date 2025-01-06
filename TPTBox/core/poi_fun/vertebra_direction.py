@@ -120,7 +120,7 @@ def calc_orientation_of_vertebra_PIR(
 
     ret = calc_centroids(
         subreg_iso.set_array(out),
-        subreg_id=subreg_id,
+        second_stage=subreg_id,
         extend_to=poi_iso.copy(),
         inplace=True,
     )
@@ -363,7 +363,7 @@ def calc_center_spinal_cord(
         _fill_inplace.set_array_(arr)
     ret = calc_centroids(
         subreg_iso.set_array(out),
-        subreg_id=subreg_id,
+        second_stage=subreg_id,
         extend_to=poi_iso.extract_subregion(subreg_id),
         inplace=True,
     )
