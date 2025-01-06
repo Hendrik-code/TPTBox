@@ -9,11 +9,11 @@ from typing import Any, Literal, TypeVar
 
 import nibabel as nib
 import nibabel.orientations as nio
-import nibabel.processing as nip
 import numpy as np
 from nibabel import Nifti1Header, Nifti1Image  # type: ignore
 from typing_extensions import Self
 
+from TPTBox.core.internal.nii_help import _resample_from_to, secure_save
 from TPTBox.core.nii_wrapper_math import NII_Math
 from TPTBox.core.np_utils import (
     np_calc_boundary_mask,
@@ -33,13 +33,13 @@ from TPTBox.core.np_utils import (
     np_unique_withoutzero,
     np_volume,
 )
-from TPTBox.core.vert_constants import COORDINATE
 from TPTBox.logger.log_file import Log_Type
 
 from . import bids_files
 from .vert_constants import (
     AFFINE,
     AX_CODES,
+    COORDINATE,
     DIRECTIONS,
     LABEL_MAP,
     LABEL_REFERENCE,
@@ -47,6 +47,7 @@ from .vert_constants import (
     ZOOMS,
     Location,
     Sentinel,
+    _supported_img_files,
     log,
     logging,
     v_name2idx,
@@ -130,7 +131,7 @@ class NII(NII_Math):
 
     Note: This class assumes that the input NIfTI images are in the NIfTI-1 format.
     """
-    def __init__(self, nii: Nifti1Image|_unpacked_nii, seg=False,c_val=None, desc:str|None=None) -> None:
+    def __init__(self, nii: Nifti1Image|_unpacked_nii, seg=False,c_val=None, desc:str|None=None, info=None) -> None:
         assert nii is not None
         self.__divergent = False
         self._checked_dtype = False
@@ -138,15 +139,100 @@ class NII(NII_Math):
         self.seg:bool = seg
         self.c_val:float|None=c_val # default c_vale if seg is None
         self.__min = None
+        self.info = info if info is not None else {}
         self.set_description(desc)
 
 
     @classmethod
-    def load(cls, path: Image_Reference, seg, c_val=None):
+    def load(cls, path: Image_Reference, seg, c_val=None)-> Self:
         nii= to_nii(path,seg)
         nii.c_val = c_val
         return nii
-        #return NII(nib.load(path), seg, c_val) #type: ignore
+
+    @classmethod
+    def load_nrrd(cls, path: str | Path, seg: bool):
+        """
+        Load an NRRD file and convert it into a Nifti1Image object.
+
+        Args:
+            path (str | Path): The file path to the NRRD file to be loaded.
+            seg (bool): A flag indicating if the data represents segmentation data.
+
+        Returns:
+            NII: An NII object containing the loaded Nifti1Image and the segmentation flag.
+
+        Raises:
+            ImportError: If the `pynrrd` package is not installed.
+            FileNotFoundError: If the specified NRRD file cannot be found.
+
+        Example:
+            >>> nii = cls.load_nrrd("example.nrrd", seg=True)
+            >>> print(nii)
+        """
+
+        try:
+            import nrrd  # pip install pynrrd, if pynrrd is not already installed
+        except ModuleNotFoundError:
+            raise ImportError("The `pynrrd` package is required but not installed. Install it with `pip install pynrrd`.") from None
+        _nrrd = nrrd.read(path)
+        data = _nrrd[0]
+        header = dict(_nrrd[1])
+        #print(header)
+        # Example print out: OrderedDict([
+        # ('type', 'short'), ('dimension', 3), ('space', 'left-posterior-superior'),
+        # ('sizes', array([512, 512, 1637])),
+        # ('space directions', array([[0.9765625, 0.       , 0.       ],
+        #                             [0.       , 0.9765625, 0.       ],
+        #                             [0.       , 0.       , 0.6997555]])),
+        # ('kinds', ['domain', 'domain', 'domain']), ('endian', 'little'),
+        # ('encoding', 'gzip'),
+        # ('space origin', array([-249.51171875, -392.51171875,  119.7]))])
+
+        # Construct the affine transformation matrix
+        try:
+            #print(header['space directions'])
+            #print(header['space origin'])
+            space_directions = np.array(header['space directions'])
+            space_origin = np.array(header['space origin'])
+            #space_directions = space_directions[~np.isnan(space_directions).any(axis=1)] #Filter NAN
+            n = header['dimension']
+            #print(data.shape)
+
+            if space_directions.shape != (n, n):
+                raise ValueError(f"Expected 'space directions' to be a nxn matrix. n = {n} is not {space_directions.shape}",space_directions)
+            if space_origin.shape != (n,):
+                raise ValueError("Expected 'space origin' to be a n-element vector. n = ", n, "is not",space_origin.shape )
+            space = header.get("space","left-posterior-superior")
+            affine = np.eye(n+1)  # Initialize 4x4 identity matrix
+            affine[:n, :n] = space_directions  # Set rotation and scaling
+            affine[:n, n] = space_origin       # Set translation
+            if space =="left-posterior-superior": #LPS (SITK-space)
+                affine[0] *=-1
+                affine[1] *=-1
+            elif space == "right-posterior-superior": #RPS
+                affine[0] *=-1
+            elif space == "left-anterior-superior":  #LAS
+                affine[1] *=-1
+            elif space == "right-anterior-superior": #RAS
+                pass
+            else:
+                raise ValueError(space)
+
+
+        except KeyError as e:
+            raise KeyError(f"Missing expected header field: {e}") from None
+        ref_orientation = header.get("ref_orientation")
+        for i in ["ref_orientation","dimension","space directions","space origin""space","type","endian"]:
+            if i in header :
+                del header[i]
+        for key in list(header.keys()):
+            if "_Extent" in key:
+                del header[key]
+        nii =  NII((data,affine,None),seg=seg,info = header)
+        if ref_orientation is not None:
+            nii.reorient_(ref_orientation)
+        return nii
+
     @classmethod
     def load_bids(cls, nii_bids: bids_files.BIDS_FILE):
         nifty = None
@@ -156,6 +242,9 @@ class NII(NII_Math):
         elif "nii.gz" in nii_bids.file:
             path = nii_bids.file['nii.gz']
             nifty = nib.load(path)
+        elif "nrrd" in nii_bids.file:
+            path = nii_bids.file['nrrd']
+            nifty = NII.load_nrrd(path,seg=False)
         else:
             import SimpleITK as sitk  # noqa: N813
 
@@ -233,16 +322,27 @@ class NII(NII_Math):
                 nii = Nifti1Image(self._arr,nii2.affine,nii2.header) # type: ignore
             if all(a is None for a in self.header.get_slope_inter()):
                 nii.header.set_slope_inter(1,self.get_c_val()) # type: ignore
+            #if self.header is not None:
+            #    self.header.set_sform(self.affine, code=1)
+
             self._nii = nii
             self.__divergent = False
         return self._nii
     @nii.setter
     def nii(self,nii:Nifti1Image|_unpacked_nii):
         if isinstance(nii,tuple):
-            assert len(nii) == 3
+            assert len(nii) == 3, nii
             self.__divergent = True
             self.__unpacked = True
             arr, aff, header = nii
+            n = aff.shape[0]-1
+            if n != header['dim'][0]:
+                header = None
+            if len(arr.shape) != n:
+                # is there a dimesion with size 1?
+                arr = arr.squeeze()
+                # TODO try to get back to a saveabel state, if this did not work
+
             self._arr = arr
             self._aff = aff
             self._checked_dtype = True
@@ -251,8 +351,9 @@ class NII(NII_Math):
                 header.set_sform(aff, code='aligned')
                 header.set_qform(aff, code='unknown')
                 header.set_data_dtype(arr.dtype)
-                rotation_zoom = aff[:3, :3]
+                rotation_zoom = aff[:n, :n]
                 zoom = np.sqrt(np.sum(rotation_zoom * rotation_zoom, axis=0))
+                #print(aff.shape,arr.shape,zoom)
                 header.set_zooms(zoom)
                 self._header = header
                 return
@@ -407,7 +508,7 @@ class NII(NII_Math):
             self.nii = nii
             return self
         else:
-            return NII(nii,self.seg) # type: ignore
+            return self.copy(nii) # type: ignore
 
     def set_array_(self,arr:np.ndarray,verbose:logging=True):
         return self.set_array(arr,inplace=True,verbose=verbose)
@@ -472,13 +573,15 @@ class NII(NII_Math):
         change = tuple(a * (s-1) for a, s in zip(change, self.shape, strict=False))
         new_aff[:3, 3] = nib.affines.apply_affine(aff,change) # type: ignore
         ######
+        #if self.header is not None:
+        #    self.header.set_sform(new_aff, code=1)
         new_img = arr, new_aff,self.header
         log.print("Image reoriented from", nio.ornt2axcodes(ornt_fr), "to", axcodes_to,verbose=verbose)
         if inplace:
             self.nii = new_img
             return self
 
-        return NII(new_img, self.seg) # type: ignore
+        return self.copy(new_img) # type: ignore
     def reorient_(self:Self, axcodes_to: AX_CODES|None = ("P", "I", "R"), verbose:logging=False) -> Self:
         if axcodes_to is None:
             return self
@@ -680,7 +783,7 @@ class NII(NII_Math):
         Rescales the NIfTI image to a new voxel spacing.
 
         Args:
-            voxel_spacing (tuple[float, float, float]): The desired voxel spacing in millimeters (x, y, z). -1 is keep the voxel spacing.
+            voxel_spacing (tuple[float, float, float] | float): The desired voxel spacing in millimeters (x, y, z). -1 is keep the voxel spacing.
                 Defaults to (1, 1, 1).
             c_val (float | None, optional): The padding value. Defaults to None, meaning that the padding value will be
                 inferred from the image data.
@@ -693,6 +796,8 @@ class NII(NII_Math):
         Returns:
             NII: A new NII object with the resampled image data.
         """
+        if isinstance(voxel_spacing, (int,float)):
+            voxel_spacing =(voxel_spacing,voxel_spacing,voxel_spacing)
         if voxel_spacing in ((-1, -1, -1), self.zoom):
             log.print(f"Image already resampled to voxel size {self.zoom}",verbose=verbose)
             return self.copy() if inplace else self
@@ -705,6 +810,7 @@ class NII(NII_Math):
         order = 0 if self.seg else 3
         voxel_spacing = tuple([v if v != -1 else z for v,z in zip(voxel_spacing,zms,strict=True)])
         if voxel_spacing == self.zoom:
+            log.print(f"Image already resampled to voxel size {self.zoom}",verbose=verbose)
             return self.copy() if inplace else self
 
         # Calculate new shape
@@ -716,7 +822,7 @@ class NII(NII_Math):
         if inplace:
             self.nii = new_img
             return self
-        return NII(new_img, self.seg,self.c_val)
+        return self.copy(new_img)
 
     def rescale_(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:logging=False,mode='nearest'):
         return self.rescale( voxel_spacing=voxel_spacing, c_val=c_val, verbose=verbose,mode=mode, inplace=True)
@@ -742,7 +848,7 @@ class NII(NII_Math):
             self.nii = nii
             return self
         else:
-            return NII(nii,self.seg,self.c_val)
+            return self.copy(nii)
     def resample_from_to_(self, to_vox_map:Image_Reference|tuple[SHAPE,AFFINE,ZOOMS], mode='nearest', c_val:float|None=None,verbose:logging=True,aline_corners=False):
         return self.resample_from_to(to_vox_map,mode=mode,c_val=c_val,inplace=True,verbose=verbose,align_corners=aline_corners)
 
@@ -1264,20 +1370,19 @@ class NII(NII_Math):
         if inplace:
             self.nii = nii
             return self
-        return NII(nii, True)
+        return self.copy(nii)
 
     def map_labels_(self, label_map: LABEL_MAP, verbose:logging=True):
         return self.map_labels(label_map,verbose=verbose,inplace=True)
     def copy(self, nib:Nifti1Image|_unpacked_nii|None = None):
         if nib is None:
-            return NII((self.get_array(), self.affine.copy(), self.header.copy()),seg=self.seg,c_val = self.c_val)
-        else:
-            return NII(nib,seg=self.seg,c_val = self.c_val)
+            nib = (self.get_array(), self.affine.copy(), self.header.copy())
+        return NII((self.get_array(), self.affine.copy(), self.header.copy()),seg=self.seg,c_val = self.c_val,info = self.info)
+
     def clone(self):
         return self.copy()
-    def save(self,file:str|Path|bids_files.BIDS_FILE,make_parents=True,verbose:logging=True, dtype = None):
-        if isinstance(file, bids_files.BIDS_FILE):
-            file = file.file['nii.gz']
+    @secure_save
+    def save(self,file:str|Path,make_parents=True,verbose:logging=True, dtype = None):
         if make_parents:
             Path(file).parent.mkdir(exist_ok=True,parents=True)
         arr = self.get_array()
@@ -1293,6 +1398,65 @@ class NII(NII_Math):
                 out.set_data_dtype(np.int32)
         nib.save(out, file) #type: ignore
         log.print(f"Save {file} as {out.get_data_dtype()}",verbose=verbose,ltype=Log_Type.SAVE)
+
+    @secure_save
+    def save_nrrd(self:Self, file: str | Path|bids_files.BIDS_FILE,make_parents=True,verbose:logging=True,**args):
+        """
+        Save an NII object to an NRRD file.
+
+        Args:
+            nii_obj (NII): The NII object to be saved.
+            path (str | Path): The file path where the NRRD file will be saved.
+
+        Raises:
+            ImportError: If the `pynrrd` package is not installed.
+            ValueError: If the affine matrix is invalid or incompatible.
+        """
+        try:
+            import nrrd
+        except ModuleNotFoundError:
+            raise ImportError("The `pynrrd` package is required but not installed. Install it with `pip install pynrrd`." ) from None
+        if isinstance(file, bids_files.BIDS_FILE):
+            file = file.file['nrrd']
+        if not str(file).endswith(".nrrd"):
+            file = str(file)+".nrrd"
+        if make_parents:
+            Path(file).parent.mkdir(exist_ok=True,parents=True)
+        _header = {}
+        #if self.orientation not in [("L","P","S")]: #,("R","P","S"),("R","A","S"),("L","A","S")
+        #    _header = {"ref_orientation": "".join(self.orientation)}
+        #    self = self.reorient(("P","L","S"))  # Convert to LAS-SimpleITK  # noqa: PLW0642
+        # Slicer only allows LPS and flip of L and P axis
+        ori = "left-posterior-superior"# "-".join([_dirction_name_itksnap_dict[i] for i in self.orientation])
+
+        data = self.get_array()
+        affine = self.affine.copy()
+        affine[0] *=-1
+        affine[1] *=-1
+        # Extract header fields from the affine matrix
+        n = affine.shape[0] - 1
+        space_directions = affine[:n, :n]
+        space_origin = affine[:n, n]
+        _header["kinds"]= ['domain'] * n if "kinds" not in self.info else self.info["kinds"]
+        header = {
+            'type': str(data.dtype),
+            'dimension': n,
+            'space': ori,
+            'sizes': data.shape,#(data.shape[1],data.shape[0],data.shape[2]),
+            'space directions': space_directions.tolist(),
+            'space origin': space_origin,
+            'endian': 'little',
+            'encoding': 'gzip',
+            **_header,**self.info
+        }
+        if "Segmentation_ConversionParameters" in header:
+            del header["Segmentation_ConversionParameters"]
+        # Save NRRD file
+
+        log.print(f"Saveing {file}",verbose=verbose,ltype=Log_Type.SAVE,end='\r')
+        nrrd.write(file, data=data, header=header,**args)
+        log.print(f"Save {file} as {header['type']}",verbose=verbose,ltype=Log_Type.SAVE)
+
     def __str__(self) -> str:
         return f"shp={self.shape}; ori={self.orientation}, zoom={tuple(np.around(self.zoom, decimals=2))}, seg={self.seg}" # type: ignore
     def __repr__(self)-> str:
@@ -1474,11 +1638,14 @@ def to_nii(img_bids: Image_Reference, seg=False) -> NII:
         return img_bids.open_nii()
 
     elif isinstance(img_bids, str):
-        if img_bids.split(".")[-1] in ("mha",):
+        ending = img_bids.split(".")[-1]
+        if ending in ("mha",):
             import SimpleITK as sitk  # noqa: N813
             img = sitk.ReadImage(img_bids)
             from TPTBox.core.sitk_utils import sitk_to_nii
             return sitk_to_nii(img,seg)
+        if ending in ("nrrd",):
+            return NII.load_nrrd(img_bids,seg=seg)
         return NII(nib.load(img_bids), seg) #type: ignore
     elif isinstance(img_bids, Nifti1Image):
         return NII(img_bids, seg)
@@ -1499,67 +1666,3 @@ def to_nii_interpolateable(i_img:Interpolateable_Image_Reference) -> NII:
         return i_img.open_nii()
     else:
         raise TypeError("to_nii_interpolateable",i_img)
-
-
-def _resample_from_to(
-    from_img:NII,
-    to_img:NII|tuple[SHAPE,AFFINE,ZOOMS],
-    order=3,
-    mode="nearest",
-    align_corners:bool|Sentinel=Sentinel()  # noqa: B008
-):
-    import numpy.linalg as npl
-    import scipy.ndimage as scipy_img
-    from nibabel.affines import AffineError, to_matvec
-    from nibabel.imageclasses import spatial_axes_first
-
-    # This check requires `shape` attribute of image
-    if not spatial_axes_first(from_img.nii):
-        raise ValueError(f"Cannot predict position of spatial axes for Image type {type(from_img)}")
-    if isinstance(to_img,tuple):
-        to_shape, to_affine, zoom_to = to_img
-    else:
-        assert to_img.affine is not None
-        assert to_img.zoom is not None
-        to_shape:SHAPE = to_img.shape
-        to_affine:AFFINE = to_img.affine
-        zoom_to = np.array(to_img.zoom)
-    from_n_dim = len(from_img.shape)
-    if from_n_dim < 3:
-        raise AffineError("from_img must be at least 3D")
-    if (isinstance(align_corners,Sentinel) and order == 0) or align_corners:
-        # https://discuss.pytorch.org/t/what-we-should-use-align-corners-false/22663/6
-        # https://discuss.pytorch.org/uploads/default/original/2X/6/6a242715685b8192f07c93a57a1d053b8add97bf.png
-        # Simulate align_corner=True, by manipulating the affine
-        # Updated to matrix:
-        # make the output by one voxel larger
-        # z_new = z * num_pixel/(num_pixel+1)
-        to_affine_new = to_affine.copy()
-        num_pixel = np.array(to_shape)
-        zoom_new = zoom_to*num_pixel/(1+num_pixel)
-        rotation_zoom = to_affine[:3, :3]
-        to_affine_new[:3, :3] = rotation_zoom / np.array(zoom_to)*zoom_new
-        ## Shift origin to corner
-        corner = np.array([-0.5,-0.5,-0.5,0])
-        to_affine_new[:,3] -=to_affine_new@corner
-        # Update from matrix
-        # z_new = z * num_pixel/(num_pixel+1)
-        zoom_from = np.array(from_img.zoom)
-        from_affine_new = from_img.affine.copy()
-        num_pixel = np.array(from_img.shape)
-        zoom_new = zoom_from*num_pixel/(1+num_pixel)
-        rotation_zoom = from_img.affine[:3, :3]
-        from_affine_new[:3, :3] = rotation_zoom / np.array(zoom_from)*zoom_new
-        ## Shift origin to corner
-        from_affine_new[:,3] -=from_affine_new@corner
-
-        a_to_affine = nip.adapt_affine(to_affine_new, len(to_shape))
-        a_from_affine = nip.adapt_affine(from_affine_new, from_n_dim)
-    else:
-        a_to_affine = nip.adapt_affine(to_affine, len(to_shape))
-        a_from_affine = nip.adapt_affine(from_img.affine, from_n_dim)
-    to_vox2from_vox = npl.inv(a_from_affine).dot(a_to_affine)
-    rzs, trans = to_matvec(to_vox2from_vox)
-
-    data = scipy_img.affine_transform(from_img.get_array(), rzs, trans, to_shape, order=order, mode=mode, cval=from_img.get_c_val()) # type: ignore
-    return data, to_affine, from_img.header
