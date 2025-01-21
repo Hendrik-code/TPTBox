@@ -50,8 +50,12 @@ class NII_Math(NII_Proxy,Has_Grid):
         return self.set_array(opt(self.get_array()),inplace=inplace,verbose=False)
     def __add__(self,p2):
         return self._binary_opt(p2,operator.add)
+    def __radd__(self,p2):
+        return self._binary_opt(p2,operator.add)
     def __sub__(self,p2):
         return self._binary_opt(p2,operator.sub)
+    def __rsub__(self,p2)->Self:
+        return (-self)._binary_opt(p2,operator.add)
     def __mul__(self,p2):
         return self._binary_opt(p2,operator.mul)
     def __pow__(self,p2):
