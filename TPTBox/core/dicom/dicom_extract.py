@@ -511,6 +511,24 @@ def extract_dicom_folder(
 
 
 if __name__ == "__main__":
+    # s = "/home/robert/Downloads/bein/dataset-oberschenkel/rawdata/sub-1-3-46-670589-11-2889201787-2305829596-303261238-2367429497/mr/sub-1-3-46-670589-11-2889201787-2305829596-303261238-2367429497_sequ-406_mr.nii.gz"
+    # nii2 = NII.load(s, False)
+    # print(nii2.affine, nii2.orientation)
+    # nii3 = None
+    # k = 1
+    # for i in Path("/home/robert/Downloads/bein/").glob("ID001_*.nrrd"):
+    #    nii = NII.load_nrrd(i, True)
+    #    nii.reorient_(nii2.orientation)
+    #    nii.affine = nii2.affine
+    #    nii.save(str(i).replace(".nrrd", ".nii.gz"))
+    #    if nii3 is None:
+    #        nii3 = nii.copy() * 0
+    #    print(nii3.unique())
+    #    nii += nii3
+    #    nii3[np.logical_and(nii == 1, nii3 == 0) == 1] = k
+    #    k += 1
+    # print(nii3.unique())
+    # nii3.save("/home/robert/Downloads/bein/ID001.nii.gz")
     # extract_dicom_folder(Path("/home/robert/Downloads/bein/a"), Path("/home/robert/Downloads/bein/", "dataset-oberschenkel"), False, False)
 
     # exit()

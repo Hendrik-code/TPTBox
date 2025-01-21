@@ -47,11 +47,10 @@ else:
         pass
 
 
-@dataclass
 class Has_Grid(Grid_Proxy):
     """Parent class for methods that are shared by POI and NII"""
 
-    info: dict = field(default_factory=dict, compare=False)  # additional info (key,value pairs)
+    info: dict
 
     def to_gird(self) -> "Grid":
         return Grid(**self._extract_affine())

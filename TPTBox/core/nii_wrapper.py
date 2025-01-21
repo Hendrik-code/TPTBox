@@ -341,7 +341,7 @@ class NII(NII_Math):
             self.__unpacked = True
             arr, aff, header = nii
             n = aff.shape[0]-1
-            if n != header['dim'][0]:
+            if header is None or n != header['dim'][0]:
                 header = None
             if len(arr.shape) != n:
                 # is there a dimesion with size 1?
@@ -713,7 +713,8 @@ class NII(NII_Math):
         if inplace:
             self.nii = nii
             return self
-        return self.copy(nii)
+        x= self.copy(nii)
+        return x
 
     def apply_crop_(self,ex_slice:tuple[slice,slice,slice]|Sequence[slice]):
         return self.apply_crop(ex_slice=ex_slice,inplace=True)
@@ -1395,7 +1396,7 @@ class NII(NII_Math):
     def copy(self, nib:Nifti1Image|_unpacked_nii|None = None):
         if nib is None:
             nib = (self.get_array(), self.affine.copy(), self.header.copy())
-        return NII((self.get_array(), self.affine.copy(), self.header.copy()),seg=self.seg,c_val = self.c_val,info = self.info)
+        return NII(nib,seg=self.seg,c_val = self.c_val,info = self.info)
 
     def clone(self):
         return self.copy()
