@@ -1014,7 +1014,7 @@ def load_poi(ctd_path: POI_Reference, verbose=True) -> POI:  # noqa: ARG001
     else:
         raise NotImplementedError(format_)
     return POI(
-        centroids,
+        centroids=centroids,
         orientation=axcode,
         zoom=zoom,
         shape=shape,  # type: ignore
@@ -1047,7 +1047,7 @@ def _load_docker_centroids(dict_list, centroids: POI_Descriptor, format_):  # no
                     subreg_id = conversion_poi[subreg]
                     centroids[vert_id, subreg_id] = (d["X"], d["Y"], d["Z"])
                 except Exception:
-                    print(f'Label {d["label"]} is not an integer and cannot be converted to an int')
+                    print(f"Label {d['label']} is not an integer and cannot be converted to an int")
                     centroids[0, d["label"]] = (d["X"], d["Y"], d["Z"])
         else:
             raise ValueError(d)

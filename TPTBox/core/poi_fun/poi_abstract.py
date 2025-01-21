@@ -286,6 +286,7 @@ class Abstract_POI(Has_Grid):
     format: int | None = field(default=None, repr=False, compare=False)
     level_one_info: type[Abstract_lvl] = Vertebra_Instance  # Must be Enum and must has order_dict
     level_two_info: type[Abstract_lvl] = Location
+    info: dict = field(default_factory=dict, compare=False, init=True)  # additional info (key,value pairs)
 
     @property
     def centroids(self) -> POI_Descriptor:

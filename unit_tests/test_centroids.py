@@ -140,17 +140,19 @@ class Test_Centroids(unittest.TestCase):
         for _ in range(repeats):
             msk, cent, order, sizes = get_nii(num_point=random.randint(1, 2))
             msk.seg = True
-            cdt = POI(cent, orientation=order)
+            cdt = msk.make_empty_POI(cent)
             ex_slice = msk.compute_crop()
             msk2 = msk.apply_crop(ex_slice)
+            assert msk2.origin != msk.origin
             cdt2 = cdt.apply_crop(ex_slice)
+
             cdt2_alt = calc_centroids(msk2)
             self.assertEqual(cdt2.centroids, cdt2_alt.centroids)
 
     def test_crop_centroids_(self):
         for _ in range(repeats):
             msk, cent, order, sizes = get_nii(num_point=random.randint(1, 7))
-            cdt = POI(cent, orientation=order, zoom=msk.zoom, shape=msk.shape)
+            cdt = msk.make_empty_POI(cent)
             ex_slice = msk.compute_crop()
             msk.apply_crop_(ex_slice)
             cdt.apply_crop_(ex_slice)
