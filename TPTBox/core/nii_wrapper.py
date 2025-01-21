@@ -54,7 +54,7 @@ from .vert_constants import (
 )
 
 if TYPE_CHECKING:
-    from TPTBox import POI
+    pass
 MODES = Literal["constant", "nearest", "reflect", "wrap"]
 _unpacked_nii = tuple[np.ndarray, AFFINE, nib.nifti1.Nifti1Header]
 _formatwarning = warnings.formatwarning
@@ -88,7 +88,7 @@ class NII(NII_Math):
     Example Usage:
     ```python
     # Create an instance of NII class
-    nii = NII(nib.load('image.nii.gz'))
+    nii = NII(nib.load('image.nii.gz'),seg=False)
 
     # Get the shape of the image
     shape = nii.shape
