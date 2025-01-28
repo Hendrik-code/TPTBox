@@ -20,7 +20,6 @@ from TPTBox.core.bids_constants import (
     entity_format,
     entity_left_right,
     entity_on_off,
-    entity_parts,
     file_types,
     formats,
     formats_relaxed,
@@ -107,6 +106,7 @@ def validate_entities(key: str, value: str, name: str, verbose: bool):
 
 def get_values_from_name(path: Path | str, verbose) -> tuple[str, dict[str, str], str, str]:
     name = Path(path).name
+
     bids_key, file_type = name.split(".", maxsplit=1)
 
     keys = bids_key.split("_")
@@ -704,11 +704,11 @@ class BIDS_FILE:
 
         Returns:
             _type_: _description_
-        """ """"""
+        """
         if info is None:
             info = {}
         if non_strict_mode and not self.BIDS_key.startswith("sub"):
-            info["sub"] = self.BIDS_key.replace("_", "-")
+            info["sub"] = self.BIDS_key.replace("_", "-").replace(".", "-")
         if isinstance(file_type, str) and file_type.startswith("."):
             file_type = file_type[1:]
         path = self.insert_info_into_path(path)
