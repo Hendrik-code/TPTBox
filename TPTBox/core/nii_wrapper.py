@@ -1120,7 +1120,7 @@ class NII(NII_Math):
             else:
                 out += i*k
         if out is None:
-            return self if inplace else self
+            return self if inplace else self.copy()
         return self.set_array(out,inplace=inplace)
 
     def filter_connected_components(self, labels: int |list[int]|None,min_volume:int|None=None,max_volume:int|None=None, max_count_component = None, connectivity: int = 3,removed_to_label=0):
