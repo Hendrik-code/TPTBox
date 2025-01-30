@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import typing
 from collections.abc import Sequence
 from enum import Enum
