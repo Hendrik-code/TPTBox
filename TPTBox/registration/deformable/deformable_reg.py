@@ -83,12 +83,15 @@ class Deformable_Registration:
         self,
         fixed_image: Image_Reference,
         moving_image: Image_Reference,
+        fixed_image_seg: Image_Reference | None = None,
+        moving_image_seg: Image_Reference | None = None,
         normalize: Literal["MRI", "CT"] | None = None,
         quantile: float = 0.95,
         reference_image: Image_Reference | None = None,
         device: Device | str | None = cuda,
         align_corners: bool = False,
         verbose=1,
+        config: Path | str | dict = Path(__file__).parent / "settings.json",
     ) -> None:
         """
         Initialize the deformable registration process.
@@ -123,13 +126,21 @@ class Deformable_Registration:
         source = mov.resample_from_to_(reference_image)
 
         # Load configuration and perform registration
-        deformable_simple = _load_config(Path(__file__).parent / "settings.json")
+        deformable_simple = _load_config(config) if not isinstance(config, dict) else config
         self.target_grid = fix.to_gird()
         self.input_grid = mov.to_gird()
         self.align_corners = align_corners
-
+        target_seg = to_nii(fixed_image_seg, True) if fixed_image_seg is not None else None
+        if moving_image_seg is not None:
+            source_seg = to_nii(moving_image_seg, True).resample_from_to_(reference_image)
         self.transform = deform_reg_pair.register_pairwise(
-            target=fix.copy(), source=source.copy(), config=deformable_simple, device=device, verbose=verbose
+            target=fix.copy(),
+            source=source.copy(),
+            target_seg=target_seg,
+            source_seg=source_seg,
+            config=deformable_simple,
+            device=device,  # type: ignore
+            verbose=verbose,
         )
 
     @torch.no_grad()
@@ -147,14 +158,26 @@ class Deformable_Registration:
         target_grid = target_grid_nii.to_deepali_grid(self.align_corners)
         source_image = img.resample_from_to(self.input_grid).to_deepali()
 
-        data = _warp_image(source_image, target_grid, self.transform, "nearest" if img.seg else "linear", device=device).squeeze()
+        data = _warp_image(
+            source_image,
+            target_grid,
+            self.transform,
+            "nearest" if img.seg else "linear",
+            device=device,
+        ).squeeze()
         data: torch.Tensor = data.permute(*torch.arange(data.ndim - 1, -1, -1))  # type: ignore
         out = target_grid_nii.make_nii(data.detach().cpu().numpy(), img.seg)
         return out
 
     def transform_poi(self, poi: POI, device="cuda"):
         source_image = poi.resample_from_to(self.target_grid)
-        data = _warp_poi(source_image, self.target_grid, self.transform, self.align_corners, device=device)
+        data = _warp_poi(
+            source_image,
+            self.target_grid,
+            self.transform,
+            self.align_corners,
+            device=device,
+        )
         return data.resample_from_to(self.target_grid)
 
     def __call__(self, *args, **kwds) -> NII:
@@ -196,8 +219,14 @@ def test1(run=False):
     """
     from TPTBox import NII
 
-    fixed = NII.load("/media/data/robert/code/TPTBox/tmp/sub-100000_sequ-stitched_acq-ax_part-water_vibe.nii.gz", False)
-    moving = NII.load("/media/data/robert/code/TPTBox/tmp/sub-100000_sequ-me1_acq-ax_part-water_mevibe.nii.gz", False)
+    fixed = NII.load(
+        "/media/data/robert/code/TPTBox/tmp/sub-100000_sequ-stitched_acq-ax_part-water_vibe.nii.gz",
+        False,
+    )
+    moving = NII.load(
+        "/media/data/robert/code/TPTBox/tmp/sub-100000_sequ-me1_acq-ax_part-water_mevibe.nii.gz",
+        False,
+    )
     poi = moving.make_empty_POI()
 
     poi[123, 44] = (93 - 1, 51 - 1, 26 - 1)
@@ -236,11 +265,17 @@ def test2(run=False):
     from TPTBox import NII
 
     # ref = NII.load("/media/data/robert/code/TPTBox/tmp/sub-100000_sequ-stitched_acq-ax_part-water_vibe.nii.gz", False)
-    mov = NII.load("/media/data/robert/code/TPTBox/tmp/sub-100000_sequ-me1_acq-ax_part-water_mevibe.nii.gz", False)
+    mov = NII.load(
+        "/media/data/robert/code/TPTBox/tmp/sub-100000_sequ-me1_acq-ax_part-water_mevibe.nii.gz",
+        False,
+    )
     poi = mov.make_empty_POI()
     poi[123, 44] = (68 - 1, 61 - 1, 17 - 1)
     poi[123, 45] = (77 - 1, 55 - 1, 20 - 1)
-    mov2 = NII.load("/media/data/robert/code/TPTBox/tmp/sub-100000_sequ-me1_acq-ax_part-water_mevibe.nii.gz", False)
+    mov2 = NII.load(
+        "/media/data/robert/code/TPTBox/tmp/sub-100000_sequ-me1_acq-ax_part-water_mevibe.nii.gz",
+        False,
+    )
     mov2[mov2 != 0] = 0
     mov2[:-3, :, :] = mov2[3:, :, :]
     # mov2[:, :-3, :] = mov2[:, 3:, :]

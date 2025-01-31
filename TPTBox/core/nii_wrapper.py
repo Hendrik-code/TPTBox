@@ -54,7 +54,7 @@ from .vert_constants import (
 )
 
 if TYPE_CHECKING:
-    from TPTBox import POI
+    pass
 MODES = Literal["constant", "nearest", "reflect", "wrap"]
 _unpacked_nii = tuple[np.ndarray, AFFINE, nib.nifti1.Nifti1Header]
 _formatwarning = warnings.formatwarning
@@ -75,7 +75,13 @@ warnings.formatwarning = formatwarning_tb
 
 N = TypeVar("N", bound="NII")
 Image_Reference = bids_files.BIDS_FILE | Nifti1Image | Path | str | N
-Interpolateable_Image_Reference = bids_files.BIDS_FILE | tuple[Nifti1Image, bool] | tuple[Path, bool] | tuple[str, bool] | N
+Interpolateable_Image_Reference = (
+    bids_files.BIDS_FILE
+    | tuple[Nifti1Image, bool]
+    | tuple[Path, bool]
+    | tuple[str, bool]
+    | N
+)
 
 Proxy = tuple[tuple[int, int, int], np.ndarray]
 suppress_dtype_change_printout_in_set_array = False
@@ -605,7 +611,7 @@ class NII(NII_Math):
         Returns:
             NII: A new NII object containing the sliced image if inplace=False. Otherwise, it returns the original NII object after applying the slice.
         """        ''''''
-        nii = self.nii.slicer[ex_slice] if ex_slice is not None else self.nii_abstract
+        nii = self.nii.slicer[tuple(ex_slice)] if ex_slice is not None else self.nii_abstract
         if inplace:
             self.nii = nii
             return self
@@ -1124,7 +1130,7 @@ class NII(NII_Math):
             return self if inplace else self
         return self.set_array(out,inplace=inplace)
 
-    def filter_connected_components(self, labels: int |list[int]|None,min_volume:int|None=None,max_volume:int|None=None, max_count_component = None, connectivity: int = 3,removed_to_label=0):
+    def filter_connected_components(self, labels: int |list[int]|None,min_volume:int=0,max_volume:int|None=None, max_count_component = None, connectivity: int = 3,removed_to_label=0):
         """
         Filter connected components in a segmentation array based on specified volume constraints.
 
@@ -1140,15 +1146,20 @@ class NII(NII_Math):
         None
         """
         arr = self.get_seg_array()
-        nii = self.get_largest_k_segmentation_connected_components(None,labels,connectivity=connectivity,return_original_labels=False)
+        nii = self.get_largest_k_segmentation_connected_components(max_count_component,labels,connectivity=connectivity,return_original_labels=False,min_volume=min_volume,max_volume=max_volume)
+        #print("filter",nii.unique())
+        assert max_count_component is None or nii.max() <= max_count_component, nii.unique()
+        return nii
+        print("nii", np.unique(nii))
         for k, idx in enumerate(nii.unique(),start=1):
             msk = nii.extract_label(idx)
-            nii *=(-msk+1)
+            nii[msk != 0] =0 # Remaining Labels
             s = msk.sum()
             #print(idx,k,s)
             if min_volume is not None and s < min_volume:
                 arr[msk.get_array()!=0] = removed_to_label
                 arr[nii.get_array()!=0] = removed_to_label # set all future to 0
+                #print(np.unique(arr))
                 break
             if max_volume is not None and s>max_volume:
                 arr[msk.get_array()==1] = removed_to_label
@@ -1172,7 +1183,7 @@ class NII(NII_Math):
         return np_get_connected_components_center_of_mass(arr, label=label, connectivity=connectivity, sort_by_axis=sort_by_axis)
 
 
-    def get_largest_k_segmentation_connected_components(self, k: int | None, labels: int | list[int] | None = None, connectivity: int = 1, return_original_labels: bool = True):
+    def get_largest_k_segmentation_connected_components(self, k: int | None, labels: int | list[int] | None = None, connectivity: int = 1, return_original_labels: bool = True,use_crop=True,inplace=False,min_volume:int=0,max_volume:int|None=None):
         """Finds the largest k connected components in a given array (does NOT work with zero as label!)
 
         Args:
@@ -1181,7 +1192,20 @@ class NII(NII_Math):
             labels (int | list[int] | None, optional): Labels that the algorithm should be applied to. If none, applies on all labels found in this NII. Defaults to None.
             return_original_labels (bool): If set to False, will label the components from 1 to k. Defaults to True
         """
-        return self.set_array(np_get_largest_k_connected_components(self.get_seg_array(), k=k, label_ref=labels, connectivity=connectivity, return_original_labels=return_original_labels))
+       # if use_crop:
+       #     try:
+       #         crop = (self if labels is None else self.extract_label(labels)).compute_crop(dist=1)
+       #     except ValueError:
+       #         return self if inplace else self.copy()
+       #     msk_i_data_org = self.get_seg_array()
+       #     msk_i_data = msk_i_data_org[crop]
+       # else:
+        msk_i_data = self.get_seg_array()
+        out = np_get_largest_k_connected_components(msk_i_data, k=k, label_ref=labels, connectivity=connectivity, return_original_labels=return_original_labels,min_volume=min_volume,max_volume=max_volume)
+        #if use_crop:
+        #    msk_i_data_org[crop] = out
+        #    out = msk_i_data_org        
+        return self.set_array(out,inplace=inplace)
 
     def compute_surface_mask(self, connectivity: int, dilated_surface: bool = False):
         """ Removes everything but surface voxels
@@ -1401,19 +1425,19 @@ class NII(NII_Math):
         b = b.resample_from_to(self,c_val=0,verbose=False) # type: ignore
         return b.get_array().sum()
 
-    def extract_label(self,label:int|Location|Sequence[int]|Sequence[Location], keep_label=False,inplace=False):
+    def extract_label(self,label:int|Enum|Sequence[int]|Sequence[Enum], keep_label=False,inplace=False):
         '''If this NII is a segmentation you can single out one label with [0,1].'''
         seg_arr = self.get_seg_array()
 
         if isinstance(label, Sequence):
-            label = [l.value if isinstance(l,Enum) else l for l in label]
-            if 1 not in label:
+            label_int:list[int] = [idx.value if isinstance(idx,Enum) else idx for idx in label]
+            if 1 not in label_int:
                 seg_arr[seg_arr == 1] = 0
-            for l in label:
-                seg_arr[seg_arr == l] = 1
+            for idx in label_int:
+                seg_arr[seg_arr == idx] = 1
             seg_arr[seg_arr != 1] = 0
         else:
-            if isinstance(label,Location):
+            if isinstance(label,Enum):
                 label = label.value
             if isinstance(label,str):
                 label = int(label)

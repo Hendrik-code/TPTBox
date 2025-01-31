@@ -699,7 +699,7 @@ def to_cdt(ctd_bids: POI_Reference | None) -> POI | None:
     if ctd_bids is None:
         return None
     ctd = load_centroids(ctd_bids)
-    if len(ctd) > 2:  # handle case if empty centroid file given
+    if len(ctd) > 0:  # handle case if empty centroid file given
         return ctd
     print("[!][snp] To few centroids", ctd)
     return None
