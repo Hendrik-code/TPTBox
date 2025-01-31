@@ -62,23 +62,6 @@ class Test_Centroids(unittest.TestCase):
         file.unlink(missing_ok=True)
         self.assertEqual(c, p)
 
-    def test_calc_centroids_labeled_bufferd(self):
-        msk, cent, order, sizes = get_nii(num_point=random.randint(1, 7))
-        msk2, cent2, order2, sizes2 = get_nii(num_point=len(cent) - 1)
-
-        cent = POI(cent, **msk._extract_affine())
-        cent2 = POI(cent2, **msk2._extract_affine())
-        file = Path(tempfile.gettempdir(), "test_save_load_centroids.json")
-        file.unlink(missing_ok=True)
-        out = calc_centroids_from_two_masks(msk, None, out_path=file, verbose=False)
-        self.assertEqual(out, cent)
-        out = calc_centroids_from_two_masks(msk2, None, out_path=file, verbose=False)
-        self.assertEqual(out, cent)
-        file.unlink(missing_ok=True)
-        out = calc_centroids_from_two_masks(msk2, None, out_path=file, verbose=False)
-        self.assertEqual(out, cent2)
-        file.unlink(missing_ok=True)
-
     def test_calc_centroids_labeled_bufferd2(self):
         msk, cent, order, sizes = get_nii(num_point=random.randint(1, 7))
         msk2, cent2, order2, sizes2 = get_nii(x=msk.shape, num_point=len(cent) - 1)
@@ -94,12 +77,12 @@ class Test_Centroids(unittest.TestCase):
         cent2 = POI(cent2, **msk2._extract_affine())
         file = Path(tempfile.gettempdir(), "test_save_load_centroids.json")
         file.unlink(missing_ok=True)
-        out = calc_centroids_from_two_masks(msk, subreg, out_path=file, verbose=False)
+        out = calc_poi_from_subreg_vert(msk, subreg, buffer_file=file, save_buffer_file=True, verbose=False)
         self.assertEqual(out, cent)
-        out = calc_centroids_from_two_masks(msk2, subreg2, out_path=file, verbose=False)
+        out = calc_poi_from_subreg_vert(msk2, subreg2, buffer_file=file, save_buffer_file=True, verbose=False)
         self.assertEqual(out, cent)
         file.unlink(missing_ok=True)
-        out = calc_centroids_from_two_masks(msk2, subreg2, out_path=file, verbose=False)
+        out = calc_poi_from_subreg_vert(msk2, subreg2, buffer_file=file, save_buffer_file=True, verbose=False)
         self.assertEqual(out, cent2)
         file.unlink(missing_ok=True)
 
