@@ -33,12 +33,16 @@ def get_test_ct() -> tuple[NII, NII, NII, int]:
     return ct, subreg, vert, 22
 
 
-def get_test_mri() -> tuple[NII, NII, NII, int]:
+def get_test_mri(orientation=None) -> tuple[NII, NII, NII, int]:
     tests_path = get_tests_dir()
     mri_path = tests_path.joinpath("sample_mri")
     mri = NII.load(mri_path.joinpath("sub-mri_label-6_T2w.nii.gz"), seg=False)
     subreg = NII.load(mri_path.joinpath("sub-mri_seg-subreg_label-6_msk.nii.gz"), seg=True)
     vert = NII.load(mri_path.joinpath("sub-mri_seg-vert_label-6_msk.nii.gz"), seg=True)
+    if orientation is not None:
+        mri = mri.reorient(orientation)
+        subreg = subreg.reorient(orientation)
+        vert = vert.reorient(orientation)
     return mri, subreg, vert, 6
 
 

@@ -350,8 +350,8 @@ def calc_center_spinal_cord(
             fill_back[np.logical_and(select == 1, fill_back == 0)] = reg_label
     if fill_back is not None:
         assert _fill_inplace is not None
-        subreg_iso = subreg_iso.set_array(fill_back).reorient(("S", "A", "R"))
-        fill_back = subreg_iso.get_array()
+        subreg_iso2 = subreg_iso.set_array(fill_back).reorient(("S", "A", "R"))
+        fill_back = subreg_iso2.get_array()
         x_slice = np.ones_like(fill_back[0]) * np.max(fill_back) + 1
         for i in range(fill_back.shape[0]):
             curr_slice = fill_back[i]
@@ -359,13 +359,8 @@ def calc_center_spinal_cord(
             x_slice[cond] = np.minimum(curr_slice[cond], x_slice[cond])
             fill_back[i] = x_slice
 
-        arr = subreg_iso.set_array(fill_back).reorient(poi.orientation).rescale_(poi.zoom).get_array()
+        arr = subreg_iso2.set_array(fill_back).reorient(poi.orientation).rescale_(poi.zoom).get_array()
         _fill_inplace.set_array_(arr)
-    ret = calc_centroids(
-        subreg_iso.set_array(out),
-        second_stage=subreg_id,
-        extend_to=poi_iso.extract_subregion(subreg_id),
-        inplace=True,
-    )
+    ret = calc_centroids(subreg_iso.set_array(out), second_stage=subreg_id, extend_to=poi_iso.extract_subregion(subreg_id), inplace=True)
     ret.rescale_(poi.zoom)
     return poi.join_left_(ret)
