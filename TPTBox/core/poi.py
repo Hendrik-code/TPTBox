@@ -1047,7 +1047,7 @@ def _load_docker_centroids(dict_list, centroids: POI_Descriptor, format_):  # no
                     subreg_id = conversion_poi[subreg]
                     centroids[vert_id, subreg_id] = (d["X"], d["Y"], d["Z"])
                 except Exception:
-                    print(f'Label {d["label"]} is not an integer and cannot be converted to an int')
+                    print(f"Label {d['label']} is not an integer and cannot be converted to an int")
                     centroids[0, d["label"]] = (d["X"], d["Y"], d["Z"])
         else:
             raise ValueError(d)
@@ -1118,7 +1118,7 @@ def _int2loc(
     return i
 
 
-def calc_poi_labeled_buffered(
+def calc_poi_from_two_segs(
     msk_reference: Image_Reference,
     subreg_reference: Image_Reference | None,
     out_path: Path | str,
@@ -1284,10 +1284,7 @@ def calc_poi_from_subreg_vert(
     if _vert_ids is None:
         _vert_ids = vert_msk.unique()
 
-    from TPTBox.core.poi_fun.vertebra_pois_non_centroids import (
-        add_prerequisites,
-        compute_non_centroid_pois,
-    )
+    from TPTBox.core.poi_fun.vertebra_pois_non_centroids import add_prerequisites, compute_non_centroid_pois
 
     subreg_id = add_prerequisites(_int2loc(subreg_id if isinstance(subreg_id, Sequence) else [subreg_id]))  # type: ignore
 

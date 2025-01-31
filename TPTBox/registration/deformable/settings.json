@@ -29,7 +29,7 @@
     "levels":3,
     "coarsest_level":2,
     "finest_level":0,
-    "finest_spacing":[1.40625, 1.40625, 3.0],
+    "finest_spacing":null, 
     "min_size":16,
     "pyramid_dims":["x", "y", "z"]
   }
