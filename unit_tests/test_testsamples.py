@@ -157,7 +157,7 @@ class Test_testsamples(unittest.TestCase):
         _, subreg_nii, vert_nii, label = get_test_mri()
         locs = [Location.Vertebra_Direction_Inferior]
         poi = calc_poi_from_subreg_vert(vert_nii, subreg_nii, subreg_id=locs, verbose=False)
-        from TPTBox.spine.stat import angles
+        from TPTBox.spine.spinestats import angles
 
         a = angles.compute_angel_between_two_points_(poi, label, label + 1, "R", project_2D=True)
         assert a is not None
