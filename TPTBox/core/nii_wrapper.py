@@ -77,13 +77,7 @@ warnings.formatwarning = formatwarning_tb
 
 N = TypeVar("N", bound="NII")
 Image_Reference = bids_files.BIDS_FILE | Nifti1Image | Path | str | N
-Interpolateable_Image_Reference = (
-    bids_files.BIDS_FILE
-    | tuple[Nifti1Image, bool]
-    | tuple[Path, bool]
-    | tuple[str, bool]
-    | N
-)
+Interpolateable_Image_Reference = bids_files.BIDS_FILE | tuple[Nifti1Image, bool] | tuple[Path, bool] | tuple[str, bool] | N
 
 Proxy = tuple[tuple[int, int, int], np.ndarray]
 suppress_dtype_change_printout_in_set_array = False
@@ -1294,7 +1288,7 @@ class NII(NII_Math):
         return np_get_connected_components_center_of_mass(arr, label=label, connectivity=connectivity, sort_by_axis=sort_by_axis)
 
 
-    def get_largest_k_segmentation_connected_components(self, k: int | None, labels: int | list[int] | None = None, connectivity: int = 1, return_original_labels: bool = True,use_crop=True,inplace=False,min_volume:int=0,max_volume:int|None=None):
+    def get_largest_k_segmentation_connected_components(self, k: int | None, labels: int | list[int] | None = None, connectivity: int = 1, return_original_labels: bool = True,inplace=False,min_volume:int=0,max_volume:int|None=None):
         """Finds the largest k connected components in a given array (does NOT work with zero as label!)
 
         Args:
@@ -1303,19 +1297,8 @@ class NII(NII_Math):
             labels (int | list[int] | None, optional): Labels that the algorithm should be applied to. If none, applies on all labels found in this NII. Defaults to None.
             return_original_labels (bool): If set to False, will label the components from 1 to k. Defaults to True
         """
-       # if use_crop:
-       #     try:
-       #         crop = (self if labels is None else self.extract_label(labels)).compute_crop(dist=1)
-       #     except ValueError:
-       #         return self if inplace else self.copy()
-       #     msk_i_data_org = self.get_seg_array()
-       #     msk_i_data = msk_i_data_org[crop]
-       # else:
         msk_i_data = self.get_seg_array()
         out = np_get_largest_k_connected_components(msk_i_data, k=k, label_ref=labels, connectivity=connectivity, return_original_labels=return_original_labels,min_volume=min_volume,max_volume=max_volume)
-        #if use_crop:
-        #    msk_i_data_org[crop] = out
-        #    out = msk_i_data_org        
         return self.set_array(out,inplace=inplace)
 
     def compute_surface_mask(self, connectivity: int, dilated_surface: bool = False):

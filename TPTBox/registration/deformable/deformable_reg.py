@@ -131,6 +131,7 @@ class Deformable_Registration:
         self.input_grid = mov.to_gird()
         self.align_corners = align_corners
         target_seg = to_nii(fixed_image_seg, True) if fixed_image_seg is not None else None
+        source_seg = None
         if moving_image_seg is not None:
             source_seg = to_nii(moving_image_seg, True).resample_from_to_(reference_image)
         self.transform = deform_reg_pair.register_pairwise(

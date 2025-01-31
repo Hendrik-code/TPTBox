@@ -96,7 +96,7 @@ def _run_spineps_internal(
     verbose: bool = False,
     outpath: str | Path | None = None,
     override=False,
-    gpu=0,
+    # gpu=0,
 ):
     # TODO select GPU
     from spineps.get_models import get_actual_model
@@ -112,8 +112,8 @@ def _run_spineps_internal(
     model.load()
     from torch import device
 
-    model.predictor.network.to(device("cuda:0"))
-    model.predictor.device = device("cuda:0")
+    # model.predictor.network.to(device("cuda:0"))
+    # model.predictor.device = device("cuda:0")
     orig_img_nii = image_nii.copy()
     logger.print("Input", orig_img_nii, verbose=verbose)
     image_nii.reorient_(verbose=verbose)
