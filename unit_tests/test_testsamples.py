@@ -309,3 +309,15 @@ class Test_testsamples(unittest.TestCase):
             out = calc_poi_from_subreg_vert(vert_nii, subreg_nii, buffer_file=None, decimals=3, subreg_id=idx)
             if idx.value not in out.keys_subregion():
                 raise ValueError(idx, "missing")
+
+    def test_calc_center_spinal_cord(self):
+        from TPTBox.core.poi_fun.vertebra_direction import calc_center_spinal_cord
+        from TPTBox.tests.test_utils import get_random_ax_code
+
+        orientations = {get_random_ax_code() for _ in range(100)}
+        for orientation in orientations:
+            _, subreg_nii, vert_nii, label = get_test_mri(orientation)
+            poi = calc_poi_from_subreg_vert(vert_nii, subreg_nii, buffer_file=None, decimals=3, subreg_id=[50])
+
+            __fill_inplace = subreg_nii.copy()
+            poi = calc_center_spinal_cord(poi, subreg_nii, _fill_inplace=__fill_inplace)
