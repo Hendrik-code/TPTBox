@@ -1014,7 +1014,7 @@ def load_poi(ctd_path: POI_Reference, verbose=True) -> POI:  # noqa: ARG001
     else:
         raise NotImplementedError(format_)
     return POI(
-        centroids,
+        centroids=centroids,
         orientation=axcode,
         zoom=zoom,
         shape=shape,  # type: ignore
