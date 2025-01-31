@@ -66,7 +66,7 @@ def _generate_bids_path(
     assert "sub" in keys, keys
     ses = keys.get("ses")
     ses = f"ses-{ses}" if ses is not None else ""
-
+    keys["sub"] = keys["sub"].replace(".", "-")
     assert keys["sub"] is not None, keys
     p = Path(
         nifti_dir,  # dataset path
@@ -157,6 +157,8 @@ def _get_paths(
 
 
 def _filter_dicom(dcm_data_l: list[pydicom.FileDataset]):
+    if len(dcm_data_l) == 1:
+        return dcm_data_l
     dcm_data_l = [d for d in dcm_data_l if hasattr(d, "ImageOrientationPatient")]
     return dcm_data_l
 
@@ -192,7 +194,6 @@ def _from_dicom_to_nii(
                 )
                 outs.append(o)
             return outs
-
     dcm_data_l = _filter_dicom(dcm_data_l)
     if len(dcm_data_l) == 0:
         logger.on_neutral(Path(nifti_dir).name, " - not an image. Will be skipped")
@@ -299,8 +300,6 @@ def _read_dicom_files(dicom_out_path: Path) -> tuple[dict[str, list[FileDataset]
         if path.is_file():
             try:
                 dcm_data = pydicom.dcmread(path, defer_size="1 KB", force=True)
-                if not hasattr(dcm_data, "ImageOrientationPatient"):
-                    continue
                 try:
                     typ = (
                         str(dcm_data.get_item((0x0008, 0x0008)).value)
@@ -315,6 +314,9 @@ def _read_dicom_files(dicom_out_path: Path) -> tuple[dict[str, list[FileDataset]
                 key1 = str(dcm_data.SeriesInstanceUID)
 
                 key = f"{key1}_{typ}"
+                if not hasattr(dcm_data, "ImageOrientationPatient"):
+                    key += "_" + dcm_data.get("SOPInstanceUID", 0)
+
                 if key1 not in dicom_types:
                     dicom_types[key1] = []
                 if typ not in dicom_types[key1]:
@@ -325,7 +327,7 @@ def _read_dicom_files(dicom_out_path: Path) -> tuple[dict[str, list[FileDataset]
             except AttributeError:
                 pass
     for key, value in dicom_files.items():
-        dicom_files[key] = sorted(value, key=lambda dcm_data: np.array(dcm_data.ImagePositionPatient).sum())
+        dicom_files[key] = sorted(value, key=lambda dcm_data: np.array(dcm_data.get("ImagePositionPatient", 0)).sum())
     return dicom_files, _filter_file_type(dicom_types)
 
 
@@ -350,7 +352,7 @@ def _classic_get_grouped_dicoms(dicom_input: list[FileDataset]) -> list[list[Fil
         current_direction = None
         # if the stack number decreases we moved to the next stack
         if previous_position is not None:
-            current_direction = np.array(dicom_.ImagePositionPatient) - previous_position
+            current_direction = np.array(dicom_.get("ImagePositionPatient", 0)) - previous_position
             current_direction = current_direction / np.linalg.norm(current_direction)
 
         if (
@@ -358,11 +360,11 @@ def _classic_get_grouped_dicoms(dicom_input: list[FileDataset]) -> list[list[Fil
             and previous_direction is not None
             and not np.allclose(current_direction, previous_direction, rtol=0.05, atol=0.05)
         ):
-            previous_position = np.array(dicom_.ImagePositionPatient)
+            previous_position = np.array(dicom_.get("ImagePositionPatient", 0))
             previous_direction = None
             stack_index += 1
         else:
-            previous_position = np.array(dicom_.ImagePositionPatient)
+            previous_position = np.array(dicom_.get("ImagePositionPatient", 0))
             previous_direction = current_direction
 
         if stack_index >= len(grouped_dicoms):
@@ -454,6 +456,7 @@ def extract_dicom_folder(
 
     for p in _find_all_files(dicom_folder):
         dicom_path = p
+
         if str(dicom_path).endswith(".pkl"):
             continue
         temp_dir = None
@@ -461,6 +464,7 @@ def extract_dicom_folder(
             if str(dicom_path).endswith(".zip"):
                 temp_dir = tempfile.mkdtemp(prefix="dicom_export_from_zip_")
                 dicom_path = _unzip_files(dicom_path, temp_dir)
+
             dicom_files_dict, parts = _read_dicom_files(dicom_path)
 
             def process_series(key, files, parts):
@@ -507,6 +511,27 @@ def extract_dicom_folder(
 
 
 if __name__ == "__main__":
+    # s = "/home/robert/Downloads/bein/dataset-oberschenkel/rawdata/sub-1-3-46-670589-11-2889201787-2305829596-303261238-2367429497/mr/sub-1-3-46-670589-11-2889201787-2305829596-303261238-2367429497_sequ-406_mr.nii.gz"
+    # nii2 = NII.load(s, False)
+    # print(nii2.affine, nii2.orientation)
+    # nii3 = None
+    # k = 1
+    # for i in Path("/home/robert/Downloads/bein/").glob("ID001_*.nrrd"):
+    #    nii = NII.load_nrrd(i, True)
+    #    nii.reorient_(nii2.orientation)
+    #    nii.affine = nii2.affine
+    #    nii.save(str(i).replace(".nrrd", ".nii.gz"))
+    #    if nii3 is None:
+    #        nii3 = nii.copy() * 0
+    #    print(nii3.unique())
+    #    nii += nii3
+    #    nii3[np.logical_and(nii == 1, nii3 == 0) == 1] = k
+    #    k += 1
+    # print(nii3.unique())
+    # nii3.save("/home/robert/Downloads/bein/ID001.nii.gz")
+    # extract_dicom_folder(Path("/home/robert/Downloads/bein/a"), Path("/home/robert/Downloads/bein/", "dataset-oberschenkel"), False, False)
+
+    # exit()
     import argparse
 
     arg_parser = argparse.ArgumentParser()
