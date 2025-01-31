@@ -354,9 +354,9 @@ def compute_lordosis_and_kyphosis(poi: POI, project_2D=True):
         >>> print(angles)
         {'cervical_lordosis': 30.5, 'thoracic_kyphosis': 35.0, 'lumbar_lordosis': 45.2}
     """
-    assert (
-        Location.Vertebra_Direction_Posterior.value in poi.keys_subregion()
-    ), "You need to compute the Direction in the Poi (Location.Vertebra_Direction_Posterior)"
+    assert Location.Vertebra_Direction_Posterior.value in poi.keys_subregion(), (
+        "You need to compute the Direction in the Poi (Location.Vertebra_Direction_Posterior)"
+    )
     last_t = _get_last_thoracic(poi)
     last_l = _get_last_lumbar(poi)
     poi = poi.copy()
@@ -912,7 +912,7 @@ def plot_cobb_and_lordosis_and_kyphosis(
 
 if __name__ == "__main__":
     from TPTBox import POI, calc_poi_from_subreg_vert
-    from TPTBox.spine.statistics.ivd_pois import compute_fake_ivd
+    from TPTBox.spine.stat.ivd_pois import compute_fake_ivd
 
     # poi = POI.load(
     #    "/DATA/NAS/datasets_processed/CT_spine/dataset-Cancer/derivatives_spineps/sub-mc0034/ses-20240312/sub-mc0034_ses-20240312_sequ-206_mod-ct_seg-spine_msk.nii.gz"
