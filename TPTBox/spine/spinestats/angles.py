@@ -912,7 +912,7 @@ def plot_cobb_and_lordosis_and_kyphosis(
 
 if __name__ == "__main__":
     from TPTBox import POI, calc_poi_from_subreg_vert
-    from TPTBox.spine.stat.ivd_pois import compute_fake_ivd
+    from TPTBox.spine.spinestats.ivd_pois import compute_fake_ivd
 
     # poi = POI.load(
     #    "/DATA/NAS/datasets_processed/CT_spine/dataset-Cancer/derivatives_spineps/sub-mc0034/ses-20240312/sub-mc0034_ses-20240312_sequ-206_mod-ct_seg-spine_msk.nii.gz"
