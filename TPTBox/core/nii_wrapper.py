@@ -781,7 +781,7 @@ class NII(NII_Math):
         return self.reorient(axcodes_to=axcodes_to, verbose=verbose, inplace=inplace)
     def reorient_same_as_(self, img_as: Nifti1Image | Self, verbose:logging=False) -> Self:
         return self.reorient_same_as(img_as=img_as,verbose=verbose,inplace=True)
-    def rescale(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:logging=False, inplace=False,mode:MODES='nearest',align_corners:bool=False):
+    def rescale(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:logging=False, inplace=False,mode:MODES='nearest',order: int |None = None,align_corners:bool=False):
         """
         Rescales the NIfTI image to a new voxel spacing.
 
@@ -810,7 +810,8 @@ class NII(NII_Math):
         aff = self.affine
         shp = self.shape
         zms = self.zoom
-        order = 0 if self.seg else 3
+        if order is None:
+            order = 0 if self.seg else 3
         voxel_spacing = tuple([v if v != -1 else z for v,z in zip(voxel_spacing,zms,strict=True)])
         if voxel_spacing == self.zoom:
             log.print(f"Image already resampled to voxel size {self.zoom}",verbose=verbose)
@@ -830,7 +831,7 @@ class NII(NII_Math):
     def rescale_(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:logging=False,mode:MODES='nearest'):
         return self.rescale( voxel_spacing=voxel_spacing, c_val=c_val, verbose=verbose,mode=mode, inplace=True)
 
-    def resample_from_to(self, to_vox_map:Image_Reference|Has_Grid|tuple[SHAPE,AFFINE,ZOOMS], mode:MODES='nearest', c_val=None, inplace = False,verbose:logging=True,align_corners:bool=False):
+    def resample_from_to(self, to_vox_map:Image_Reference|Has_Grid|tuple[SHAPE,AFFINE,ZOOMS], mode:MODES='nearest', order: int |None=None, c_val=None, inplace = False,verbose:logging=True,align_corners:bool=False):
         """self will be resampled in coordinate of given other image. Adheres to global space not to local pixel space
         Args:
             to_vox_map (Image_Reference|Proxy): If object, has attributes shape giving input voxel shape, and affine giving mapping of input voxels to output space. If length 2 sequence, elements are (shape, affine) with same meaning as above. The affine is a (4, 4) array-like.\n
@@ -849,7 +850,9 @@ class NII(NII_Math):
             mapping = to_vox_map if isinstance(to_vox_map, tuple) else to_nii_optional(to_vox_map, seg=self.seg, default=to_vox_map)
         assert mapping is not None
         log.print(f"resample_from_to: {self} to {mapping}",verbose=verbose)
-        nii = _resample_from_to(self, mapping,order=0 if self.seg else 3, mode=mode,align_corners=align_corners)
+        if order is None:
+            order = 0 if self.seg else 3
+        nii = _resample_from_to(self, mapping,order=order, mode=mode,align_corners=align_corners)
         if inplace:
             self.nii = nii
             return self
@@ -1327,7 +1330,7 @@ class NII(NII_Math):
 
     def compute_surface_points(self, connectivity: int, dilated_surface: bool = False):
         surface = self.compute_surface_mask(connectivity, dilated_surface)
-        return np_point_coordinates(surface) # type: ignore
+        return np_point_coordinates(surface.get_seg_array()) # type: ignore
 
 
     def get_segmentation_difference_to(self, mask_gt: Self, ignore_background_tp: bool = False) -> Self:
