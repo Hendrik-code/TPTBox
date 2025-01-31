@@ -149,6 +149,26 @@ class Test_POI(unittest.TestCase):
             self.assertEqual(c, p)
             self.assert_affine(c, p)
 
+    def test_calc_POI_labeled_bufferd(self):
+        msk, cent, order, sizes = get_nii(num_point=random.randint(1, 7))
+        msk2, cent2, order2, sizes2 = get_nii(num_point=len(cent) - 1)
+
+        cent = POI(cent, orientation=order, zoom=(1, 1, 1), **extract_affine(msk))
+        cent2 = POI(cent2, orientation=order2, zoom=(1, 1, 1), **extract_affine(msk2))
+        file = Path(tempfile.gettempdir(), "test_save_load_POI.json")
+        file.unlink(missing_ok=True)
+        out = calc_centroids_from_two_masks(msk, None, out_path=file, verbose=False)
+        self.assertEqual(out, cent)
+        self.assert_affine(out, msk)
+        out = calc_centroids_from_two_masks(msk2, None, out_path=file, verbose=False)
+        self.assertEqual(out, cent)
+        self.assert_affine(out, msk)
+        file.unlink(missing_ok=True)
+        out = calc_centroids_from_two_masks(msk2, None, out_path=file, verbose=False)
+        self.assert_affine(out, msk2)
+        self.assertEqual(out, cent2)
+        file.unlink(missing_ok=True)
+
     def test_calc_POI_from_subreg_vert(self):
         msk, cent, order, sizes = get_nii(num_point=random.randint(1, 7))
         arr = msk.get_array()
