@@ -1,0 +1,36 @@
+{
+  "loss":
+  {
+    "config": {
+      "be": {
+        "stride": 1,
+        "name": "BSplineBending"
+      },
+      "seg": {
+        "name": "LNCC"
+      }
+    },
+    "weights": {
+      "be": 0.001,
+      "seg": 1
+    }
+  },
+  "model":{
+    "name": "SVFFD",
+    "args": {"stride": [8, 8, 16], "transpose": false},
+    "init": null
+  },
+  "optim":{
+    "name": "Adam",
+    "args":{"lr": 0.001},
+    "loop": {"max_steps": 1000, "min_delta": -0.0001}
+  },
+  "pyramid":{
+    "levels":3,
+    "coarsest_level":2,
+    "finest_level":0,
+    "finest_spacing":null, 
+    "min_size":16,
+    "pyramid_dims":["x", "y", "z"]
+  }
+}

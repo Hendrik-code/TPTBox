@@ -1,5 +1,6 @@
 import sys
 import warnings
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import nibabel as nib
@@ -49,6 +50,8 @@ else:
 class Has_Grid(Grid_Proxy):
     """Parent class for methods that are shared by POI and NII"""
 
+    info: dict
+
     def to_gird(self) -> "Grid":
         return Grid(**self._extract_affine())
 
@@ -77,6 +80,17 @@ class Has_Grid(Grid_Proxy):
         aff[:3, :3] = self.rotation @ np.diag(self.zoom)
         aff[:3, 3] = self.origin
         return np.round(aff, ROUNDING_LVL)
+
+    @affine.setter
+    def affine(self, affine: np.ndarray):
+        rotation_zoom = affine[:3, :3]
+        zoom = np.sqrt(np.sum(rotation_zoom * rotation_zoom, axis=0))
+        rotation_zoom = affine[:3, :3]
+        rotation = rotation_zoom / zoom
+        origin = affine[:3, 3]
+        self.zoom = zoom
+        self.rotation = rotation
+        self.origin = origin.tolist()
 
     def _extract_affine(self: "Has_Grid", rm_key=()):
         out = {"zoom": self.spacing, "origin": self.origin, "shape": self.shape, "rotation": self.rotation, "orientation": self.orientation}

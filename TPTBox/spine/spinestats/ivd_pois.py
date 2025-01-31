@@ -73,7 +73,7 @@ def _crop(i: int, verts_ids: list[int], vert_full: NII, spine_full: NII, out: np
 
 
 def _process_vertebra_A(idx, vert: NII, spine: NII, next_id, poi) -> NII | None:
-    from TPTBox.spine.statistics import endplate_extraction
+    from TPTBox.spine.spinestats import endplate_extraction
 
     try:
         a = endplate_extraction(idx, vert, spine, poi)

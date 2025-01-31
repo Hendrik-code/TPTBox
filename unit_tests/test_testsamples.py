@@ -157,7 +157,7 @@ class Test_testsamples(unittest.TestCase):
         _, subreg_nii, vert_nii, label = get_test_mri()
         locs = [Location.Vertebra_Direction_Inferior]
         poi = calc_poi_from_subreg_vert(vert_nii, subreg_nii, subreg_id=locs, verbose=False)
-        from TPTBox.spine.statistics import angles
+        from TPTBox.spine.spinestats import angles
 
         a = angles.compute_angel_between_two_points_(poi, label, label + 1, "R", project_2D=True)
         assert a is not None
@@ -238,3 +238,74 @@ class Test_testsamples(unittest.TestCase):
 
     def test_deformable_saved(self):
         self._test_deformable(dim=0, save=True)
+
+    def test_calc_POI_from_subreg_vert_(self):
+        idxs = [
+            Location.Vertebra_Full,
+            Location.Arcus_Vertebrae,
+            Location.Spinosus_Process,
+            Location.Costal_Process_Left,
+            Location.Costal_Process_Right,
+            Location.Superior_Articular_Left,
+            Location.Superior_Articular_Right,
+            Location.Inferior_Articular_Left,
+            Location.Inferior_Articular_Right,
+            Location.Vertebra_Corpus,
+            # Location.Dens_axis,
+            # Location.Vertebral_Body_Endplate_Superior,
+            # Location.Vertebral_Body_Endplate_Inferior,
+            Location.Vertebra_Disc_Superior,
+            Location.Vertebra_Disc_Inferior,
+            Location.Vertebra_Disc,
+            Location.Spinal_Cord,
+            Location.Spinal_Canal,
+            Location.Spinal_Canal_ivd_lvl,
+            # Location.Endplate,
+            Location.Muscle_Inserts_Spinosus_Process,
+            Location.Muscle_Inserts_Transverse_Process_Left,
+            Location.Muscle_Inserts_Transverse_Process_Right,
+            Location.Muscle_Inserts_Vertebral_Body_Left,
+            Location.Muscle_Inserts_Vertebral_Body_Right,
+            Location.Muscle_Inserts_Articulate_Process_Inferior_Left,
+            Location.Muscle_Inserts_Articulate_Process_Inferior_Right,
+            Location.Muscle_Inserts_Articulate_Process_Superior_Left,
+            Location.Muscle_Inserts_Articulate_Process_Superior_Right,
+            # Location.Implant_Entry_Left,
+            # Location.Implant_Entry_Right,
+            # Location.Implant_Target_Left,
+            # Location.Implant_Target_Right,
+            Location.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Median,
+            Location.Ligament_Attachment_Point_Posterior_Longitudinal_Superior_Median,
+            Location.Ligament_Attachment_Point_Anterior_Longitudinal_Inferior_Median,
+            Location.Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Median,
+            Location.Additional_Vertebral_Body_Middle_Superior_Median,
+            Location.Additional_Vertebral_Body_Posterior_Central_Median,
+            Location.Additional_Vertebral_Body_Middle_Inferior_Median,
+            Location.Additional_Vertebral_Body_Anterior_Central_Median,
+            Location.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Left,
+            Location.Ligament_Attachment_Point_Posterior_Longitudinal_Superior_Left,
+            Location.Ligament_Attachment_Point_Anterior_Longitudinal_Inferior_Left,
+            Location.Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Left,
+            Location.Additional_Vertebral_Body_Middle_Superior_Left,
+            Location.Additional_Vertebral_Body_Posterior_Central_Left,
+            Location.Additional_Vertebral_Body_Middle_Inferior_Left,
+            Location.Additional_Vertebral_Body_Anterior_Central_Left,
+            Location.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Right,
+            Location.Ligament_Attachment_Point_Posterior_Longitudinal_Superior_Right,
+            Location.Ligament_Attachment_Point_Anterior_Longitudinal_Inferior_Right,
+            Location.Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Right,
+            Location.Additional_Vertebral_Body_Middle_Superior_Right,
+            Location.Additional_Vertebral_Body_Posterior_Central_Right,
+            Location.Additional_Vertebral_Body_Middle_Inferior_Right,
+            Location.Additional_Vertebral_Body_Anterior_Central_Right,
+            Location.Ligament_Attachment_Point_Flava_Superior_Median,
+            Location.Ligament_Attachment_Point_Flava_Inferior_Median,
+            Location.Vertebra_Direction_Posterior,
+            Location.Vertebra_Direction_Inferior,
+            Location.Vertebra_Direction_Right,
+        ]
+        for idx in idxs:
+            _, subreg_nii, vert_nii, label = get_test_mri()
+            out = calc_poi_from_subreg_vert(vert_nii, subreg_nii, buffer_file=None, decimals=3, subreg_id=idx)
+            if idx.value not in out.keys_subregion():
+                raise ValueError(idx, "missing")

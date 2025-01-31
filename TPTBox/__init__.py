@@ -20,7 +20,9 @@ from TPTBox.core.nii_wrapper import (
     to_nii_optional,
     to_nii_seg,
 )
-from TPTBox.core.poi import AX_CODES, POI, POI_Reference, calc_centroids, calc_poi_from_subreg_vert, calc_poi_labeled_buffered
+from TPTBox.core.poi import AX_CODES, POI, POI_Reference, calc_centroids, calc_poi_from_subreg_vert
+from TPTBox.core.poi import calc_poi_from_two_segs
+from TPTBox.core.poi import calc_poi_from_two_segs as calc_poi_labeled_buffered
 from TPTBox.core.poi import load_poi
 from TPTBox.core.poi import load_poi as load_centroids
 from TPTBox.core.poi_fun.poi_global import POI_Global
@@ -31,3 +33,34 @@ from TPTBox.logger import Log_Type, Logger, Logger_Interface, Print_Logger, Stri
 from TPTBox.logger.log_file import No_Logger
 
 Centroids = POI
+
+__all__ = [
+    "AX_CODES",
+    "BIDS_FILE",
+    "NII",
+    "POI",
+    "ZOOMS",
+    "BIDS_Family",
+    "BIDS_Global_info",
+    "Image_Reference",
+    "Interpolateable_Image_Reference",
+    "Location",
+    "Log_Type",
+    "POI_Global",
+    "POI_Reference",
+    "Print_Logger",
+    "Searchquery",
+    "Subject_Container",
+    "Vertebra_Instance",
+    "bids_files",
+    "calc_centroids",
+    "calc_poi_from_subreg_vert",
+    "calc_poi_from_two_segs",
+    "core",
+    "load_poi",
+    "np_utils",
+    "to_nii",
+    "v_idx2name",
+    "v_idx_order",
+    "v_name2idx",
+]

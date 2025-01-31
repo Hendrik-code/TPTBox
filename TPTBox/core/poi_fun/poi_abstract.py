@@ -27,7 +27,7 @@ MAPPING = dict[int | str, int | str] | dict[int, int] | dict[int, int | None] | 
 DIMENSIONS = 3
 
 
-class Abstract_POI_Definition:
+class _Abstract_POI_Definition:
     def __init__(
         self,
         path: str | Path | None = None,
@@ -49,7 +49,7 @@ class Abstract_POI_Definition:
         self.subregion_name2idx = {value: key for key, value in subregion.items()}
 
 
-def unpack_poi_id(key: POI_ID, definition: Abstract_POI_Definition) -> tuple[int, int]:
+def unpack_poi_id(key: POI_ID, definition: _Abstract_POI_Definition) -> tuple[int, int]:
     if isinstance(key, int | np.integer):
         region = int(key % vert_constants.LABEL_MAX)
         subregion = int(key // vert_constants.LABEL_MAX)
@@ -82,10 +82,10 @@ class POI_Descriptor(AbstractSet, MutableMapping):
         self,
         *,
         default: POI_DICT | None = None,
-        definition: Abstract_POI_Definition | None = None,
+        definition: _Abstract_POI_Definition | None = None,
     ):
         if definition is None:
-            definition = Abstract_POI_Definition(
+            definition = _Abstract_POI_Definition(
                 region=vert_constants.v_idx2name,
                 subregion=vert_constants.subreg_idx2name,
             )
@@ -284,9 +284,9 @@ class Abstract_POI(Has_Grid):
     _centroids: POI_Descriptor = field(default_factory=lambda: POI_Descriptor(), repr=False, kw_only=True)
     centroids: POI_Descriptor = field(repr=False, hash=False, compare=False, default=None)  # type: ignore
     format: int | None = field(default=None, repr=False, compare=False)
-    info: dict = field(default_factory=dict, compare=False)  # additional info (key,value pairs)
     level_one_info: type[Abstract_lvl] = Vertebra_Instance  # Must be Enum and must has order_dict
     level_two_info: type[Abstract_lvl] = Location
+    info: dict = field(default_factory=dict, compare=False, init=True)  # additional info (key,value pairs)
 
     @property
     def centroids(self) -> POI_Descriptor:
@@ -313,12 +313,14 @@ class Abstract_POI(Has_Grid):
         return self.copy(ctd)
 
     @property
-    def is_global(self) -> bool: ...
+    def is_global(self) -> bool:
+        ...
 
     def clone(self, **qargs):
         return self.copy(**qargs)
 
-    def copy(self, centroids: POI_Descriptor | None = None, **qargs) -> Self: ...
+    def copy(self, centroids: POI_Descriptor | None = None, **qargs) -> Self:
+        ...
 
     def map_labels(
         self,

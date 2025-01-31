@@ -189,7 +189,7 @@ def extract_keys_from_json(  # noqa: C901
         if chunk is not None:
             keys["chunk"] = str(chunk)
         # GET MRI FORMAT
-        series_description = _get("SeriesDescription", "no-series-description").lower()
+        series_description = _get("SeriesDescription", "mr").lower()
         mri_format = None
         ##################### Understand sequence by given times ####################
         # try:

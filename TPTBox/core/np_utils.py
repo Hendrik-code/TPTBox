@@ -369,9 +369,9 @@ def np_calc_crop_around_centerpoint(
     n_dim = len(poi)
     if isinstance(pad_to_size, int):
         pad_to_size = np.ones(n_dim) * pad_to_size
-    assert (
-        n_dim == len(arr.shape) == len(cutout_size) == len(pad_to_size)
-    ), f"dimension mismatch, got dim {n_dim}, poi {poi}, arr shape {arr.shape}, cutout {cutout_size}, pad_to_size {pad_to_size}"
+    assert n_dim == len(arr.shape) == len(cutout_size) == len(pad_to_size), (
+        f"dimension mismatch, got dim {n_dim}, poi {poi}, arr shape {arr.shape}, cutout {cutout_size}, pad_to_size {pad_to_size}"
+    )
 
     poi = tuple(int(i) for i in poi)
     shape = arr.shape
@@ -610,6 +610,8 @@ def np_get_largest_k_connected_components(
     label_ref: LABEL_REFERENCE = None,
     connectivity: int = 3,
     return_original_labels: bool = True,
+    min_volume: float = 0,
+    max_volume: float | None = None,
 ) -> UINTARRAY:
     """finds the largest k connected components in a given array (does NOT work with zero as label!)
 
@@ -640,13 +642,23 @@ def np_get_largest_k_connected_components(
     if k is None:
         k = n
     k = min(k, n)  # if k > N, will return all N but still sorted
-    label_volume_pairs = [(i, ct) for i, ct in np_volume(labels_out).items() if ct > 0]
+    label_volume_pairs = [(i, vol) for i, vol in np_volume(labels_out).items() if vol > 0]
+    k = min(k, len(label_volume_pairs))
     label_volume_pairs.sort(key=lambda x: x[1], reverse=True)
-    preserve: list[int] = [x[0] for x in label_volume_pairs[:k]]
+    preserve: list[int] = [(x[0], x[1]) for x in label_volume_pairs[:k]]
 
     cc_out = np.zeros(arr.shape, dtype=arr.dtype)
-    for i, preserve_label in enumerate(preserve):
-        cc_out[labels_out == preserve_label] = i + 1
+    i = 1
+    for preserve_label, volume in preserve:
+        if volume < min_volume:
+            continue
+        if max_volume is not None and volume > max_volume:
+            continue
+        cc_out[labels_out == preserve_label] = i
+        if k == i:
+            break
+        i += 1
+
     if return_original_labels:
         arr *= cc_out > 0  # to get original labels
         return arr
@@ -758,7 +770,7 @@ def np_fill_holes(arr: np.ndarray, label_ref: LABEL_REFERENCE = None, slice_wise
         if slice_wise_dim is None:
             filled = fill(arr_l).astype(arr.dtype)
         else:
-            assert 0 <= slice_wise_dim <= arr.ndim - 1, f"slice_wise_dim needs to be in range [0, {arr.ndim -1}]"
+            assert 0 <= slice_wise_dim <= arr.ndim - 1, f"slice_wise_dim needs to be in range [0, {arr.ndim - 1}]"
             filled = np.swapaxes(arr_l.copy(), 0, slice_wise_dim)
             filled = np.stack([fill(x) for x in filled])
             filled = np.swapaxes(filled, 0, slice_wise_dim)
@@ -1011,7 +1023,7 @@ def _binary_dilation(image: np.ndarray, struct=None):
         if selem.dtype != bool:
             selem = selem.astype(bool)
         if any(num_pixels % 2 == 0 for num_pixels in selem.shape):
-            raise ValueError("Only structure element of odd dimension " "in each direction is supported.")
+            raise ValueError("Only structure element of odd dimension in each direction is supported.")
     perimeter_image = _get_perimeter_image(image)
     perimeter_coords = np.where(perimeter_image)
     out = image.copy()
