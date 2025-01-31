@@ -103,7 +103,7 @@ for name, subj in l:
                 if len(v) == 1:
                     skipped_single.append(name)
                     continue
-                st.stitching(*v, out=out)
+                st.stitching(v, out=out)
                 new_stitched += 1
             except BaseException:
                 out.unlink(missing_ok=True)

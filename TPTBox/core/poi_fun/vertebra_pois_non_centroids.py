@@ -12,7 +12,7 @@ from TPTBox.core.poi_fun.strategies import (
 )
 from TPTBox.core.poi_fun.vertebra_direction import calc_center_spinal_cord, calc_orientation_of_vertebra_PIR
 from TPTBox.core.vert_constants import Location, vert_directions
-from TPTBox.spine.statistics import calculate_IVD_POI
+from TPTBox.spine.spinestats import calculate_IVD_POI
 
 _log = Print_Logger()
 all_poi_functions: dict[int, "Strategy_Pattern"] = {}
@@ -167,8 +167,8 @@ Strategy_Pattern(L.Muscle_Inserts_Articulate_Process_Superior_Right, strategy=S,
 #Strategy_Pattern(L.Vertebra_Disc_Post, strategy=S, subreg_id=L.Vertebra_Disc, direction=("P"))
 
 S = strategy_line_cast
-args = {"strategy": S, "regions_loc": [L.Vertebra_Corpus, L.Vertebra_Corpus_border],"start_point": L.Vertebra_Corpus, }
-Strategy_Pattern(L.Muscle_Inserts_Vertebral_Body_Right, **args, normal_vector_points ="R" ) # 84
+args = {"strategy": S, "regions_loc": [L.Vertebra_Corpus, L.Vertebra_Corpus_border],"start_point": L.Vertebra_Corpus, "prerequisite":{L.Vertebra_Direction_Right} }
+Strategy_Pattern(L.Muscle_Inserts_Vertebral_Body_Right, **args, normal_vector_points ="R") # 84
 Strategy_Pattern(L.Muscle_Inserts_Vertebral_Body_Left,  **args, normal_vector_points ="L" ) # 85
 Strategy_Pattern(L.Additional_Vertebral_Body_Middle_Superior_Median,   **args, normal_vector_points ="S" ) # 105
 Strategy_Pattern(L.Additional_Vertebral_Body_Posterior_Central_Median, **args, normal_vector_points ="P" ) # 106
