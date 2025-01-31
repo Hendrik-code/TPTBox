@@ -11,7 +11,7 @@ import nibabel as nib
 
 from TPTBox import POI, calc_centroids
 from TPTBox.core.nii_wrapper import NII
-from TPTBox.core.poi import LABEL_MAX, _poi_to_dict_list, calc_poi_from_subreg_vert, calc_poi_labeled_buffered, load_poi
+from TPTBox.core.poi import LABEL_MAX, _poi_to_dict_list, calc_centroids_from_two_masks, calc_poi_from_subreg_vert, load_poi
 from TPTBox.core.vert_constants import Location
 from TPTBox.tests.test_utils import get_nii, get_random_ax_code, overlap, repeats
 from unit_tests.test_centroids_save import get_centroids
@@ -70,12 +70,12 @@ class Test_Centroids(unittest.TestCase):
         cent2 = POI(cent2, **msk2._extract_affine())
         file = Path(tempfile.gettempdir(), "test_save_load_centroids.json")
         file.unlink(missing_ok=True)
-        out = calc_poi_labeled_buffered(msk, None, out_path=file, verbose=False)
+        out = calc_centroids_from_two_masks(msk, None, out_path=file, verbose=False)
         self.assertEqual(out, cent)
-        out = calc_poi_labeled_buffered(msk2, None, out_path=file, verbose=False)
+        out = calc_centroids_from_two_masks(msk2, None, out_path=file, verbose=False)
         self.assertEqual(out, cent)
         file.unlink(missing_ok=True)
-        out = calc_poi_labeled_buffered(msk2, None, out_path=file, verbose=False)
+        out = calc_centroids_from_two_masks(msk2, None, out_path=file, verbose=False)
         self.assertEqual(out, cent2)
         file.unlink(missing_ok=True)
 
@@ -94,12 +94,12 @@ class Test_Centroids(unittest.TestCase):
         cent2 = POI(cent2, **msk2._extract_affine())
         file = Path(tempfile.gettempdir(), "test_save_load_centroids.json")
         file.unlink(missing_ok=True)
-        out = calc_poi_labeled_buffered(msk, subreg, out_path=file, verbose=False)
+        out = calc_centroids_from_two_masks(msk, subreg, out_path=file, verbose=False)
         self.assertEqual(out, cent)
-        out = calc_poi_labeled_buffered(msk2, subreg2, out_path=file, verbose=False)
+        out = calc_centroids_from_two_masks(msk2, subreg2, out_path=file, verbose=False)
         self.assertEqual(out, cent)
         file.unlink(missing_ok=True)
-        out = calc_poi_labeled_buffered(msk2, subreg2, out_path=file, verbose=False)
+        out = calc_centroids_from_two_masks(msk2, subreg2, out_path=file, verbose=False)
         self.assertEqual(out, cent2)
         file.unlink(missing_ok=True)
 

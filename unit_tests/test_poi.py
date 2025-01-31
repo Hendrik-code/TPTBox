@@ -17,8 +17,8 @@ from TPTBox.core.poi import (
     Location,
     _poi_to_dict_list,
     calc_centroids,
+    calc_centroids_from_two_masks,
     calc_poi_from_subreg_vert,
-    calc_poi_labeled_buffered,
     load_poi,
 )
 from TPTBox.tests.test_utils import extract_affine, get_poi, get_random_ax_code, overlap, repeats, sqr1d
@@ -157,14 +157,14 @@ class Test_POI(unittest.TestCase):
         cent2 = POI(cent2, orientation=order2, zoom=(1, 1, 1), **extract_affine(msk2))
         file = Path(tempfile.gettempdir(), "test_save_load_POI.json")
         file.unlink(missing_ok=True)
-        out = calc_poi_labeled_buffered(msk, None, out_path=file, verbose=False)
+        out = calc_centroids_from_two_masks(msk, None, out_path=file, verbose=False)
         self.assertEqual(out, cent)
         self.assert_affine(out, msk)
-        out = calc_poi_labeled_buffered(msk2, None, out_path=file, verbose=False)
+        out = calc_centroids_from_two_masks(msk2, None, out_path=file, verbose=False)
         self.assertEqual(out, cent)
         self.assert_affine(out, msk)
         file.unlink(missing_ok=True)
-        out = calc_poi_labeled_buffered(msk2, None, out_path=file, verbose=False)
+        out = calc_centroids_from_two_masks(msk2, None, out_path=file, verbose=False)
         self.assert_affine(out, msk2)
         self.assertEqual(out, cent2)
         file.unlink(missing_ok=True)
