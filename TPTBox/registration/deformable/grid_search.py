@@ -47,16 +47,16 @@ def update_config(config, args):
 def pairwise(fixed, warped, fixed_seg, warped_seg, transform):
     assert fixed.ndim == warped.ndim == 5
     folding_ratio, jacobian = calculate_jacobian_metrics(transform.numpy())
-    PSNR = PeakSignalNoiseRatio()
-    SSIM = StructuralSimilarityIndexMeasure()
-    NMI = NMILOSS()
+    psnr = PeakSignalNoiseRatio()
+    ssim = StructuralSimilarityIndexMeasure()
+    nmi = NMILOSS()
     # FIXME set number of labels
     dices = [dice(fixed_seg, warped_seg, label) for label in range(1, 4)]
 
     metrics = {
-        "psnr": PSNR(fixed, warped).item(),
-        "ssim": SSIM(fixed, warped).item(),
-        "nmi": -NMI(fixed, warped).item(),
+        "psnr": psnr(fixed, warped).item(),
+        "ssim": ssim(fixed, warped).item(),
+        "nmi": -nmi(fixed, warped).item(),
         "folding_ratio": folding_ratio,
         "jacobian": jacobian,
         "dice scores": dices,
