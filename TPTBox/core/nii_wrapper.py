@@ -1405,7 +1405,7 @@ class NII(NII_Math):
         return self.map_labels(label_map,verbose=verbose,inplace=True)
     def copy(self, nib:Nifti1Image|_unpacked_nii|None = None):
         if nib is None:
-            nib = (self.get_array(), self.affine.copy(), self.header.copy())
+            nib = (self.get_array().copy(), self.affine.copy(), self.header.copy())
         return NII(nib,seg=self.seg,c_val = self.c_val,info = self.info)
 
     def clone(self):
