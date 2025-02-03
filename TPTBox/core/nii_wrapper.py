@@ -539,12 +539,12 @@ class NII(NII_Math):
 
         return sel
     def set_dtype_(self,dtype:type|Literal['smallest_int'] = np.float32,order:Literal["C","F","A","K"] ='K',casting:Literal["no","equiv","safe","same_kind","unsafe"] = "unsafe"):
-        return self.set_dtype(self,dtype=dtype,order=order,casting=casting, inplace=True):
-    
+        return self.set_dtype(dtype=dtype,order=order,casting=casting, inplace=True)
+
     def astype(self,dtype,order:Literal["C","F","A","K"] ='K', casting:Literal["no","equiv","safe","same_kind","unsafe"] = "unsafe",subok=True, copy=True):
         ''' numpy wrapper '''
         if subok:
-            c = self.set_dtype(dtype,order=order,casting=casting, subok=subok,inplace=copy)
+            c = self.set_dtype(dtype,order=order,casting=casting, inplace=copy)
             return c
         else:
             return self.get_array().astype(dtype,order=order,casting=casting, subok=subok,copy=copy)
