@@ -480,6 +480,8 @@ class NII(NII_Math):
             return self.get_seg_array()
         self._unpack()
         return self._arr.copy()
+    def numpy(self, *_args):
+        return self.get_array()
     def set_array(self,arr:np.ndarray|Self, inplace=False,verbose:logging=False)-> Self:  # noqa: ARG002
         """Creates a NII where the array is replaces with the input array.
 
@@ -519,7 +521,9 @@ class NII(NII_Math):
 
     def set_array_(self,arr:np.ndarray,verbose:logging=True):
         return self.set_array(arr,inplace=True,verbose=verbose)
-    def set_dtype_(self,dtype:type|Literal['smallest_int'] = np.float32):
+    def set_dtype(self,dtype:type|Literal['smallest_int'] = np.float32,order:Literal["C","F","A","K"] ='K',casting:Literal["no","equiv","safe","same_kind","unsafe"] = "unsafe", inplace=False):
+        sel = self if inplace else self.copy()
+
         if dtype == "smallest_int":
             arr = self.get_array()
             if arr.max()<128:
@@ -529,13 +533,21 @@ class NII(NII_Math):
             else:
                 dtype = np.int32
 
-        self.nii.set_data_dtype(dtype)
-        if self.nii.get_data_dtype() != self.dtype: #type: ignore
-            self.nii = Nifti1Image(self.get_array().astype(dtype),self.affine,self.header)
+        sel.nii.set_data_dtype(dtype)
+        if sel.nii.get_data_dtype() != self.dtype: #type: ignore
+            sel.nii = Nifti1Image(self.get_array().astype(dtype,casting=casting,order=order),self.affine,self.header)
 
-        return self
-
-
+        return sel
+    def set_dtype_(self,dtype:type|Literal['smallest_int'] = np.float32,order:Literal["C","F","A","K"] ='K',casting:Literal["no","equiv","safe","same_kind","unsafe"] = "unsafe"):
+        return self.set_dtype(self,dtype=dtype,order=order,casting=casting, inplace=True):
+    
+    def astype(self,dtype,order:Literal["C","F","A","K"] ='K', casting:Literal["no","equiv","safe","same_kind","unsafe"] = "unsafe",subok=True, copy=True):
+        ''' numpy wrapper '''
+        if subok:
+            c = self.set_dtype(dtype,order=order,casting=casting, subok=subok,inplace=copy)
+            return c
+        else:
+            return self.get_array().astype(dtype,order=order,casting=casting, subok=subok,copy=copy)
     def reorient(self:Self, axcodes_to: AX_CODES = ("P", "I", "R"), verbose:logging=False, inplace=False)-> Self:
         """
         Reorients the input Nifti image to the desired orientation, specified by the axis codes.
