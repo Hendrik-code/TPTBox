@@ -14,7 +14,7 @@ from cc3d import (
 from cc3d import statistics as _cc3dstats
 from fill_voids import fill
 from numpy.typing import NDArray
-from scipy.ndimage import binary_erosion, center_of_mass, generate_binary_structure
+from scipy.ndimage import binary_erosion, center_of_mass, gaussian_filter, generate_binary_structure
 from skimage.measure import euler_number, label
 
 from TPTBox.core.vert_constants import COORDINATE, LABEL_MAP, LABEL_REFERENCE
@@ -369,9 +369,9 @@ def np_calc_crop_around_centerpoint(
     n_dim = len(poi)
     if isinstance(pad_to_size, int):
         pad_to_size = np.ones(n_dim) * pad_to_size
-    assert n_dim == len(arr.shape) == len(cutout_size) == len(pad_to_size), (
-        f"dimension mismatch, got dim {n_dim}, poi {poi}, arr shape {arr.shape}, cutout {cutout_size}, pad_to_size {pad_to_size}"
-    )
+    assert (
+        n_dim == len(arr.shape) == len(cutout_size) == len(pad_to_size)
+    ), f"dimension mismatch, got dim {n_dim}, poi {poi}, arr shape {arr.shape}, cutout {cutout_size}, pad_to_size {pad_to_size}"
 
     poi = tuple(int(i) for i in poi)
     shape = arr.shape
@@ -777,6 +777,94 @@ def np_fill_holes(arr: np.ndarray, label_ref: LABEL_REFERENCE = None, slice_wise
         filled[filled != 0] = l
         arr[arr == 0] = filled[arr == 0]
     return arr
+
+
+def np_smooth_gaussian_labelwise(
+    arr: UINTARRAY,
+    label_to_smooth: list[int] | int,
+    sigma: float = 3.0,
+    radius: int = 6,
+    truncate: int = 4,
+    boundary_mode: str = "nearest",
+    dilate_prior: int = 0,
+    dilate_connectivity: int = 3,
+    smooth_background: bool = True,
+) -> UINTARRAY:
+    """Smoothes labels in a segmentation mask array
+
+
+    Args:
+        arr (UINTARRAY): Input Segmentation Mask Array
+        label_to_smooth (list[int] | int): Which labels to smooth in the mask. Every other label will be untouched
+        sigma (float, optional): Sigma of the gaussian blur. Defaults to 3.0.
+        radius (int, optional): Radius of the gaussian blur. Defaults to 6.
+        truncate (int, optional): Truncate of the gaussian blur. Defaults to 4.
+        boundary_mode (str, optional): Boundary Mode of the gaussian blur. Defaults to "nearest".
+        dilate_prior (int, optional): Dilate this many voxels before starting the gaussian blur algorithm. Defaults to 0.
+        dilate_connectivity (int, optional): Connectivity of the dilation process, if applied. Defaults to 3.
+        smooth_background (bool, optional): If true, will also smooth the background. If False, the background voxels stay the same and the segmentation cannot add voxels. Defaults to True.
+
+    Returns:
+        UINTARRAY: The resulting smoothed array of the segmentation (with the same labels as the input)
+    """
+    sem_labels = np_unique_withoutzero(arr)
+
+    if isinstance(label_to_smooth, int):
+        label_to_smooth = [label_to_smooth]
+
+    for l in label_to_smooth:
+        assert l in sem_labels, f"You want to smooth label {l} but it is not present in the given segmentation mask"
+
+    if dilate_prior > 0:
+        arr = np_dilate_msk(
+            arr,
+            mm=dilate_prior,
+            label_ref=label_to_smooth,
+            connectivity=dilate_connectivity,
+        )
+
+    smoothed_arrs = []
+    sem_labels_plus_background = sem_labels.copy()
+    sem_labels_plus_background.append(0)
+    for l in sem_labels_plus_background[:-1]:
+        arr_l = np_extract_label(arr.copy(), l).astype(float)
+        if l in label_to_smooth:
+            blurred = gaussian_filter(
+                arr_l,
+                sigma=sigma,
+                mode=boundary_mode,
+                truncate=truncate,
+                radius=radius,
+            )
+            smoothed_arrs.append(blurred)
+        else:
+            smoothed_arrs.append(arr_l)
+
+    # background
+    arr_bg = arr.copy()
+    arr_bg[arr_bg > 0] = 2
+    arr_bg[arr_bg == 0] = 1
+    arr_bg[arr_bg == 2] = 0
+    if smooth_background:
+        blurred = gaussian_filter(
+            arr_bg.astype(float),
+            sigma=sigma,
+            mode=boundary_mode,
+            truncate=truncate,
+            radius=radius,
+        )
+        smoothed_arrs.append(blurred)
+    else:
+        smoothed_arrs.append(arr_bg)
+
+    arr_stack = np.stack(smoothed_arrs)
+    seg_arr_smoothed = np.argmax(arr_stack, axis=0)
+    seg_arr_s = seg_arr_smoothed.copy()
+
+    for idx, l in enumerate(sem_labels_plus_background):
+        seg_arr_s[seg_arr_smoothed == idx] = l
+
+    return seg_arr_s
 
 
 def np_calc_convex_hull(
