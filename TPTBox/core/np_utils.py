@@ -378,9 +378,9 @@ def np_calc_crop_around_centerpoint(
     n_dim = len(poi)
     if isinstance(pad_to_size, int):
         pad_to_size = np.ones(n_dim) * pad_to_size
-    assert (
-        n_dim == len(arr.shape) == len(cutout_size) == len(pad_to_size)
-    ), f"dimension mismatch, got dim {n_dim}, poi {poi}, arr shape {arr.shape}, cutout {cutout_size}, pad_to_size {pad_to_size}"
+    assert n_dim == len(arr.shape) == len(cutout_size) == len(pad_to_size), (
+        f"dimension mismatch, got dim {n_dim}, poi {poi}, arr shape {arr.shape}, cutout {cutout_size}, pad_to_size {pad_to_size}"
+    )
 
     poi = tuple(int(i) for i in poi)
     shape = arr.shape
