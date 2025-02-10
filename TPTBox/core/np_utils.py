@@ -779,7 +779,7 @@ def np_fill_holes(arr: np.ndarray, label_ref: LABEL_REFERENCE = None, slice_wise
     return arr
 
 
-def np_smooth_gaussian_channelwise(
+def np_smooth_gaussian_labelwise(
     arr: UINTARRAY,
     label_to_smooth: list[int] | int,
     sigma: float = 3.0,

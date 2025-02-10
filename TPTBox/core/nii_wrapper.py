@@ -30,7 +30,7 @@ from TPTBox.core.np_utils import (
     np_get_largest_k_connected_components,
     np_map_labels,
     np_point_coordinates,
-    np_smooth_gaussian_channelwise,
+    np_smooth_gaussian_labelwise,
     np_unique,
     np_unique_withoutzero,
     np_volume,
@@ -975,7 +975,7 @@ class NII(NII_Math):
         return self.smooth_gaussian(sigma=sigma,truncate=truncate,nth_derivative=nth_derivative,inplace=True)
 
 
-    def smooth_gaussian_channelwise(
+    def smooth_gaussian_labelwise(
         self,
         label_to_smooth: list[int] | int,
         sigma: float = 3.0,
@@ -987,11 +987,27 @@ class NII(NII_Math):
         smooth_background: bool = True,
         inplace: bool = False,
     ):
+        """Smoothes the segmentation mask by applying a gaussian filter label-wise and then using argmax to derive the smoothed segmentation labels again.
+
+        Args:
+            label_to_smooth (list[int] | int): Which labels to smooth in the mask. Every other label will be untouched
+            sigma (float, optional): Sigma of the gaussian blur. Defaults to 3.0.
+            radius (int, optional): Radius of the gaussian blur. Defaults to 6.
+            truncate (int, optional): Truncate of the gaussian blur. Defaults to 4.
+            boundary_mode (str, optional): Boundary Mode of the gaussian blur. Defaults to "nearest".
+            dilate_prior (int, optional): Dilate this many voxels before starting the gaussian blur algorithm. Defaults to 0.
+            dilate_connectivity (int, optional): Connectivity of the dilation process, if applied. Defaults to 3.
+            smooth_background (bool, optional): If true, will also smooth the background. If False, the background voxels stay the same and the segmentation cannot add voxels. Defaults to True.
+            inplace (bool, optional): If true, will overwrite the input NII instead of making a copy. Defaults to False.
+
+        Returns:
+            NII: The smoothed NII object.
+        """
         assert self.seg, "You cannot use this on a non-segmentation NII"
-        smoothed = np_smooth_gaussian_channelwise(self.get_seg_array(), label_to_smooth=label_to_smooth, sigma=sigma, radius=radius, truncate=truncate, boundary_mode=boundary_mode, dilate_prior=dilate_prior, dilate_connectivity=dilate_connectivity,smooth_background=smooth_background,)
+        smoothed = np_smooth_gaussian_labelwise(self.get_seg_array(), label_to_smooth=label_to_smooth, sigma=sigma, radius=radius, truncate=truncate, boundary_mode=boundary_mode, dilate_prior=dilate_prior, dilate_connectivity=dilate_connectivity,smooth_background=smooth_background,)
         return self.set_array(smoothed,inplace,verbose=False)
 
-    def smooth_gaussian_channelwise_(
+    def smooth_gaussian_labelwise_(
         self,
         label_to_smooth: list[int] | int,
         sigma: float = 3.0,
@@ -1002,7 +1018,7 @@ class NII(NII_Math):
         dilate_connectivity: int = 1,
         smooth_background: bool = True
     ):
-        return self.smooth_gaussian_channelwise(label_to_smooth=label_to_smooth, sigma=sigma, radius=radius, truncate=truncate, boundary_mode=boundary_mode, dilate_prior=dilate_prior, dilate_connectivity=dilate_connectivity, smooth_background=smooth_background, inplace=True,)
+        return self.smooth_gaussian_labelwise(label_to_smooth=label_to_smooth, sigma=sigma, radius=radius, truncate=truncate, boundary_mode=boundary_mode, dilate_prior=dilate_prior, dilate_connectivity=dilate_connectivity, smooth_background=smooth_background, inplace=True,)
 
     def to_ants(self):
         try:

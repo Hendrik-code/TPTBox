@@ -261,15 +261,15 @@ class Test_bids_file(unittest.TestCase):
         print(data)
 
         # Dilate the segmentation mask
-        smoothed = np_utils.np_smooth_gaussian_channelwise(
+        smoothed = np_utils.np_smooth_gaussian_labelwise(
             data,
             label_to_smooth=1,
             sigma=1,
             radius=4,
             truncate=4,
-            mode="nearest",
+            boundary_mode="nearest",
             dilate_prior=0,
-            smooth_bg=True,
+            smooth_background=True,
         )
 
         print()
@@ -292,15 +292,15 @@ class Test_bids_file(unittest.TestCase):
         print(data)
 
         # Dilate the segmentation mask
-        smoothed = np_utils.np_smooth_gaussian_channelwise(
+        smoothed = np_utils.np_smooth_gaussian_labelwise(
             data,
             label_to_smooth=1,
             sigma=3,
             radius=4,
             truncate=4,
-            mode="nearest",
+            boundary_mode="nearest",
             dilate_prior=1,
-            smooth_bg=True,
+            smooth_background=True,
         )
 
         print()
