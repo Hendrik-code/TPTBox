@@ -785,10 +785,10 @@ def np_smooth_gaussian_channelwise(
     sigma: float = 3.0,
     radius: int = 6,
     truncate: int = 4,
-    mode: str = "nearest",
+    boundary_mode: str = "nearest",
     dilate_prior: int = 0,
     dilate_connectivity: int = 3,
-    smooth_bg: bool = True,
+    smooth_background: bool = True,
 ) -> UINTARRAY:
     """Smoothes labels in a segmentation mask array
 
@@ -799,10 +799,10 @@ def np_smooth_gaussian_channelwise(
         sigma (float, optional): Sigma of the gaussian blur. Defaults to 3.0.
         radius (int, optional): Radius of the gaussian blur. Defaults to 6.
         truncate (int, optional): Truncate of the gaussian blur. Defaults to 4.
-        mode (str, optional): Boundary Mode of the gaussian blur. Defaults to "nearest".
+        boundary_mode (str, optional): Boundary Mode of the gaussian blur. Defaults to "nearest".
         dilate_prior (int, optional): Dilate this many voxels before starting the gaussian blur algorithm. Defaults to 0.
         dilate_connectivity (int, optional): Connectivity of the dilation process, if applied. Defaults to 3.
-        smooth_bg (bool, optional): If true, will also smooth the background. If False, the background voxels stay the same and the segmentation cannot add voxels. Defaults to True.
+        smooth_background (bool, optional): If true, will also smooth the background. If False, the background voxels stay the same and the segmentation cannot add voxels. Defaults to True.
 
     Returns:
         UINTARRAY: The resulting smoothed array of the segmentation (with the same labels as the input)
@@ -832,7 +832,7 @@ def np_smooth_gaussian_channelwise(
             blurred = gaussian_filter(
                 arr_l,
                 sigma=sigma,
-                mode=mode,
+                mode=boundary_mode,
                 truncate=truncate,
                 radius=radius,
             )
@@ -845,11 +845,11 @@ def np_smooth_gaussian_channelwise(
     arr_bg[arr_bg > 0] = 2
     arr_bg[arr_bg == 0] = 1
     arr_bg[arr_bg == 2] = 0
-    if smooth_bg:
+    if smooth_background:
         blurred = gaussian_filter(
             arr_bg.astype(float),
             sigma=sigma,
-            mode=mode,
+            mode=boundary_mode,
             truncate=truncate,
             radius=radius,
         )

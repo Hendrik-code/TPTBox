@@ -984,11 +984,11 @@ class NII(NII_Math):
         boundary_mode: str = "nearest",
         dilate_prior: int = 1,
         dilate_connectivity: int = 1,
-        smooth_bg: bool = True,
+        smooth_background: bool = True,
         inplace: bool = False,
     ):
         assert self.seg, "You cannot use this on a non-segmentation NII"
-        smoothed = np_smooth_gaussian_channelwise(self.get_seg_array(), label_to_smooth=label_to_smooth, sigma=sigma, radius=radius, truncate=truncate, mode=boundary_mode, dilate_prior=dilate_prior, dilate_connectivity=dilate_connectivity,smooth_bg=smooth_bg,)
+        smoothed = np_smooth_gaussian_channelwise(self.get_seg_array(), label_to_smooth=label_to_smooth, sigma=sigma, radius=radius, truncate=truncate, boundary_mode=boundary_mode, dilate_prior=dilate_prior, dilate_connectivity=dilate_connectivity,smooth_background=smooth_background,)
         return self.set_array(smoothed,inplace,verbose=False)
 
     def smooth_gaussian_channelwise_(
@@ -1000,9 +1000,9 @@ class NII(NII_Math):
         boundary_mode: str = "nearest",
         dilate_prior: int = 1,
         dilate_connectivity: int = 1,
-        smooth_bg: bool = True
+        smooth_background: bool = True
     ):
-        return self.smooth_gaussian_channelwise(label_to_smooth=label_to_smooth, sigma=sigma, radius=radius, truncate=truncate, boundary_mode=boundary_mode, dilate_prior=dilate_prior, dilate_connectivity=dilate_connectivity, smooth_bg=smooth_bg, inplace=True,)
+        return self.smooth_gaussian_channelwise(label_to_smooth=label_to_smooth, sigma=sigma, radius=radius, truncate=truncate, boundary_mode=boundary_mode, dilate_prior=dilate_prior, dilate_connectivity=dilate_connectivity, smooth_background=smooth_background, inplace=True,)
 
     def to_ants(self):
         try:
