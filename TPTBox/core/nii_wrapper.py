@@ -30,6 +30,7 @@ from TPTBox.core.np_utils import (
     np_get_largest_k_connected_components,
     np_map_labels,
     np_point_coordinates,
+    np_smooth_gaussian_channelwise,
     np_unique,
     np_unique_withoutzero,
     np_volume,
@@ -393,7 +394,6 @@ class NII(NII_Math):
     def affine(self,affine:np.ndarray):
         self._unpack()
         self.__divergent = True
-
         self._aff = affine
     @property
     def orientation(self) -> AX_CODES:
@@ -419,6 +419,7 @@ class NII(NII_Math):
     @origin.setter
     def origin(self,x:tuple[float, float, float]):
         self._unpack()
+        self.__divergent = True
         affine = self._aff
         affine[:3,3] = np.array(x) # type: ignore
         self._aff = affine
@@ -708,7 +709,7 @@ class NII(NII_Math):
             inplace (bool, optional): If True, it applies the slice to the original image and returns it. If False, it returns a new NII object with the sliced image.
         Returns:
             NII: A new NII object containing the sliced image if inplace=False. Otherwise, it returns the original NII object after applying the slice.
-        """        ''''''
+        """
         nii = self.nii.slicer[tuple(ex_slice)] if ex_slice is not None else self.nii_abstract
         if inplace:
             self.nii = nii
@@ -965,13 +966,43 @@ class NII(NII_Math):
         return self.match_histograms(reference,c_val = c_val,inplace=True)
 
     def smooth_gaussian(self, sigma:float|list[float]|tuple[float],truncate:float=4.0,nth_derivative=0,inplace=False):
-        assert self.seg is False, "You really want to smooth a segmentation?"
+        assert self.seg is False, "You really want to smooth a segmentation? If yes, use smooth_gaussian_channelwise() instead"
         from scipy.ndimage import gaussian_filter
         arr = gaussian_filter(self.get_array(), sigma, order=nth_derivative,cval=self.get_c_val(), truncate=truncate)# radius=None, axes=None
         return self.set_array(arr,inplace,verbose=False)
 
     def smooth_gaussian_(self, sigma:float|list[float]|tuple[float],truncate=4.0,nth_derivative=0):
         return self.smooth_gaussian(sigma=sigma,truncate=truncate,nth_derivative=nth_derivative,inplace=True)
+
+
+    def smooth_gaussian_channelwise(
+        self,
+        label_to_smooth: list[int] | int,
+        sigma: float = 3.0,
+        radius: int = 6,
+        truncate: int = 4,
+        boundary_mode: str = "nearest",
+        dilate_prior: int = 1,
+        dilate_connectivity: int = 1,
+        smooth_bg: bool = True,
+        inplace: bool = False,
+    ):
+        assert self.seg, "You cannot use this on a non-segmentation NII"
+        smoothed = np_smooth_gaussian_channelwise(self.get_seg_array(), label_to_smooth=label_to_smooth, sigma=sigma, radius=radius, truncate=truncate, mode=boundary_mode, dilate_prior=dilate_prior, dilate_connectivity=dilate_connectivity,smooth_bg=smooth_bg,)
+        return self.set_array(smoothed,inplace,verbose=False)
+
+    def smooth_gaussian_channelwise_(
+        self,
+        label_to_smooth: list[int] | int,
+        sigma: float = 3.0,
+        radius: int = 6,
+        truncate: int = 4,
+        boundary_mode: str = "nearest",
+        dilate_prior: int = 1,
+        dilate_connectivity: int = 1,
+        smooth_bg: bool = True
+    ):
+        return self.smooth_gaussian_channelwise(label_to_smooth=label_to_smooth, sigma=sigma, radius=radius, truncate=truncate, boundary_mode=boundary_mode, dilate_prior=dilate_prior, dilate_connectivity=dilate_connectivity, smooth_bg=smooth_bg, inplace=True,)
 
     def to_ants(self):
         try:
@@ -1534,6 +1565,7 @@ class NII(NII_Math):
         if isinstance(key,self.__class__):
             key = key.get_array()==1
         self._unpack()
+        self.__divergent = True
         self._arr[key] = value
 
 
