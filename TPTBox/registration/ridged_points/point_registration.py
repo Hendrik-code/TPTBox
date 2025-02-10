@@ -70,7 +70,7 @@ class Point_Registration:
         ctr_b = self._img_moving.TransformContinuousIndexToPhysicalPoint(cord)
         ctr_b = self._transform.GetInverse().TransformPoint(ctr_b)
         ctr_b = out.TransformPhysicalPointToContinuousIndex(ctr_b)
-        return ctr_b
+        return np.array(ctr_b)
 
     def transform_nii(self, moving_img_nii: NII, allow_only_same_grid_as_moving=True, output_space: NII | None = None):
         if output_space is not None:
@@ -87,7 +87,7 @@ class Point_Registration:
             resampler = self._resampler_seg if moving_img_nii.seg else self._resampler
         if allow_only_same_grid_as_moving:
             text = "input image must be in the same space as moving.  If you sure that this input is in same space as the moving image you can turn of 'only_allow_grid_as_moving'"
-            moving_img_nii.assert_affine(self.input_poi, text=text)
+            moving_img_nii.assert_affine(self.input_poi, text=text, shape_tolerance=0.9)
 
         img_sitk = nii_to_sitk(moving_img_nii)
         transformed_img = resampler.Execute(img_sitk)
@@ -186,7 +186,7 @@ def ridged_points_from_poi(
             inter, poi_fixed, representative_f_sitk, poi_moving, representative_m_sitk, verbose=False, log=log
         )
         delta_after = sorted(delta_after.items(), key=lambda x: -x[1])
-        out_str = f"Did not use the following keys for registaiton (worst {leave_worst_percent_out*100} %) "
+        out_str = f"Did not use the following keys for registaiton (worst {leave_worst_percent_out * 100} %) "
         for i, key in enumerate(delta_after):
             if i >= len(delta_after) * leave_worst_percent_out:
                 break
@@ -307,7 +307,7 @@ def _compute_versor(
     err_count = 0
     err_count_n = 0
     log.print(
-        f'{"key": <7}|{"fixed points": <23}|{"moved points after": <23}|{"moved points before": <23}|{"delta fixed/moved": <23}|{"distF": <5}|{"distM": <5}|',
+        f"{'key': <7}|{'fixed points': <23}|{'moved points after': <23}|{'moved points before': <23}|{'delta fixed/moved': <23}|{'distF': <5}|{'distM': <5}|",
         verbose=verbose,
     )
     k_old = -1000
@@ -332,7 +332,7 @@ def _compute_versor(
             y_ = f"{y[0]:7.1f},{y[1]:7.1f},{y[2]:7.1f}"
             y2_ = f"{y2[0]:7.1f},{y2[1]:7.1f},{y2[2]:7.1f}"
             d_ = f"{dif[0]:7.1f},{dif[1]:7.1f},{dif[2]:7.1f}"
-            log.print(f"{(k1,k2)!s: <7}|{x_: <23}|{y2_: <23}|{y_: <23}|{d_: <23}|{dist!s: <5}|{dist2!s: <5}|", verbose=verbose)
+            log.print(f"{(k1, k2)!s: <7}|{x_: <23}|{y2_: <23}|{y_: <23}|{d_: <23}|{dist!s: <5}|{dist2!s: <5}|", verbose=verbose)
 
         x_old = x
         y_old = y
