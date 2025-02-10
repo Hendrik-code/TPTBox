@@ -70,7 +70,7 @@ class Point_Registration:
         ctr_b = self._img_moving.TransformContinuousIndexToPhysicalPoint(cord)
         ctr_b = self._transform.GetInverse().TransformPoint(ctr_b)
         ctr_b = out.TransformPhysicalPointToContinuousIndex(ctr_b)
-        return ctr_b
+        return np.array(ctr_b)
 
     def transform_nii(self, moving_img_nii: NII, allow_only_same_grid_as_moving=True, output_space: NII | None = None):
         if output_space is not None:
@@ -87,7 +87,7 @@ class Point_Registration:
             resampler = self._resampler_seg if moving_img_nii.seg else self._resampler
         if allow_only_same_grid_as_moving:
             text = "input image must be in the same space as moving.  If you sure that this input is in same space as the moving image you can turn of 'only_allow_grid_as_moving'"
-            moving_img_nii.assert_affine(self.input_poi, text=text)
+            moving_img_nii.assert_affine(self.input_poi, text=text, shape_tolerance=0.9)
 
         img_sitk = nii_to_sitk(moving_img_nii)
         transformed_img = resampler.Execute(img_sitk)
