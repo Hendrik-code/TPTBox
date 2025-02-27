@@ -253,6 +253,68 @@ class Test_bids_file(unittest.TestCase):
         # expected = [1, 1, 0]  # Adjust based on your bounding box logic
         # self.assertEqual(result, expected)
 
+    def test_smooth_msk(self):
+        # Create a test NII object with a segmentation mask
+        data = np.zeros((10, 10), dtype=np.uint16)
+        data[3:8, 3:8] = 1
+
+        print(data)
+
+        # Dilate the segmentation mask
+        smoothed = np_utils.np_smooth_gaussian_labelwise(
+            data,
+            label_to_smooth=1,
+            sigma=1,
+            radius=4,
+            truncate=4,
+            boundary_mode="nearest",
+            dilate_prior=0,
+            smooth_background=True,
+        )
+
+        print()
+        print(smoothed)
+
+        # Check that the dilated mask is correct
+        expected = np.zeros((10, 10), dtype=np.uint16)
+        expected[3:8, 3:8] = 1
+        expected[3, 3] = 0
+        expected[3, 7] = 0
+        expected[7, 3] = 0
+        expected[7, 7] = 0
+        assert np.array_equal(smoothed, expected), (smoothed[5], expected[5])
+
+    def test_smooth_msk2(self):
+        # Create a test NII object with a segmentation mask
+        data = np.zeros((10, 10), dtype=np.uint16)
+        data[3:8, 3:8] = 1
+
+        print(data)
+
+        # Dilate the segmentation mask
+        smoothed = np_utils.np_smooth_gaussian_labelwise(
+            data,
+            label_to_smooth=1,
+            sigma=3,
+            radius=4,
+            truncate=4,
+            boundary_mode="nearest",
+            dilate_prior=1,
+            smooth_background=True,
+        )
+
+        print()
+        print(smoothed)
+
+        # Check that the dilated mask is correct
+        expected = np.zeros((10, 10), dtype=np.uint16)
+        expected[3:8, 3:8] = 1
+        expected[2, 5] = 1
+        expected[5, 2] = 1
+        expected[8, 5] = 1
+        expected[5, 8] = 1
+        assert np.array_equal(smoothed, expected), (smoothed[5], expected[5])
+
 
 if __name__ == "__main__":
     unittest.main()
