@@ -1135,7 +1135,7 @@ class NII(NII_Math):
             out = msk_i_data_org
         return self.set_array(out,inplace=inplace)
 
-    def dilate_msk_(self, n_pixel:int = 5, labels: LABEL_REFERENCE = None, connectivity: int=3, mask: Self | None = None, verbose:logging=True,use_crop=True,ignore_direction=None):
+    def dilate_msk_(self, n_pixel:int = 5, labels: LABEL_REFERENCE = None, connectivity: int=3, mask: Self | None = None, verbose:logging=True,use_crop=True,ignore_direction:DIRECTIONS|int|None=None):
         return self.dilate_msk(n_pixel=n_pixel, labels=labels, connectivity=connectivity, mask=mask, inplace=True, verbose=verbose,use_crop=use_crop,ignore_direction=ignore_direction)
 
 
@@ -1390,7 +1390,76 @@ class NII(NII_Math):
         assert self.seg and mask_other.seg
         return np_calc_overlapping_labels(self.get_seg_array(), mask_other.get_seg_array())
 
+    def truncate_labels_beyond_reference_(
+        self, idx: int | list[int] = 1, not_beyond: int | list[int] = 1, fill: int = 0,  axis: DIRECTIONS = "S", inclusion: bool = False, inplace: bool = True
+    ):
+        """
+        Modifies the NIfTI object to remove all voxels with the label `idx` beyond a reference label `not_beyond`
+        along a specified axis, replacing them with `fill (default = 0)`.
 
+        Parameters:
+            nii (NII): The NIfTI-like object with 3D imaging data.
+            idx (int or list[int]): The index/label(s) to process in the array. Default is 1.
+            not_beyond (int or list[int]): The label/index used to determine the reference position. Default is 1.
+            fill (int): The value to set for voxels beyond the reference point. Default is 0.
+            axis (str): The anatomical axis along which truncation is applied. Default is "S" (superior).
+                Options:
+                - "S" (Superior)
+                - "I" (Inferior)
+                - "R" (Right)
+                - "L" (Left)
+                - "A" (Anterior)
+                - "P" (Posterior)
+            inclusion (bool): Controls whether the reference label `not_beyond` itself is considered a boundary.
+                - `False` (default): The truncation occurs strictly beyond the reference label.
+                - `True`: The truncation includes the reference label as well.
+            inplace (bool): If `True`, modifies the NIfTI object in place. If `False`, returns a modified copy.
+
+        Returns:
+            NII: The modified NIfTI object.
+        """
+        # Identify the axis to work on
+        axis_ = self.get_axis(axis)
+        flip = self.orientation[axis_] != axis  # Check orientation for flipping
+        axis_ = axis_
+        # Get the array data
+        np_array = self.get_array()
+        np_array_cond = self.extract_label(idx).get_seg_array()
+
+        # Find the lowest point (smallest index) along the axis where `not_above` exists
+        threshold = np.where(self.extract_label(not_beyond).get_seg_array() == 1)
+        if len(threshold[axis_]) == 0:
+            return self if inplace else self.copy()
+        flip_up = flip
+        if inclusion:
+            flip_up = not flip_up
+        # Determine the lowest index along the axis
+        limit = threshold[axis_].min() if flip_up else threshold[axis_].max()
+
+        # Create an array of indices along the specified axis
+        index_grid = np.arange(self.shape[axis_])
+
+        # Create a mask to identify the region above or below the threshold
+        mask = index_grid < limit if flip else index_grid >= limit
+
+        # Apply the mask along the specified axis
+        mask = np.expand_dims(mask, axis=tuple(i for i in range(np_array.ndim) if i != axis_))
+        mask = np.broadcast_to(mask, self.shape)
+
+        # Replace values of `idx` with `fill` in the masked region
+        np_array = np.where((np_array_cond == 1) & mask, fill, np_array)
+
+        # Update the NIfTI object with the modified array
+        return self.set_array(np_array, inplace=inplace)
+    def truncate_labels_beyond_reference(
+        self,
+        idx: int | list[int] = 1,
+        not_beyond: int | list[int] = 1,
+        fill: int = 0,
+        axis: DIRECTIONS = "S",
+        inclusion: bool = False
+    ):
+        return self.truncate_labels_beyond_reference_(idx,not_beyond,fill,axis,inclusion)
     def map_labels(self, label_map:LABEL_MAP , verbose:logging=True, inplace=False):
         """
         Maps labels in the given NIfTI image according to the label_map dictionary.
@@ -1432,6 +1501,7 @@ class NII(NII_Math):
 
     def map_labels_(self, label_map: LABEL_MAP, verbose:logging=True):
         return self.map_labels(label_map,verbose=verbose,inplace=True)
+
     def copy(self, nib:Nifti1Image|_unpacked_nii|None = None):
         if nib is None:
             nib = (self.get_array().copy(), self.affine.copy(), self.header.copy())
