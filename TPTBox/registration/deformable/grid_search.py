@@ -12,18 +12,36 @@
 
 
 import argparse
+import pickle
 import random
+from dataclasses import dataclass
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import torch
-import wandb
-from data_utils import load_and_preprocess
 from deepali.data import Image
-from metrics import NMILOSS, calculate_jacobian_metrics, dice
-from reg_utils import load_config, register_affine, register_deformable
+
+# import wandb
+from deepali.losses import HuberImageLoss
+from torch import Tensor
 from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure
+from tqdm import tqdm
+
+from TPTBox.core.nii_wrapper import to_nii
+from TPTBox.registration.deformable._deepali.metrics import NMILOSS, calculate_jacobian_metrics, dice
+from TPTBox.registration.deformable.deformable_reg import Deformable_Registration, Image_Reference, _load_config
+
+
+@dataclass
+class Example:
+    name: str
+    fixed_path: Image_Reference
+    moving_path: Image_Reference
+    fixed_seg_path: Image_Reference | None
+    moving_seg_path: Image_Reference | None
+    outfolder: Path
 
 
 def set_seed(seed):
@@ -35,116 +53,223 @@ def set_seed(seed):
     torch.backends.cudnn.benchmark = False
 
 
-def update_config(config, args):
-    config["energy"]["seg"] = [1, args.loss]
-    config["energy"]["be"][0] = args.be
-    config["energy"]["be"][2]["stride"] = [args.stride, args.stride, args.stride]
-    config["optim"]["step_size"] = args.lr
+def update_config(config, loss, be, stride, lr):
+    config["loss"]["config"]["seg"]["name"] = loss
+    config["loss"]["weights"]["be"] = be
+    config["model"]["args"]["stride"] = stride
+    config["optim"]["args"]["lr"] = lr
     return config
 
 
 @torch.no_grad()
 def pairwise(fixed, warped, fixed_seg, warped_seg, transform):
-    assert fixed.ndim == warped.ndim == 5
+    # print(fixed.shape, warped.shape, fixed_seg.shape, warped_seg.shape)
+    # print(type(fixed), type(warped), type(fixed_seg), type(warped_seg))
+    fixed = np.expand_dims(fixed.numpy(), 0)
+    warped = np.expand_dims(warped.numpy(), 0)
+
+    # assert fixed.ndim == warped.ndim == 5
     folding_ratio, jacobian = calculate_jacobian_metrics(transform.numpy())
     psnr = PeakSignalNoiseRatio()
     ssim = StructuralSimilarityIndexMeasure()
     nmi = NMILOSS()
     # FIXME set number of labels
-    dices = [dice(fixed_seg, warped_seg, label) for label in range(1, 4)]
-
+    if fixed_seg is not None:
+        fixed_seg = np.expand_dims(fixed_seg.numpy(), 0)
+        warped_seg = np.expand_dims(warped_seg.numpy(), 0)
+        fixed_seg[fixed < 10] = 0
+        warped_seg[fixed < 10] = 0
+        c = np.unique(fixed_seg)
+        dices = {label: dice(fixed_seg, warped_seg, label) for label in c if int(label) != 0}
+    else:
+        dices = {-1: -1}
+    fixed_t = Tensor(fixed.astype(np.float32))
+    warped_t = Tensor(warped.astype(np.float32))
     metrics = {
-        "psnr": psnr(fixed, warped).item(),
-        "ssim": ssim(fixed, warped).item(),
-        "nmi": -nmi(fixed, warped).item(),
+        "psnr": psnr(fixed_t, warped_t).item(),
+        "ssim": ssim(fixed_t, warped_t).item(),
+        "nmi": -nmi(fixed_t, warped_t).item(),
         "folding_ratio": folding_ratio,
         "jacobian": jacobian,
         "dice scores": dices,
-        "avg_dice": np.mean(dices),
+        "avg_dice": np.mean(list(dices.values())),
     }
     return metrics
 
 
+def run_all(
+    e: Example,
+    losses=(
+        # "SSD",
+        # "NMI",
+        # "HuberImageLoss",
+        "LNCC",
+        # "MSE",
+    ),
+    bes=(
+        1e-2,
+        # 1e-3,
+    ),
+    strides=(4, 8, 16),
+    lrs=(
+        # 1e-2,
+        1e-3,
+        1e-4,
+    ),
+    spacings=([], [2], [3], [4]),
+):
+    tests = []
+    for loss in losses:
+        for be in bes:
+            for sx in strides:
+                for sy in strides:
+                    for sz in strides:
+                        for lr in lrs:
+                            for spacing in spacings:
+                                tests.append((loss, be, (sx, sy, sz), lr, *spacing))  # noqa: PERF401
+
+    # Buffer laden, falls vorhanden
+    try:
+        with open(e.outfolder / f"buffer_{e.name}.pkl", "rb") as w:
+            buffer = pickle.load(w)
+    except (FileNotFoundError, EOFError):
+        buffer = {}
+    # print([f["avg_dice"] for f in buffer.values()])
+    # print(max([f["avg_dice"] for f in buffer.values()]))
+    # exit()
+    random.shuffle(tests)
+
+    for test in tqdm(tests):
+        if test in buffer:
+            continue
+        # break
+        buffer[test] = run(e, *test)
+
+        # Buffer speichern nach jedem Testlauf
+        with open(e.outfolder / f"buffer_{e.name}.pkl", "wb") as f:
+            pickle.dump(buffer, f)
+
+        # Ergebnisse als Excel speichern
+        data = []
+        for a, metrics in buffer.items():
+            if len(a) == 4:
+                (loss, be, stride, lr) = a
+                spacing_type = 1
+            else:
+                (loss, be, stride, lr, spacing_type) = a
+            row = {
+                "Loss": loss,
+                "BE": be,
+                "Strides_X": stride[0],
+                "Strides_Y": stride[1],
+                "Strides_Z": stride[2],
+                "LR": lr,
+                "spacing_type": spacing_type,
+                **metrics,
+            }
+            if "dice scores" in row:
+                del row["dice scores"]
+            data.append(row)
+
+        df_ = pd.DataFrame(data)
+        df_.to_excel(e.outfolder / f"results_{e.name}.xlsx", index=False)
+
+
+def run(e: Example, loss, be, stride, lr, spacing=1, save=False):
+    PATH_CONFIG = Path(__file__).parent / "settings.json"  # noqa: N806
+    deformable_config = _load_config(PATH_CONFIG)
+    deformable_config = update_config(deformable_config, loss, be, stride, lr)
+
+    # base_path = Path.cwd().joinpath("temp", eid)
+    # TODO POINT Preregistaion
+    # if not moving_path.exists():
+    #    raise NotImplementedError()
+    deform = Deformable_Registration(e.fixed_path, e.moving_path, device="cuda", config=deformable_config, spacing_type=spacing)
+    warped = deform.transform_nii(to_nii(e.moving_path, False))
+    warped_seg = deform.transform_nii(to_nii(e.moving_seg_path, True)) if e.moving_seg_path is not None else None
+    deformable_trf = deform.transform
+    ref = to_nii(e.fixed_path, False)  # .unsqueeze(0)
+
+    metrics = pairwise(
+        fixed=ref,
+        warped=warped,
+        fixed_seg=to_nii(e.fixed_seg_path, True) if e.fixed_seg_path is not None else None,
+        warped_seg=warped_seg,
+        transform=deformable_trf.tensor().cpu(),
+    )
+    if save:
+        warped.save(e.outfolder / f"{e.name}_moved.nii.gz")
+        ref.save(e.outfolder / f"{e.name}_fixed.nii.gz")
+        if warped_seg is not None:
+            warped_seg.save(e.outfolder / f"{e.name}_moved_seg.nii.gz")
+            to_nii(e.fixed_seg_path, True).save(e.outfolder / f"{e.name}_fixed_seg.nii.gz")
+    return metrics
+
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--loss", type=str)
-    parser.add_argument("--be", type=float)
-    parser.add_argument("--stride", type=int)
-    parser.add_argument("--lr", type=float)
-    args = parser.parse_args()
+    # parser = argparse.ArgumentParser()
+    # parser.add_argument("--loss", type=str, default="LNCC")
+    # parser.add_argument("--be", type=float, default=0.001)
+    # parser.add_argument("--stride", type=int, nargs=3, default=[8, 8, 16])
+    # parser.add_argument("--lr", type=float, default=0.001)
+    # args = parser.parse_args()
+    PATH_DATA = Path("/DATA/NAS/datasets_processed/NAKO/dataset-nako/rawdata/100/100000/")
 
     # Set the seed
     set_seed(42)
     device = "cuda"
-
-    PATH_CONFIG = Path("/vol/aimspace/users/staso/repositories/WholeBodyAtlas/cfg/deformable_config.yaml")
-    PATH_DATA = Path("/vol/aimspace/projects/ukbb/data/whole_body/nifti/")
-    PATH_SEG = Path("/vol/aimspace/projects/ukbb/data/whole_body/total_segmentator/")
-
-    deformable_config = load_config(PATH_CONFIG)
-    deformable_config = update_config(deformable_config, args)
-
-    run = wandb.init(project="ukbb-reg", entity="starcksophie", config=args)
-
-    ref_eid = "1197096"
-    eid = "1028117"
-
-    base_path = Path.cwd().joinpath("temp", eid)
-    fixed_path = base_path.joinpath("ref_pp.nii.gz")
-    moving_path = base_path.joinpath("A_wat.nii.gz")
-
-    fixed_seg_path = PATH_SEG.joinpath(ref_eid, f"{ref_eid}_total_seg.nii.gz")
-    moving_seg_path = base_path.joinpath("A_label.nii.gz")
-
-    if not moving_path.exists():
-        base_path.mkdir(parents=True, exist_ok=True)
-
-        ref, sitk_arr = load_and_preprocess(
-            path=PATH_DATA.joinpath(ref_eid, "wat.nii.gz"),
-            save_path=fixed_path,
-        )
-        fixed_seg_path = PATH_SEG.joinpath(ref_eid, f"{ref_eid}_total_seg.nii.gz")
-
-        target_grid = Image.read(fixed_path).grid()
-
-        # affine reg
-        _, transform, warped, warped_label = register_affine(
-            ref,
-            source_path=PATH_DATA.joinpath(str(eid), "wat.nii.gz"),
-            source_seg=PATH_SEG.joinpath(str(eid), f"{eid!s}_total_seg.nii.gz"),
-            target_grid=target_grid,
-            iterations=200,
-            save=(base_path, sitk_arr),
-            device=device,
-        )
-
-    warped, warped_seg, deformable_trf = register_deformable(
-        fixed_path, moving_path, deformable_config, "cuda", source_seg=moving_seg_path, target_seg=fixed_seg_path, save=None, verbose=1
+    e = Example(
+        "vibe-mevibe-100000",
+        PATH_DATA / "mevibe/sub-100000_sequ-me1_acq-ax_part-water_mevibe.nii.gz",
+        Path(
+            "/DATA/NAS/datasets_processed/NAKO/dataset-nako/rawdata_stitched/100/100000/vibe/sub-100000_sequ-stitched_acq-ax_part-water_vibe.nii.gz",
+        ),
+        fixed_seg_path=Path(
+            "/DATA/NAS/datasets_processed/NAKO/dataset-nako/derivatives_Abdominal-Segmentation/100/100000/mevibe/sub-100000_sequ-me1_acq-ax_mod-mevibe_seg-TotalVibeSegmentator80_msk.nii.gz"
+        ),
+        moving_seg_path=Path(
+            "/DATA/NAS/datasets_processed/NAKO/dataset-nako/derivatives_Abdominal-Segmentation/100/100000/vibe/sub-100000_sequ-stitched_acq-ax_mod-vibe_seg-TotalVibeSegmentator_msk.nii.gz"
+        ),
+        outfolder=Path("/DATA/NAS/ongoing_projects/robert/test"),
+    )
+    p = Path("/DATA/NAS/datasets_processed/SHIP/rawdata/10108/sub-10108001/")
+    e = Example(
+        "ship-vibe-T2w-10108001",
+        p / "T2w/sub-10108001_sequ-T2w-2_T2w.nii.gz",
+        p / "vibe/sub-10108001_sequ-stitched_part-water_vibe.nii.gz",
+        None,
+        None,
+        outfolder=Path("/DATA/NAS/ongoing_projects/robert/test"),
     )
 
-    ref = Image.read(fixed_path).unsqueeze(0)
-
-    metrics = pairwise(
-        fixed=ref,
-        warped=warped.cpu().unsqueeze(0),
-        fixed_seg=Image.read(fixed_seg_path).unsqueeze(0),
-        warped_seg=warped_seg.cpu().unsqueeze(0).unsqueeze(0),
-        transform=deformable_trf.tensor().cpu(),
+    # run_all(e)
+    p = Path("/DATA/NAS/datasets_processed/NAKO/dataset-nako/rawdata_stitched/102/102017/")
+    e = Example(
+        "nako-vibe-T2w-102017",
+        p / "T2w/sub-102017_sequ-stitched_acq-sag_T2w.nii.gz",
+        p / "vibe/sub-102017_sequ-stitched_acq-ax_part-water_vibe.nii.gz",
+        Path(
+            "/DATA/NAS/datasets_processed/NAKO/dataset-nako/derivatives_totalVibe/102/102017/T2w/sub-102017_sequ-stitched_acq-sag_seg-totalVibeSegmentor98_msk.nii.gz"
+        ),
+        Path(
+            "/DATA/NAS/datasets_processed/NAKO/dataset-nako/derivatives_Abdominal-Segmentation/102/102017/vibe/sub-102017_sequ-stitched_acq-ax_mod-vibe_seg-TotalVibeSegmentator_msk.nii.gz"
+        ),
+        outfolder=Path("/DATA/NAS/ongoing_projects/robert/test"),
+    )
+    # m = run(e, "LNCC", 0.01, (4, 4, 8), 0.001, 3, True)
+    # run_all(e)
+    # print(m)
+    exit()
+    p = Path("/DATA/NAS/datasets_processed/SHIP/rawdata/10108/sub-10108001/")
+    e = Example(
+        "ship-T1w-T2w-10108001",
+        p / "T2w/sub-10108001_sequ-T2w-2_T2w.nii.gz",
+        p / "T1w/sub-10108001_sequ-T1w-2_T1w.nii.gz",
+        None,
+        None,
+        outfolder=Path("/DATA/NAS/ongoing_projects/robert/test"),
     )
 
-    wandb.log(metrics)
-
-    fig, ax = plt.subplots(1, 2, figsize=(15, 10))
-    f = np.rot90(ref[0, 0, :, 80], k=2)
-    m = np.rot90(load_and_preprocess(PATH_DATA.joinpath(str(eid), "wat.nii.gz"))[0][:, 80].numpy(), k=2)
-    w = np.rot90(warped[0, :, 80].detach().cpu().numpy(), k=2)
-
-    s = ax[0].imshow(m - f, cmap="seismic")
-    ax[0].set_title("diff map before reg")
-    s.set_clim(-1, 1)
-    s = ax[1].imshow(w - f, cmap="seismic")
-    ax[1].set_title("diff map after reg")
-    s.set_clim(-1, 1)
-
-    wandb.log({"result": wandb.Image(fig)})
-    wandb.finish()
+    run(e, "LNCC", 0.001, (4, 4, 16), 0.001, True)
+    # metrics = run_all(e)
+    # print(metrics)

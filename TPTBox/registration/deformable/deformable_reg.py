@@ -92,6 +92,7 @@ class Deformable_Registration:
         align_corners: bool = False,
         verbose=1,
         config: Path | str | dict = Path(__file__).parent / "settings.json",
+        spacing_type=1,
     ) -> None:
         """
         Initialize the deformable registration process.
@@ -116,6 +117,16 @@ class Deformable_Registration:
         elif normalize == "CT":
             fix.clamp_(-1024, 1024).normalize_().clamp(0, 1)
             mov.clamp_(-1024, 1024).normalize_().clamp(0, 1)
+        if spacing_type == 1:
+            finest_spacing = fix.spacing
+        elif spacing_type == 2:
+            finest_spacing = mov.spacing
+        elif spacing_type == 3:
+            finest_spacing = [max(a, b) for a, b in zip(mov.spacing, fix.spacing, strict=True)]
+        elif spacing_type == 4:
+            finest_spacing = [min(a, b) for a, b in zip(mov.spacing, fix.spacing, strict=True)]
+        else:
+            finest_spacing = None
 
         if reference_image is None:
             reference_image = fix
@@ -142,6 +153,7 @@ class Deformable_Registration:
             config=deformable_simple,
             device=device,  # type: ignore
             verbose=verbose,
+            finest_spacing=finest_spacing,
         )
 
     @torch.no_grad()
