@@ -313,14 +313,12 @@ class Abstract_POI(Has_Grid):
         return self.copy(ctd)
 
     @property
-    def is_global(self) -> bool:
-        ...
+    def is_global(self) -> bool: ...
 
     def clone(self, **qargs):
         return self.copy(**qargs)
 
-    def copy(self, centroids: POI_Descriptor | None = None, **qargs) -> Self:
-        ...
+    def copy(self, centroids: POI_Descriptor | None = None, **qargs) -> Self: ...
 
     def map_labels(
         self,
@@ -582,6 +580,15 @@ class Abstract_POI(Has_Grid):
         return self.extract_subregion(*location, inplace=True)
 
     def extract_vert(self, *vert_label: int, inplace=False):
+        import warnings
+
+        warnings.warn("extract_vert id deprecated use extract_region instead", stacklevel=5)  # TODO remove in version 2.0
+        return self.extract_region(*vert_label, inplace=inplace)
+
+    def extract_vert_(self, *vert_label: int):
+        return self.extract_vert(*vert_label, inplace=True)
+
+    def extract_region(self, *vert_label: int, inplace=False):
         vert_labels = tuple(vert_label)
         extracted_centroids = POI_Descriptor()
         for x1, x2, y in self.centroids.items():
@@ -592,8 +599,8 @@ class Abstract_POI(Has_Grid):
             return self
         return self.copy(centroids=extracted_centroids)
 
-    def extract_vert_(self, *vert_label: int):
-        return self.extract_vert(*vert_label, inplace=True)
+    def extract_region_(self, *vert_label: int):
+        return self.extract_region(*vert_label, inplace=True)
 
     def round(self, ndigits, inplace=False):
         """Round the centroid coordinates to a specified number of digits.
