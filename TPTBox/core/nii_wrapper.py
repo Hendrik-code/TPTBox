@@ -48,8 +48,6 @@ from .vert_constants import (
     SHAPE,
     ZOOMS,
     Location,
-    Sentinel,
-    _supported_img_files,
     log,
     logging,
     v_name2idx,
@@ -756,12 +754,19 @@ class NII(NII_Math):
         return s.apply_pad(padding,inplace=inplace,mode=mode)
 
     def apply_pad(self,padd:Sequence[tuple[int|None,int]],mode:MODES="constant",inplace = False):
+        #TODO add other modes
+        #TODO add testcases and options for modes
         transform = np.eye(4, dtype=int)
         for i, (before,_) in enumerate(padd):
             #transform[i, i] = pad_slice.step if pad_slice.step is not None else 1
             transform[i, 3] = -before  if before is not None else 0
         affine = self.affine.dot(transform)
-        arr = np.pad(self.get_array(),padd,mode=mode,constant_values=self.get_c_val()) # type: ignore
+        print(mode)
+        args = {}
+        if mode == "constant":
+            args["constant_values"]=self.get_c_val()
+        arr = np.pad(self.get_array(),padd,mode=mode,**args) # type: ignore
+
         nii:_unpacked_nii = (arr,affine,self.header)
         if inplace:
             self.nii = nii
@@ -1044,7 +1049,7 @@ class NII(NII_Math):
         #   data = data.unsqueeze(0)
         return deepaliImage(data, grid, dtype=dtype, device=device)  # type: ignore
 
-    def erode_msk(self, n_pixel: int = 5, labels: LABEL_REFERENCE = None, connectivity: int = 3, inplace=False,verbose:logging=True,border_value=0, use_crop=True):
+    def erode_msk(self, n_pixel: int = 5, labels: LABEL_REFERENCE = None, connectivity: int = 3, inplace=False,verbose:logging=True,border_value=0, use_crop=True,ignore_direction:DIRECTIONS|int|None=None):
         """
         Erodes the binary segmentation mask by the specified number of voxels.
 
@@ -1074,7 +1079,9 @@ class NII(NII_Math):
         else:
             msk_i_data = self.get_seg_array()
         labels = self.unique() if labels is None else labels
-        out = np_erode_msk(msk_i_data, label_ref=labels, mm=n_pixel, connectivity=connectivity,border_value=border_value)
+        if isinstance(ignore_direction,str):
+            ignore_direction = self.get_axis(ignore_direction)
+        out = np_erode_msk(msk_i_data, label_ref=labels, mm=n_pixel, connectivity=connectivity,border_value=border_value,ignore_axis=ignore_direction)
         out = out.astype(self.dtype)
         log.print("Mask eroded by", n_pixel, "voxels",verbose=verbose)
 
@@ -1083,10 +1090,10 @@ class NII(NII_Math):
             out = msk_i_data_org
         return self.set_array(out,inplace=inplace)
 
-    def erode_msk_(self, n_pixel:int = 5, labels: LABEL_REFERENCE = None, connectivity: int=3, verbose:logging=True,border_value=0,use_crop=True):
-        return self.erode_msk(n_pixel=n_pixel, labels=labels, connectivity=connectivity, inplace=True, verbose=verbose,border_value=border_value,use_crop=use_crop)
+    def erode_msk_(self, n_pixel:int = 5, labels: LABEL_REFERENCE = None, connectivity: int=3, verbose:logging=True,border_value=0,use_crop=True,ignore_direction:DIRECTIONS|int|None=None):
+        return self.erode_msk(n_pixel=n_pixel, labels=labels, connectivity=connectivity, inplace=True, verbose=verbose,border_value=border_value,use_crop=use_crop,ignore_direction=ignore_direction)
 
-    def dilate_msk(self, n_pixel: int = 5, labels: LABEL_REFERENCE = None, connectivity: int = 3, mask: Self | None = None, inplace=False, verbose:logging=True,use_crop=True):
+    def dilate_msk(self, n_pixel: int = 5, labels: LABEL_REFERENCE = None, connectivity: int = 3, mask: Self | None = None, inplace=False, verbose:logging=True,use_crop=True, ignore_direction:DIRECTIONS|int|None=None):
         """
         Dilates the binary segmentation mask by the specified number of voxels.
 
@@ -1118,7 +1125,9 @@ class NII(NII_Math):
         else:
             msk_i_data = self.get_seg_array()
         mask_ = mask.get_seg_array() if mask is not None else None
-        out = np_dilate_msk(arr=msk_i_data, label_ref=labels, mm=n_pixel, mask=mask_, connectivity=connectivity)
+        if isinstance(ignore_direction,str):
+            ignore_direction = self.get_axis(ignore_direction)
+        out = np_dilate_msk(arr=msk_i_data, label_ref=labels, mm=n_pixel, mask=mask_, connectivity=connectivity,ignore_axis=ignore_direction)
         out = out.astype(self.dtype)
         log.print("Mask dilated by", n_pixel, "voxels",verbose=verbose)
         if use_crop:
@@ -1126,11 +1135,11 @@ class NII(NII_Math):
             out = msk_i_data_org
         return self.set_array(out,inplace=inplace)
 
-    def dilate_msk_(self, n_pixel:int = 5, labels: LABEL_REFERENCE = None, connectivity: int=3, mask: Self | None = None, verbose:logging=True,use_crop=True):
-        return self.dilate_msk(n_pixel=n_pixel, labels=labels, connectivity=connectivity, mask=mask, inplace=True, verbose=verbose,use_crop=use_crop)
+    def dilate_msk_(self, n_pixel:int = 5, labels: LABEL_REFERENCE = None, connectivity: int=3, mask: Self | None = None, verbose:logging=True,use_crop=True,ignore_direction=None):
+        return self.dilate_msk(n_pixel=n_pixel, labels=labels, connectivity=connectivity, mask=mask, inplace=True, verbose=verbose,use_crop=use_crop,ignore_direction=ignore_direction)
 
 
-    def fill_holes(self, labels: LABEL_REFERENCE = None, slice_wise_dim: int | None = None, verbose:logging=False, inplace=False,use_crop=True):  # noqa: ARG002
+    def fill_holes(self, labels: LABEL_REFERENCE = None, slice_wise_dim: int|str | None = None, verbose:logging=False, inplace=False,use_crop=True):  # noqa: ARG002
         """Fills holes in segmentation
 
         Args:
@@ -1145,6 +1154,7 @@ class NII(NII_Math):
         """
         if labels is None:
             labels = list(self.unique())
+
         if isinstance(labels, int):
             labels = [labels]
 
@@ -1158,7 +1168,8 @@ class NII(NII_Math):
             seg_arr = msk_i_data_org[crop]
         else:
             seg_arr = self.get_seg_array()
-
+        if isinstance(slice_wise_dim,str):
+            slice_wise_dim = self.get_axis(slice_wise_dim)
         #seg_arr = self.get_seg_array()
         filled = np_fill_holes(seg_arr, label_ref=labels, slice_wise_dim=slice_wise_dim)
         if use_crop:
@@ -1247,7 +1258,7 @@ class NII(NII_Math):
             return self if inplace else self.copy()
         return self.set_array(out,inplace=inplace)
 
-    def filter_connected_components(self, labels: int |list[int]|None,min_volume:int=0,max_volume:int|None=None, max_count_component = None, connectivity: int = 3,removed_to_label=0):
+    def filter_connected_components(self, labels: int |list[int]|None,min_volume:int=0,max_volume:int|None=None, max_count_component = None, connectivity: int = 3,removed_to_label=0,keep_label=False):
         """
         Filter connected components in a segmentation array based on specified volume constraints.
 
@@ -1262,10 +1273,16 @@ class NII(NII_Math):
         Returns:
         None
         """
-        arr = self.get_seg_array()
-        nii = self.get_largest_k_segmentation_connected_components(max_count_component,labels,connectivity=connectivity,return_original_labels=False,min_volume=min_volume,max_volume=max_volume)
+        nii = self.get_largest_k_segmentation_connected_components(max_count_component,labels,connectivity=connectivity,return_original_labels=keep_label,min_volume=min_volume,max_volume=max_volume)
+        if keep_label and labels is not None:
+            if isinstance(labels,int):
+                labels = [labels]
+            old_labels = [i for i in nii.unique() if i not in labels]
+            if len(old_labels) != 0:
+                s = self.extract_label(old_labels,keep_label=True)
+                nii[s != 0] = s[s!=0]
         #print("filter",nii.unique())
-        assert max_count_component is None or nii.max() <= max_count_component, nii.unique()
+        #assert max_count_component is None or nii.max() <= max_count_component, nii.unique()
         return nii
         print("nii", np.unique(nii))
         for k, idx in enumerate(nii.unique(),start=1):
@@ -1546,6 +1563,7 @@ class NII(NII_Math):
         if isinstance(key,self.__class__):
             key = key.get_array()==1
         self._unpack()
+        self.__divergent = True
         self._arr[key] = value
 
 
