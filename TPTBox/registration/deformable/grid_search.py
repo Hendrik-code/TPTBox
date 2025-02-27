@@ -259,7 +259,7 @@ if __name__ == "__main__":
     # m = run(e, "LNCC", 0.01, (4, 4, 8), 0.001, 3, True)
     # run_all(e)
     # print(m)
-    exit()
+    # exit()
     p = Path("/DATA/NAS/datasets_processed/SHIP/rawdata/10108/sub-10108001/")
     e = Example(
         "ship-T1w-T2w-10108001",
