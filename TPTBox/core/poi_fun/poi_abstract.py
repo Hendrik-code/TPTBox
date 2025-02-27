@@ -257,7 +257,7 @@ class POI_Descriptor(AbstractSet, MutableMapping):
     def normalize_input_data(cls, dic: dict):
         _centroids = cls()
         for k, v in dic.items():
-            if isinstance(k, (tuple, list)) and isinstance(v, (tuple, list)) and len(v) == DIMENSIONS:
+            if isinstance(k, (tuple, list)) and isinstance(v, (tuple, list, np.ndarray)) and len(v) == DIMENSIONS:
                 _centroids[k[0], k[1]] = tuple(v)  # type: ignore
             elif isinstance(k, (int, float)) and isinstance(v, tuple) and len(v) == DIMENSIONS:
                 _centroids[0, int(k)] = v  # type: ignore
@@ -265,7 +265,7 @@ class POI_Descriptor(AbstractSet, MutableMapping):
                 for k2, v2 in v.items():
                     _centroids[int(k), int(k2)] = v2  # type: ignore
             else:
-                raise ValueError(dic, type(dic))
+                raise ValueError(k, type(k), v, tuple(v))
         return _centroids
 
     def pop(self, key: POI_ID, default):
@@ -313,12 +313,14 @@ class Abstract_POI(Has_Grid):
         return self.copy(ctd)
 
     @property
-    def is_global(self) -> bool: ...
+    def is_global(self) -> bool:
+        ...
 
     def clone(self, **qargs):
         return self.copy(**qargs)
 
-    def copy(self, centroids: POI_Descriptor | None = None, **qargs) -> Self: ...
+    def copy(self, centroids: POI_Descriptor | None = None, **qargs) -> Self:
+        ...
 
     def map_labels(
         self,
