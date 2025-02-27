@@ -1324,7 +1324,7 @@ class NII(NII_Math):
         if keep_label and labels is not None:
             if isinstance(labels,int):
                 labels = [labels]
-            old_labels = [i for i in nii.unique() if i not in labels]
+            old_labels = [i for i in self.unique() if i not in labels]
             if len(old_labels) != 0:
                 s = self.extract_label(old_labels,keep_label=True)
                 nii[s != 0] = s[s!=0]
