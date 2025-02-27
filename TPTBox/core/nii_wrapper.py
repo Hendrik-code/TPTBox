@@ -1305,7 +1305,7 @@ class NII(NII_Math):
             return self if inplace else self.copy()
         return self.set_array(out,inplace=inplace)
 
-    def filter_connected_components(self, labels: int |list[int]|None,min_volume:int=0,max_volume:int|None=None, max_count_component = None, connectivity: int = 3,removed_to_label=0,keep_label=False):
+    def filter_connected_components(self, labels: int |list[int]|None,min_volume:int=0,max_volume:int|None=None, max_count_component = None, connectivity: int = 3,keep_label=False, inplace=False):
         """
         Filter connected components in a segmentation array based on specified volume constraints.
 
@@ -1330,25 +1330,11 @@ class NII(NII_Math):
                 nii[s != 0] = s[s!=0]
         #print("filter",nii.unique())
         #assert max_count_component is None or nii.max() <= max_count_component, nii.unique()
+        if inplace:
+            return self.set_array_(nii.get_array())
         return nii
-        print("nii", np.unique(nii))
-        for k, idx in enumerate(nii.unique(),start=1):
-            msk = nii.extract_label(idx)
-            nii[msk != 0] =0 # Remaining Labels
-            s = msk.sum()
-            #print(idx,k,s)
-            if min_volume is not None and s < min_volume:
-                arr[msk.get_array()!=0] = removed_to_label
-                arr[nii.get_array()!=0] = removed_to_label # set all future to 0
-                #print(np.unique(arr))
-                break
-            if max_volume is not None and s>max_volume:
-                arr[msk.get_array()==1] = removed_to_label
-            if max_count_component is not None and k == max_count_component:
-                arr[nii.get_array()!=0] = removed_to_label # set all future to 0
-                break
-        #print("Finish")
-        return self.set_array(arr)
+    def filter_connected_components_(self, labels: int |list[int]|None,min_volume:int=0,max_volume:int|None=None, max_count_component = None, connectivity: int = 3,keep_label=False):
+        return self.filter_connected_components(labels,min_volume=min_volume,max_volume=max_volume, max_count_component = max_count_component, connectivity = connectivity,keep_label=keep_label,inplace=True)
     def get_segmentation_connected_components_center_of_mass(self, label: int, connectivity: int = 3, sort_by_axis: int | None = None):
         """Calculates the center of mass of the different connected components of a given label in an array
 
@@ -1468,7 +1454,6 @@ class NII(NII_Math):
         # Identify the axis to work on
         axis_ = self.get_axis(axis)
         flip = self.orientation[axis_] != axis  # Check orientation for flipping
-        axis_ = axis_
         # Get the array data
         np_array = self.get_array()
         np_array_cond = self.extract_label(idx).get_seg_array()

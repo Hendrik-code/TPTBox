@@ -31,8 +31,8 @@ def main_vert_test():
     # Load and extract two vertebras
     vert = to_nii(vert, True)
     sub = to_nii(sub, True)  # .resample_from_to(vert)
-    L1 = vert.extract_label(21)
-    L2 = vert.extract_label(22)
+    L1 = vert.extract_label(21)  # noqa: N806
+    L2 = vert.extract_label(22)  # noqa: N806
     c1 = L1.compute_crop(dist=10)
     L1.apply_crop_(c1)
     c2 = L2.compute_crop(dist=10)
@@ -46,9 +46,9 @@ def main_vert_test():
     poi2 = calc_poi_from_two_segs(L2, sub2, out / "L2_cdt.json")
     # Point registration
     reg = ridged_points_from_poi(poi1, poi2)
-    L2_preg_sub = reg.transform_nii(sub2 * L2)
+    L2_preg_sub = reg.transform_nii(sub2 * L2)  # noqa: N806
     L2_preg_sub.save(out / "L2_preg.nii.gz")
-    L2_preg = reg.transform_nii(L2)
+    L2_preg = reg.transform_nii(L2)  # noqa: N806
     # Deformable Registration
     reg_deform = Deformable_Registration(L1, L2_preg, config=setting)
     reg_deform.transform_nii(L2_preg_sub).save(out / "L2_reg_large_no_be.nii.gz")
