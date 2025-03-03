@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from collections.abc import Callable
 from copy import deepcopy
 from time import perf_counter

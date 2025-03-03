@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import operator
 from numbers import Number
 from typing import TYPE_CHECKING

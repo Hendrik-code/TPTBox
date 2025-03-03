@@ -12,7 +12,7 @@ readme = "README.md"
 packages = [{ include = "TPTBox" }]
 
 [tool.poetry.dependencies]
-python = "^3.10 || ^3.11 || ^3.12"
+python = "^3.9 || ^3.10 || ^3.11 || ^3.12"
 pathlib = "*"
 nibabel = "^5.2.0"
 numpy = "^1.26.3"

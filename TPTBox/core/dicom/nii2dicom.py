@@ -1,5 +1,7 @@
 # Original Source: https://github.com/amine0110/nifti2dicom/blob/main/nifti2dicom.py
 # Added that you can add json, we extract back into the dicom header
+from __future__ import annotations
+
 import json
 import os
 import time

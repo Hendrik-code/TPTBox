@@ -1,5 +1,5 @@
 # Source: https://github.com/wasserth/TotalSegmentator/blob/master/totalsegmentator/preview.py
-
+from __future__ import annotations
 
 from collections.abc import Sequence
 from multiprocessing import Pool

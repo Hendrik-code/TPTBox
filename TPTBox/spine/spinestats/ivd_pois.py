@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np

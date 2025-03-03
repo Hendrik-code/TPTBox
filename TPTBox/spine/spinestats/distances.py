@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from TPTBox import POI, Image_Reference, Location, calc_poi_from_subreg_vert
 
 

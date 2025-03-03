@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # pip install hf-deepali
 import json
 import pickle
