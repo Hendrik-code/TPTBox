@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # noqa: INP001
 import glob
 import os
