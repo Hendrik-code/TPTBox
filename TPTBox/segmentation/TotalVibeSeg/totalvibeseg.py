@@ -89,6 +89,7 @@ def run_totalvibeseg(
     gpu=0,
     ddevice: Literal["cpu", "cuda", "mps"] = "cuda",
     dataset_id=80,
+    padd=0,
     **args,
 ):
     run_inference_on_file(
@@ -98,6 +99,7 @@ def run_totalvibeseg(
         override=override,
         gpu=gpu,
         ddevice=ddevice,
+        padd=padd,
         **args,
     )
 
@@ -179,7 +181,10 @@ def extract_vertebra_bodies_from_totalVibe(
     centroids_unsorted_srp = centroids_unsorted.reorient(("S", "R", "P"))
     centroids_sorted = dict(
         sorted(
-            {i: centroids_unsorted_srp[i, 50][0] for i in centroids_unsorted_srp.keys_region()}.items(),
+            {
+                i: centroids_unsorted_srp[i, 50][0]
+                for i in centroids_unsorted_srp.keys_region()
+            }.items(),
             key=lambda x: x[1],
         )
     )
@@ -190,7 +195,9 @@ def extract_vertebra_bodies_from_totalVibe(
             return 0  # Remove cervical vertebrae
         if index < num_lumbar_verts:
             return Vertebra_Instance.name2idx()[f"L{num_lumbar_verts - index}"]
-        return Vertebra_Instance.name2idx()[f"T{num_thoracic_verts - (index - num_lumbar_verts)}"]
+        return Vertebra_Instance.name2idx()[
+            f"T{num_thoracic_verts - (index - num_lumbar_verts)}"
+        ]
 
     label_mapping = {k: map_to_label(i) for i, k in enumerate(centroids_sorted)}
     vert_bodys.map_labels_(label_mapping, verbose=False)

@@ -268,7 +268,7 @@ class POI_Descriptor(AbstractSet, MutableMapping):
     def normalize_input_data(cls, dic: dict):
         _centroids = cls()
         for k, v in dic.items():
-            if isinstance(k, (tuple, list)) and isinstance(v, (tuple, list)) and len(v) == DIMENSIONS:
+            if isinstance(k, (tuple, list)) and isinstance(v, (tuple, list, np.ndarray)) and len(v) == DIMENSIONS:
                 _centroids[k[0], k[1]] = tuple(v)  # type: ignore
             elif isinstance(k, (int, float)) and isinstance(v, tuple) and len(v) == DIMENSIONS:
                 _centroids[0, int(k)] = v  # type: ignore
@@ -276,7 +276,7 @@ class POI_Descriptor(AbstractSet, MutableMapping):
                 for k2, v2 in v.items():
                     _centroids[int(k), int(k2)] = v2  # type: ignore
             else:
-                raise ValueError(dic, type(dic))
+                raise ValueError(k, type(k), v, tuple(v))
         return _centroids
 
     def pop(self, key: POI_ID, default):
@@ -598,6 +598,15 @@ class Abstract_POI(Has_Grid):
         return self.extract_subregion(*location, inplace=True)
 
     def extract_vert(self, *vert_label: int, inplace=False):
+        import warnings
+
+        warnings.warn("extract_vert id deprecated use extract_region instead", stacklevel=5)  # TODO remove in version 2.0
+        return self.extract_region(*vert_label, inplace=inplace)
+
+    def extract_vert_(self, *vert_label: int):
+        return self.extract_vert(*vert_label, inplace=True)
+
+    def extract_region(self, *vert_label: int, inplace=False):
         vert_labels = tuple(vert_label)
         extracted_centroids = POI_Descriptor()
         for x1, x2, y in self.centroids.items():
@@ -608,8 +617,8 @@ class Abstract_POI(Has_Grid):
             return self
         return self.copy(centroids=extracted_centroids)
 
-    def extract_vert_(self, *vert_label: int):
-        return self.extract_vert(*vert_label, inplace=True)
+    def extract_region_(self, *vert_label: int):
+        return self.extract_region(*vert_label, inplace=True)
 
     def round(self, ndigits, inplace=False):
         """Round the centroid coordinates to a specified number of digits.

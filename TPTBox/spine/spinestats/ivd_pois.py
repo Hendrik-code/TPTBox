@@ -3,32 +3,16 @@ from __future__ import annotations
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np
-from sklearn.decomposition import PCA
 from tqdm import tqdm
 
 from TPTBox import Print_Logger, Vertebra_Instance, calc_poi_from_subreg_vert
 from TPTBox.core.nii_wrapper import NII
 from TPTBox.core.poi import POI
 from TPTBox.core.poi_fun._help import paint_into_NII, to_local_np
-from TPTBox.core.poi_fun.ray_casting import max_distance_ray_cast_convex
+from TPTBox.core.poi_fun.ray_casting import calculate_pca_normal_np, max_distance_ray_cast_convex
 from TPTBox.core.vert_constants import Location
 
 _log = Print_Logger()
-
-
-def calculate_up_vector_np(segmentation: np.ndarray, verbose=False):
-    # Get indices of segmented region (assuming segmentation is a binary mask)
-    points = np.argwhere(segmentation > 0)
-    # Perform PCA to find the principal axes
-    pca = PCA(n_components=3)
-    pca.fit(points)
-    # First, second, and third principal components
-    up_vector = pca.components_[2]  # Normal to the disc plane
-    if verbose:
-        print(f"Main Axis (PC1): {pca.components_[0]}")
-        print(f"Secondary Axis (PC2): {pca.components_[1]}")
-        print(f"Up Vector (PC3): {up_vector}")
-    return up_vector
 
 
 def strategy_calculate_up_vector(poi: POI, current_vert: NII, vert_id: int, bb, log=_log):
@@ -36,10 +20,9 @@ def strategy_calculate_up_vector(poi: POI, current_vert: NII, vert_id: int, bb, 
     if center is None:
         return poi
     try:
-        normal_vector = calculate_up_vector_np(current_vert.rescale().extract_label(vert_id + 100).get_array())
+        normal_vector = calculate_pca_normal_np(current_vert.rescale().extract_label(vert_id + 100).get_array(), pca_component=2)
     except ValueError:
         return poi
-    normal_vector = normal_vector / np.array(poi.zoom)
     extreme_point = center + normal_vector * 10
 
     axis = poi.get_axis("S")
