@@ -56,8 +56,8 @@ def strategy_calculate_up_vector(poi: POI, current_vert: NII, vert_id: int, bb, 
 
     assert extreme_point is not None
     assert extreme_point_sup is not None
-    poi[vert_id, Location.Vertebra_Disc_Inferior] = tuple(a.start + b for a, b in zip(bb, extreme_point, strict=True))
-    poi[vert_id, Location.Vertebra_Disc_Superior] = tuple(a.start + b for a, b in zip(bb, extreme_point_sup, strict=True))
+    poi[vert_id, Location.Vertebra_Disc_Inferior] = tuple(a.start + b for a, b in zip(bb, extreme_point))
+    poi[vert_id, Location.Vertebra_Disc_Superior] = tuple(a.start + b for a, b in zip(bb, extreme_point_sup))
 
     return poi
 

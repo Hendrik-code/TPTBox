@@ -130,7 +130,7 @@ def make_sub_snapshot_parallel(
 ):
     ress = []
     with Pool(cpus) as p:  # type: ignore
-        for out_path, img in zip(output_paths, imgs, strict=True):
+        for out_path, img in zip(output_paths, imgs):
             res = p.apply_async(
                 make_snapshot3D,
                 kwds={

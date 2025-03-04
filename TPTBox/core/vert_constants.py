@@ -3,7 +3,7 @@ from __future__ import annotations
 import typing
 from collections.abc import Sequence
 from enum import Enum
-from typing import TYPE_CHECKING, Literal, NoReturn
+from typing import TYPE_CHECKING, Literal, NoReturn, Union, Tuple, Dict
 
 import numpy as np
 
@@ -12,28 +12,28 @@ from TPTBox.logger import log_file
 ROUNDING_LVL = 7
 #####################
 log = log_file.Reflection_Logger()
-logging = bool | log_file.Logger_Interface
+logging = Union[bool, log_file.Logger_Interface]
 # R: Right, L: Left; S: Superior (up), I: Inferior (down); A: Anterior (front), P: Posterior (back)
 DIRECTIONS = Literal["R", "L", "S", "I", "A", "P"]
-AX_CODES = tuple[DIRECTIONS, DIRECTIONS, DIRECTIONS]
+AX_CODES = Tuple[DIRECTIONS, DIRECTIONS, DIRECTIONS]
 ROTATION = np.ndarray
-ZOOMS = tuple[float, float, float] | Sequence[float]
+ZOOMS = Union[Tuple[float, float, float], Sequence[float]]
 #####################
 LABEL_MAX = 256
 
 CENTROID_DICT = dict[int, tuple[float, float, float]]
-TRIPLE = tuple[float, float, float] | Sequence[float]
+TRIPLE = Union[Tuple[float, float, float], Sequence[float]]
 COORDINATE = TRIPLE
 POI_DICT = dict[int, dict[int, COORDINATE]]
 
 AFFINE = np.ndarray
-SHAPE = TRIPLE | tuple[int, int, int]
+SHAPE = Union[TRIPLE, Tuple[int, int, int]]
 ORIGIN = TRIPLE
 
 
-LABEL_MAP = dict[int | str, int | str] | dict[str, str] | dict[int, int]
+LABEL_MAP = Union[Dict[Union[int, str], Union[int, str]], Dict[str, str], Dict[int, int]]
 
-LABEL_REFERENCE = int | Sequence[int] | None
+LABEL_REFERENCE = Union[int, Sequence[int], None]
 
 if TYPE_CHECKING:
     from TPTBox import NII, POI

@@ -16,7 +16,7 @@ sacrum_w_o_direction = (Vertebra_Instance.COCC.value,)
 
 def to_local_np(loc: Location, bb: tuple[slice, slice, slice], poi: POI, label, log: Logger_Interface, verbose=True):
     if (label, loc.value) in poi:
-        return np.asarray([a - b.start for a, b in zip(poi[label, loc.value], bb, strict=True)])
+        return np.asarray([a - b.start for a, b in zip(poi[label, loc.value], bb)])
     if verbose:
         log.on_fail(f"region={label},subregion={loc.value} is missing")
         # raise KeyError(f"region={label},subregion={loc.value} is missing.")

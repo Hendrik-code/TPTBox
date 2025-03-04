@@ -40,7 +40,7 @@ class PreprocessAdapterFromNpy(DataLoader):
             truncated_of_names = [None] * len(list_of_images)  # type: ignore
 
         super().__init__(
-            list(zip(list_of_images, list_of_segs_from_prev_stage, list_of_image_properties, truncated_of_names, strict=False)),  # type: ignore
+            list(zip(list_of_images, list_of_segs_from_prev_stage, list_of_image_properties, truncated_of_names)),  # type: ignore
             1,
             num_threads_in_multithreaded,
             seed_for_shuffle=1,

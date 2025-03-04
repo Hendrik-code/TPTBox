@@ -270,7 +270,7 @@ class BIDS_Global_info:
             self.sequence_splitting_keys = sequence_splitting_keys
 
         self.sequence_splitting_keys = sequence_splitting_keys
-        if isinstance(datasets, Path | str):
+        if isinstance(datasets, (Path, str)):
             datasets = [datasets]  # type: ignore
         if isinstance(parents, str):
             parents = [parents]

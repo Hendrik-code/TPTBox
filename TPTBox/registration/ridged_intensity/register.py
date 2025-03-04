@@ -58,7 +58,7 @@ def registrate_nipy(
         transform: Affine = hist_reg.optimize(optimizer, iterations=100)
     aligned_img = apply_registration_nipy(moving, fixed, transform)
     out_arr = [apply_registration_nipy(i, fixed, transform) for i in other_moving]
-    for out, other in zip(out_arr, other_moving, strict=False):
+    for out, other in zip(out_arr, other_moving):
         out.seg = other.seg
     return aligned_img, transform, out_arr
 
