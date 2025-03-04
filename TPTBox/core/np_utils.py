@@ -3,7 +3,7 @@ from __future__ import annotations
 import itertools
 import warnings
 from collections.abc import Sequence
-from typing import Any, TypeVar
+from typing import Any, TypeVar, Union
 
 import numpy as np
 import scipy
@@ -24,8 +24,7 @@ from TPTBox.core.vert_constants import COORDINATE, LABEL_MAP, LABEL_REFERENCE
 UINT = TypeVar("UINT", bound=np.unsignedinteger[Any])
 INT = TypeVar("INT", bound=np.signedinteger[Any])
 UINTARRAY = NDArray[UINT]
-INTARRAY = UINTARRAY | NDArray[INT]
-
+INTARRAY = Union[UINTARRAY, NDArray[INT]]
 
 def np_extract_label(arr: np.ndarray, label: int, to_label: int = 1, inplace: bool = True) -> np.ndarray:
     """Extracts a label from an given arr (works with zero as well!)
@@ -1131,7 +1130,7 @@ def _binary_dilation(image: np.ndarray, struct=None):
         lx = image.shape
         sx, sy = selem.shape
         lx, ly = image.shape
-        for ix, iy in zip(perimeter_coords[0], perimeter_coords[1], strict=False):
+        for ix, iy in zip(perimeter_coords[0], perimeter_coords[1]):
             (jx_b, jx_e), (kx_b, kx_e) = _generate_array_indices(ix, rx, sx, lx)
             (jy_b, jy_e), (ky_b, ky_e) = _generate_array_indices(iy, ry, sy, ly)
             out[jx_b:jx_e, jy_b:jy_e] |= selem[kx_b:kx_e, ky_b:ky_e]
@@ -1140,7 +1139,7 @@ def _binary_dilation(image: np.ndarray, struct=None):
         rx, ry, rz = (n // 2 for n in selem.shape)
         sx, sy, sz = selem.shape
         lx, ly, lz = image.shape
-        for ix, iy, iz in zip(perimeter_coords[0], perimeter_coords[1], perimeter_coords[2], strict=False):
+        for ix, iy, iz in zip(perimeter_coords[0], perimeter_coords[1], perimeter_coords[2]):
             (jx_b, jx_e), (kx_b, kx_e) = _generate_array_indices(ix, rx, sx, lx)
             (jy_b, jy_e), (ky_b, ky_e) = _generate_array_indices(iy, ry, sy, ly)
             (jz_b, jz_e), (kz_b, kz_e) = _generate_array_indices(iz, rz, sz, lz)

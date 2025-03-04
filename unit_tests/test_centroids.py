@@ -32,7 +32,7 @@ class Test_Centroids(unittest.TestCase):
                 msk, cent, order, sizes = get_nii(num_point=random.randint(1, 7))
                 centroid = calc_centroids(msk)
                 msg = "\n\n"
-                for x, y in zip(cent, sizes, strict=False):
+                for x, y in zip(cent, sizes):
                     msg += f"{cent[x]},{y}\n"
                 self.assertEqual(cent, centroid.centroids, msg=msg)
 
@@ -193,10 +193,10 @@ class Test_Centroids(unittest.TestCase):
             voxel_spacing2 = (1, 1, 1)  # tuple(1 / i for i in voxel_spacing)
             cdt2 = cdt.rescale(voxel_spacing=voxel_spacing, verbose=False, decimals=10)
             cdt2.rescale_(voxel_spacing=voxel_spacing2, verbose=False, decimals=10)
-            for (k1, k2, v), (k1_2, k2_2, v2) in zip(cdt.items(), cdt2.items(), strict=False):
+            for (k1, k2, v), (k1_2, k2_2, v2) in zip(cdt.items(), cdt2.items()):
                 self.assertEqual(k1, k1_2)
                 self.assertEqual(k2, k2_2)
-                for v, v2 in zip(v, v2, strict=False):  # noqa: B020, PLW2901
+                for v, v2 in zip(v, v2):  # noqa: B020, PLW2901
                     self.assertAlmostEqual(v, v2, places=2)
 
 

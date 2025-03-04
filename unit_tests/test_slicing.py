@@ -38,12 +38,12 @@ def get_nii(x: tuple[int, int, int] | None = None, num_point=3, rotation=True): 
             break
         point = tuple(random.randint(1, a - 1) for a in x)
         size = tuple(random.randint(1, 1 + a) for a in [5, 5, 5])
-        if any(a - b < 0 for a, b in zip(point, size, strict=True)):
+        if any(a - b < 0 for a, b in zip(point, size)):
             continue
-        if any(a + b > c - 1 for a, b, c in zip(point, size, x, strict=True)):
+        if any(a + b > c - 1 for a, b, c in zip(point, size, x)):
             continue
         skip = False
-        for p2, s2 in zip(points, sizes, strict=True):
+        for p2, s2 in zip(points, sizes):
             if overlap(point, size, p2, s2):
                 skip = True
                 break

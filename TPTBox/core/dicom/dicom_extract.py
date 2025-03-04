@@ -401,7 +401,7 @@ def _filter_file_type(dicom_types: dict[str, list[str]]):
         for sublist in split_lists:
             filtered_set.append([item for item in sublist if item in unique_strings])  # noqa: PERF401
         # Add to dicom_parts if there are unique strings
-        for l, i in zip(filtered_set, v, strict=True):
+        for l, i in zip(filtered_set, v):
             dicom_parts[f"{k}_{i}"] = l
     return dicom_parts
 

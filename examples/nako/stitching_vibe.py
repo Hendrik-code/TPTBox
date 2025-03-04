@@ -32,7 +32,7 @@ random.shuffle(l)
 
 def split_multi_scans(v: list[BIDS_FILE], out: BIDS_FILE):
     jsons = [x.open_json() for x in v]
-    ids = [(j["SeriesNumber"], bids) for j, bids in zip(jsons, v, strict=True)]
+    ids = [(j["SeriesNumber"], bids) for j, bids in zip(jsons, v)]
     ids.sort()
     curr = []
     curr_id = []

@@ -64,7 +64,7 @@ def _warp_poi(poi_moving: POI, target_grid: TPTBox_Grid, transform: SpatialTrans
         print(data2 - data)
 
     out_poi = target_grid.make_empty_POI()
-    for (key, key2), (x, y, z) in zip(keys, data.cpu(), strict=True):
+    for (key, key2), (x, y, z) in zip(keys, data.cpu()):
         print(key, key2, x, y, z)
         out_poi[key, key2] = (x.item(), y.item(), z.item())
     return out_poi

@@ -340,7 +340,7 @@ def main(  # noqa: C901
     niis: list[nib.nifti1.Nifti1Image] = []
     print("### loading ###") if verbose else None
     for f_name in images:
-        if isinstance(f_name, Path | str):
+        if isinstance(f_name, (Path , str)):
             print("Load ", f_name, Path(f_name)) if verbose else None
             # Load Nii
             nii: nib.nifti1.Nifti1Image = nib.load(f_name)  # type: ignore

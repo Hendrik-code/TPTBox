@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from enum import Enum
 from math import ceil, floor
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, Union, Tuple
 
 import nibabel as nib
 import nibabel.orientations as nio
@@ -79,8 +79,8 @@ _dtype_max = {"int8": 128, "uint8": 256, "int16": 32768, "uint16": 65536}
 warnings.formatwarning = formatwarning_tb
 
 N = TypeVar("N", bound="NII")
-Image_Reference = bids_files.BIDS_FILE | Nifti1Image | Path | str | N
-Interpolateable_Image_Reference = bids_files.BIDS_FILE | tuple[Nifti1Image, bool] | tuple[Path, bool] | tuple[str, bool] | N
+Image_Reference = Union[bids_files.BIDS_FILE, Nifti1Image, Path, str, N]
+Interpolateable_Image_Reference = Union[bids_files.BIDS_FILE, Tuple[Nifti1Image, bool], Tuple[Path, bool], Tuple[str, bool], N]
 
 Proxy = tuple[tuple[int, int, int], np.ndarray]
 suppress_dtype_change_printout_in_set_array = False
@@ -573,7 +573,7 @@ class NII(NII_Math):
         ### Reset origin ###
         flip = ornt_trans[:, 1]
         change = ((-flip) + 1) / 2  # 1 if flip else 0
-        change = tuple(a * (s-1) for a, s in zip(change, self.shape, strict=False))
+        change = tuple(a * (s-1) for a, s in zip(change, self.shape))
         new_aff[:3, 3] = nib.affines.apply_affine(aff,change) # type: ignore
         ######
         #if self.header is not None:
@@ -637,7 +637,7 @@ class NII(NII_Math):
 
         if other_crop is not None:
             assert all((a.step is None) for a in other_crop), 'Only None slice is supported for combining x'
-            ex_slice = [slice(max(a.start, b.start), min(a.stop, b.stop)) for a, b in zip(ex_slice, other_crop, strict=False)]
+            ex_slice = [slice(max(a.start, b.start), min(a.stop, b.stop)) for a, b in zip(ex_slice, other_crop)]
 
         if maximum_size is not None:
             if isinstance(maximum_size,int):
@@ -728,7 +728,7 @@ class NII(NII_Math):
         padding = []
         crop = []
         requires_crop = False
-        for in_size, out_size in zip(self.shape[-3:], target_shape[-3:],strict=True):
+        for in_size, out_size in zip(self.shape[-3:], target_shape[-3:]):
             to_pad_size = max(0, out_size - in_size) / 2.0
             to_crop_size = -min(0, out_size - in_size) / 2.0
             padding.extend([(ceil(to_pad_size), floor(to_pad_size))])
@@ -809,7 +809,7 @@ class NII(NII_Math):
         zms = self.zoom
         if order is None:
             order = 0 if self.seg else 3
-        voxel_spacing = tuple([v if v != -1 else z for v,z in zip(voxel_spacing,zms,strict=True)])
+        voxel_spacing = tuple([v if v != -1 else z for v,z in zip(voxel_spacing,zms)])
         if voxel_spacing == self.zoom:
             log.print(f"Image already resampled to voxel size {self.zoom}",verbose=verbose)
             return self.copy() if inplace else self
@@ -1556,7 +1556,7 @@ class NII(NII_Math):
         return self.set_array(array)
     def __getitem__(self, key)-> Any:
         if isinstance(key,Sequence):
-            from types import EllipsisType
+            EllipsisType = type(Ellipsis)
 
             if all(isinstance(k, (slice,EllipsisType)) for k in key):
                 #if all(k.step is not None and k.step == 1 for k in key):
