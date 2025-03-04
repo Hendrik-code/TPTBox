@@ -176,9 +176,11 @@ class NII_Math(NII_Proxy,Has_Grid):
         arr2 = arr.copy()
         arr[arr2>=threshold] = 1
         arr[arr2<=threshold] = 0
-        nii = self.set_array(arr,inplace,verbose=False)
-        nii.seg =True
+        nii = self if inplace else self.copy()
+        nii.seg = True
+        nii:NII = nii.set_array(arr,inplace,verbose=False)
         nii.c_val = 0
+        nii.set_dtype_('smallest_int')
         return nii
 
     def nan_to_num(self, num=0,inplace=False):
