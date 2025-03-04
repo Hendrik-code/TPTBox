@@ -1124,7 +1124,7 @@ def calc_poi_from_two_segs(
     msk_reference: Image_Reference,
     subreg_reference: Image_Reference | None,
     out_path: Path | str,
-    subreg_id: int | Location | Sequence[int | Location] = 50,
+    subreg_id: int | Location | Sequence[int | Location] | None = None,
     verbose=True,
     override=False,
     decimals=3,
@@ -1187,6 +1187,8 @@ def calc_poi_from_two_segs(
     sub_nii = to_nii_optional(subreg_reference, True)
     if (sub_nii is None or not check_every_point) and out_path.exists():
         return POI.load(out_path)
+    if subreg_id is None:
+        subreg_id = sub_nii.unique()
     if sub_nii is not None:
         ctd = calc_poi_from_subreg_vert(
             msk_nii,

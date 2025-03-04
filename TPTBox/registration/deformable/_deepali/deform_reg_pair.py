@@ -272,6 +272,7 @@ def register_pairwise(  # noqa: C901
     verbose: bool | int = False,
     debug: bool | int = False,
     device: Device | None = None,
+    finest_spacing=None,
 ) -> SpatialTransform:
     r"""Register pair of images using ``torch.autograd`` and ``torch.optim``."""
     # Configuration
@@ -289,7 +290,9 @@ def register_pairwise(  # noqa: C901
     levels = config["pyramid"]["levels"]
     coarsest_level = config["pyramid"]["coarsest_level"]
     finest_level = config["pyramid"]["finest_level"]
-    finest_spacing = target.spacing
+    if finest_spacing is None:
+        finest_spacing = target.spacing
+
     min_size = config["pyramid"]["min_size"]
     pyramid_dims = config["pyramid"]["pyramid_dims"]
     device = get_device_config(config, device)
