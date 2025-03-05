@@ -239,7 +239,7 @@ def n4_bias_field_correction(
 
             return ants_img
 
-        def to_nibabel(img: "ants.core.ants_image.ANTsImage"):
+        def to_nibabel(img: ants.core.ants_image.ANTsImage):
             try:
                 from nibabel.nifti1 import Nifti1Image
             except ModuleNotFoundError as e:

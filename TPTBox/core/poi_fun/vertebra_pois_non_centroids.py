@@ -17,7 +17,7 @@ from TPTBox.core.vert_constants import Location, vert_directions
 from TPTBox.spine.spinestats import calculate_IVD_POI
 
 _log = Print_Logger()
-all_poi_functions: dict[int, "Strategy_Pattern"] = {}
+all_poi_functions: dict[int, Strategy_Pattern] = {}
 pois_computed_by_side_effect: dict[int, Location] = {}
 _sacrum = set(Vertebra_Instance.sacrum())
 

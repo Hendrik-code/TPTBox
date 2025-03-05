@@ -44,7 +44,7 @@ def get_weights_dir(idx) -> Path:
     return weights_dir
 
 
-def read_config(idx) -> dict["str", float]:
+def read_config(idx) -> dict[str, float]:
     weights_dir = get_weights_dir(idx)
     ds_path = weights_dir / "dataset.json"
     if ds_path.exists():

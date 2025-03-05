@@ -3,7 +3,6 @@
 # method for deep learning-based biomedical image segmentation. Nature methods, 18(2), 203-211.
 from __future__ import annotations
 
-
 import nnunetv2
 import nnunetv2.preprocessing
 import nnunetv2.preprocessing.normalization

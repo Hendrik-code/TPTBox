@@ -6,10 +6,10 @@ from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from typing import Union
 
 import numpy as np
 from scipy import interpolate
-from typing import Union, Tuple, Dict
 from typing_extensions import Self
 
 from TPTBox.core import vert_constants
@@ -17,21 +17,21 @@ from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.vert_constants import COORDINATE, POI_DICT, Abstract_lvl, Location, Vertebra_Instance, log, log_file, logging
 
 POI_ID = Union[
-    Tuple[int, int],
+    tuple[int, int],
     slice,
-    Tuple[Location, Location],
-    Tuple[Location, int],
-    Tuple[int, Location],
-    Tuple[Vertebra_Instance, Location],
-    Tuple[Vertebra_Instance, int],
+    tuple[Location, Location],
+    tuple[Location, int],
+    tuple[int, Location],
+    tuple[Vertebra_Instance, Location],
+    tuple[Vertebra_Instance, int],
 ]
 
 MAPPING = Union[
-    Dict[Union[int, str], Union[int, str]],
-    Dict[int, int],
-    Dict[int, Union[int, None]],
-    Dict[int, None],
-    Dict[Union[int, str], Union[int, str, None]],
+    dict[Union[int, str], Union[int, str]],
+    dict[int, int],
+    dict[int, Union[int, None]],
+    dict[int, None],
+    dict[Union[int, str], Union[int, str, None]],
     None
 ]
 
@@ -294,11 +294,11 @@ class POI_Descriptor(AbstractSet, MutableMapping):
 class Abstract_POI(Has_Grid):
     _centroids: POI_Descriptor = field(default_factory=lambda: POI_Descriptor(), repr=False)
     centroids: POI_Descriptor = field(repr=False, hash=False, compare=False, default=None)  # type: ignore
-    format: Union[int, None] = field(default=None, repr=False, compare=False)
+    format: int | None = field(default=None, repr=False, compare=False)
     level_one_info: type[Abstract_lvl] = Vertebra_Instance  # Must be Enum and must has order_dict
     level_two_info: type[Abstract_lvl] = Location
     info: dict = field(default_factory=dict, compare=False, init=True)  # additional info (key,value pairs)
-    
+
     def __post_init__(self):
         if not isinstance(self._centroids, POI_Descriptor):
             self._centroids = POI_Descriptor.normalize_input_data(self._centroids)
