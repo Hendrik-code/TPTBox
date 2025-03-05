@@ -3,7 +3,6 @@
 # method for deep learning-based biomedical image segmentation. Nature methods, 18(2), 203-211.
 from __future__ import annotations
 
-
 import numpy as np
 import torch
 from acvl_utils.cropping_and_padding.bounding_boxes import bounding_box_to_slice

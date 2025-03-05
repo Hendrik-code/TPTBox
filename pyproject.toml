@@ -151,6 +151,8 @@ ignore = [
     "N802",    # function name lowercase
     "F811",
     "N803",
+    "B905", # strict= in zip 
+    "UP007", # Union and "|" python 3.9
 ]
 
 # Allow fix for all enabled rules (when `--fix`) is provided.

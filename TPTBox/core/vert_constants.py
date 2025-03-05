@@ -3,7 +3,7 @@ from __future__ import annotations
 import typing
 from collections.abc import Sequence
 from enum import Enum
-from typing import TYPE_CHECKING, Literal, NoReturn, Union, Tuple, Dict
+from typing import TYPE_CHECKING, Literal, NoReturn, Union
 
 import numpy as np
 
@@ -15,23 +15,23 @@ log = log_file.Reflection_Logger()
 logging = Union[bool, log_file.Logger_Interface]
 # R: Right, L: Left; S: Superior (up), I: Inferior (down); A: Anterior (front), P: Posterior (back)
 DIRECTIONS = Literal["R", "L", "S", "I", "A", "P"]
-AX_CODES = Tuple[DIRECTIONS, DIRECTIONS, DIRECTIONS]
+AX_CODES = tuple[DIRECTIONS, DIRECTIONS, DIRECTIONS]
 ROTATION = np.ndarray
-ZOOMS = Union[Tuple[float, float, float], Sequence[float]]
+ZOOMS = Union[tuple[float, float, float], Sequence[float]]
 #####################
 LABEL_MAX = 256
 
 CENTROID_DICT = dict[int, tuple[float, float, float]]
-TRIPLE = Union[Tuple[float, float, float], Sequence[float]]
+TRIPLE = Union[tuple[float, float, float], Sequence[float]]
 COORDINATE = TRIPLE
 POI_DICT = dict[int, dict[int, COORDINATE]]
 
 AFFINE = np.ndarray
-SHAPE = Union[TRIPLE, Tuple[int, int, int]]
+SHAPE = Union[TRIPLE, tuple[int, int, int]]
 ORIGIN = TRIPLE
 
 
-LABEL_MAP = Union[Dict[Union[int, str], Union[int, str]], Dict[str, str], Dict[int, int]]
+LABEL_MAP = Union[dict[Union[int, str], Union[int, str]], dict[str, str], dict[int, int]]
 
 LABEL_REFERENCE = Union[int, Sequence[int], None]
 
@@ -202,7 +202,7 @@ class Vertebra_Instance(Abstract_lvl):
     def order_dict(cls) -> dict[int, int]:
         return {a.value: e for e, a in enumerate(cls.order())}
 
-    def get_next_poi(self, poi: typing.Union["POI", "NII", list[int]]):
+    def get_next_poi(self, poi: POI | NII | list[int]):
         r = poi if isinstance(poi, list) else poi.keys_region() if hasattr(poi, "keys_region") else poi.unique()  # type: ignore
         o = self.order()
         idx = o.index(self)
@@ -211,7 +211,7 @@ class Vertebra_Instance(Abstract_lvl):
                 return vert
         return None
 
-    def get_previous_poi(self, poi: typing.Union["POI", "NII", list[int]]):
+    def get_previous_poi(self, poi: POI | NII | list[int]):
         r = poi if isinstance(poi, list) else poi.keys_region() if hasattr(poi, "keys_region") else poi.unique()  # type: ignore
         o = self.order()
         idx = o.index(self)

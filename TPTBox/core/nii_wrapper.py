@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from enum import Enum
 from math import ceil, floor
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, TypeVar, Union, Tuple
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, Union
 
 import nibabel as nib
 import nibabel.orientations as nio
@@ -78,7 +78,7 @@ warnings.formatwarning = formatwarning_tb
 
 N = TypeVar("N", bound="NII")
 Image_Reference = Union[bids_files.BIDS_FILE, Nifti1Image, Path, str, N]
-Interpolateable_Image_Reference = Union[bids_files.BIDS_FILE, Tuple[Nifti1Image, bool], Tuple[Path, bool], Tuple[str, bool], N]
+Interpolateable_Image_Reference = Union[bids_files.BIDS_FILE, tuple[Nifti1Image, bool], tuple[Path, bool], tuple[str, bool], N]
 
 Proxy = tuple[tuple[int, int, int], np.ndarray]
 suppress_dtype_change_printout_in_set_array = False
@@ -1640,9 +1640,9 @@ class NII(NII_Math):
         return self.set_array(array)
     def __getitem__(self, key)-> Any:
         if isinstance(key,Sequence):
-            EllipsisType = type(Ellipsis)
+            ellipsis_type = type(Ellipsis)
 
-            if all(isinstance(k, (slice,EllipsisType)) for k in key):
+            if all(isinstance(k, (slice, ellipsis_type)) for k in key):
                 #if all(k.step is not None and k.step == 1 for k in key):
                 #    raise NotImplementedError(f"Slicing is not implemented. Attempted {key}")
                 if len(key)!= len(self.shape) or Ellipsis in key:

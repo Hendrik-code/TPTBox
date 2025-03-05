@@ -54,7 +54,7 @@ class Has_Grid(Grid_Proxy):
 
     info: dict
 
-    def to_gird(self) -> "Grid":
+    def to_gird(self) -> Grid:
         return Grid(**self._extract_affine())
 
     @property
@@ -94,7 +94,7 @@ class Has_Grid(Grid_Proxy):
         self.rotation = rotation
         self.origin = origin.tolist()
 
-    def _extract_affine(self: "Has_Grid", rm_key=()):
+    def _extract_affine(self: Has_Grid, rm_key=()):
         out = {"zoom": self.spacing, "origin": self.origin, "shape": self.shape, "rotation": self.rotation, "orientation": self.orientation}
         for k in rm_key:
             out.pop(k)
@@ -102,7 +102,7 @@ class Has_Grid(Grid_Proxy):
 
     def assert_affine(
         self,
-        other: Self | "NII" | "POI" | None = None,
+        other: Self | NII | POI | None = None,
         ignore_missing_values: bool = False,
         affine: AFFINE | None = None,
         zoom: ZOOMS | None = None,

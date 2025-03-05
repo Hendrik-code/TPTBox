@@ -210,7 +210,7 @@ class NII_Math(NII_Proxy,Has_Grid):
         return ssim_value
 
 
-    def betti_numbers(self: "NII",verbose=False) -> dict[int, tuple[int, int, int]]: # type: ignore
+    def betti_numbers(self: NII,verbose=False) -> dict[int, tuple[int, int, int]]: # type: ignore
         """
         Calculate Betti numbers for connected components in a 3D image.
 

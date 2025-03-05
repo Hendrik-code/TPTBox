@@ -7,13 +7,13 @@ from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TypedDict, TypeVar, Union, Tuple
+from typing import TypedDict, TypeVar, Union
 
 import nibabel as nib
 import nibabel.orientations as nio
 import numpy as np
 from scipy.ndimage import center_of_mass
-from typing_extensions import Self, TypeGuard
+from typing_extensions import Self, TypeGuard  # noqa: UP035
 
 from TPTBox.core import bids_files
 from TPTBox.core.nii_poi_abstract import Has_Grid
@@ -63,7 +63,7 @@ _Centroid_DictList = Sequence[Union[_Orientation, _Point3D]]
 
 ### CURRENT TYPE DEFINITIONS
 C = TypeVar("C", bound="POI")
-POI_Reference = Union[bids_files.BIDS_FILE, Path, str, Tuple[Image_Reference, Image_Reference, Sequence[int]], C]
+POI_Reference = Union[bids_files.BIDS_FILE, Path, str, tuple[Image_Reference, Image_Reference, Sequence[int]], C]
 ctd_info_blacklist = [
     "zoom",
     "shape",
