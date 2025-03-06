@@ -1625,6 +1625,15 @@ class NII(NII_Math):
         b = b.resample_from_to(self,c_val=0,verbose=False) # type: ignore
         return b.get_array().sum()
 
+    def extract_background(self,inplace=False):
+        assert self.seg, "extracting the background only makes sense for a segmentation mask"
+        arr_bg = self.get_seg_array()
+        arr_bg[arr_bg > 0] = 2
+        arr_bg[arr_bg == 0] = 1
+        arr_bg[arr_bg == 2] = 0
+        return self.set_array(arr_bg, inplace, False)
+
+
     def extract_label(self,label:int|Enum|Sequence[int]|Sequence[Enum], keep_label=False,inplace=False):
         '''If this NII is a segmentation you can single out one label with [0,1].'''
         seg_arr = self.get_seg_array()
