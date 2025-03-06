@@ -7,7 +7,6 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Literal
 
-from TPTBox.core.compat import zip_strict
 import numpy as np
 import vtk
 from fury import window
@@ -16,6 +15,7 @@ from vtk.util import numpy_support  # type: ignore
 from xvfbwrapper import Xvfb
 
 from TPTBox import NII, Image_Reference, to_nii_seg
+from TPTBox.core.compat import zip_strict
 from TPTBox.logger import Reflection_Logger
 from TPTBox.mesh3D.mesh_colors import get_color_by_label
 

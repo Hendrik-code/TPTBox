@@ -9,7 +9,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypedDict, TypeVar, Union
 
-from TPTBox.core.compat import zip_strict
 import nibabel as nib
 import nibabel.orientations as nio
 import numpy as np
@@ -17,6 +16,7 @@ from scipy.ndimage import center_of_mass
 from typing_extensions import Self, TypeGuard  # noqa: UP035
 
 from TPTBox.core import bids_files
+from TPTBox.core.compat import zip_strict
 from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.nii_wrapper import NII, Image_Reference, to_nii, to_nii_optional
 from TPTBox.core.poi_fun.poi_abstract import Abstract_POI, POI_Descriptor

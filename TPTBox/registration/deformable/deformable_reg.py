@@ -6,7 +6,6 @@ import pickle
 from pathlib import Path
 from typing import Literal
 
-from TPTBox.core.compat import zip_strict
 import numpy as np
 import torch
 import yaml
@@ -19,6 +18,7 @@ from deepali.spatial import SpatialTransform
 from torch import device
 
 from TPTBox import NII, POI, Image_Reference, to_nii
+from TPTBox.core.compat import zip_strict
 from TPTBox.core.nii_poi_abstract import Grid as TPTBox_Grid
 from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.registration.deformable._deepali import deform_reg_pair

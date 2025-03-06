@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from TPTBox.core.compat import zip_strict
 import numpy as np
 from tqdm import tqdm
 
 from TPTBox import Print_Logger, Vertebra_Instance, calc_poi_from_subreg_vert
+from TPTBox.core.compat import zip_strict
 from TPTBox.core.nii_wrapper import NII
 from TPTBox.core.poi import POI
 from TPTBox.core.poi_fun._help import paint_into_NII, to_local_np

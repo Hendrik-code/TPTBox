@@ -7,7 +7,6 @@ import os
 import traceback
 from pathlib import Path
 
-from TPTBox.core.compat import zip_strict
 import numpy as np
 import torch
 from acvl_utils.cropping_and_padding.padding import pad_nd_image
@@ -16,6 +15,7 @@ from nnunetv2.utilities.label_handling.label_handling import determine_num_input
 from torch._dynamo import OptimizedModule
 from tqdm import tqdm
 
+from TPTBox.core.compat import zip_strict
 from TPTBox.segmentation.nnUnet_utils.data_iterators import PreprocessAdapterFromNpy
 from TPTBox.segmentation.nnUnet_utils.export_prediction import (
     convert_predicted_logits_to_segmentation_with_correct_shape,

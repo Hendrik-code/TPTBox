@@ -3,10 +3,10 @@ from __future__ import annotations
 from functools import wraps
 from time import time
 
-from TPTBox.core.compat import zip_strict
 import numpy as np
 
 from TPTBox import POI, Location, Logger_Interface, Print_Logger
+from TPTBox.core.compat import zip_strict
 from TPTBox.core.nii_wrapper import NII
 from TPTBox.core.vert_constants import Vertebra_Instance
 

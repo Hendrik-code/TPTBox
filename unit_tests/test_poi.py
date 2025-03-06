@@ -9,10 +9,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from TPTBox.core.compat import zip_strict
 import nibabel as nib
 import numpy as np
 
+from TPTBox.core.compat import zip_strict
 from TPTBox.core.nii_wrapper import NII
 from TPTBox.core.poi import (
     LABEL_MAX,

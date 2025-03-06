@@ -3,10 +3,10 @@ from __future__ import annotations
 from enum import Enum, auto
 from pathlib import Path
 
-from TPTBox.core.compat import zip_strict
 import numpy as np
 
 from TPTBox import POI, Image_Reference
+from TPTBox.core.compat import zip_strict
 from TPTBox.core.nii_wrapper import to_nii
 from TPTBox.core.vert_constants import DIRECTIONS, Location, Vertebra_Instance
 from TPTBox.spine.snapshot2D.snapshot_modular import Snapshot_Frame, create_snapshot

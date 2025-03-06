@@ -8,10 +8,10 @@ import random
 import unittest
 from pathlib import Path
 
-from TPTBox.core.compat import zip_strict
 import nibabel as nib
 import numpy as np
 
+from TPTBox.core.compat import zip_strict
 from TPTBox.core.nii_wrapper import NII
 from TPTBox.stitching import stitching_raw
 from TPTBox.tests.test_utils import overlap

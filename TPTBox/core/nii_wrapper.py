@@ -9,13 +9,13 @@ from math import ceil, floor
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, Union
 
-from TPTBox.core.compat import zip_strict
 import nibabel as nib
 import nibabel.orientations as nio
 import numpy as np
 from nibabel import Nifti1Header, Nifti1Image  # type: ignore
 from typing_extensions import Self
 
+from TPTBox.core.compat import zip_strict
 from TPTBox.core.internal.nii_help import _resample_from_to, secure_save
 from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.nii_wrapper_math import NII_Math
