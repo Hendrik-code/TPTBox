@@ -12,7 +12,7 @@ def speed_test_input(inp, functions: list[Callable], assert_equal_function: Call
     for f in functions:
         start = perf_counter()
         input_copy = deepcopy(inp)
-        out = f(*input_copy, *args, **kwargs)
+        out = f(*input_copy, *args, **kwargs) if isinstance(input_copy, (tuple, list)) else f(input_copy, *args, **kwargs)
         time = perf_counter() - start
         outs[f.__name__] = out
         time_measures[f.__name__] = time
@@ -38,7 +38,7 @@ def speed_test(
     #
     for f in functions:
         input_copy = deepcopy(first_input)
-        out = f(*input_copy, *args, **kwargs)
+        out = f(*input_copy, *args, **kwargs) if isinstance(input_copy, (tuple, list)) else f(input_copy, *args, **kwargs)
         print(f.__name__, out)
 
     for _ in tqdm(range(repeats)):
