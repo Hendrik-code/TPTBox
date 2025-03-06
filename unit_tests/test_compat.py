@@ -5,7 +5,9 @@
 from __future__ import annotations
 
 import unittest
+
 from TPTBox.core.compat import zip_strict
+
 
 class TestZipStrict(unittest.TestCase):
     def test_equal_length_lists(self):

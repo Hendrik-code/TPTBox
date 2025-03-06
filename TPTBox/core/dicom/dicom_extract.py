@@ -9,7 +9,6 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from TPTBox.core.compat import zip_strict
 import dicom2nifti
 import dicom2nifti.exceptions
 import numpy as np
@@ -21,6 +20,7 @@ from joblib import Parallel, delayed
 from pydicom.dataset import FileDataset
 
 from TPTBox import BIDS_FILE, Log_Type, Print_Logger
+from TPTBox.core.compat import zip_strict
 from TPTBox.core.dicom.dicom_header_to_keys import extract_keys_from_json
 from TPTBox.core.nii_wrapper import NII
 

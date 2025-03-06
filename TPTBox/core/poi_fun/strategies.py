@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from TPTBox.core.compat import zip_strict
 import numpy as np
 from numpy.linalg import norm
 from scipy.interpolate import RegularGridInterpolator
 
 from TPTBox import NII, POI, Logger_Interface, Print_Logger
+from TPTBox.core.compat import zip_strict
 from TPTBox.core.poi_fun._help import sacrum_w_o_arcus, to_local_np
 from TPTBox.core.poi_fun.pixel_based_point_finder import get_direction, get_extreme_point_by_vert_direction
 from TPTBox.core.poi_fun.ray_casting import max_distance_ray_cast_convex_poi, shift_point

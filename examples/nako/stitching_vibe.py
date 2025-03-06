@@ -5,10 +5,10 @@ import argparse
 import random
 from pathlib import Path
 
-from TPTBox.core.compat import zip_strict
 import TPTBox.stitching.stitching_tools as st
 from TPTBox import BIDS_FILE, BIDS_Global_info, Print_Logger
 from TPTBox.core.bids_constants import sequence_splitting_keys
+from TPTBox.core.compat import zip_strict
 
 logger = Print_Logger()
 arg_parser = argparse.ArgumentParser()

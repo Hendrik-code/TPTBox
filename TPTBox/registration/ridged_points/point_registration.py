@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeVar
 
-from TPTBox.core.compat import zip_strict
 import numpy as np
 import SimpleITK as sitk  # noqa: N813
 
@@ -22,6 +21,7 @@ from TPTBox import (
     calc_poi_from_subreg_vert,
     to_nii,
 )
+from TPTBox.core.compat import zip_strict
 from TPTBox.core.sitk_utils import nii_to_sitk, sitk_to_nii
 
 NII_or_POI = TypeVar("NII_or_POI")

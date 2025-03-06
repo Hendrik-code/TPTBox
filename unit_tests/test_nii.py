@@ -9,11 +9,11 @@ import sys
 import unittest
 from pathlib import Path
 
-from TPTBox.core.compat import zip_strict
 import nibabel as nib
 import numpy as np
 
 from TPTBox.core import np_utils
+from TPTBox.core.compat import zip_strict
 from TPTBox.core.nii_wrapper import NII
 from TPTBox.core.poi import POI as Centroids  # _centroids_to_dict_list  # noqa: N811
 from TPTBox.core.poi import calc_centroids, v_idx2name
