@@ -9,6 +9,7 @@ from math import ceil, floor
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, Union
 
+from TPTBox.core.compat import zip_strict
 import nibabel as nib
 import nibabel.orientations as nio
 import numpy as np
@@ -738,7 +739,7 @@ class NII(NII_Math):
         padding = []
         crop = []
         requires_crop = False
-        for in_size, out_size in zip(self.shape[-3:], target_shape[-3:]):
+        for in_size, out_size in zip_strict(self.shape[-3:], target_shape[-3:]):
             to_pad_size = max(0, out_size - in_size) / 2.0
             to_crop_size = -min(0, out_size - in_size) / 2.0
             padding.extend([(ceil(to_pad_size), floor(to_pad_size))])
@@ -826,7 +827,7 @@ class NII(NII_Math):
         zms = self.zoom
         if order is None:
             order = 0 if self.seg else 3
-        voxel_spacing = tuple([v if v != -1 else z for v,z in zip(voxel_spacing,zms)])
+        voxel_spacing = tuple([v if v != -1 else z for v,z in zip_strict(voxel_spacing,zms)])
         if voxel_spacing == self.zoom:
             log.print(f"Image already resampled to voxel size {self.zoom}",verbose=verbose)
             return self.copy() if inplace else self

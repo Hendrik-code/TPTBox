@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypedDict, TypeVar, Union
 
+from TPTBox.core.compat import zip_strict
 import nibabel as nib
 import nibabel.orientations as nio
 import numpy as np
@@ -299,7 +300,7 @@ class POI(Abstract_POI):
     ):
         """A Poi crop can be trivially reversed with out any loss. See apply_crop for more information"""
         return self.apply_crop(
-            tuple(slice(-shift.start, sh - shift.start) for shift, sh in zip(o_shift, shape)),
+            tuple(slice(-shift.start, sh - shift.start) for shift, sh in zip_strict(o_shift, shape)),
             inplace=inplace,
         )
 
@@ -462,7 +463,7 @@ class POI(Abstract_POI):
                 ctd_arr[ax[0]] = np.around(size - ctd_arr[ax[0]], decimals) - 1
         points = POI_Descriptor()
         ctd_arr = np.transpose(ctd_arr).tolist()
-        for v, point in zip(v_list, ctd_arr):
+        for v, point in zip_strict(v_list, ctd_arr):
             points[v] = tuple(point)
 
         log.print("[*] Centroids reoriented from", nio.ornt2axcodes(ornt_fr), "to", axcodes_to, verbose=verbose)
@@ -479,7 +480,7 @@ class POI(Abstract_POI):
             # flip is -1 when when a side (of shape) is moved from the origin
             # if flip = -1 new local point is affine_matmul_(shape[1]-1) else 0
             change = ((-flip) + 1) / 2  # 1 if flip else 0
-            change = tuple(a * (s - 1) for a, s in zip(change, self.shape))
+            change = tuple(a * (s - 1) for a, s in zip_strict(change, self.shape))
             origin: COORDINATE = self.local_to_global(change)
         else:
             origin = None  # type: ignore
@@ -531,7 +532,7 @@ class POI(Abstract_POI):
         shp: list[float] = list(self.shape) if self.shape is not None else None  # type: ignore
         ctd_arr = np.transpose(np.asarray(list(self.centroids.values())))
         v_list = list(self.centroids.keys())
-        voxel_spacing = tuple([v if v != -1 else z for v, z in zip(voxel_spacing, zms)])
+        voxel_spacing = tuple([v if v != -1 else z for v, z in zip_strict(voxel_spacing, zms)])
         for i in range(3):
             fkt = zms[i] / voxel_spacing[i]
             if len(v_list) != 0:
@@ -540,7 +541,7 @@ class POI(Abstract_POI):
                 shp[i] *= fkt
         points = POI_Descriptor()
         ctd_arr = np.transpose(ctd_arr).tolist()
-        for v, point in zip(v_list, ctd_arr):
+        for v, point in zip_strict(v_list, ctd_arr):
             points[v] = tuple(point)
         log.print(
             "Rescaled centroid coordinates to spacing (x, y, z) =",

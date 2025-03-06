@@ -9,6 +9,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+from TPTBox.core.compat import zip_strict
 import dicom2nifti
 import dicom2nifti.exceptions
 import numpy as np
@@ -401,7 +402,7 @@ def _filter_file_type(dicom_types: dict[str, list[str]]):
         for sublist in split_lists:
             filtered_set.append([item for item in sublist if item in unique_strings])  # noqa: PERF401
         # Add to dicom_parts if there are unique strings
-        for l, i in zip(filtered_set, v):
+        for l, i in zip_strict(filtered_set, v):
             dicom_parts[f"{k}_{i}"] = l
     return dicom_parts
 

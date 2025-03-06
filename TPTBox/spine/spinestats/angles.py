@@ -3,6 +3,7 @@ from __future__ import annotations
 from enum import Enum, auto
 from pathlib import Path
 
+from TPTBox.core.compat import zip_strict
 import numpy as np
 
 from TPTBox import POI, Image_Reference
@@ -722,10 +723,10 @@ def plot_compute_lordosis_and_kyphosis(
         out.append((id1.value, s, (a[0] * line_len, a[1] * line_len)))
         out.append((id1.value, s, (-a[0] * line_len * 3, -a[1] * line_len * 3)))
     out2 = compute_lordosis_and_kyphosis(poi, project_2D=project_2D)
-    for (name, v), id1, id2 in zip(
+    for (name, v), id1, id2 in zip_strict(
         out2.items(),
         [Vertebra_Instance.C7, last_t, last_l],
-        [Vertebra_Instance.C2, Vertebra_Instance.C7, last_t],
+        [Vertebra_Instance.C2, Vertebra_Instance.C7, last_t]
     ):
         if v is None:
             continue
