@@ -8,6 +8,7 @@ import random
 import unittest
 from pathlib import Path
 
+from TPTBox.core.compat import zip_strict
 import nibabel as nib
 import numpy as np
 
@@ -38,12 +39,12 @@ def get_nii(x: tuple[int, int, int] | None = None, num_point=3, rotation=True): 
             break
         point = tuple(random.randint(1, a - 1) for a in x)
         size = tuple(random.randint(1, 1 + a) for a in [5, 5, 5])
-        if any(a - b < 0 for a, b in zip(point, size)):
+        if any(a - b < 0 for a, b in zip_strict(point, size)):
             continue
-        if any(a + b > c - 1 for a, b, c in zip(point, size, x)):
+        if any(a + b > c - 1 for a, b, c in zip_strict(point, size, x)):
             continue
         skip = False
-        for p2, s2 in zip(points, sizes):
+        for p2, s2 in zip_strict(points, sizes):
             if overlap(point, size, p2, s2):
                 skip = True
                 break

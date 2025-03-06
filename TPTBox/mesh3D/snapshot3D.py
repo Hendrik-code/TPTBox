@@ -7,6 +7,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Literal
 
+from TPTBox.core.compat import zip_strict
 import numpy as np
 import vtk
 from fury import window
@@ -130,7 +131,7 @@ def make_sub_snapshot_parallel(
 ):
     ress = []
     with Pool(cpus) as p:  # type: ignore
-        for out_path, img in zip(output_paths, imgs):
+        for out_path, img in zip_strict(output_paths, imgs):
             res = p.apply_async(
                 make_snapshot3D,
                 kwds={

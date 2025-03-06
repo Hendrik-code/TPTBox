@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from TPTBox.core.compat import zip_strict
 import numpy as np
 from numpy.linalg import norm
 from scipy.interpolate import RegularGridInterpolator
@@ -48,7 +49,7 @@ def strategy_extreme_points(
     extreme_point = get_extreme_point_by_vert_direction(poi, region, vert_id, direction)
     if extreme_point is None:
         return
-    poi[vert_id, location.value] = tuple(a.start + b for a, b in zip(bb, extreme_point))
+    poi[vert_id, location.value] = tuple(a.start + b for a, b in zip_strict(bb, extreme_point))
 
 
 ##### Ray CASTING ####
@@ -70,7 +71,7 @@ def strategy_line_cast(
     extreme_point = max_distance_ray_cast_convex_poi(poi, region, vert_id, bb, normal_vector_points, start_point, log=log)
     if extreme_point is None:
         return
-    poi[vert_id, location.value] = tuple(a.start + b for a, b in zip(bb, extreme_point))
+    poi[vert_id, location.value] = tuple(a.start + b for a, b in zip_strict(bb, extreme_point))
 
 
 #### find corner ####
@@ -100,7 +101,7 @@ def strategy_find_corner(
 
     if corner_point is None:
         return
-    poi[vert_id, location.value] = tuple(a.start + b for a, b in zip(bb, corner_point))
+    poi[vert_id, location.value] = tuple(a.start + b for a, b in zip_strict(bb, corner_point))
 
 
 # @timing

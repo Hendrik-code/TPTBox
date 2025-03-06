@@ -7,6 +7,7 @@ import os
 import traceback
 from pathlib import Path
 
+from TPTBox.core.compat import zip_strict
 import numpy as np
 import torch
 from acvl_utils.cropping_and_padding.padding import pad_nd_image
@@ -392,7 +393,7 @@ class nnUNetPredictor:
             for d in range(image_size[0]):
                 for sx in steps[0]:
                     for sy in steps[1]:
-                        x__ = [slice(si, si + ti) for si, ti in zip((sx, sy), self.configuration_manager.patch_size)]
+                        x__ = [slice(si, si + ti) for si, ti in zip_strict((sx, sy), self.configuration_manager.patch_size)]
                         slicers.append((slice(None), d, *x__))
         else:
             steps = compute_steps_for_sliding_window(image_size, self.configuration_manager.patch_size, self.tile_step_size)  # type: ignore
@@ -404,7 +405,7 @@ class nnUNetPredictor:
             for sx in steps[0]:
                 for sy in steps[1]:
                     for sz in steps[2]:
-                        x__ = [slice(si, si + ti) for si, ti in zip((sx, sy, sz), self.configuration_manager.patch_size)]
+                        x__ = [slice(si, si + ti) for si, ti in zip_strict((sx, sy, sz), self.configuration_manager.patch_size)]
                         slicers.append((slice(None), *x__))
         return slicers
 
