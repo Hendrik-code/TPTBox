@@ -782,6 +782,7 @@ def np_fill_holes(arr: np.ndarray, label_ref: LABEL_REFERENCE = None, slice_wise
 def np_smooth_gaussian_labelwise(
     arr: UINTARRAY,
     label_to_smooth: list[int] | int,
+    label_weights: dict[int, float] | None = None,
     sigma: float = 3.0,
     radius: int = 6,
     truncate: int = 4,
@@ -807,6 +808,8 @@ def np_smooth_gaussian_labelwise(
     Returns:
         UINTARRAY: The resulting smoothed array of the segmentation (with the same labels as the input)
     """
+    if label_weights is None:
+        label_weights = {}
     sem_labels = np_unique_withoutzero(arr)
 
     if isinstance(label_to_smooth, int):
@@ -829,16 +832,16 @@ def np_smooth_gaussian_labelwise(
     for l in sem_labels_plus_background[:-1]:
         arr_l = np_extract_label(arr.copy(), l).astype(float)
         if l in label_to_smooth:
-            blurred = gaussian_filter(
+            arr_l = gaussian_filter(
                 arr_l,
                 sigma=sigma,
                 mode=boundary_mode,
                 truncate=truncate,
                 radius=radius,
             )
-            smoothed_arrs.append(blurred)
-        else:
-            smoothed_arrs.append(arr_l)
+        if l in label_weights:
+            arr_l = np.multiply(arr_l, label_weights[l])
+        smoothed_arrs.append(arr_l)
 
     # background
     arr_bg = arr.copy()
@@ -846,16 +849,16 @@ def np_smooth_gaussian_labelwise(
     arr_bg[arr_bg == 0] = 1
     arr_bg[arr_bg == 2] = 0
     if smooth_background:
-        blurred = gaussian_filter(
+        arr_bg = gaussian_filter(
             arr_bg.astype(float),
             sigma=sigma,
             mode=boundary_mode,
             truncate=truncate,
             radius=radius,
         )
-        smoothed_arrs.append(blurred)
-    else:
-        smoothed_arrs.append(arr_bg)
+    if 0 in label_weights:
+        arr_bg = np.multiply(arr_bg, label_weights[0])
+    smoothed_arrs.append(arr_bg)
 
     arr_stack = np.stack(smoothed_arrs)
     seg_arr_smoothed = np.argmax(arr_stack, axis=0)
