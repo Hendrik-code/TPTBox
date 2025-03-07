@@ -86,7 +86,6 @@ if __name__ == "__main__":
         zarr = np.zeros((len(labels), *arr.shape), dtype=arr.dtype)
 
         labels_out = connected_components(arrc, connectivity=connectivity, return_N=False)
-        #
         for sidx, subreg in enumerate(labels):  # type:ignore
             img_subreg = np_extract_label(arrc, subreg, inplace=False)
             lcrop = np_bbox_binary(img_subreg)
@@ -112,7 +111,6 @@ if __name__ == "__main__":
         arrc = arr  # [crop]
 
         labels_out = connected_components(arrc, connectivity=connectivity, return_N=False)
-        #
         for subreg in labels:  # type:ignore
             img_subreg = np_extract_label(arrc, subreg, inplace=False)
             lcrop = np_bbox_binary(img_subreg)

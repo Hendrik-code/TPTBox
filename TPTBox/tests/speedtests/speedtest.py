@@ -40,7 +40,6 @@ def speed_test(
     first_input = get_input_func()
     time = perf_counter() - start
     time_sums["input_function"].append(time)
-    #
     for f in functions:
         input_copy = deepcopy(first_input)
         out = f(*input_copy, *args, **kwargs) if isinstance(input_copy, (tuple, list)) else f(input_copy, *args, **kwargs)
