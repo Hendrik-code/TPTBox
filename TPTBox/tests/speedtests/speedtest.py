@@ -25,7 +25,12 @@ def speed_test_input(inp, functions: list[Callable], assert_equal_function: Call
 
 
 def speed_test(
-    get_input_func: Callable, functions: list[Callable], repeats: int = 20, assert_equal_function: Callable | None = None, *args, **kwargs
+    get_input_func: Callable,
+    functions: list[Callable],
+    repeats: int = 20,
+    assert_equal_function: Callable | None = None,
+    *args,
+    **kwargs,
 ):
     time_sums: dict[str, list[float]] = {"input_function": []}
     # print first iteration
