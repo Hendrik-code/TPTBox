@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # POI
 import sys
 from pathlib import Path

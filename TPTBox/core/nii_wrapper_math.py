@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import operator
 from numbers import Number
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Union
 
 import numpy as np
 from skimage.metrics import peak_signal_noise_ratio as psnr
@@ -36,11 +38,11 @@ if TYPE_CHECKING:
             ...
         def get_c_val(self)->int:
             ...
-    C = NII|Number|np.ndarray
+    C = Union[NII, Number, np.ndarray]
 else:
     class NII_Proxy:
         pass
-    C = Self|Number|np.ndarray
+    C = Union[Self,Number,np.ndarray]
 class NII_Math(NII_Proxy,Has_Grid):
     def _binary_opt(self, other:C, opt,inplace = False)-> Self:
         if isinstance(other,NII_Math):
@@ -208,7 +210,7 @@ class NII_Math(NII_Proxy,Has_Grid):
         return ssim_value
 
 
-    def betti_numbers(self: "NII",verbose=False) -> dict[int, tuple[int, int, int]]: # type: ignore
+    def betti_numbers(self: NII,verbose=False) -> dict[int, tuple[int, int, int]]: # type: ignore
         """
         Calculate Betti numbers for connected components in a 3D image.
 
