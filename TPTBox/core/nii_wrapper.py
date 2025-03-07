@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import traceback
 import warnings
 import zlib
@@ -5,7 +7,7 @@ from collections.abc import Sequence
 from enum import Enum
 from math import ceil, floor
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, Union
 
 import nibabel as nib
 import nibabel.orientations as nio
@@ -13,6 +15,7 @@ import numpy as np
 from nibabel import Nifti1Header, Nifti1Image  # type: ignore
 from typing_extensions import Self
 
+from TPTBox.core.compat import zip_strict
 from TPTBox.core.internal.nii_help import _resample_from_to, secure_save
 from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.nii_wrapper_math import NII_Math
@@ -79,8 +82,8 @@ _dtype_max = {"int8": 128, "uint8": 256, "int16": 32768, "uint16": 65536}
 warnings.formatwarning = formatwarning_tb
 
 N = TypeVar("N", bound="NII")
-Image_Reference = bids_files.BIDS_FILE | Nifti1Image | Path | str | N
-Interpolateable_Image_Reference = bids_files.BIDS_FILE | tuple[Nifti1Image, bool] | tuple[Path, bool] | tuple[str, bool] | N
+Image_Reference = Union[bids_files.BIDS_FILE, Nifti1Image, Path, str, N]
+Interpolateable_Image_Reference = Union[bids_files.BIDS_FILE, tuple[Nifti1Image, bool], tuple[Path, bool], tuple[str, bool], N]
 
 Proxy = tuple[tuple[int, int, int], np.ndarray]
 suppress_dtype_change_printout_in_set_array = False
@@ -585,7 +588,7 @@ class NII(NII_Math):
         ### Reset origin ###
         flip = ornt_trans[:, 1]
         change = ((-flip) + 1) / 2  # 1 if flip else 0
-        change = tuple(a * (s-1) for a, s in zip(change, self.shape, strict=False))
+        change = tuple(a * (s-1) for a, s in zip(change, self.shape))
         new_aff[:3, 3] = nib.affines.apply_affine(aff,change) # type: ignore
         ######
         #if self.header is not None:
@@ -649,7 +652,7 @@ class NII(NII_Math):
 
         if other_crop is not None:
             assert all((a.step is None) for a in other_crop), 'Only None slice is supported for combining x'
-            ex_slice = [slice(max(a.start, b.start), min(a.stop, b.stop)) for a, b in zip(ex_slice, other_crop, strict=False)]
+            ex_slice = [slice(max(a.start, b.start), min(a.stop, b.stop)) for a, b in zip(ex_slice, other_crop)]
 
         if maximum_size is not None:
             if isinstance(maximum_size,int):
@@ -814,7 +817,7 @@ class NII(NII_Math):
         zms = self.zoom
         if order is None:
             order = 0 if self.seg else 3
-        voxel_spacing = tuple([v if v != -1 else z for v,z in zip(voxel_spacing,zms,strict=True)])
+        voxel_spacing = tuple([v if v != -1 else z for v,z in zip_strict(voxel_spacing,zms)])
         if voxel_spacing == self.zoom:
             log.print(f"Image already resampled to voxel size {self.zoom}",verbose=verbose)
             return self.copy() if inplace else self
@@ -1636,9 +1639,9 @@ class NII(NII_Math):
         return self.set_array(array)
     def __getitem__(self, key)-> Any:
         if isinstance(key,Sequence):
-            from types import EllipsisType
+            ellipsis_type = type(Ellipsis)
 
-            if all(isinstance(k, (slice,EllipsisType)) for k in key):
+            if all(isinstance(k, (slice, ellipsis_type)) for k in key):
                 #if all(k.step is not None and k.step == 1 for k in key):
                 #    raise NotImplementedError(f"Slicing is not implemented. Attempted {key}")
                 if len(key)!= len(self.shape) or Ellipsis in key:

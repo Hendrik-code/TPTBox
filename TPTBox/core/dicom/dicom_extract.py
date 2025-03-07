@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import shutil
 import sys
@@ -18,6 +20,7 @@ from joblib import Parallel, delayed
 from pydicom.dataset import FileDataset
 
 from TPTBox import BIDS_FILE, Log_Type, Print_Logger
+from TPTBox.core.compat import zip_strict
 from TPTBox.core.dicom.dicom_header_to_keys import extract_keys_from_json
 from TPTBox.core.nii_wrapper import NII
 
@@ -399,7 +402,7 @@ def _filter_file_type(dicom_types: dict[str, list[str]]):
         for sublist in split_lists:
             filtered_set.append([item for item in sublist if item in unique_strings])  # noqa: PERF401
         # Add to dicom_parts if there are unique strings
-        for l, i in zip(filtered_set, v, strict=True):
+        for l, i in zip_strict(filtered_set, v):
             dicom_parts[f"{k}_{i}"] = l
     return dicom_parts
 

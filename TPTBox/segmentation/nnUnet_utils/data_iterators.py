@@ -1,6 +1,8 @@
 # Adapted from https://github.com/MIC-DKFZ/nnUNet
 # Isensee, F., Jaeger, P. F., Kohl, S. A., Petersen, J., & Maier-Hein, K. H. (2021). nnU-Net: a self-configuring
 # method for deep learning-based biomedical image segmentation. Nature methods, 18(2), 203-211.
+from __future__ import annotations
+
 import numpy as np
 import torch
 from batchgenerators.dataloading.data_loader import DataLoader
@@ -38,7 +40,7 @@ class PreprocessAdapterFromNpy(DataLoader):
             truncated_of_names = [None] * len(list_of_images)  # type: ignore
 
         super().__init__(
-            list(zip(list_of_images, list_of_segs_from_prev_stage, list_of_image_properties, truncated_of_names, strict=False)),  # type: ignore
+            list(zip(list_of_images, list_of_segs_from_prev_stage, list_of_image_properties, truncated_of_names)),  # type: ignore
             1,
             num_threads_in_multithreaded,
             seed_for_shuffle=1,

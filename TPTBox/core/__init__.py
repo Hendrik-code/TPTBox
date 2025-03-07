@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # POI
 # packages
 from . import bids_files, np_utils, sitk_utils

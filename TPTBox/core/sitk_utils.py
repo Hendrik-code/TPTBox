@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -9,13 +11,13 @@ if TYPE_CHECKING:  # pragma: no cover
     from TPTBox import NII, POI
 
 
-def nii_to_sitk(nii: "NII") -> sitk.Image:
+def nii_to_sitk(nii: NII) -> sitk.Image:
     # https://github.com/fepegar/torchio/blob/5983f83f0e7f13f9c5056e25f8753b03426ae18a/src/torchio/data/io.py#L289
     """Create a SimpleITK image from a Nifti."""
     return nib_to_sitk(nii.nii)
 
 
-def nib_to_sitk(nii: "Nifti1Image") -> sitk.Image:
+def nib_to_sitk(nii: Nifti1Image) -> sitk.Image:
     # https://github.com/fepegar/torchio/blob/5983f83f0e7f13f9c5056e25f8753b03426ae18a/src/torchio/data/io.py#L289
     """Create a SimpleITK image from a Nifti."""
     array = np.asarray(nii.dataobj)
@@ -36,7 +38,7 @@ def nib_to_sitk(nii: "Nifti1Image") -> sitk.Image:
 
 ###########################################################################################
 # Functions are simplified from https://github.com/fepegar/torchio
-def sitk_to_nib(image: sitk.Image) -> "Nifti1Image":
+def sitk_to_nib(image: sitk.Image) -> Nifti1Image:
     # https://github.com/fepegar/torchio/blob/5983f83f0e7f13f9c5056e25f8753b03426ae18a/src/torchio/data/io.py#L332
     data = sitk.GetArrayFromImage(image).transpose()
     assert image.GetNumberOfComponentsPerPixel() == 1
@@ -47,13 +49,13 @@ def sitk_to_nib(image: sitk.Image) -> "Nifti1Image":
     return nibabel.Nifti1Image(data, affine)
 
 
-def sitk_to_nii(image: sitk.Image, seg: bool) -> "NII":
+def sitk_to_nii(image: sitk.Image, seg: bool) -> NII:
     import TPTBox
 
     return TPTBox.NII(sitk_to_nib(image), seg)
 
 
-def transform_centroid(ctd: "POI", transform: sitk.Transform, img_fixed: sitk.Image, img_moving: sitk.Image, reg_type):
+def transform_centroid(ctd: POI, transform: sitk.Transform, img_fixed: sitk.Image, img_moving: sitk.Image, reg_type):
     import TPTBox
 
     out = TPTBox.core.poi.POI_Descriptor()

@@ -2,6 +2,8 @@
 # coverage run -m unittest
 # coverage report
 # coverage html
+from __future__ import annotations
+
 import os
 import random
 import sys
@@ -53,7 +55,7 @@ def get_centroids2(x: tuple[int, int, int] = (50, 30, 40), num_point=3):
     for _ in range(num_point):
         point = tuple(random.randint(1, a * 100) / 100.0 for a in x)
         out_points[random.randint(1, 27), l[random.randint(0, len(l) - 1)]] = point
-    return POI(out_points, get_random_ax_code(), zoom=(1, 1, 1), shape=x)
+    return POI(centroids=out_points, orientation=get_random_ax_code(), zoom=(1, 1, 1), shape=x)
 
 
 s = Path("BIDS/test/")
