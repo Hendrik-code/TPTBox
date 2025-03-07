@@ -167,30 +167,26 @@ def _run_spineps_vert(
     model_instance="instance",  # _sagittal_v1.2.0
     model_labeling=None,
     vertebra_instance_labeling_offset=2,
-    proc_fill_3d_holes=True,
+    proc_fill_3d_holes=False,
     proc_inst_detect_and_solve_merged_corpi=True,
     proc_inst_corpus_clean=True,
-    proc_inst_clean_small_cc_artifacts=False,
-    proc_inst_largest_k_cc=True,
+    proc_inst_clean_small_cc_artifacts=True,
+    proc_inst_largest_k_cc=0,
     proc_clean_inst_by_sem=True,
     proc_assign_missing_cc=False,
     proc_vertebra_inconsistency=True,
     verbose=True,
     use_cpu=False,
 ):
-    from spineps import (
-        get_instance_model,
-        phase_postprocess_combined,
-        predict_instance_mask,
-    )
+    from spineps import get_instance_model, phase_postprocess_combined, predict_instance_mask
     from spineps.get_models import get_actual_model, modelid2folder_instance
 
-    print(modelid2folder_instance())
     if isinstance(model_instance, Path):
         model_instance = get_actual_model(model_instance, use_cpu=use_cpu)
     else:
         model_instance = get_instance_model(model_instance, use_cpu=use_cpu)
     debug_data = {}
+
     whole_vert_nii, errcode = predict_instance_mask(
         subreg_nii.copy(),
         model_instance,
