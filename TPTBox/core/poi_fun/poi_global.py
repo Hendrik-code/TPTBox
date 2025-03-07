@@ -15,7 +15,17 @@ class POI_Global(Abstract_POI):
     Inherits from the `Abstract_POI` class and contains methods for converting the POI to different coordinate systems.
     """
 
-    def __init__(self, input_poi: poi.POI | POI_Descriptor):
+    def __init__(self, input_poi: poi.POI | POI_Descriptor | dict[str, dict[str, tuple[float, ...]]], itk_coords: bool = False):
+        self.itk_coords = itk_coords
+
+        if isinstance(input_poi, dict):
+            global_points = POI_Descriptor()
+            self.info = {}
+            self.format = None
+            for k1, d1 in input_poi.items():
+                for k2, v in d1.items():
+                    global_points[k1:k2] = v
+
         if isinstance(input_poi, POI_Descriptor):
             global_points = input_poi
             self.info = {}
@@ -76,7 +86,7 @@ class POI_Global(Abstract_POI):
         """
         return self.to_other(poi.POI.load(ref))
 
-    def to_other(self, msk: Has_Grid) -> poi.POI:
+    def to_other(self, msk: Has_Grid, verbose=False) -> poi.POI:
         """
         Convert the POI to another coordinate system.
 
@@ -88,7 +98,12 @@ class POI_Global(Abstract_POI):
         """
         out = poi.POI_Descriptor(definition=self._get_centroids().definition)
         for k1, k2, v in self.items():
+            if self.itk_coords:
+                assert len(v) == 3, "n-d vec not implemented for n != 3"
+                v = (-v[0], -v[1], v[2])  # noqa: PLW2901
             v_out = msk.global_to_local(v)
+            if verbose:
+                print(v, "-->", v_out)
             out[k1, k2] = tuple(v_out)
 
         return poi.POI(centroids=out, **msk._extract_affine(), info=self.info, format=self.format)
@@ -99,4 +114,5 @@ class POI_Global(Abstract_POI):
         p = POI_Global(centroids)
         p.format = self.format
         p.info = deepcopy(self.info)
+        p.itk_coords = self.itk_coords
         return p  # type: ignore
