@@ -288,7 +288,7 @@ def get_cmd_ex_spinal_cord(
         out_file = __bids2spinalcord(bids_file, parent_folder_name=parent_folder_name)
     if not override and out_file.exists():
         return ["echo", f"[?] the spinalcord already exists {out_file.name}."], out_file
-    in_file = str(bids_file) if isinstance(bids_file, Path | str) else bids_file.file["nii.gz"]
+    in_file = str(bids_file) if isinstance(bids_file, (Path, str)) else bids_file.file["nii.gz"]
     # sct_deepseg_sc -i sub-spinegan0008_ses-20210204_sequ-302_e-1_dixon.nii.gz -c t2 -brain 0 -o text.nii.gz
     cmd_ex = ["sct_deepseg_sc", "-i", in_file, "-c", domain, "-brain", "0", "-o", str(out_file)]
     if threshold != -1:

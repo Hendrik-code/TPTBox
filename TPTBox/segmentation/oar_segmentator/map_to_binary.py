@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 class_map = {
     1: "spleen",
     2: "kidney_right",

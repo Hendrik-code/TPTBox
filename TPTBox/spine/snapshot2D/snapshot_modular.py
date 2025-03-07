@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import copy
 import warnings
 from collections.abc import Sequence
@@ -959,7 +961,7 @@ def create_snapshot(  # noqa: C901
 
     fig, axs = create_figure(dpi, img_list, has_title=frame.title is None)
     for ax, (img, msk, ctd, wdw, is_sag, alpha, cmap, zms, curve_location, poi_labelmap, hide_centroid_labels, title, frame) in zip(
-        axs, frame_list, strict=False
+        axs, frame_list
     ):
         if title is not None:
             ax.set_title(title, fontdict={"fontsize": 18, "color": "black"}, loc="center")

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from collections.abc import Sequence
 
 import numpy as np
@@ -5,6 +7,7 @@ from numpy.linalg import norm
 from scipy.interpolate import RegularGridInterpolator
 
 from TPTBox import NII, POI, Logger_Interface, Print_Logger
+from TPTBox.core.compat import zip_strict
 from TPTBox.core.poi_fun._help import sacrum_w_o_arcus, to_local_np
 from TPTBox.core.poi_fun.pixel_based_point_finder import get_direction, get_extreme_point_by_vert_direction
 from TPTBox.core.poi_fun.ray_casting import max_distance_ray_cast_convex_poi, shift_point
@@ -46,7 +49,7 @@ def strategy_extreme_points(
     extreme_point = get_extreme_point_by_vert_direction(poi, region, vert_id, direction)
     if extreme_point is None:
         return
-    poi[vert_id, location.value] = tuple(a.start + b for a, b in zip(bb, extreme_point, strict=True))
+    poi[vert_id, location.value] = tuple(a.start + b for a, b in zip_strict(bb, extreme_point))
 
 
 ##### Ray CASTING ####
@@ -68,7 +71,7 @@ def strategy_line_cast(
     extreme_point = max_distance_ray_cast_convex_poi(poi, region, vert_id, bb, normal_vector_points, start_point, log=log)
     if extreme_point is None:
         return
-    poi[vert_id, location.value] = tuple(a.start + b for a, b in zip(bb, extreme_point, strict=True))
+    poi[vert_id, location.value] = tuple(a.start + b for a, b in zip_strict(bb, extreme_point))
 
 
 #### find corner ####
@@ -96,7 +99,7 @@ def strategy_find_corner(
 
     if corner_point is None:
         return
-    poi[vert_id, location.value] = tuple(a.start + b for a, b in zip(bb, corner_point, strict=True))
+    poi[vert_id, location.value] = tuple(a.start + b for a, b in zip_strict(bb, corner_point))
 
 
 # @timing
@@ -224,7 +227,7 @@ def strategy_ligament_attachment_point_flava(
             v2_n /= 2
 
     coords = start_point_np + f1 * v1 + f2 * v2
-    poi[vert_id, location] = tuple(x + y.start for x, y in zip(coords, bb, strict=False))
+    poi[vert_id, location] = tuple(x + y.start for x, y in zip(coords, bb))
 
 
 #### shifted_line_cast ####

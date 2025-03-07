@@ -2,6 +2,8 @@
 # coverage run -m unittest
 # coverage report
 # coverage html
+from __future__ import annotations
+
 import random
 import sys
 import tempfile

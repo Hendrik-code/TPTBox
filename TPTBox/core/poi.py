@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import functools
 import json
 import warnings
@@ -5,15 +7,16 @@ from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TypedDict, TypeGuard, TypeVar
+from typing import TypedDict, TypeVar, Union
 
 import nibabel as nib
 import nibabel.orientations as nio
 import numpy as np
 from scipy.ndimage import center_of_mass
-from typing_extensions import Self
+from typing_extensions import Self, TypeGuard  # noqa: UP035
 
 from TPTBox.core import bids_files
+from TPTBox.core.compat import zip_strict
 from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.nii_wrapper import NII, Image_Reference, to_nii, to_nii_optional
 from TPTBox.core.poi_fun.poi_abstract import Abstract_POI, POI_Descriptor
@@ -56,12 +59,12 @@ class _Orientation(TypedDict):
     direction: tuple[str, str, str]
 
 
-_Centroid_DictList = Sequence[_Orientation | _Point3D]
+_Centroid_DictList = Sequence[Union[_Orientation, _Point3D]]
 
 
 ### CURRENT TYPE DEFINITIONS
 C = TypeVar("C", bound="POI")
-POI_Reference = bids_files.BIDS_FILE | Path | str | tuple[Image_Reference, Image_Reference, Sequence[int]] | C
+POI_Reference = Union[bids_files.BIDS_FILE, Path, str, tuple[Image_Reference, Image_Reference, Sequence[int]], C]
 ctd_info_blacklist = [
     "zoom",
     "shape",
@@ -301,7 +304,7 @@ class POI(Abstract_POI):
     ):
         """A Poi crop can be trivially reversed with out any loss. See apply_crop for more information"""
         return self.apply_crop(
-            tuple(slice(-shift.start, sh - shift.start) for shift, sh in zip(o_shift, shape, strict=True)),
+            tuple(slice(-shift.start, sh - shift.start) for shift, sh in zip_strict(o_shift, shape)),
             inplace=inplace,
         )
 
@@ -464,7 +467,7 @@ class POI(Abstract_POI):
                 ctd_arr[ax[0]] = np.around(size - ctd_arr[ax[0]], decimals) - 1
         points = POI_Descriptor()
         ctd_arr = np.transpose(ctd_arr).tolist()
-        for v, point in zip(v_list, ctd_arr, strict=True):
+        for v, point in zip_strict(v_list, ctd_arr):
             points[v] = tuple(point)
 
         log.print("[*] Centroids reoriented from", nio.ornt2axcodes(ornt_fr), "to", axcodes_to, verbose=verbose)
@@ -481,7 +484,7 @@ class POI(Abstract_POI):
             # flip is -1 when when a side (of shape) is moved from the origin
             # if flip = -1 new local point is affine_matmul_(shape[1]-1) else 0
             change = ((-flip) + 1) / 2  # 1 if flip else 0
-            change = tuple(a * (s - 1) for a, s in zip(change, self.shape, strict=True))
+            change = tuple(a * (s - 1) for a, s in zip_strict(change, self.shape))
             origin: COORDINATE = self.local_to_global(change)
         else:
             origin = None  # type: ignore
@@ -533,7 +536,7 @@ class POI(Abstract_POI):
         shp: list[float] = list(self.shape) if self.shape is not None else None  # type: ignore
         ctd_arr = np.transpose(np.asarray(list(self.centroids.values())))
         v_list = list(self.centroids.keys())
-        voxel_spacing = tuple([v if v != -1 else z for v, z in zip(voxel_spacing, zms, strict=True)])
+        voxel_spacing = tuple([v if v != -1 else z for v, z in zip_strict(voxel_spacing, zms)])
         for i in range(3):
             fkt = zms[i] / voxel_spacing[i]
             if len(v_list) != 0:
@@ -542,7 +545,7 @@ class POI(Abstract_POI):
                 shp[i] *= fkt
         points = POI_Descriptor()
         ctd_arr = np.transpose(ctd_arr).tolist()
-        for v, point in zip(v_list, ctd_arr, strict=True):
+        for v, point in zip_strict(v_list, ctd_arr):
             points[v] = tuple(point)
         log.print(
             "Rescaled centroid coordinates to spacing (x, y, z) =",
@@ -986,7 +989,7 @@ def load_poi(ctd_path: POI_Reference, verbose=True) -> POI:  # noqa: ARG001
         return ctd_path
     elif isinstance(ctd_path, bids_files.BIDS_FILE):
         dict_list: _Centroid_DictList = ctd_path.open_json()  # type: ignore
-    elif isinstance(ctd_path, Path | str):
+    elif isinstance(ctd_path, (Path, str)):
         with open(ctd_path) as json_data:
             dict_list: _Centroid_DictList = json.load(json_data)
             json_data.close()

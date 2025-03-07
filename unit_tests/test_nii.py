@@ -2,6 +2,8 @@
 # coverage run -m unittest
 # coverage report
 # coverage html
+from __future__ import annotations
+
 import random
 import sys
 import unittest
@@ -11,6 +13,7 @@ import nibabel as nib
 import numpy as np
 
 from TPTBox.core import np_utils
+from TPTBox.core.compat import zip_strict
 from TPTBox.core.nii_wrapper import NII
 from TPTBox.core.poi import POI as Centroids  # _centroids_to_dict_list  # noqa: N811
 from TPTBox.core.poi import calc_centroids, v_idx2name
@@ -113,10 +116,10 @@ class Test_bids_file(unittest.TestCase):
             msk2 = msk.rescale_and_reorient(axcode, voxel_spacing=voxel_spacing, verbose=False, inplace=False)
             msk2 = msk2.rescale_and_reorient(axcode_start, voxel_spacing=voxel_spacing2, verbose=False)
             cdt2 = calc_centroids(msk2)
-            for (k1, k2, v), (k1_2, k2_2, v2) in zip(cdt.items(), cdt2.items(), strict=True):
+            for (k1, k2, v), (k1_2, k2_2, v2) in zip_strict(cdt.items(), cdt2.items()):
                 self.assertEqual(k1, k1_2)
                 self.assertEqual(k2, k2_2)
-                for v, v2 in zip(v, v2, strict=True):  # noqa: B020, PLW2901
+                for v, v2 in zip_strict(v, v2):  # noqa: B020, PLW2901
                     self.assertTrue(abs(v - v2) <= 1.01, msg=f"{v},{v2}")
 
     def test_get_plane(self):
@@ -202,6 +205,12 @@ class Test_bids_file(unittest.TestCase):
         for _ in range(repeats):
             msk, cent, order, sizes = get_nii(num_point=random.randint(3, 10))
             msk2 = msk.erode_msk(verbose=False)
+            self.assertNotEqual(msk.get_array().sum(), msk2.get_array().sum())
+
+    def test_dilate_msk(self):
+        for _ in range(repeats):
+            msk, cent, order, sizes = get_nii(num_point=random.randint(3, 10))
+            msk2 = msk.dilate_msk(verbose=False)
             self.assertNotEqual(msk.get_array().sum(), msk2.get_array().sum())
 
     def test_get_segmentation_connected_components(self):

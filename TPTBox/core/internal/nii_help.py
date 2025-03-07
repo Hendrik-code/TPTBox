@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import shutil
 from functools import wraps
 from pathlib import Path
@@ -84,8 +86,8 @@ def secure_save(func):
 
 
 def _resample_from_to(
-    from_img: "NII",
-    to_img: "tuple[SHAPE, AFFINE, ZOOMS] | Has_Grid",
+    from_img: NII,
+    to_img: tuple[SHAPE, AFFINE, ZOOMS] | Has_Grid,
     order=3,
     mode: MODES = "nearest",
     align_corners: bool | Sentinel = Sentinel(),  # noqa: B008

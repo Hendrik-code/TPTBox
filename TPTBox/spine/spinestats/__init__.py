@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from .angles import (
     compute_lordosis_and_kyphosis,
     compute_max_cobb_angle,
