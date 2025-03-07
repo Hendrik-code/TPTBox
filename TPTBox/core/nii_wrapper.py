@@ -754,7 +754,7 @@ class NII(NII_Math):
             s = s.apply_crop(tuple(crop),inplace=inplace)
         return s.apply_pad(padding,inplace=inplace,mode=mode)
 
-    def apply_pad(self,padd:Sequence[tuple[int|None,int]],mode:MODES="constant",inplace = False):
+    def apply_pad(self,padd:Sequence[tuple[int|None,int]],mode:MODES="constant",inplace = False,verbose:logging=True):
         #TODO add other modes
         #TODO add testcases and options for modes
         transform = np.eye(4, dtype=int)
@@ -762,10 +762,10 @@ class NII(NII_Math):
             #transform[i, i] = pad_slice.step if pad_slice.step is not None else 1
             transform[i, 3] = -before  if before is not None else 0
         affine = self.affine.dot(transform)
-        print(mode)
         args = {}
         if mode == "constant":
             args["constant_values"]=self.get_c_val()
+        log.print(f"Padd {padd}; {mode=}, {args}",verbose=verbose)
         arr = np.pad(self.get_array(),padd,mode=mode,**args) # type: ignore
 
         nii:_unpacked_nii = (arr,affine,self.header)
@@ -1305,7 +1305,7 @@ class NII(NII_Math):
             return self if inplace else self.copy()
         return self.set_array(out,inplace=inplace)
 
-    def filter_connected_components(self, labels: int |list[int]|None,min_volume:int=0,max_volume:int|None=None, max_count_component = None, connectivity: int = 3,keep_label=False, inplace=False):
+    def filter_connected_components(self, labels: int |list[int]|None,min_volume:int=0,max_volume:int|None=None, max_count_component = None, connectivity: int = 3,removed_to_label=0,keep_label=False, inplace=False):
         """
         Filter connected components in a segmentation array based on specified volume constraints.
 
@@ -1320,7 +1320,7 @@ class NII(NII_Math):
         Returns:
         None
         """
-        nii = self.get_largest_k_segmentation_connected_components(max_count_component,labels,connectivity=connectivity,return_original_labels=keep_label,min_volume=min_volume,max_volume=max_volume)
+        nii = self.get_largest_k_segmentation_connected_components(max_count_component,labels,connectivity=connectivity,return_original_labels=keep_label,min_volume=min_volume,max_volume=max_volume,removed_to_label=removed_to_label)
         if keep_label and labels is not None:
             if isinstance(labels,int):
                 labels = [labels]
@@ -1350,7 +1350,7 @@ class NII(NII_Math):
         return np_get_connected_components_center_of_mass(arr, label=label, connectivity=connectivity, sort_by_axis=sort_by_axis)
 
 
-    def get_largest_k_segmentation_connected_components(self, k: int | None, labels: int | list[int] | None = None, connectivity: int = 1, return_original_labels: bool = True,inplace=False,min_volume:int=0,max_volume:int|None=None):
+    def get_largest_k_segmentation_connected_components(self, k: int | None, labels: int | list[int] | None = None, connectivity: int = 1, return_original_labels: bool = True,inplace=False,min_volume:int=0,max_volume:int|None=None,removed_to_label=0):
         """Finds the largest k connected components in a given array (does NOT work with zero as label!)
 
         Args:
@@ -1360,7 +1360,7 @@ class NII(NII_Math):
             return_original_labels (bool): If set to False, will label the components from 1 to k. Defaults to True
         """
         msk_i_data = self.get_seg_array()
-        out = np_get_largest_k_connected_components(msk_i_data, k=k, label_ref=labels, connectivity=connectivity, return_original_labels=return_original_labels,min_volume=min_volume,max_volume=max_volume)
+        out = np_get_largest_k_connected_components(msk_i_data, k=k, label_ref=labels, connectivity=connectivity, return_original_labels=return_original_labels,min_volume=min_volume,max_volume=max_volume,removed_to_label=removed_to_label)
         return self.set_array(out,inplace=inplace)
 
     def compute_surface_mask(self, connectivity: int, dilated_surface: bool = False):
