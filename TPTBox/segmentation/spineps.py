@@ -48,7 +48,7 @@ def run_spineps_single(
         model_semantic = get_actual_model(model_semantic, use_cpu=use_cpu)
     else:
         model_semantic = get_semantic_model(model_semantic, use_cpu=use_cpu)
-    if isinstance(model_semantic, Path):
+    if isinstance(model_instance, Path):
         model_instance = get_actual_model(model_instance, use_cpu=use_cpu)
     else:
         model_instance = get_instance_model(model_instance, use_cpu=use_cpu)
@@ -159,3 +159,60 @@ def _run_spineps_internal(
     if outpath is not None:
         seg_nii.save(outpath)
     return seg_nii  # , seg_nii_modelresa
+
+
+def _run_spineps_vert(
+    input_nii: NII,
+    subreg_nii: NII,
+    model_instance="instance",  # _sagittal_v1.2.0
+    model_labeling=None,
+    vertebra_instance_labeling_offset=2,
+    proc_fill_3d_holes=True,
+    proc_inst_detect_and_solve_merged_corpi=True,
+    proc_inst_corpus_clean=True,
+    proc_inst_clean_small_cc_artifacts=False,
+    proc_inst_largest_k_cc=True,
+    proc_clean_inst_by_sem=True,
+    proc_assign_missing_cc=False,
+    proc_vertebra_inconsistency=True,
+    verbose=True,
+    use_cpu=False,
+):
+    from spineps import (
+        get_instance_model,
+        phase_postprocess_combined,
+        predict_instance_mask,
+    )
+    from spineps.get_models import get_actual_model, modelid2folder_instance
+
+    print(modelid2folder_instance())
+    if isinstance(model_instance, Path):
+        model_instance = get_actual_model(model_instance, use_cpu=use_cpu)
+    else:
+        model_instance = get_instance_model(model_instance, use_cpu=use_cpu)
+    debug_data = {}
+    whole_vert_nii, errcode = predict_instance_mask(
+        subreg_nii.copy(),
+        model_instance,
+        debug_data=debug_data,
+        verbose=verbose,
+        proc_inst_fill_3d_holes=proc_fill_3d_holes,
+        proc_detect_and_solve_merged_corpi=proc_inst_detect_and_solve_merged_corpi,
+        proc_corpus_clean=proc_inst_corpus_clean,
+        proc_inst_clean_small_cc_artifacts=proc_inst_clean_small_cc_artifacts,
+        proc_inst_largest_k_cc=proc_inst_largest_k_cc,
+    )
+    whole_vert_nii = whole_vert_nii.resample_from_to(input_nii)
+    seg_nii_clean, vert_nii_clean = phase_postprocess_combined(
+        img_nii=input_nii,
+        seg_nii=subreg_nii,
+        vert_nii=whole_vert_nii,
+        model_labeling=model_labeling,
+        debug_data=debug_data,
+        labeling_offset=vertebra_instance_labeling_offset - 1,
+        proc_clean_inst_by_sem=proc_clean_inst_by_sem,
+        proc_assign_missing_cc=proc_assign_missing_cc,
+        proc_vertebra_inconsistency=proc_vertebra_inconsistency,
+        verbose=verbose,
+    )
+    return seg_nii_clean, vert_nii_clean, whole_vert_nii

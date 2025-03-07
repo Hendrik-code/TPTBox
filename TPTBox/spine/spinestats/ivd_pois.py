@@ -7,7 +7,7 @@ from TPTBox import Print_Logger, Vertebra_Instance, calc_poi_from_subreg_vert
 from TPTBox.core.nii_wrapper import NII
 from TPTBox.core.poi import POI
 from TPTBox.core.poi_fun._help import paint_into_NII, to_local_np
-from TPTBox.core.poi_fun.ray_casting import calculate_pca_normal_np, max_distance_ray_cast_convex
+from TPTBox.core.poi_fun.ray_casting import calculate_pca_normal_np, max_distance_ray_cast_convex, set_above_3_point_plane
 from TPTBox.core.vert_constants import Location
 
 _log = Print_Logger()
@@ -43,7 +43,7 @@ def strategy_calculate_up_vector(poi: POI, current_vert: NII, vert_id: int, bb, 
     return poi
 
 
-def _crop(i: int, verts_ids: list[int], vert_full: NII, spine_full: NII, out: np.ndarray):
+def _crop(i: int, verts_ids: list[int], vert_full: NII, spine_full: NII, poi: POI):
     if i >= 100 or (i + 100 in verts_ids):
         return None
     next_id = Vertebra_Instance(i).get_next_poi(verts_ids)
@@ -52,7 +52,8 @@ def _crop(i: int, verts_ids: list[int], vert_full: NII, spine_full: NII, out: np
     crop = vert_full.extract_label([i, next_id.value]).compute_crop(dist=3)
     vert = vert_full.apply_crop(crop)
     spine = spine_full.apply_crop(crop)
-    return i, verts_ids, vert, spine, out, crop, next_id
+    poi = poi.apply_crop(crop)
+    return i, verts_ids, vert, spine, poi, crop, next_id
 
 
 def _process_vertebra_A(idx, vert: NII, spine: NII, next_id, poi) -> NII | None:
@@ -74,7 +75,7 @@ def _process_vertebra_A(idx, vert: NII, spine: NII, next_id, poi) -> NII | None:
     return ivd
 
 
-def _process_vertebra_B(idx: int, vert: NII, spine: NII, next_id):
+def _process_vertebra_B(idx: int, vert: NII, spine: NII, next_id, dilate=1):
     spine = spine.extract_label([49, 50, 26])
     spine_full = spine.extract_label([49, 50, 26, 41, 43, 44])
     spine_full = spine_full.calc_convex_hull("S")
@@ -82,15 +83,15 @@ def _process_vertebra_B(idx: int, vert: NII, spine: NII, next_id):
     below = vert.extract_label(next_id.value) * spine
     a = above.erode_msk(2, verbose=False) + below
     hull = a.calc_convex_hull("A")
-    hull = hull.erode_msk(2, verbose=False).dilate_msk(1, verbose=False)
+    hull = hull.erode_msk(dilate + 1, verbose=False).dilate_msk(dilate, verbose=False)
     hull[a != 0] = 0
     b = above + below.erode_msk(2, verbose=False)
     hull_b = b.calc_convex_hull("A")
-    hull_b = hull_b.erode_msk(2, verbose=False).dilate_msk(1, verbose=False)
+    hull_b = hull_b.erode_msk(dilate + 1, verbose=False).dilate_msk(dilate, verbose=False)
     hull_b[b != 0] = 0
     hull = hull * hull_b
     hull = hull.filter_connected_components(1, max_count_component=1)
-    hull = hull.dilate_msk(1, verbose=False) * (-spine_full + 1)
+    hull = hull.dilate_msk(dilate, verbose=False) * (-spine_full + 1)
     s2 = hull.sum()
     for j in range(2, 0, -1):
         hull2 = hull.copy()
@@ -112,40 +113,72 @@ def _process_vertebra_B(idx: int, vert: NII, spine: NII, next_id):
 
 
 def _process_vertebra(
-    idx: int, verts_ids: list[int], vert: NII, spine: NII, poi: POI, out: np.ndarray
+    idx: int, verts_ids: list[int], vert: NII, spine: NII, poi: POI, dilate=1
 ) -> tuple[NII, tuple[slice, slice, slice]] | None:
     """Process a single vertebra index."""
     # POI is not cropped, as we only need the vertebra direction
-    result = _crop(idx, verts_ids, vert, spine, out)
+    result = _crop(idx, verts_ids, vert, spine, poi)
     if result is None:
         return None
-    idx, verts_ids, vert, spine, out, crop, next_id = result
+    idx, verts_ids, vert, spine, poi, crop, next_id = result
     ivd_1 = _process_vertebra_A(idx, vert, spine, next_id, poi)
-    ivd_2 = _process_vertebra_B(idx, vert, spine, next_id)
+    ivd_2 = _process_vertebra_B(idx, vert, spine, next_id, dilate)
+
     if ivd_1 is not None:
         ivd_2[ivd_2 == 0] = ivd_1[ivd_2 == 0]
+    try:
+        a = set_above_3_point_plane(
+            ivd_2.copy(),
+            poi[idx, Location.Ligament_Attachment_Point_Anterior_Longitudinal_Inferior_Right.value],
+            poi[idx, Location.Vertebra_Corpus.value],
+            poi[idx, Location.Ligament_Attachment_Point_Anterior_Longitudinal_Inferior_Left.value],
+            value=222,
+        )
+        b = set_above_3_point_plane(
+            ivd_2.copy(),
+            poi[idx, Location.Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Right.value],
+            poi[idx, Location.Vertebra_Corpus.value],
+            poi[idx, Location.Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Left.value],
+            value=222,
+        )
+        ivd_2[np.logical_and(a == 222, ivd_2 != 0)] = 222
+        ivd_2[np.logical_and(b == 222, ivd_2 != 0)] = 222
+        # ivd_2.filter_connected_components_(
+        #    (idx + 100), max_count_component=1, connectivity=1, keep_label=True
+        # )
+    except Exception as e:
+        print("Exception", e)
     return ivd_2, crop
 
 
-def compute_fake_ivd(vert_full: NII, subreg_full: NII, poi: POI):
+def compute_fake_ivd(vert_full: NII, subreg_full: NII, poi: POI, dilate=1):
+    subreg_ids_required_for_ivd_generation = [
+        Location.Vertebra_Direction_Inferior,
+        Location.Vertebra_Corpus,
+        Location.Ligament_Attachment_Point_Anterior_Longitudinal_Inferior_Right,
+        Location.Ligament_Attachment_Point_Anterior_Longitudinal_Inferior_Left,
+        Location.Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Right,
+        Location.Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Left,
+    ]
+    _sub = poi.keys_subregion()
+    if any(f.value not in _sub for f in subreg_ids_required_for_ivd_generation):
+        poi = calc_poi_from_subreg_vert(
+            vert_full,
+            subreg_full,
+            extend_to=poi,
+            subreg_id=subreg_ids_required_for_ivd_generation,
+        )
+
     verts_ids: list[int] = vert_full.unique()
     crop = vert_full.compute_crop(dist=2)
     vert_full_cropped = vert_full.apply_crop(crop)
     subreg_full = subreg_full.apply_crop(crop)
+    poi_cropped = poi.apply_crop(crop)
 
     out = vert_full_cropped.get_array()
-
     with ProcessPoolExecutor() as executor:
         futures = {
-            executor.submit(
-                _process_vertebra,
-                i,
-                verts_ids,
-                vert_full_cropped,
-                subreg_full,
-                poi,
-                out,
-            ): i
+            executor.submit(_process_vertebra, i, verts_ids, vert_full_cropped, subreg_full, poi_cropped, dilate): i
             for i in vert_full.unique()
         }
 

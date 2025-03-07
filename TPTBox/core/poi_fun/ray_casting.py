@@ -1,3 +1,5 @@
+from typing import Literal
+
 import numpy as np
 from numpy.linalg import norm
 from scipy.interpolate import RegularGridInterpolator
@@ -277,3 +279,83 @@ def calculate_pca_normal_np(segmentation: np.ndarray, pca_component, zoom=None, 
     if zoom is not None:
         normal_vector = normal_vector / np.array(zoom)
     return normal_vector
+
+
+def set_above_3_point_plane(
+    array: NII | np.ndarray,
+    p1,
+    p2,
+    p3,
+    value=0,
+    invert: Literal[-1, 1] = 1,
+    mask: np.ndarray | NII | bool = True,
+    inplace=False,
+):
+    """
+    Set all values in a 3D array above a plane defined by three non-collinear points to a specified value.
+
+    Parameters:
+    -----------
+    array : NII | np.ndarray
+        A 3D NumPy array or an NII object representing the volume data.
+    p1, p2, p3 : array-like
+        Three (x, y, z) points defining the plane.
+    value : int or float, optional (default=0)
+        The value to set for all elements above the plane.
+    inf : Literal[-1, 1], optional (default=1)
+        Controls the direction of "above":
+        - `1` means values superior to the plane (default).
+        - `-1` means values inferior to the plane.
+        If the input is an NII object with an inferior-superior orientation, this will be adjusted accordingly.
+
+    Returns:
+    --------
+    np.ndarray
+        The modified 3D array with values set above the plane.
+
+    Notes:
+    ------
+    - The plane is defined by the equation `ax + by + cz + d = 0`, where `(a, b, c)` is the normal vector.
+    - Uses `meshgrid` to construct a 3D grid and determine which values lie above the plane.
+
+    Example:
+    --------
+    ```python
+    import numpy as np
+
+    data = np.random.rand(300, 300, 300)
+    p1 = [100, 100, 50]
+    p2 = [100, 50, 100]
+    p3 = [50, 100, 100]
+
+    result = set_above_3_point_plane(data, p1, p2, p3, value=0)
+    ```
+    """
+    import numpy as np
+
+    if not inplace:
+        array = array.copy()
+    if isinstance(array, NII) and array.orientation[array.get_axis("S")] == "I":
+        # for NII inf = 1 means Superior
+        invert *= -1
+
+    # Define three 3D points that form a plane
+    p1 = np.array(p1)
+    p2 = np.array(p2)
+    p3 = np.array(p3)
+
+    # Compute the normal vector of the plane
+    normal = np.cross(p2 - p1, p3 - p1)
+    a, b, c = normal
+    d = -np.dot(normal, p1)
+
+    # Define a 3D grid of points
+    shape = array.shape
+    x, y, z = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]), np.arange(shape[2]), indexing="ij")
+
+    # Compute the plane equation for each (x, y)
+    plane_z = (-a * x - b * y - d) / c
+
+    # Create the 3D array and set values above the plane to 0
+    array[np.logical_and(mask, z * invert > plane_z)] = value
+    return array
