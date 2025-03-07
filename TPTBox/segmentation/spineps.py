@@ -29,6 +29,7 @@ def run_spineps_single(
     **args,
 ):
     from spineps import get_instance_model, get_semantic_model, process_img_nii
+    from spineps.get_models import get_actual_model
 
     try:
         from spineps.get_models import get_labeling_model
@@ -43,11 +44,19 @@ def run_spineps_single(
         file_path = BIDS_FILE(file_path, file_path.parent if dataset is None else dataset)
     elif dataset is not None:
         file_path.dataset = dataset
+    if isinstance(model_semantic, Path):
+        model_semantic = get_actual_model(model_semantic, use_cpu=use_cpu)
+    else:
+        model_semantic = get_semantic_model(model_semantic, use_cpu=use_cpu)
+    if isinstance(model_semantic, Path):
+        model_instance = get_actual_model(model_instance, use_cpu=use_cpu)
+    else:
+        model_instance = get_instance_model(model_instance, use_cpu=use_cpu)
     output_paths, errcode = process_img_nii(
         img_ref=file_path,
         derivative_name=derivative_name,
-        model_semantic=get_semantic_model(model_semantic, use_cpu=use_cpu),
-        model_instance=get_instance_model(model_instance, use_cpu=use_cpu),
+        model_semantic=model_semantic,
+        model_instance=model_instance,
         **label,
         override_semantic=override_semantic,
         override_instance=override_instance,
@@ -105,12 +114,11 @@ def _run_spineps_internal(
     from TPTBox import to_nii
 
     if not override and outpath is not None and outpath.exists():
-        return to_nii(outpath)
+        return to_nii(outpath, True)
 
     image_nii = to_nii(image_nii, False)
     model: Segmentation_Model = get_actual_model(model_path)
     model.load()
-    from torch import device
 
     # model.predictor.network.to(device("cuda:0"))
     # model.predictor.device = device("cuda:0")
