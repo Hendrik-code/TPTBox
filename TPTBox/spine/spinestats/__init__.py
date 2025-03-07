@@ -6,5 +6,5 @@ from .angles import (
     plot_cobb_angle,
     plot_compute_lordosis_and_kyphosis,
 )
-from .ivd_pois import calculate_IVD_POI, calculate_up_vector_np, compute_fake_ivd
+from .ivd_pois import calculate_IVD_POI, calculate_pca_normal_np, compute_fake_ivd
 from .make_endplate import endplate_extraction
