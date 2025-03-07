@@ -17,6 +17,7 @@ from TPTBox.core.internal.nii_help import _resample_from_to, secure_save
 from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.nii_wrapper_math import NII_Math
 from TPTBox.core.np_utils import (
+    _pad_to_parameters,
     np_calc_boundary_mask,
     np_calc_convex_hull,
     np_calc_overlapping_labels,
@@ -25,10 +26,13 @@ from TPTBox.core.np_utils import (
     np_connected_components,
     np_dilate_msk,
     np_erode_msk,
+    np_extract_label,
     np_fill_holes,
+    np_fill_holes_global_with_majority_voting,
     np_get_connected_components_center_of_mass,
     np_get_largest_k_connected_components,
     np_map_labels,
+    np_map_labels_based_on_majority_label_mask_overlap,
     np_point_coordinates,
     np_smooth_gaussian_labelwise,
     np_unique,
@@ -670,7 +674,7 @@ class NII(NII_Math):
         #origin_shift = tuple([int(ex_slice[i].start) for i in range(len(ex_slice))])
         return tuple(ex_slice)# type: ignore
 
-    def apply_center_crop(self, center_shape: tuple[int,int,int], verbose: bool = False):
+    def apply_center_crop(self, center_shape: tuple[int,int,int], inplace=False, verbose: bool = False):
         shp_x, shp_y, shp_z = self.shape
         crop_x, crop_y, crop_z = center_shape
         arr = self.get_array()
@@ -698,7 +702,8 @@ class NII(NII_Math):
         log.print(f"Center cropped from {arr_padded.shape} to {arr_cropped.shape}", verbose=verbose)
         shp_x, shp_y, shp_z = arr_cropped.shape
         assert crop_x == shp_x and crop_y == shp_y and crop_z == shp_z
-        return self.set_array(arr_cropped)
+        return self.set_array(arr_cropped, inplace=inplace)
+        #return self.apply_crop(crop_slices, inplace=inplace)
 
     def apply_crop_slice(self,*args,**qargs):
         import warnings
@@ -733,22 +738,7 @@ class NII(NII_Math):
     def pad_to(self,target_shape:list[int]|tuple[int,int,int] | Self, mode:MODES="constant",crop=False,inplace = False):
         if isinstance(target_shape, NII):
             target_shape = target_shape.shape
-        padding = []
-        crop = []
-        requires_crop = False
-        for in_size, out_size in zip(self.shape[-3:], target_shape[-3:],strict=True):
-            to_pad_size = max(0, out_size - in_size) / 2.0
-            to_crop_size = -min(0, out_size - in_size) / 2.0
-            padding.extend([(ceil(to_pad_size), floor(to_pad_size))])
-            if to_crop_size == 0:
-                crop.append(slice(None))
-            else:
-                end = -floor(to_crop_size)
-                if end == 0:
-                    end = None
-                crop.append(slice(ceil(to_crop_size), end))
-                requires_crop = True
-
+        padding, crop, requires_crop = _pad_to_parameters(self.shape, target_shape)
         s = self
         if crop and requires_crop:
             s = s.apply_crop(tuple(crop),inplace=inplace)
@@ -1115,26 +1105,13 @@ class NII(NII_Math):
 
         """
         log.print("erode mask",end='\r',verbose=verbose)
-        if use_crop:
-            try:
-                crop = (self if labels is None else self.extract_label(labels)).compute_crop(dist=1)
-            except ValueError:
-                return self if inplace else self.copy()
-
-            msk_i_data_org = self.get_seg_array()
-            msk_i_data = msk_i_data_org[crop]
-        else:
-            msk_i_data = self.get_seg_array()
+        msk_i_data = self.get_seg_array()
         labels = self.unique() if labels is None else labels
         if isinstance(ignore_direction,str):
             ignore_direction = self.get_axis(ignore_direction)
-        out = np_erode_msk(msk_i_data, label_ref=labels, mm=n_pixel, connectivity=connectivity,border_value=border_value,ignore_axis=ignore_direction)
+        out = np_erode_msk(msk_i_data, label_ref=labels, n_pixel=n_pixel, connectivity=connectivity,border_value=border_value,ignore_axis=ignore_direction, use_crop=use_crop)
         out = out.astype(self.dtype)
         log.print("Mask eroded by", n_pixel, "voxels",verbose=verbose)
-
-        if use_crop:
-            msk_i_data_org[crop] = out
-            out = msk_i_data_org
         return self.set_array(out,inplace=inplace)
 
     def erode_msk_(self, n_pixel:int = 5, labels: LABEL_REFERENCE = None, connectivity: int=3, verbose:logging=True,border_value=0,use_crop=True,ignore_direction:DIRECTIONS|int|None=None):
@@ -1162,24 +1139,13 @@ class NII(NII_Math):
         log.print("dilate mask",end='\r',verbose=verbose)
         if labels is None:
             labels = self.unique()
-        if use_crop:
-            try:
-                crop = (self if labels is None else self.extract_label(labels)).compute_crop(dist=1+n_pixel)
-            except ValueError:
-                return self if inplace else self.copy()
-            msk_i_data_org = self.get_seg_array()
-            msk_i_data = msk_i_data_org[crop]
-        else:
-            msk_i_data = self.get_seg_array()
+        msk_i_data = self.get_seg_array()
         mask_ = mask.get_seg_array() if mask is not None else None
         if isinstance(ignore_direction,str):
             ignore_direction = self.get_axis(ignore_direction)
-        out = np_dilate_msk(arr=msk_i_data, label_ref=labels, mm=n_pixel, mask=mask_, connectivity=connectivity,ignore_axis=ignore_direction)
+        out = np_dilate_msk(arr=msk_i_data, label_ref=labels, n_pixel=n_pixel, mask=mask_, connectivity=connectivity,ignore_axis=ignore_direction, use_crop=use_crop)
         out = out.astype(self.dtype)
         log.print("Mask dilated by", n_pixel, "voxels",verbose=verbose)
-        if use_crop:
-            msk_i_data_org[crop] = out
-            out = msk_i_data_org
         return self.set_array(out,inplace=inplace)
 
     def dilate_msk_(self, n_pixel:int = 5, labels: LABEL_REFERENCE = None, connectivity: int=3, mask: Self | None = None, verbose:logging=True,use_crop=True,ignore_direction:DIRECTIONS|int|None=None):
@@ -1218,7 +1184,7 @@ class NII(NII_Math):
         if isinstance(slice_wise_dim,str):
             slice_wise_dim = self.get_axis(slice_wise_dim)
         #seg_arr = self.get_seg_array()
-        filled = np_fill_holes(seg_arr, label_ref=labels, slice_wise_dim=slice_wise_dim)
+        filled = np_fill_holes(seg_arr, label_ref=labels, slice_wise_dim=slice_wise_dim, use_crop=use_crop)
         if use_crop:
             msk_i_data_org[crop] = filled
             filled = msk_i_data_org
@@ -1376,6 +1342,38 @@ class NII(NII_Math):
     def compute_surface_points(self, connectivity: int, dilated_surface: bool = False):
         surface = self.compute_surface_mask(connectivity, dilated_surface)
         return np_point_coordinates(surface.get_seg_array()) # type: ignore
+
+
+    def fill_holes_global_with_majority_voting(self, connectivity: int = 3, inplace: bool = False, verbose: bool = False):
+        """Fills 3D holes globally, and resolves inter-label conflicts with majority voting by neighbors
+
+        Args:
+            connectivity (int, optional): Connectivity of fill holes. Defaults to 3.
+            inplace (bool, optional): Defaults to False.
+            verbose (bool, optional): Defaults to False.
+
+        Returns:
+            NII:
+        """
+        assert self.seg, "only works with segmentation masks"
+        arr = np_fill_holes_global_with_majority_voting(self.get_seg_array(), connectivity=connectivity, verbose=verbose, inplace=inplace)
+        return self.set_array(arr,inplace=inplace)
+
+
+    def map_labels_based_on_majority_label_mask_overlap(self, label_mask: Self, labels: int | list[int] | None = None, dilate_pixel: int = 1, inplace: bool = False):
+        """Relabels all individual labels from input array to the majority labels of a given label_mask
+
+        Args:
+            label_mask (np.ndarray): the mask from which to pull the target labels.
+            labels (int | list[int] | None, optional): Which labels in the input to process. Defaults to None.
+            dilate_pixel (int, optional): If true, will dilate the input to calculate the overlap. Defaults to 1.
+            inplace (bool, optional): Defaults to False.
+
+        Returns:
+            NII: Relabeled nifti
+        """
+        assert self.seg and label_mask.seg, "This only works on segmentations"
+        return self.set_array(np_map_labels_based_on_majority_label_mask_overlap(self.get_seg_array(), label_mask.get_seg_array(), labels=labels, dilate_pixel=dilate_pixel, inplace=inplace), inplace=inplace,)
 
 
     def get_segmentation_difference_to(self, mask_gt: Self, ignore_background_tp: bool = False) -> Self:
@@ -1709,8 +1707,16 @@ class NII(NII_Math):
         b = b.resample_from_to(self,c_val=0,verbose=False) # type: ignore
         return b.get_array().sum()
 
+    def extract_background(self,inplace=False):
+        assert self.seg, "extracting the background only makes sense for a segmentation mask"
+        arr_bg = self.get_seg_array()
+        arr_bg = np_extract_label(arr_bg, label=0, to_label=1)
+        return self.set_array(arr_bg, inplace, False)
+
+
     def extract_label(self,label:int|Enum|Sequence[int]|Sequence[Enum], keep_label=False,inplace=False):
         '''If this NII is a segmentation you can single out one label with [0,1].'''
+        assert self.seg, "extracting a label only makes sense for a segmentation mask"
         seg_arr = self.get_seg_array()
 
         if isinstance(label, Sequence):
@@ -1726,7 +1732,7 @@ class NII(NII_Math):
             if isinstance(label,str):
                 label = int(label)
 
-            assert label != 0, 'Zero label does not make sens. This is the background'
+            assert label != 0, 'Zero label does not make sense. This is the background'
             seg_arr[seg_arr != label] = 0
             seg_arr[seg_arr == label] = 1
         if keep_label:

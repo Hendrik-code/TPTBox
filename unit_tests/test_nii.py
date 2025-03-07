@@ -204,6 +204,12 @@ class Test_bids_file(unittest.TestCase):
             msk2 = msk.erode_msk(verbose=False)
             self.assertNotEqual(msk.get_array().sum(), msk2.get_array().sum())
 
+    def test_dilate_msk(self):
+        for _ in range(repeats):
+            msk, cent, order, sizes = get_nii(num_point=random.randint(3, 10))
+            msk2 = msk.dilate_msk(verbose=False)
+            self.assertNotEqual(msk.get_array().sum(), msk2.get_array().sum())
+
     def test_get_segmentation_connected_components(self):
         for _ in range(repeats):
             msk, cent, order, sizes = get_nii(num_point=random.randint(3, 10))
