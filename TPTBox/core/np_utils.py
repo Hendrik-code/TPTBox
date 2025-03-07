@@ -53,7 +53,7 @@ def np_extract_label(
         arr = arr.copy()
 
     if use_crop:
-        crop = np_bbox_binary(arr, px_dist=1)
+        crop = np_bbox_binary(arr, px_dist=1, raise_error=False)
         arrc = arr[crop]
     else:
         arrc = arr
@@ -83,7 +83,7 @@ def np_extract_label(
 def cc3dstatistics(arr: UINTARRAY, use_crop: bool = True) -> dict:
     assert np.issubdtype(arr.dtype, np.unsignedinteger), f"cc3dstatistics expects uint type, got {arr.dtype}"
     if use_crop:
-        crop = np_bbox_binary(arr)
+        crop = np_bbox_binary(arr, raise_error=False)
         arrc = arr[crop]
         return _cc3dstats(arrc)
     return _cc3dstats(arr)
@@ -303,10 +303,7 @@ def np_dilate_msk(
         # try:
         arr_bin = arr.copy()
         arr_bin[np.isin(arr_bin, labels, invert=True)] = 0
-        try:
-            crop = np_bbox_binary(arr_bin, px_dist=1 + n_pixel)
-        except AssertionError:
-            crop = tuple([slice(None)] * arr.ndim)
+        crop = np_bbox_binary(arr_bin, px_dist=1 + n_pixel, raise_error=False)
         arrc = arr[crop]
     else:
         arrc = arr
@@ -379,10 +376,7 @@ def np_erode_msk(
         # try:
         arr_bin = arr.copy()
         arr_bin[np.isin(arr_bin, labels, invert=True)] = 0
-        try:
-            crop = np_bbox_binary(arr_bin, px_dist=1 + n_pixel)
-        except AssertionError:
-            crop = tuple([slice(None)] * arr.ndim)
+        crop = np_bbox_binary(arr_bin, px_dist=1 + n_pixel, raise_error=False)
         arrc = arr[crop]
     else:
         arrc = arr
@@ -491,7 +485,7 @@ def np_calc_crop_around_centerpoint(
     )
 
 
-def np_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 0) -> tuple[slice, ...]:
+def np_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 0, raise_error=True) -> tuple[slice, ...]:
     """calculates a bounding box in n dimensions given a image (factor ~2 times faster than compute_crop)
 
     Args:
@@ -502,7 +496,11 @@ def np_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 
         list of boundary coordinates as slices tuple
     """
     assert img is not None, "bbox_nd: received None as image"
-    assert np_count_nonzero(img) > 0, "bbox_nd: img is empty, cannot calculate a bbox"
+    if np_count_nonzero(img) == 0:
+        if raise_error:
+            assert AssertionError("bbox_nd: img is empty, cannot calculate a bbox")
+        return tuple([slice(None)] * img.ndim)
+
     n = img.ndim
     shp = img.shape
     if isinstance(px_dist, int):
@@ -862,7 +860,7 @@ def np_fill_holes(
     labels: Sequence[int] = _to_labels(arr, label_ref)
 
     if use_crop:
-        gcrop = np_bbox_binary(arr, px_dist=1)
+        gcrop = np_bbox_binary(arr, px_dist=1, raise_error=False)
         arrc = arr[gcrop]
     else:
         arrc = arr
@@ -874,7 +872,7 @@ def np_fill_holes(
         arr_l = arrc.copy()
         arr_l = np_extract_label(arr_l, l)
         if use_crop:
-            crop = np_bbox_binary(arr_l, px_dist=1)
+            crop = np_bbox_binary(arr_l, px_dist=1, raise_error=False)
             arr_lc = arr_l[crop]
         else:
             arr_lc = arr_l
