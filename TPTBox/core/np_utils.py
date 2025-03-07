@@ -276,6 +276,7 @@ def np_dilate_msk(
     connectivity: int = 3,
     use_crop: bool = True,
     mask: np.ndarray | None = None,
+    ignore_axis: None | int = None,
 ) -> np.ndarray:
     """
     Dilates the given array by the specified number of voxels (not including the zero).
@@ -284,7 +285,7 @@ def np_dilate_msk(
         mm (int, optional): The number of voxels to dilate the mask by. Defaults to 5.
         connectivity (int, optional): Elements up to a squared distance of connectivity from the center are considered neighbors. connectivity may range from 1 (no diagonal elements are neighbors) to rank (all elements are neighbors).
         mask (nparray, optional): If set, after each iteration, will zero out everything based on this mask
-
+        ignore_axis: This axis will be ignored. e. g. do 2d dilation in a 3d array
     Returns:
         nparray: The dilated mask.
 
@@ -311,8 +312,11 @@ def np_dilate_msk(
         mask[mask != 0] = 1
         if use_crop:
             mask = mask[crop]
-
-    struct = generate_binary_structure(arr.ndim, connectivity)
+    if ignore_axis is None:
+        struct = generate_binary_structure(arr.ndim, connectivity)
+    else:
+        struct = generate_binary_structure(arr.ndim - 1, connectivity)
+        struct = np.expand_dims(struct, ignore_axis)
 
     labels: list[int] = [l for l in labels if l != 0]  # and l in present_labels]
 
@@ -351,6 +355,7 @@ def np_erode_msk(
     use_crop: bool = True,
     connectivity: int = 3,
     border_value=0,
+    ignore_axis: None | int = None,
 ) -> np.ndarray:
     """
     Erodes the given array by the specified number of voxels.
@@ -358,7 +363,7 @@ def np_erode_msk(
     Args:
         mm (int, optional): The number of voxels to erode the mask by. Defaults to 5.
         connectivity (int, optional): Elements up to a squared distance of connectivity from the center are considered neighbors. connectivity may range from 1 (no diagonal elements are neighbors) to rank (all elements are neighbors).
-
+        ignore_axis: This axis will be ignored. e. g. do 2d erosion in a 3d array
     Returns:
         nparray: The eroded mask.
 
@@ -379,7 +384,11 @@ def np_erode_msk(
     else:
         arrc = arr
 
-    struct = generate_binary_structure(arr.ndim, connectivity)
+    if ignore_axis is None:
+        struct = generate_binary_structure(arr.ndim, connectivity)
+    else:
+        struct = generate_binary_structure(arr.ndim - 1, connectivity)
+        struct = np.expand_dims(struct, ignore_axis)
     msk_i_data = arrc.copy()
     out = arrc
     for i in labels:
