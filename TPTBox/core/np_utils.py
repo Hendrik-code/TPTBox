@@ -621,6 +621,7 @@ def np_get_largest_k_connected_components(
     return_original_labels: bool = True,
     min_volume: float = 0,
     max_volume: float | None = None,
+    removed_to_label=0,
 ) -> UINTARRAY:
     """finds the largest k connected components in a given array (does NOT work with zero as label!)
 
@@ -667,7 +668,8 @@ def np_get_largest_k_connected_components(
         if k == i:
             break
         i += 1
-
+    if removed_to_label != 0:
+        arr[np.logical_and(labels_out != 0, arr == 0)] = removed_to_label
     if return_original_labels:
         arr *= cc_out > 0  # to get original labels
         return arr
@@ -759,7 +761,7 @@ def np_translate_arr(arr: np.ndarray, translation_vector: tuple[int, int] | tupl
     return arr_translated
 
 
-def np_fill_holes(arr: np.ndarray, label_ref: LABEL_REFERENCE = None, slice_wise_dim: int | None = None) -> np.ndarray:
+def np_fill_holes(arr: np.ndarray, label_ref: LABEL_REFERENCE = None, slice_wise_dim: int | None = None, pbar=False) -> np.ndarray:
     """Fills holes in segmentations
 
     Args:
@@ -773,6 +775,11 @@ def np_fill_holes(arr: np.ndarray, label_ref: LABEL_REFERENCE = None, slice_wise
     assert 2 <= arr.ndim <= 3
     assert arr.ndim == 3 or slice_wise_dim is None, "slice_wise_dim set but array is 3D"
     labels: Sequence[int] = _to_labels(arr, label_ref)
+
+    if pbar:
+        from tqdm import tqdm
+
+        labels = tqdm(labels, desc="fill_holes")  # type: ignore
     for l in labels:  # type:ignore
         arr_l = arr.copy()
         arr_l = np_extract_label(arr_l, l)
