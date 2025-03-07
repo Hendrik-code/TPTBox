@@ -1,6 +1,7 @@
 import numpy as np
 from numpy.linalg import norm
 from scipy.interpolate import RegularGridInterpolator
+from sklearn.decomposition import PCA
 
 from TPTBox import NII, POI, Print_Logger, Vertebra_Instance
 from TPTBox.core.poi_fun._help import sacrum_w_o_arcus, to_local_np
@@ -231,3 +232,48 @@ def max_distance_ray_cast_convex_poi(
             log.on_fail("TypeError", e)
             return None
     return max_distance_ray_cast_convex(region, start_point_np, normal_vector, acc_delta)
+
+
+def calculate_pca_normal_np(segmentation: np.ndarray, pca_component, zoom=None, verbose=False):
+    """
+    Computes the normal vector of a segmented region using Principal Component Analysis (PCA).
+
+    Parameters:
+    ----------
+    segmentation : np.ndarray
+        A binary mask where nonzero values indicate the segmented region.
+    pca_component : int, optional
+        The principal component index to return as the normal vector.
+        - `0`: The primary axis (direction of greatest variance, often the main elongation).
+        - `1`: The secondary axis (orthogonal to the primary, capturing the second-most variance).
+        - `2`: The third axis (typically the normal direction to the structure in 3D).
+    zoom : tuple or array-like, optional
+        If provided, scales the normal vector by the inverse of the voxel size to account for anisotropic resolution.
+    verbose : bool, optional
+        If True, prints the principal component vectors for debugging.
+
+    Returns:
+    -------
+    normal_vector : np.ndarray
+        The selected principal component as a normal vector.
+
+    Usage:
+    ------
+    Use `pca_component=2` when you want the normal to a surface-like structure.
+    If analyzing an elongated structure (e.g., a vessel or bone), `pca_component=0` gives the primary axis,
+    while `pca_component=1` provides the secondary direction.
+    """
+    # Get indices of segmented region (assuming segmentation is a binary mask)
+    points = np.argwhere(segmentation > 0)
+    # Perform PCA to find the principal axes
+    pca = PCA(n_components=3)
+    pca.fit(points)
+    # First, second, and third principal components
+    if verbose:
+        print(f"Main Axis (PC1): {pca.components_[0]}")
+        print(f"Secondary Axis (PC2): {pca.components_[1]}")
+        print(f"Third Axis (PC3): {pca.components_[2]}")
+    normal_vector = pca.components_[pca_component]
+    if zoom is not None:
+        normal_vector = normal_vector / np.array(zoom)
+    return normal_vector
