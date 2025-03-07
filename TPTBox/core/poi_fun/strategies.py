@@ -72,8 +72,6 @@ def strategy_line_cast(
 
 
 #### find corner ####
-
-
 def strategy_find_corner(
     poi: POI,
     current_subreg: NII,
@@ -158,9 +156,7 @@ def _find_corner_point(
     return start_point_np + (factor1 + f1) * v1 + (factor2 + f2) * v2
 
 
-####
-
-
+### ligament_attachment_point_flava ###
 def strategy_ligament_attachment_point_flava(
     poi: POI,
     current_subreg: NII,
@@ -231,6 +227,7 @@ def strategy_ligament_attachment_point_flava(
     poi[vert_id, location] = tuple(x + y.start for x, y in zip(coords, bb, strict=False))
 
 
+#### shifted_line_cast ####
 def strategy_shifted_line_cast(
     poi: POI,
     current_subreg: NII,
