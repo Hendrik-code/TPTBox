@@ -18,7 +18,6 @@ from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.nii_wrapper_math import NII_Math
 from TPTBox.core.np_utils import (
     _pad_to_parameters,
-    np_binary_fill_holes_and_set_inter_labels_based_on_majority,
     np_calc_boundary_mask,
     np_calc_convex_hull,
     np_calc_overlapping_labels,
@@ -29,10 +28,11 @@ from TPTBox.core.np_utils import (
     np_erode_msk,
     np_extract_label,
     np_fill_holes,
+    np_fill_holes_global_with_majority_voting,
     np_get_connected_components_center_of_mass,
     np_get_largest_k_connected_components,
     np_map_labels,
-    np_map_labels_based_on_label_mask_overlap,
+    np_map_labels_based_on_majority_label_mask_overlap,
     np_point_coordinates,
     np_smooth_gaussian_labelwise,
     np_unique,
@@ -1344,15 +1344,36 @@ class NII(NII_Math):
         return np_point_coordinates(surface.get_seg_array()) # type: ignore
 
 
-    def binary_fill_holes_and_set_inter_labels_based_on_majority(self, connectivity: int = 3, inplace: bool = False, verbose: bool = False):
+    def fill_holes_global_with_majority_voting(self, connectivity: int = 3, inplace: bool = False, verbose: bool = False):
+        """Fills 3D holes globally, and resolves inter-label conflicts with majority voting by neighbors
+
+        Args:
+            connectivity (int, optional): Connectivity of fill holes. Defaults to 3.
+            inplace (bool, optional): Defaults to False.
+            verbose (bool, optional): Defaults to False.
+
+        Returns:
+            NII:
+        """
         assert self.seg, "only works with segmentation masks"
-        arr = np_binary_fill_holes_and_set_inter_labels_based_on_majority(self.get_seg_array(), connectivity=connectivity, verbose=verbose, inplace=inplace)
+        arr = np_fill_holes_global_with_majority_voting(self.get_seg_array(), connectivity=connectivity, verbose=verbose, inplace=inplace)
         return self.set_array(arr,inplace=inplace)
 
 
-    def map_labels_based_on_label_mask_overlap(self, label_mask: Self, labels: int | list[int] | None = None, dilate_pixel: int = 1, inplace: bool = False):
+    def map_labels_based_on_majority_label_mask_overlap(self, label_mask: Self, labels: int | list[int] | None = None, dilate_pixel: int = 1, inplace: bool = False):
+        """Relabels all individual labels from input array to the majority labels of a given label_mask
+
+        Args:
+            label_mask (np.ndarray): the mask from which to pull the target labels.
+            labels (int | list[int] | None, optional): Which labels in the input to process. Defaults to None.
+            dilate_pixel (int, optional): If true, will dilate the input to calculate the overlap. Defaults to 1.
+            inplace (bool, optional): Defaults to False.
+
+        Returns:
+            NII: Relabeled nifti
+        """
         assert self.seg and label_mask.seg, "This only works on segmentations"
-        return self.set_array(np_map_labels_based_on_label_mask_overlap(self.get_seg_array(), label_mask.get_seg_array(), labels=labels, dilate_pixel=dilate_pixel, inplace=inplace), inplace=inplace,)
+        return self.set_array(np_map_labels_based_on_majority_label_mask_overlap(self.get_seg_array(), label_mask.get_seg_array(), labels=labels, dilate_pixel=dilate_pixel, inplace=inplace), inplace=inplace,)
 
 
     def get_segmentation_difference_to(self, mask_gt: Self, ignore_background_tp: bool = False) -> Self:

@@ -1191,11 +1191,21 @@ def np_normalize_to_range(arr: np.ndarray, min_value: float = 0, max_value: floa
     return arr
 
 
-def np_binary_fill_holes_and_set_inter_labels_based_on_majority(
+def np_fill_holes_global_with_majority_voting(
     arr: UINTARRAY,
     connectivity: int = 3,
     inplace: bool = False,
 ):
+    """Fill holes globaly (across labels) and resolves inter-label conflicts with majority voting of neighbors
+
+    Args:
+        arr (UINTARRAY): input array
+        connectivity (int, optional): connectivity of connected components of the holes. Defaults to 3.
+        inplace (bool, optional): Defaults to False.
+
+    Returns:
+        arr: Array with all global holes filled
+    """
     arr_c = arr if inplace else arr.copy()
     # Fill simple holes
     arr_c = np_fill_holes(arr_c)
@@ -1211,7 +1221,7 @@ def np_binary_fill_holes_and_set_inter_labels_based_on_majority(
         cc_msk = cc_msk[1]
         # delete voxels that are already labeled
         cc_msk[seg_nii_bin != 0] = 0
-        seg_nii_new = np_map_labels_based_on_label_mask_overlap(
+        seg_nii_new = np_map_labels_based_on_majority_label_mask_overlap(
             cc_msk,
             label_mask=arr_c,
             dilate_pixel=1,
@@ -1222,13 +1232,25 @@ def np_binary_fill_holes_and_set_inter_labels_based_on_majority(
     return arr_c
 
 
-def np_map_labels_based_on_label_mask_overlap(
+def np_map_labels_based_on_majority_label_mask_overlap(
     arr: UINTARRAY,
     label_mask: np.ndarray,
     labels: int | list[int] | None = None,
     dilate_pixel: int = 1,
     inplace: bool = False,
 ):
+    """Relabels all individual labels from input array to the majority labels of a given label_mask
+
+    Args:
+        arr (UINTARRAY): input array to be relabeled
+        label_mask (np.ndarray): the mask from which to pull the target labels.
+        labels (int | list[int] | None, optional): Which labels in the input to process. Defaults to None.
+        dilate_pixel (int, optional): If true, will dilate the input to calculate the overlap. Defaults to 1.
+        inplace (bool, optional): Defaults to False.
+
+    Returns:
+        arr: input array with all labels in labels relabeled
+    """
     arr_c = arr if inplace else arr.copy()
 
     if isinstance(labels, int):
@@ -1259,7 +1281,7 @@ def np_map_labels_based_on_label_mask_overlap(
 
 
 def _pad_to_parameters(origin_shape: list[int] | tuple[int, int, int], target_shape: list[int] | tuple[int, int, int]):
-    """Yields parameter to pad the input to the target shape
+    """Returns the parameter to pad the input to the target shape
 
     Args:
         arr (np.ndarray): input array

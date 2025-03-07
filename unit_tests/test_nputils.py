@@ -331,7 +331,7 @@ class Test_bids_file(unittest.TestCase):
         print(data)
 
         # Dilate the segmentation mask
-        filled = np_utils.np_binary_fill_holes_and_set_inter_labels_based_on_majority(
+        filled = np_utils.np_fill_holes_global_with_majority_voting(
             data,
             connectivity=1,
         )
