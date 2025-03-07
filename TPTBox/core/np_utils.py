@@ -82,10 +82,13 @@ def np_extract_label(
 
 def cc3dstatistics(arr: UINTARRAY, use_crop: bool = True) -> dict:
     assert np.issubdtype(arr.dtype, np.unsignedinteger), f"cc3dstatistics expects uint type, got {arr.dtype}"
-    if use_crop:
-        crop = np_bbox_binary(arr, raise_error=False)
-        arrc = arr[crop]
-        return _cc3dstats(arrc)
+    try:
+        if use_crop:
+            crop = np_bbox_binary(arr, raise_error=False, px_dist=2)
+            arrc = arr[crop]
+            return _cc3dstats(arrc)
+    except ValueError as e:
+        print(e)
     return _cc3dstats(arr)
 
 
