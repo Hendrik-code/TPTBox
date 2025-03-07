@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import numpy as np  # noqa: INP001
 
 from TPTBox import v_idx2name

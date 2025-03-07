@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Literal
 
 import numpy as np
@@ -129,7 +131,7 @@ def add_ray_to_img(
 
 def add_spline_to_img(
     seg: NII,
-    poi: "POI",
+    poi: POI,
     location=50,
     add_to_img=True,
     override_seg=True,

@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np
 from tqdm import tqdm
 
 from TPTBox import Print_Logger, Vertebra_Instance, calc_poi_from_subreg_vert
+from TPTBox.core.compat import zip_strict
 from TPTBox.core.nii_wrapper import NII
 from TPTBox.core.poi import POI
 from TPTBox.core.poi_fun._help import paint_into_NII, to_local_np
@@ -37,8 +40,8 @@ def strategy_calculate_up_vector(poi: POI, current_vert: NII, vert_id: int, bb, 
 
     assert extreme_point is not None
     assert extreme_point_sup is not None
-    poi[vert_id, Location.Vertebra_Disc_Inferior] = tuple(a.start + b for a, b in zip(bb, extreme_point, strict=True))
-    poi[vert_id, Location.Vertebra_Disc_Superior] = tuple(a.start + b for a, b in zip(bb, extreme_point_sup, strict=True))
+    poi[vert_id, Location.Vertebra_Disc_Inferior] = tuple(a.start + b for a, b in zip_strict(bb, extreme_point))
+    poi[vert_id, Location.Vertebra_Disc_Superior] = tuple(a.start + b for a, b in zip_strict(bb, extreme_point_sup))
 
     return poi
 

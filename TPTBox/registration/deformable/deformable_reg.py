@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # pip install hf-deepali
 import json
 import pickle
@@ -16,6 +18,7 @@ from deepali.spatial import SpatialTransform
 from torch import device
 
 from TPTBox import NII, POI, Image_Reference, to_nii
+from TPTBox.core.compat import zip_strict
 from TPTBox.core.nii_poi_abstract import Grid as TPTBox_Grid
 from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.registration.deformable._deepali import deform_reg_pair
@@ -62,7 +65,7 @@ def _warp_poi(poi_moving: POI, target_grid: TPTBox_Grid, transform: SpatialTrans
         print(data2 - data)
 
     out_poi = target_grid.make_empty_POI()
-    for (key, key2), (x, y, z) in zip(keys, data.cpu(), strict=True):
+    for (key, key2), (x, y, z) in zip_strict(keys, data.cpu()):
         print(key, key2, x, y, z)
         out_poi[key, key2] = (x.item(), y.item(), z.item())
     return out_poi
@@ -122,9 +125,9 @@ class Deformable_Registration:
         elif spacing_type == 2:
             finest_spacing = mov.spacing
         elif spacing_type == 3:
-            finest_spacing = [max(a, b) for a, b in zip(mov.spacing, fix.spacing, strict=True)]
+            finest_spacing = [max(a, b) for a, b in zip_strict(mov.spacing, fix.spacing)]
         elif spacing_type == 4:
-            finest_spacing = [min(a, b) for a, b in zip(mov.spacing, fix.spacing, strict=True)]
+            finest_spacing = [min(a, b) for a, b in zip_strict(mov.spacing, fix.spacing)]
         else:
             finest_spacing = None
 

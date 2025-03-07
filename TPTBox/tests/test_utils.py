@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import sys
 from pathlib import Path
@@ -67,7 +69,7 @@ def overlap(
     c2: tuple[float, float, float],
     w2: tuple[float, float, float],
 ):
-    return all(sqr1d(a, b, c, d) for a, b, c, d in zip(c1, w1, c2, w2, strict=False))
+    return all(sqr1d(a, b, c, d) for a, b, c, d in zip(c1, w1, c2, w2))
 
 
 def extract_affine(nii: NII):
@@ -131,12 +133,12 @@ def get_nii(x: tuple[int, int, int] | None = None, num_point=3, min_size: int = 
             break
         point = tuple(random.randint(1, a - 1) for a in x)
         size = tuple(random.randint(min_size, min_size + a) for a in [5, 5, 5])
-        if any(a - b < 0 for a, b in zip(point, size, strict=False)):
+        if any(a - b < 0 for a, b in zip(point, size)):
             continue
-        if any(a + b > c - 1 for a, b, c in zip(point, size, x, strict=False)):
+        if any(a + b > c - 1 for a, b, c in zip(point, size, x)):
             continue
         skip = False
-        for p2, s2 in zip(points, sizes, strict=False):
+        for p2, s2 in zip(points, sizes):
             if overlap(point, size, p2, s2):
                 skip = True
                 break

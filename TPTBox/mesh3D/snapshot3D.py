@@ -1,5 +1,5 @@
 # Source: https://github.com/wasserth/TotalSegmentator/blob/master/totalsegmentator/preview.py
-
+from __future__ import annotations
 
 from collections.abc import Sequence
 from multiprocessing import Pool
@@ -15,6 +15,7 @@ from vtk.util import numpy_support  # type: ignore
 from xvfbwrapper import Xvfb
 
 from TPTBox import NII, Image_Reference, to_nii_seg
+from TPTBox.core.compat import zip_strict
 from TPTBox.logger import Reflection_Logger
 from TPTBox.mesh3D.mesh_colors import get_color_by_label
 
@@ -130,7 +131,7 @@ def make_sub_snapshot_parallel(
 ):
     ress = []
     with Pool(cpus) as p:  # type: ignore
-        for out_path, img in zip(output_paths, imgs, strict=True):
+        for out_path, img in zip_strict(output_paths, imgs):
             res = p.apply_async(
                 make_snapshot3D,
                 kwds={

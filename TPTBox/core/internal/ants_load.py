@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 import ants
@@ -7,7 +9,7 @@ if TYPE_CHECKING:
     from nibabel.nifti1 import Nifti1Image
 
 
-def nifti_to_ants(nib_image: "Nifti1Image"):
+def nifti_to_ants(nib_image: Nifti1Image):
     """
     Convert a Nifti image to an ANTsPy image.
 
@@ -89,7 +91,7 @@ def get_ras_affine_from_ants(ants_img) -> np.ndarray:
     return affine
 
 
-def ants_to_nifti(img, header=None) -> "Nifti1Image":
+def ants_to_nifti(img, header=None) -> Nifti1Image:
     """
     Convert an ANTs image to a Nifti image.
 
@@ -125,7 +127,7 @@ if __name__ == "__main__":
 
     fn = ants.get_ants_data("mni")
     ants_img = ants.image_read(fn)
-    nii_mni: "Nifti1Image" = nib.load(fn)
+    nii_mni: Nifti1Image = nib.load(fn)
     ants_mni = to_nibabel(ants_img)
     assert (ants_mni.get_qform() == nii_mni.get_qform()).all()
     assert (ants_mni.affine == nii_mni.affine).all()

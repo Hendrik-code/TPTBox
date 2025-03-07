@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +21,7 @@ from TPTBox import (
     calc_poi_from_subreg_vert,
     to_nii,
 )
+from TPTBox.core.compat import zip_strict
 from TPTBox.core.sitk_utils import nii_to_sitk, sitk_to_nii
 
 NII_or_POI = TypeVar("NII_or_POI")
@@ -54,7 +57,7 @@ class Point_Registration:
             poi_moving.assert_affine(self.input_poi, text=text)
         move_l = []
         keys = []
-        out = dict(zip(keys, move_l, strict=True))
+        out = dict(zip_strict(keys, move_l))
 
         for key, key2, (x, y, z) in poi_moving.items():
             out[key, key2] = self.transform_cord((x, y, z))
@@ -312,13 +315,13 @@ def _compute_versor(
     )
     k_old = -1000
     delta_after = {}
-    for (k1, k2), x, y in zip(inter, np.round(fix_l, decimals=1), np.round(move_l, decimals=1), strict=True):
+    for (k1, k2), x, y in zip_strict(inter, np.round(fix_l, decimals=1), np.round(move_l, decimals=1)):
         y2 = init_transform.GetInverse().TransformPoint(y)
         y = [round(m, ndigits=1) for m in y]  # noqa: PLW2901
-        dif = [round(i - j, ndigits=1) for i, j in zip(x, y2, strict=True)]
+        dif = [round(i - j, ndigits=1) for i, j in zip_strict(x, y2)]
         delta_after[(k1, k2)] = np.sum(np.array(dif) ** 2).item()
-        dist = round(math.sqrt(sum([(i - j) ** 2 for i, j in zip(x, x_old, strict=True)])), ndigits=1)
-        dist2 = round(math.sqrt(sum([(i - j) ** 2 for i, j in zip(y, y_old, strict=True)])), ndigits=1)
+        dist = round(math.sqrt(sum([(i - j) ** 2 for i, j in zip_strict(x, x_old)])), ndigits=1)
+        dist2 = round(math.sqrt(sum([(i - j) ** 2 for i, j in zip_strict(y, y_old)])), ndigits=1)
         error_reg += math.sqrt(sum([i * i for i in dif]))
         err_count += 1
         if k1 - k_old < 50:
