@@ -66,7 +66,8 @@ class Has_Grid(Grid_Proxy):
         self.zoom = value
 
     def __str__(self) -> str:
-        return f"shape={self.shape},spacing={tuple(np.around(self.zoom, decimals=2))}, origin={tuple(np.around(self.origin, decimals=2))}, ori={self.orientation}"  # type: ignore
+        #origin={tuple(np.around(self.origin, decimals=2))}
+        return f"shape={self.shape},spacing={tuple(np.around(self.zoom, decimals=2))}, origin={self.origin}, ori={self.orientation}"  # type: ignore
 
     @property
     def affine(self):
