@@ -1,6 +1,8 @@
 # Adapted from https://github.com/MIC-DKFZ/nnUNet
 # Isensee, F., Jaeger, P. F., Kohl, S. A., Petersen, J., & Maier-Hein, K. H. (2021). nnU-Net: a self-configuring
 # method for deep learning-based biomedical image segmentation. Nature methods, 18(2), 203-211.
+from __future__ import annotations
+
 import os
 import traceback
 from pathlib import Path
@@ -13,6 +15,7 @@ from nnunetv2.utilities.label_handling.label_handling import determine_num_input
 from torch._dynamo import OptimizedModule
 from tqdm import tqdm
 
+from TPTBox.core.compat import zip_strict
 from TPTBox.segmentation.nnUnet_utils.data_iterators import PreprocessAdapterFromNpy
 from TPTBox.segmentation.nnUnet_utils.export_prediction import (
     convert_predicted_logits_to_segmentation_with_correct_shape,
@@ -390,7 +393,7 @@ class nnUNetPredictor:
             for d in range(image_size[0]):
                 for sx in steps[0]:
                     for sy in steps[1]:
-                        x__ = [slice(si, si + ti) for si, ti in zip((sx, sy), self.configuration_manager.patch_size, strict=True)]
+                        x__ = [slice(si, si + ti) for si, ti in zip_strict((sx, sy), self.configuration_manager.patch_size)]
                         slicers.append((slice(None), d, *x__))
         else:
             steps = compute_steps_for_sliding_window(image_size, self.configuration_manager.patch_size, self.tile_step_size)  # type: ignore
@@ -402,7 +405,7 @@ class nnUNetPredictor:
             for sx in steps[0]:
                 for sy in steps[1]:
                     for sz in steps[2]:
-                        x__ = [slice(si, si + ti) for si, ti in zip((sx, sy, sz), self.configuration_manager.patch_size, strict=True)]
+                        x__ = [slice(si, si + ti) for si, ti in zip_strict((sx, sy, sz), self.configuration_manager.patch_size)]
                         slicers.append((slice(None), *x__))
         return slicers
 

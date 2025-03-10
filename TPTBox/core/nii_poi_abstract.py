@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import sys
 import warnings
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import nibabel as nib
@@ -49,7 +52,9 @@ else:
 class Has_Grid(Grid_Proxy):
     """Parent class for methods that are shared by POI and NII"""
 
-    def to_gird(self) -> "Grid":
+    info: dict
+
+    def to_gird(self) -> Grid:
         return Grid(**self._extract_affine())
 
     @property
@@ -79,7 +84,18 @@ class Has_Grid(Grid_Proxy):
         aff[:3, 3] = self.origin
         return np.round(aff, ROUNDING_LVL)
 
-    def _extract_affine(self: "Has_Grid", rm_key=()):
+    @affine.setter
+    def affine(self, affine: np.ndarray):
+        rotation_zoom = affine[:3, :3]
+        zoom = np.sqrt(np.sum(rotation_zoom * rotation_zoom, axis=0))
+        rotation_zoom = affine[:3, :3]
+        rotation = rotation_zoom / zoom
+        origin = affine[:3, 3]
+        self.zoom = zoom
+        self.rotation = rotation
+        self.origin = origin.tolist()
+
+    def _extract_affine(self: Has_Grid, rm_key=()):
         out = {"zoom": self.spacing, "origin": self.origin, "shape": self.shape, "rotation": self.rotation, "orientation": self.orientation}
         for k in rm_key:
             out.pop(k)
@@ -87,7 +103,7 @@ class Has_Grid(Grid_Proxy):
 
     def assert_affine(
         self,
-        other: Self | "NII" | "POI" | None = None,
+        other: Self | NII | POI | None = None,
         ignore_missing_values: bool = False,
         affine: AFFINE | None = None,
         zoom: ZOOMS | None = None,

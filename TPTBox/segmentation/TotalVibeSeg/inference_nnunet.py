@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import sys
 from collections.abc import Sequence
@@ -18,7 +20,9 @@ model_path = out_base / "nnUNet_results"
 
 def get_ds_info(idx) -> dict:
     try:
-        nnunet_path = next(next(iter(model_path.glob(f"*{idx}*"))).glob("*__nnUNetPlans*"))
+        nnunet_path = next(
+            next(iter(model_path.glob(f"*{idx}*"))).glob("*__nnUNetPlans*")
+        )
     except StopIteration:
         Print_Logger().print(f"Please add Dataset {idx} to {model_path}", Log_Type.FAIL)
         model_path.mkdir(exist_ok=True, parents=True)
@@ -49,12 +53,16 @@ def run_inference_on_file(
     crop=False,
     max_folds=None,
     mode="nearest",
+    padd: int = 0,
     ddevice: Literal["cpu", "cuda", "mps"] = "cuda",
 ) -> tuple[Image_Reference, np.ndarray | None]:
     if out_file is not None and Path(out_file).exists() and not override:
         return out_file, None
 
-    from TPTBox.segmentation.nnUnet_utils.inference_api import load_inf_model, run_inference
+    from TPTBox.segmentation.nnUnet_utils.inference_api import (
+        load_inf_model,
+        run_inference,
+    )
 
     download_weights(idx)
 
@@ -66,9 +74,15 @@ def run_inference_on_file(
     # if idx in _unets:
     #    nnunet = _unets[idx]
     # else:
+
     nnunet = load_inf_model(
-        nnunet_path, allow_non_final=True, use_folds=tuple(folds) if len(folds) != 5 else None, gpu=gpu, ddevice=ddevice
+        nnunet_path,
+        allow_non_final=True,
+        use_folds=tuple(folds) if len(folds) != 5 else None,
+        gpu=gpu,
+        ddevice=ddevice,
     )
+
     #    _unets[idx] = nnunet
     with open(Path(nnunet_path, "plans.json")) as f:
         plans_info = json.load(f)
@@ -83,7 +97,12 @@ def run_inference_on_file(
         zoom = plans_info["configurations"]["3d_fullres"]["spacing"][::-1]
     except Exception:
         pass
-    assert len(ds_info["channel_names"]) == len(input_nii), (ds_info["channel_names"], len(input_nii), "\n", nnunet_path)
+    assert len(ds_info["channel_names"]) == len(input_nii), (
+        ds_info["channel_names"],
+        len(input_nii),
+        "\n",
+        nnunet_path,
+    )
     if orientation is not None:
         input_nii = [i.reorient(orientation) for i in input_nii]
 
@@ -93,7 +112,16 @@ def run_inference_on_file(
     if crop:
         crop = input_nii[0].compute_crop(minimum=20)
         input_nii = [i.apply_crop(crop) for i in input_nii]
-    seg_nii, uncertainty_nii, softmax_logits = run_inference(input_nii, nnunet, logits=logits)
+    if padd != 0:
+        p = (padd, padd)
+        input_nii = [i.apply_pad([p, p, p], mode="reflect") for i in input_nii]
+
+    seg_nii, uncertainty_nii, softmax_logits = run_inference(
+        input_nii, nnunet, logits=logits
+    )
+    if padd != 0:
+        seg_nii = seg_nii[padd:-padd, padd:-padd, padd:-padd]
+
     if mapping is not None:
         seg_nii.map_labels_(mapping)
     if not keep_size:
@@ -135,7 +163,10 @@ def run_total_seg(
             except StopIteration:
                 pass
         else:
-            logger.print(f"Could not find model. Download the model an put it into {model_path.absolute()}", Log_Type.FAIL)
+            logger.print(
+                f"Could not find model. Download the model an put it into {model_path.absolute()}",
+                Log_Type.FAIL,
+            )
             return
     else:
         download_weights(dataset_id)
@@ -154,7 +185,10 @@ def run_total_seg(
         raise NotImplementedError("roi")
     else:
         in_niis = [to_nii(i) for i in img]
-    in_niis = [i.resample_from_to_(in_niis[0]) if i.shape != in_niis[0].shape else i for i in in_niis]
+    in_niis = [
+        i.resample_from_to_(in_niis[0]) if i.shape != in_niis[0].shape else i
+        for i in in_niis
+    ]
     if (in_niis[0].affine == np.eye(4)).all():
         warn(
             "Your affine matrix is the identity. Make sure that the spacing and orientation is correct. For NAKO VIBE it should be 1.40625 mm for R/L and A/P and 3 mm S/I. For UKBB R/L and A/P should be around 2.2 mm",

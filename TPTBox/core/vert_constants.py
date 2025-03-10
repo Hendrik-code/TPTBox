@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 import typing
 from collections.abc import Sequence
 from enum import Enum
-from typing import TYPE_CHECKING, Literal, NoReturn
+from typing import TYPE_CHECKING, Literal, NoReturn, Union
 
 import numpy as np
 
@@ -10,31 +12,33 @@ from TPTBox.logger import log_file
 ROUNDING_LVL = 7
 #####################
 log = log_file.Reflection_Logger()
-logging = bool | log_file.Logger_Interface
+logging = Union[bool, log_file.Logger_Interface]
 # R: Right, L: Left; S: Superior (up), I: Inferior (down); A: Anterior (front), P: Posterior (back)
 DIRECTIONS = Literal["R", "L", "S", "I", "A", "P"]
 AX_CODES = tuple[DIRECTIONS, DIRECTIONS, DIRECTIONS]
 ROTATION = np.ndarray
-ZOOMS = tuple[float, float, float] | Sequence[float]
+ZOOMS = Union[tuple[float, float, float], Sequence[float]]
 #####################
 LABEL_MAX = 256
 
 CENTROID_DICT = dict[int, tuple[float, float, float]]
-TRIPLE = tuple[float, float, float] | Sequence[float]
+TRIPLE = Union[tuple[float, float, float], Sequence[float]]
 COORDINATE = TRIPLE
 POI_DICT = dict[int, dict[int, COORDINATE]]
 
 AFFINE = np.ndarray
-SHAPE = TRIPLE | tuple[int, int, int]
+SHAPE = Union[TRIPLE, tuple[int, int, int]]
 ORIGIN = TRIPLE
 
 
-LABEL_MAP = dict[int | str, int | str] | dict[str, str] | dict[int, int]
+LABEL_MAP = Union[dict[Union[int, str], Union[int, str]], dict[str, str], dict[int, int]]
 
-LABEL_REFERENCE = int | Sequence[int] | None
+LABEL_REFERENCE = Union[int, Sequence[int], None]
 
 if TYPE_CHECKING:
     from TPTBox import NII, POI
+_supported_img_files = ["nii.gz", "nii", "nrrd", "mha"]
+MODES = Literal["constant", "nearest", "reflect", "wrap"]
 _plane_dict: dict[DIRECTIONS, str] = {
     "S": "ax",
     "I": "ax",
@@ -43,6 +47,7 @@ _plane_dict: dict[DIRECTIONS, str] = {
     "A": "cor",
     "P": "cor",
 }
+
 _same_direction: dict[DIRECTIONS, DIRECTIONS] = {
     "S": "I",
     "I": "S",
@@ -197,7 +202,7 @@ class Vertebra_Instance(Abstract_lvl):
     def order_dict(cls) -> dict[int, int]:
         return {a.value: e for e, a in enumerate(cls.order())}
 
-    def get_next_poi(self, poi: typing.Union["POI", "NII", list[int]]):
+    def get_next_poi(self, poi: POI | NII | list[int]):
         r = poi if isinstance(poi, list) else poi.keys_region() if hasattr(poi, "keys_region") else poi.unique()  # type: ignore
         o = self.order()
         idx = o.index(self)
@@ -206,7 +211,7 @@ class Vertebra_Instance(Abstract_lvl):
                 return vert
         return None
 
-    def get_previous_poi(self, poi: typing.Union["POI", "NII", list[int]]):
+    def get_previous_poi(self, poi: POI | NII | list[int]):
         r = poi if isinstance(poi, list) else poi.keys_region() if hasattr(poi, "keys_region") else poi.unique()  # type: ignore
         o = self.order()
         idx = o.index(self)
@@ -290,7 +295,7 @@ class Location(Abstract_lvl):
     Superior_Articular_Right = 46
     Inferior_Articular_Left = 47
     Inferior_Articular_Right = 48
-    Vertebra_Corpus_border = 49 # actual corpus body
+    Vertebra_Corpus_border = 49  # actual corpus body
     Vertebra_Corpus = 50
     Dens_axis = 51  # TODO Unused. Should be in C2
     Vertebral_Body_Endplate_Superior = 52

@@ -2,6 +2,8 @@
 # coverage run -m unittest
 # coverage report
 # coverage html
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 
@@ -32,7 +34,7 @@ class Test_bids_file(unittest.TestCase):
             arr = nii.get_seg_array()
             volume = np_utils.np_volume(arr)
             func = np_utils.np_erode_msk if value % 2 == 0 else np_utils.np_dilate_msk
-            arr2 = func(arr, mm=1, connectivity=1)
+            arr2 = func(arr, n_pixel=1, connectivity=1)
             volume2 = np_utils.np_volume(arr2)
 
             for k, v in volume.items():
@@ -57,7 +59,7 @@ class Test_bids_file(unittest.TestCase):
             volume = np_utils.np_volume(arr)
             label = max(list(volume.keys())) + 1
             func = np_utils.np_erode_msk if value % 2 == 0 else np_utils.np_dilate_msk
-            arr2 = func(arr, mm=1, connectivity=1, label_ref=label)
+            arr2 = func(arr, n_pixel=1, connectivity=1, label_ref=label)
             volume2 = np_utils.np_volume(arr2)
 
             for k, v in volume.items():
@@ -252,6 +254,98 @@ class Test_bids_file(unittest.TestCase):
         print(result)
         # expected = [1, 1, 0]  # Adjust based on your bounding box logic
         # self.assertEqual(result, expected)
+
+    def test_smooth_msk(self):
+        # Create a test NII object with a segmentation mask
+        data = np.zeros((10, 10), dtype=np.uint16)
+        data[3:8, 3:8] = 1
+
+        print(data)
+
+        # Dilate the segmentation mask
+        smoothed = np_utils.np_smooth_gaussian_labelwise(
+            data,
+            label_to_smooth=1,
+            sigma=1,
+            radius=4,
+            truncate=4,
+            boundary_mode="nearest",
+            dilate_prior=0,
+            smooth_background=True,
+        )
+
+        print()
+        print(smoothed)
+
+        # Check that the dilated mask is correct
+        expected = np.zeros((10, 10), dtype=np.uint16)
+        expected[3:8, 3:8] = 1
+        expected[3, 3] = 0
+        expected[3, 7] = 0
+        expected[7, 3] = 0
+        expected[7, 7] = 0
+        assert np.array_equal(smoothed, expected), (smoothed[5], expected[5])
+
+    def test_smooth_msk2(self):
+        # Create a test NII object with a segmentation mask
+        data = np.zeros((10, 10), dtype=np.uint16)
+        data[3:8, 3:8] = 1
+
+        print(data)
+
+        # Dilate the segmentation mask
+        smoothed = np_utils.np_smooth_gaussian_labelwise(
+            data,
+            label_to_smooth=1,
+            sigma=3,
+            radius=4,
+            truncate=4,
+            boundary_mode="nearest",
+            dilate_prior=1,
+            smooth_background=True,
+        )
+
+        print()
+        print(smoothed)
+
+        # Check that the dilated mask is correct
+        expected = np.zeros((10, 10), dtype=np.uint16)
+        expected[3:8, 3:8] = 1
+        expected[2, 5] = 1
+        expected[5, 2] = 1
+        expected[8, 5] = 1
+        expected[5, 8] = 1
+        assert np.array_equal(smoothed, expected), (smoothed[5], expected[5])
+
+    def test_np_binary_fill_holes_and_set_inter_labels_based_on_majority(self):
+        # Create a test NII object with a segmentation mask
+        data = np.array(
+            [
+                [0, 0, 0, 0, 0],
+                [0, 0, 1, 0, 0],
+                [0, 1, 0, 1, 2],
+                [0, 0, 1, 0, 2],
+                [0, 0, 2, 2, 2],
+            ],
+            dtype=np.uint16,
+        )
+
+        print(data)
+
+        # Dilate the segmentation mask
+        filled = np_utils.np_fill_holes_global_with_majority_voting(
+            data,
+            connectivity=1,
+        )
+
+        print()
+        print(filled)
+
+        # Check that the dilated mask is correct
+        expected = data.copy()
+        expected[2, 2] = 1
+        expected[3, 3] = 2
+        assert np.array_equal(filled, expected), (filled[5], expected[5])
 
 
 if __name__ == "__main__":

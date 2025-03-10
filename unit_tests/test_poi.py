@@ -2,6 +2,8 @@
 # coverage run -m unittest
 # coverage report
 # coverage html
+from __future__ import annotations
+
 import random
 import tempfile
 import unittest
@@ -10,6 +12,7 @@ from pathlib import Path
 import nibabel as nib
 import numpy as np
 
+from TPTBox.core.compat import zip_strict
 from TPTBox.core.nii_wrapper import NII
 from TPTBox.core.poi import (
     LABEL_MAX,
@@ -17,8 +20,8 @@ from TPTBox.core.poi import (
     Location,
     _poi_to_dict_list,
     calc_centroids,
+    calc_centroids_from_two_masks,
     calc_poi_from_subreg_vert,
-    calc_poi_labeled_buffered,
     load_poi,
 )
 from TPTBox.tests.test_utils import extract_affine, get_poi, get_random_ax_code, overlap, repeats, sqr1d
@@ -37,12 +40,12 @@ def get_nii(x: tuple[int, int, int] | None = None, num_point=3, rotation=True): 
             break
         point = tuple(random.randint(1, a - 1) for a in x)
         size = tuple(random.randint(1, 1 + a) for a in [5, 5, 5])
-        if any(a - b < 0 for a, b in zip(point, size, strict=True)):
+        if any(a - b < 0 for a, b in zip_strict(point, size)):
             continue
-        if any(a + b > c - 1 for a, b, c in zip(point, size, x, strict=True)):
+        if any(a + b > c - 1 for a, b, c in zip_strict(point, size, x)):
             continue
         skip = False
-        for p2, s2 in zip(points, sizes, strict=True):
+        for p2, s2 in zip_strict(points, sizes):
             if overlap(point, size, p2, s2):
                 skip = True
                 break
@@ -112,7 +115,7 @@ class Test_POI(unittest.TestCase):
                 msk, cent, order, sizes = get_nii(num_point=random.randint(1, 7))
                 poi = calc_centroids(msk)
                 msg = "\n\n"
-                for x, y in zip(cent, sizes, strict=True):
+                for x, y in zip_strict(cent, sizes):
                     msg += f"{x} - {cent[x]},{y}\n"
                 self.assertEqual(cent, poi.centroids.pois, msg=msg)
                 self.assert_affine(poi, msk)
@@ -148,26 +151,6 @@ class Test_POI(unittest.TestCase):
             file.unlink(missing_ok=True)
             self.assertEqual(c, p)
             self.assert_affine(c, p)
-
-    def test_calc_POI_labeled_bufferd(self):
-        msk, cent, order, sizes = get_nii(num_point=random.randint(1, 7))
-        msk2, cent2, order2, sizes2 = get_nii(num_point=len(cent) - 1)
-
-        cent = POI(cent, orientation=order, zoom=(1, 1, 1), **extract_affine(msk))
-        cent2 = POI(cent2, orientation=order2, zoom=(1, 1, 1), **extract_affine(msk2))
-        file = Path(tempfile.gettempdir(), "test_save_load_POI.json")
-        file.unlink(missing_ok=True)
-        out = calc_poi_labeled_buffered(msk, None, out_path=file, verbose=False)
-        self.assertEqual(out, cent)
-        self.assert_affine(out, msk)
-        out = calc_poi_labeled_buffered(msk2, None, out_path=file, verbose=False)
-        self.assertEqual(out, cent)
-        self.assert_affine(out, msk)
-        file.unlink(missing_ok=True)
-        out = calc_poi_labeled_buffered(msk2, None, out_path=file, verbose=False)
-        self.assert_affine(out, msk2)
-        self.assertEqual(out, cent2)
-        file.unlink(missing_ok=True)
 
     def test_calc_POI_from_subreg_vert(self):
         msk, cent, order, sizes = get_nii(num_point=random.randint(1, 7))
@@ -290,10 +273,10 @@ class Test_POI(unittest.TestCase):
             assert cdt2.shape is not None
             cdt2.shape = tuple(round(float(v), 0) for v in cdt2.shape)
             self.assert_affine(cdt, cdt2)
-            for (k, s, v), (k2, s2, v2) in zip(cdt.items(), cdt2.items(), strict=True):
+            for (k, s, v), (k2, s2, v2) in zip_strict(cdt.items(), cdt2.items()):
                 self.assertEqual(k, k2)
                 self.assertEqual(s, s2)
-                for v3, v4 in zip(v, v2, strict=True):
+                for v3, v4 in zip_strict(v, v2):
                     self.assertAlmostEqual(v3, v4)
 
     def test_rescale_nii(self):
@@ -327,7 +310,7 @@ class Test_POI(unittest.TestCase):
                     not_in_list.append((a, b))
                 tries -= 1
                 assert tries != 0, (in_list, not_in_list)
-            mapping = dict(zip(in_list, not_in_list, strict=True))
+            mapping = dict(zip_strict(in_list, not_in_list))
             cdt2 = cdt.map_labels(label_map_full=mapping)
 
             for a in in_list:
@@ -387,20 +370,20 @@ class Test_POI(unittest.TestCase):
             poi.reorient_(axcodes_to=axcode)
             glob_ctd = poi.to_global()
             poi2 = glob_ctd.to_other_nii(msk)
-            for (k, s, v), (k2, s2, v2) in zip(poi.items(), poi2.items(), strict=True):
+            for (k, s, v), (k2, s2, v2) in zip_strict(poi.items(), poi2.items()):
                 self.assertEqual(k, k2)
                 self.assertEqual(s, s2)
-                for v3, v4 in zip(v, v2, strict=True):
+                for v3, v4 in zip_strict(v, v2):
                     self.assertAlmostEqual(v3, v4, places=6)
 
             self.assert_affine(poi2, msk)
 
             glob_ctd = poi.to_global()
             poi2 = glob_ctd.to_other_poi(poi)
-            for (k, s, v), (k2, s2, v2) in zip(poi.items(), poi2.items(), strict=True):
+            for (k, s, v), (k2, s2, v2) in zip_strict(poi.items(), poi2.items()):
                 self.assertEqual(k, k2)
                 self.assertEqual(s, s2)
-                for v3, v4 in zip(v, v2, strict=True):
+                for v3, v4 in zip_strict(v, v2):
                     self.assertAlmostEqual(v3, v4, places=6)
             self.assert_affine(poi2, msk)
 

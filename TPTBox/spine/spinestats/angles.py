@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 from enum import Enum, auto
 from pathlib import Path
 
 import numpy as np
 
 from TPTBox import POI, Image_Reference
+from TPTBox.core.compat import zip_strict
 from TPTBox.core.nii_wrapper import to_nii
 from TPTBox.core.vert_constants import DIRECTIONS, Location, Vertebra_Instance
 from TPTBox.spine.snapshot2D.snapshot_modular import Snapshot_Frame, create_snapshot
@@ -354,9 +357,9 @@ def compute_lordosis_and_kyphosis(poi: POI, project_2D=True):
         >>> print(angles)
         {'cervical_lordosis': 30.5, 'thoracic_kyphosis': 35.0, 'lumbar_lordosis': 45.2}
     """
-    assert (
-        Location.Vertebra_Direction_Posterior.value in poi.keys_subregion()
-    ), "You need to compute the Direction in the Poi (Location.Vertebra_Direction_Posterior)"
+    assert Location.Vertebra_Direction_Posterior.value in poi.keys_subregion(), (
+        "You need to compute the Direction in the Poi (Location.Vertebra_Direction_Posterior)"
+    )
     last_t = _get_last_thoracic(poi)
     last_l = _get_last_lumbar(poi)
     poi = poi.copy()
@@ -720,11 +723,10 @@ def plot_compute_lordosis_and_kyphosis(
         out.append((id1.value, s, (a[0] * line_len, a[1] * line_len)))
         out.append((id1.value, s, (-a[0] * line_len * 3, -a[1] * line_len * 3)))
     out2 = compute_lordosis_and_kyphosis(poi, project_2D=project_2D)
-    for (name, v), id1, id2 in zip(
+    for (name, v), id1, id2 in zip_strict(
         out2.items(),
         [Vertebra_Instance.C7, last_t, last_l],
-        [Vertebra_Instance.C2, Vertebra_Instance.C7, last_t],
-        strict=True,
+        [Vertebra_Instance.C2, Vertebra_Instance.C7, last_t]
     ):
         if v is None:
             continue
@@ -803,7 +805,7 @@ def plot_cobb_angle(
     )
     for max_angle, from_vert, to_vert, apex in copps:
         if from_vert is not None:
-            for id1, mv in zip([from_vert, to_vert], [vert_id1_mv, vert_id2_mv], strict=False):
+            for id1, mv in zip([from_vert, to_vert], [vert_id1_mv, vert_id2_mv]):
                 c = mv.get_location(id1, poi)
 
                 if use_ivd_direction and id1 > IVD_MORE_ACCURATE:
@@ -912,7 +914,7 @@ def plot_cobb_and_lordosis_and_kyphosis(
 
 if __name__ == "__main__":
     from TPTBox import POI, calc_poi_from_subreg_vert
-    from TPTBox.spine.statistics.ivd_pois import compute_fake_ivd
+    from TPTBox.spine.spinestats.ivd_pois import compute_fake_ivd
 
     # poi = POI.load(
     #    "/DATA/NAS/datasets_processed/CT_spine/dataset-Cancer/derivatives_spineps/sub-mc0034/ses-20240312/sub-mc0034_ses-20240312_sequ-206_mod-ct_seg-spine_msk.nii.gz"

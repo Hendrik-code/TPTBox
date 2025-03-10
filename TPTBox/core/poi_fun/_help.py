@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 from functools import wraps
 from time import time
 
 import numpy as np
 
 from TPTBox import POI, Location, Logger_Interface, Print_Logger
+from TPTBox.core.compat import zip_strict
 from TPTBox.core.nii_wrapper import NII
 from TPTBox.core.vert_constants import Vertebra_Instance
 
@@ -14,7 +17,7 @@ sacrum_w_o_direction = (Vertebra_Instance.COCC.value,)
 
 def to_local_np(loc: Location, bb: tuple[slice, slice, slice], poi: POI, label, log: Logger_Interface, verbose=True):
     if (label, loc.value) in poi:
-        return np.asarray([a - b.start for a, b in zip(poi[label, loc.value], bb, strict=True)])
+        return np.asarray([a - b.start for a, b in zip_strict(poi[label, loc.value], bb)])
     if verbose:
         log.on_fail(f"region={label},subregion={loc.value} is missing")
         # raise KeyError(f"region={label},subregion={loc.value} is missing.")

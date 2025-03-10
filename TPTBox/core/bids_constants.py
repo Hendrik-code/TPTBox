@@ -1,5 +1,7 @@
 ### Legal formats ###
 # https://flexikon.doccheck.com/de/MRT-Sequenz
+from __future__ import annotations
+
 formats = [
     "ct",
     "dixon",
