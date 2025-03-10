@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # noqa: INP001
 import argparse
 import random
@@ -6,6 +8,7 @@ from pathlib import Path
 import TPTBox.stitching.stitching_tools as st
 from TPTBox import BIDS_FILE, BIDS_Global_info, Print_Logger
 from TPTBox.core.bids_constants import sequence_splitting_keys
+from TPTBox.core.compat import zip_strict
 
 logger = Print_Logger()
 arg_parser = argparse.ArgumentParser()
@@ -30,7 +33,7 @@ random.shuffle(l)
 
 def split_multi_scans(v: list[BIDS_FILE], out: BIDS_FILE):
     jsons = [x.open_json() for x in v]
-    ids = [(j["SeriesNumber"], bids) for j, bids in zip(jsons, v, strict=True)]
+    ids = [(j["SeriesNumber"], bids) for j, bids in zip_strict(jsons, v)]
     ids.sort()
     curr = []
     curr_id = []
@@ -103,7 +106,7 @@ for name, subj in l:
                 if len(v) == 1:
                     skipped_single.append(name)
                     continue
-                st.stitching(*v, out=out)
+                st.stitching(v, out=out)
                 new_stitched += 1
             except BaseException:
                 out.unlink(missing_ok=True)

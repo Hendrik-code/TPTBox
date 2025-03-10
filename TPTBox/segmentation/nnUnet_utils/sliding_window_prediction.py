@@ -1,6 +1,8 @@
 # Adapted from https://github.com/MIC-DKFZ/nnUNet
 # Isensee, F., Jaeger, P. F., Kohl, S. A., Petersen, J., & Maier-Hein, K. H. (2021). nnU-Net: a self-configuring
 # method for deep learning-based biomedical image segmentation. Nature methods, 18(2), 203-211.
+from __future__ import annotations
+
 from functools import lru_cache
 
 import numpy as np
@@ -35,14 +37,14 @@ def compute_gaussian(
 
 
 def compute_steps_for_sliding_window(image_size: tuple[int, ...], tile_size: tuple[int, ...], tile_step_size: float) -> list[list[int]]:
-    assert [i >= j for i, j in zip(image_size, tile_size, strict=False)], "image size must be as large or larger than patch_size"
+    assert [i >= j for i, j in zip(image_size, tile_size)], "image size must be as large or larger than patch_size"
     assert 0 < tile_step_size <= 1, "step_size must be larger than 0 and smaller or equal to 1"
 
     # our step width is patch_size*step_size at most, but can be narrower. For example if we have image size of
     # 110, patch size of 64 and step_size of 0.5, then we want to make 3 steps starting at coordinate 0, 23, 46
     target_step_sizes_in_voxels = [i * tile_step_size for i in tile_size]
 
-    num_steps = [int(np.ceil((i - k) / j)) + 1 for i, j, k in zip(image_size, target_step_sizes_in_voxels, tile_size, strict=False)]
+    num_steps = [int(np.ceil((i - k) / j)) + 1 for i, j, k in zip(image_size, target_step_sizes_in_voxels, tile_size)]
 
     steps = []
     for dim in range(len(tile_size)):

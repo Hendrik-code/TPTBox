@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 if __name__ == "__main__":
     # speed test dilation
     import random
@@ -17,7 +19,7 @@ if __name__ == "__main__":
         np_unique_withoutzero,
         np_volume,
     )
-    from TPTBox.tests.speedtest import speed_test
+    from TPTBox.tests.speedtests.speedtest import speed_test
     from TPTBox.tests.test_utils import get_nii
 
     def get_nii_array():

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +21,7 @@ from TPTBox import (
     calc_poi_from_subreg_vert,
     to_nii,
 )
+from TPTBox.core.compat import zip_strict
 from TPTBox.core.sitk_utils import nii_to_sitk, sitk_to_nii
 
 NII_or_POI = TypeVar("NII_or_POI")
@@ -50,24 +53,27 @@ class Point_Registration:
     def transform_poi(self, poi_moving: POI, allow_only_same_grid_as_moving=True, output_space=None):
         # output_space: POI | NII | None = None,
         if allow_only_same_grid_as_moving:
-            text = (
-                "input image must be in the same space as moving.  If you sure that this input is in same space as the moving image you can turn of 'only_allow_grid_as_moving'",
-            )
+            text = "input image must be in the same space as moving.  If you sure that this input is in same space as the moving image you can turn of 'only_allow_grid_as_moving'"
             poi_moving.assert_affine(self.input_poi, text=text)
         move_l = []
         keys = []
-        out = dict(zip(keys, move_l, strict=True))
+        out = dict(zip_strict(keys, move_l))
 
         for key, key2, (x, y, z) in poi_moving.items():
-            ctr_b = self._img_moving.TransformContinuousIndexToPhysicalPoint((x, y, z))
-            ctr_b = self._transform.GetInverse().TransformPoint(ctr_b)
-            ctr_b = self._img_fixed.TransformPhysicalPointToContinuousIndex(ctr_b)
-            out[key, key2] = ctr_b
+            out[key, key2] = self.transform_cord((x, y, z))
 
         poi = POI(out, **self.out_poi._extract_affine())
         if output_space is not None:
             poi = poi.resample_from_to(output_space)
         return poi
+
+    def transform_cord(self, cord: tuple[float, ...], out: sitk.Image | None = None):
+        if out is None:
+            out = self._img_fixed
+        ctr_b = self._img_moving.TransformContinuousIndexToPhysicalPoint(cord)
+        ctr_b = self._transform.GetInverse().TransformPoint(ctr_b)
+        ctr_b = out.TransformPhysicalPointToContinuousIndex(ctr_b)
+        return np.array(ctr_b)
 
     def transform_nii(self, moving_img_nii: NII, allow_only_same_grid_as_moving=True, output_space: NII | None = None):
         if output_space is not None:
@@ -83,10 +89,8 @@ class Point_Registration:
         else:
             resampler = self._resampler_seg if moving_img_nii.seg else self._resampler
         if allow_only_same_grid_as_moving:
-            text = (
-                "input image must be in the same space as moving.  If you sure that this input is in same space as the moving image you can turn of 'only_allow_grid_as_moving'",
-            )
-            moving_img_nii.assert_affine(self.input_poi, text=text)
+            text = "input image must be in the same space as moving.  If you sure that this input is in same space as the moving image you can turn of 'only_allow_grid_as_moving'"
+            moving_img_nii.assert_affine(self.input_poi, text=text, shape_tolerance=0.9)
 
         img_sitk = nii_to_sitk(moving_img_nii)
         transformed_img = resampler.Execute(img_sitk)
@@ -98,28 +102,31 @@ class Point_Registration:
         # VersorRigid3DTransform
         # T(x) = A ( x - c ) + (t + c)
         # T(x) = Ax (- Ac + t + c)
+        # let C = (- Ac + t + c)
+        # (C^T*(Ax)^T)
         assert isinstance(self._transform, sitk.VersorRigid3DTransform)
         A = np.eye(4)  # noqa: N806
         v = self._transform.GetInverse()
-        A[:3, :3] = np.array(v.GetMatrix()).reshape(3, 3)
-        c = np.array(v.GetCenter())
-        t = np.array(v.GetTranslation())
-        trans = -A[:3, :3] @ c + c + t
-        A[:3, 3] = trans
+        A[:3, :3] = np.array(v.GetMatrix()).reshape(3, 3)  # Rotation matrix
+        c = np.array(v.GetCenter())  # Center of rotation
+        t = np.array(v.GetTranslation())  # Translation vector
+        trans = -A[:3, :3] @ c + c + t  # Correct translation formula
+        A[:3, 3] = trans  # Set translation part
         return A
 
-    def transform_nii_affine_only(self, moving_img_nii: NII, only_allow_grid_as_moving=True):
-        if only_allow_grid_as_moving:
-            text = (
-                "input image must be in the same space as moving.  If you sure that this input is in same space as the moving image you can turn of 'only_allow_grid_as_moving'",
-            )
-            assert self.input_poi.shape == moving_img_nii.shape, (self.input_poi, moving_img_nii, text)
-            assert self.input_poi.orientation == moving_img_nii.orientation, (self.input_poi, moving_img_nii, text)
-
-        affine = np.linalg.inv(self.get_affine()) @ moving_img_nii.affine
-        moving_img_nii = moving_img_nii.copy()
-        moving_img_nii.affine = affine
-        return moving_img_nii
+    # def transform_nii_affine_only(self, moving_img_nii: NII, only_allow_grid_as_moving=True):
+    #    if only_allow_grid_as_moving:
+    #        text = (
+    #            "input image must be in the same space as moving.  If you sure that this input is in same space as the moving image you can turn of 'only_allow_grid_as_moving'",
+    #        )
+    #        assert self.input_poi.shape == moving_img_nii.shape, (self.input_poi, moving_img_nii, text)
+    #        assert self.input_poi.orientation == moving_img_nii.orientation, (self.input_poi, moving_img_nii, text)
+    #        # moving_resampled = sitk.Resample(nii_to_sitk(moving_img_nii), self._img_fixed, self._transform, sitk.sitkLinear, 0.0)
+    #    # moving_img_nii = moving_img_nii
+    #    affine = self.get_affine() @ moving_img_nii.affine
+    #    moving_img_nii = moving_img_nii.copy()
+    #    moving_img_nii.affine = affine
+    #    return moving_img_nii
 
 
 def ridged_points_from_poi(
@@ -172,7 +179,7 @@ def ridged_points_from_poi(
 
     if len(inter) <= 2:
         log.print("[!] To few points, skip registration", Log_Type.FAIL)
-        raise ValueError("[!] To few points, skip registration")
+        raise ValueError("[!] To few points, skip registration", inter)
     img_movig = poi_moving.make_empty_nii()
     assert img_movig.shape == poi_moving.shape_int, (img_movig, poi_moving.shape)
     assert img_movig.orientation == poi_moving.orientation
@@ -182,7 +189,7 @@ def ridged_points_from_poi(
             inter, poi_fixed, representative_f_sitk, poi_moving, representative_m_sitk, verbose=False, log=log
         )
         delta_after = sorted(delta_after.items(), key=lambda x: -x[1])
-        out_str = f"Did not use the following keys for registaiton (worst {leave_worst_percent_out*100} %) "
+        out_str = f"Did not use the following keys for registaiton (worst {leave_worst_percent_out * 100} %) "
         for i, key in enumerate(delta_after):
             if i >= len(delta_after) * leave_worst_percent_out:
                 break
@@ -303,18 +310,18 @@ def _compute_versor(
     err_count = 0
     err_count_n = 0
     log.print(
-        f'{"key": <7}|{"fixed points": <23}|{"moved points after": <23}|{"moved points before": <23}|{"delta fixed/moved": <23}|{"distF": <5}|{"distM": <5}|',
+        f"{'key': <7}|{'fixed points': <23}|{'moved points after': <23}|{'moved points before': <23}|{'delta fixed/moved': <23}|{'distF': <5}|{'distM': <5}|",
         verbose=verbose,
     )
     k_old = -1000
     delta_after = {}
-    for (k1, k2), x, y in zip(inter, np.round(fix_l, decimals=1), np.round(move_l, decimals=1), strict=True):
+    for (k1, k2), x, y in zip_strict(inter, np.round(fix_l, decimals=1), np.round(move_l, decimals=1)):
         y2 = init_transform.GetInverse().TransformPoint(y)
         y = [round(m, ndigits=1) for m in y]  # noqa: PLW2901
-        dif = [round(i - j, ndigits=1) for i, j in zip(x, y2, strict=True)]
+        dif = [round(i - j, ndigits=1) for i, j in zip_strict(x, y2)]
         delta_after[(k1, k2)] = np.sum(np.array(dif) ** 2).item()
-        dist = round(math.sqrt(sum([(i - j) ** 2 for i, j in zip(x, x_old, strict=True)])), ndigits=1)
-        dist2 = round(math.sqrt(sum([(i - j) ** 2 for i, j in zip(y, y_old, strict=True)])), ndigits=1)
+        dist = round(math.sqrt(sum([(i - j) ** 2 for i, j in zip_strict(x, x_old)])), ndigits=1)
+        dist2 = round(math.sqrt(sum([(i - j) ** 2 for i, j in zip_strict(y, y_old)])), ndigits=1)
         error_reg += math.sqrt(sum([i * i for i in dif]))
         err_count += 1
         if k1 - k_old < 50:
@@ -328,7 +335,7 @@ def _compute_versor(
             y_ = f"{y[0]:7.1f},{y[1]:7.1f},{y[2]:7.1f}"
             y2_ = f"{y2[0]:7.1f},{y2[1]:7.1f},{y2[2]:7.1f}"
             d_ = f"{dif[0]:7.1f},{dif[1]:7.1f},{dif[2]:7.1f}"
-            log.print(f"{(k1,k2)!s: <7}|{x_: <23}|{y2_: <23}|{y_: <23}|{d_: <23}|{dist!s: <5}|{dist2!s: <5}|", verbose=verbose)
+            log.print(f"{(k1, k2)!s: <7}|{x_: <23}|{y2_: <23}|{y_: <23}|{d_: <23}|{dist!s: <5}|{dist2!s: <5}|", verbose=verbose)
 
         x_old = x
         y_old = y

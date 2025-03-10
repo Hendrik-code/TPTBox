@@ -1,6 +1,11 @@
+from __future__ import annotations
+
+from typing import Literal
+
 import numpy as np
 from numpy.linalg import norm
 from scipy.interpolate import RegularGridInterpolator
+from sklearn.decomposition import PCA
 
 from TPTBox import NII, POI, Print_Logger, Vertebra_Instance
 from TPTBox.core.poi_fun._help import sacrum_w_o_arcus, to_local_np
@@ -126,7 +131,7 @@ def add_ray_to_img(
 
 def add_spline_to_img(
     seg: NII,
-    poi: "POI",
+    poi: POI,
     location=50,
     add_to_img=True,
     override_seg=True,
@@ -231,3 +236,128 @@ def max_distance_ray_cast_convex_poi(
             log.on_fail("TypeError", e)
             return None
     return max_distance_ray_cast_convex(region, start_point_np, normal_vector, acc_delta)
+
+
+def calculate_pca_normal_np(segmentation: np.ndarray, pca_component, zoom=None, verbose=False):
+    """
+    Computes the normal vector of a segmented region using Principal Component Analysis (PCA).
+
+    Parameters:
+    ----------
+    segmentation : np.ndarray
+        A binary mask where nonzero values indicate the segmented region.
+    pca_component : int, optional
+        The principal component index to return as the normal vector.
+        - `0`: The primary axis (direction of greatest variance, often the main elongation).
+        - `1`: The secondary axis (orthogonal to the primary, capturing the second-most variance).
+        - `2`: The third axis (typically the normal direction to the structure in 3D).
+    zoom : tuple or array-like, optional
+        If provided, scales the normal vector by the inverse of the voxel size to account for anisotropic resolution.
+    verbose : bool, optional
+        If True, prints the principal component vectors for debugging.
+
+    Returns:
+    -------
+    normal_vector : np.ndarray
+        The selected principal component as a normal vector.
+
+    Usage:
+    ------
+    Use `pca_component=2` when you want the normal to a surface-like structure.
+    If analyzing an elongated structure (e.g., a vessel or bone), `pca_component=0` gives the primary axis,
+    while `pca_component=1` provides the secondary direction.
+    """
+    # Get indices of segmented region (assuming segmentation is a binary mask)
+    points = np.argwhere(segmentation > 0)
+    # Perform PCA to find the principal axes
+    pca = PCA(n_components=3)
+    pca.fit(points)
+    # First, second, and third principal components
+    if verbose:
+        print(f"Main Axis (PC1): {pca.components_[0]}")
+        print(f"Secondary Axis (PC2): {pca.components_[1]}")
+        print(f"Third Axis (PC3): {pca.components_[2]}")
+    normal_vector = pca.components_[pca_component]
+    if zoom is not None:
+        normal_vector = normal_vector / np.array(zoom)
+    return normal_vector
+
+
+def set_label_above_3_point_plane(
+    array: NII | np.ndarray,
+    p1,
+    p2,
+    p3,
+    value=0,
+    invert: Literal[-1, 1] = 1,
+    mask: np.ndarray | NII | bool = True,
+    inplace=False,
+):
+    """
+    Set all values in a 3D array above a plane defined by three non-collinear points to a specified value.
+
+    Parameters:
+    -----------
+    array : NII | np.ndarray
+        A 3D NumPy array or an NII object representing the volume data.
+    p1, p2, p3 : array-like
+        Three (x, y, z) points defining the plane.
+    value : int or float, optional (default=0)
+        The value to set for all elements above the plane.
+    inf : Literal[-1, 1], optional (default=1)
+        Controls the direction of "above":
+        - `1` means values superior to the plane (default).
+        - `-1` means values inferior to the plane.
+        If the input is an NII object with an inferior-superior orientation, this will be adjusted accordingly.
+
+    Returns:
+    --------
+    np.ndarray
+        The modified 3D array with values set above the plane.
+
+    Notes:
+    ------
+    - The plane is defined by the equation `ax + by + cz + d = 0`, where `(a, b, c)` is the normal vector.
+    - Uses `meshgrid` to construct a 3D grid and determine which values lie above the plane.
+
+    Example:
+    --------
+    ```python
+    import numpy as np
+
+    data = np.random.rand(300, 300, 300)
+    p1 = [100, 100, 50]
+    p2 = [100, 50, 100]
+    p3 = [50, 100, 100]
+
+    result = set_above_3_point_plane(data, p1, p2, p3, value=0)
+    ```
+    """
+    import numpy as np
+
+    if not inplace:
+        array = array.copy()
+    if isinstance(array, NII) and array.orientation[array.get_axis("S")] == "I":
+        # for NII inf = 1 means Superior
+        invert *= -1
+
+    # Define three 3D points that form a plane
+    p1 = np.array(p1)
+    p2 = np.array(p2)
+    p3 = np.array(p3)
+
+    # Compute the normal vector of the plane
+    normal = np.cross(p2 - p1, p3 - p1)
+    a, b, c = normal
+    d = -np.dot(normal, p1)
+
+    # Define a 3D grid of points
+    shape = array.shape
+    x, y, z = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]), np.arange(shape[2]), indexing="ij")
+
+    # Compute the plane equation for each (x, y)
+    plane_z = (-a * x - b * y - d) / c
+
+    # Create the 3D array and set values above the plane to 0
+    array[np.logical_and(mask, z * invert > plane_z)] = value
+    return array

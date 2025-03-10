@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import functools
 import json
 import warnings
@@ -5,15 +7,16 @@ from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TypedDict, TypeGuard, TypeVar
+from typing import TypedDict, TypeVar, Union
 
 import nibabel as nib
 import nibabel.orientations as nio
 import numpy as np
 from scipy.ndimage import center_of_mass
-from typing_extensions import Self
+from typing_extensions import Self, TypeGuard  # noqa: UP035
 
 from TPTBox.core import bids_files
+from TPTBox.core.compat import zip_strict
 from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.nii_wrapper import NII, Image_Reference, to_nii, to_nii_optional
 from TPTBox.core.poi_fun.poi_abstract import Abstract_POI, POI_Descriptor
@@ -56,12 +59,12 @@ class _Orientation(TypedDict):
     direction: tuple[str, str, str]
 
 
-_Centroid_DictList = Sequence[_Orientation | _Point3D]
+_Centroid_DictList = Sequence[Union[_Orientation, _Point3D]]
 
 
 ### CURRENT TYPE DEFINITIONS
 C = TypeVar("C", bound="POI")
-POI_Reference = bids_files.BIDS_FILE | Path | str | tuple[Image_Reference, Image_Reference, Sequence[int]] | C
+POI_Reference = Union[bids_files.BIDS_FILE, Path, str, tuple[Image_Reference, Image_Reference, Sequence[int]], C]
 ctd_info_blacklist = [
     "zoom",
     "shape",
@@ -178,6 +181,10 @@ class POI(Abstract_POI):
             self._zoom = None  # type: ignore
         else:
             self._zoom = tuple(round(float(v), ROUNDING_LVL) for v in value)  # type: ignore
+
+    @spacing.setter
+    def spacing(self, value):
+        self.zoom = value
 
     def clone(self, **qargs):
         return self.copy(**qargs)
@@ -297,7 +304,7 @@ class POI(Abstract_POI):
     ):
         """A Poi crop can be trivially reversed with out any loss. See apply_crop for more information"""
         return self.apply_crop(
-            tuple(slice(-shift.start, sh - shift.start) for shift, sh in zip(o_shift, shape, strict=True)),
+            tuple(slice(-shift.start, sh - shift.start) for shift, sh in zip_strict(o_shift, shape)),
             inplace=inplace,
         )
 
@@ -460,7 +467,7 @@ class POI(Abstract_POI):
                 ctd_arr[ax[0]] = np.around(size - ctd_arr[ax[0]], decimals) - 1
         points = POI_Descriptor()
         ctd_arr = np.transpose(ctd_arr).tolist()
-        for v, point in zip(v_list, ctd_arr, strict=True):
+        for v, point in zip_strict(v_list, ctd_arr):
             points[v] = tuple(point)
 
         log.print("[*] Centroids reoriented from", nio.ornt2axcodes(ornt_fr), "to", axcodes_to, verbose=verbose)
@@ -477,7 +484,7 @@ class POI(Abstract_POI):
             # flip is -1 when when a side (of shape) is moved from the origin
             # if flip = -1 new local point is affine_matmul_(shape[1]-1) else 0
             change = ((-flip) + 1) / 2  # 1 if flip else 0
-            change = tuple(a * (s - 1) for a, s in zip(change, self.shape, strict=True))
+            change = tuple(a * (s - 1) for a, s in zip_strict(change, self.shape))
             origin: COORDINATE = self.local_to_global(change)
         else:
             origin = None  # type: ignore
@@ -529,7 +536,7 @@ class POI(Abstract_POI):
         shp: list[float] = list(self.shape) if self.shape is not None else None  # type: ignore
         ctd_arr = np.transpose(np.asarray(list(self.centroids.values())))
         v_list = list(self.centroids.keys())
-        voxel_spacing = tuple([v if v != -1 else z for v, z in zip(voxel_spacing, zms, strict=True)])
+        voxel_spacing = tuple([v if v != -1 else z for v, z in zip_strict(voxel_spacing, zms)])
         for i in range(3):
             fkt = zms[i] / voxel_spacing[i]
             if len(v_list) != 0:
@@ -538,7 +545,7 @@ class POI(Abstract_POI):
                 shp[i] *= fkt
         points = POI_Descriptor()
         ctd_arr = np.transpose(ctd_arr).tolist()
-        for v, point in zip(v_list, ctd_arr, strict=True):
+        for v, point in zip_strict(v_list, ctd_arr):
             points[v] = tuple(point)
         log.print(
             "Rescaled centroid coordinates to spacing (x, y, z) =",
@@ -557,12 +564,7 @@ class POI(Abstract_POI):
         return self.copy(centroids=points, zoom=voxel_spacing, shape=shp)
 
     def rescale_(self, voxel_spacing: ZOOMS = (1, 1, 1), decimals=3, verbose: logging = False) -> Self:
-        return self.rescale(
-            voxel_spacing=voxel_spacing,
-            decimals=decimals,
-            verbose=verbose,
-            inplace=True,
-        )
+        return self.rescale(voxel_spacing=voxel_spacing, decimals=decimals, verbose=verbose, inplace=True)
 
     def to_global(self):
         """Converts the Centroids object to a global POI_Global object.
@@ -663,8 +665,8 @@ class POI(Abstract_POI):
             affine = self.affine
         arr = np.zeros(self.shape_int)
         arr2 = np.zeros(self.shape_int)
-        s1 = min(s // 2, 1)
-        s2 = min(s - s1, 1)
+        s1 = max(s // 2, 1)
+        s2 = max(s - s1, 1)
         from math import ceil, floor
 
         if sphere:
@@ -720,7 +722,7 @@ class POI(Abstract_POI):
         return self.copy(filtered_centroids)
 
     @classmethod
-    def load(cls, poi: POI_Reference):
+    def load(cls, poi: POI_Reference, reference: Has_Grid | None = None):
         """Load a Centroids object from various input sources.
 
         This method provides a convenient way to load a Centroids object from different sources,
@@ -758,7 +760,18 @@ class POI(Abstract_POI):
             >>> existing_poi = POI(...)
             >>> loaded_poi = POI.load(existing_poi)
         """
-        return load_poi(poi)
+        poi_obj = load_poi(poi)
+        if reference is not None:
+            if poi_obj.spacing is None:
+                poi_obj.spacing = reference.spacing
+            if poi_obj.rotation is None:
+                poi_obj.rotation = reference.rotation
+            if poi_obj.shape is None:
+                poi_obj.shape = reference.shape
+            if poi_obj.origin is None:
+                poi_obj.origin = reference.origin
+            reference.assert_affine(poi_obj)
+        return poi_obj
 
     def assert_affine(
         self,
@@ -976,7 +989,7 @@ def load_poi(ctd_path: POI_Reference, verbose=True) -> POI:  # noqa: ARG001
         return ctd_path
     elif isinstance(ctd_path, bids_files.BIDS_FILE):
         dict_list: _Centroid_DictList = ctd_path.open_json()  # type: ignore
-    elif isinstance(ctd_path, Path | str):
+    elif isinstance(ctd_path, (Path, str)):
         with open(ctd_path) as json_data:
             dict_list: _Centroid_DictList = json.load(json_data)
             json_data.close()
@@ -1016,7 +1029,7 @@ def load_poi(ctd_path: POI_Reference, verbose=True) -> POI:  # noqa: ARG001
     else:
         raise NotImplementedError(format_)
     return POI(
-        centroids,
+        centroids=centroids,
         orientation=axcode,
         zoom=zoom,
         shape=shape,  # type: ignore
@@ -1049,7 +1062,7 @@ def _load_docker_centroids(dict_list, centroids: POI_Descriptor, format_):  # no
                     subreg_id = conversion_poi[subreg]
                     centroids[vert_id, subreg_id] = (d["X"], d["Y"], d["Z"])
                 except Exception:
-                    print(f'Label {d["label"]} is not an integer and cannot be converted to an int')
+                    print(f"Label {d['label']} is not an integer and cannot be converted to an int")
                     centroids[0, d["label"]] = (d["X"], d["Y"], d["Z"])
         else:
             raise ValueError(d)
@@ -1120,11 +1133,11 @@ def _int2loc(
     return i
 
 
-def calc_poi_labeled_buffered(
+def calc_poi_from_two_segs(
     msk_reference: Image_Reference,
     subreg_reference: Image_Reference | None,
     out_path: Path | str,
-    subreg_id: int | Location | Sequence[int | Location] = 50,
+    subreg_id: int | Location | Sequence[int | Location] | None = None,
     verbose=True,
     override=False,
     decimals=3,
@@ -1187,6 +1200,8 @@ def calc_poi_labeled_buffered(
     sub_nii = to_nii_optional(subreg_reference, True)
     if (sub_nii is None or not check_every_point) and out_path.exists():
         return POI.load(out_path)
+    if subreg_id is None:
+        subreg_id = sub_nii.unique()
     if sub_nii is not None:
         ctd = calc_poi_from_subreg_vert(
             msk_nii,
@@ -1286,10 +1301,7 @@ def calc_poi_from_subreg_vert(
     if _vert_ids is None:
         _vert_ids = vert_msk.unique()
 
-    from TPTBox.core.poi_fun.vertebra_pois_non_centroids import (
-        add_prerequisites,
-        compute_non_centroid_pois,
-    )
+    from TPTBox.core.poi_fun.vertebra_pois_non_centroids import add_prerequisites, compute_non_centroid_pois
 
     subreg_id = add_prerequisites(_int2loc(subreg_id if isinstance(subreg_id, Sequence) else [subreg_id]))  # type: ignore
 
@@ -1468,12 +1480,7 @@ def _is_not_yet_computed(ids_in_arr: Sequence[int], extend_to: POI | None, subre
 
 
 def calc_centroids(
-    msk: Image_Reference,
-    decimals=3,
-    first_stage=-1,
-    second_stage: int | Location = 50,
-    extend_to: POI | None = None,
-    inplace: bool = False,
+    msk: Image_Reference, decimals=3, first_stage=-1, second_stage: int | Location = 50, extend_to: POI | None = None, inplace: bool = False
 ) -> POI:
     """
     Calculates the centroid coordinates of each region in the given mask image.
@@ -1531,10 +1538,7 @@ def calc_centroids(
 ######## Utility #######
 
 
-def calc_poi_average(
-    pois: list[POI],
-    keep_points_not_present_in_all_pois: bool = False,
-) -> POI:
+def calc_poi_average(pois: list[POI], keep_points_not_present_in_all_pois: bool = False) -> POI:
     """Calculates average of POI across list of POIs and removes all points that are not fully present in all given POIs
 
     Args:

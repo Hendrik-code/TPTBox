@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import itertools
 from pathlib import Path
 
@@ -237,7 +239,7 @@ def n4_bias_field_correction(
 
             return ants_img
 
-        def to_nibabel(img: "ants.core.ants_image.ANTsImage"):
+        def to_nibabel(img: ants.core.ants_image.ANTsImage):
             try:
                 from nibabel.nifti1 import Nifti1Image
             except ModuleNotFoundError as e:
@@ -338,7 +340,7 @@ def main(  # noqa: C901
     niis: list[nib.nifti1.Nifti1Image] = []
     print("### loading ###") if verbose else None
     for f_name in images:
-        if isinstance(f_name, Path | str):
+        if isinstance(f_name, (Path , str)):
             print("Load ", f_name, Path(f_name)) if verbose else None
             # Load Nii
             nii: nib.nifti1.Nifti1Image = nib.load(f_name)  # type: ignore

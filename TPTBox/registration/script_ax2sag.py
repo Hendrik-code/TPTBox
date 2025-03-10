@@ -1,6 +1,7 @@
 """
 This script assumes that there are aligned Sagittal data and poorly aligned axial data.
 """
+from __future__ import annotations
 
 import pickle
 from pathlib import Path

@@ -1,9 +1,8 @@
+from __future__ import annotations
+
 from enum import Enum
 
-import matplotlib.pyplot as plt
 import numpy as np
-import scipy.linalg
-from scipy import ndimage
 from skimage.measure import label
 from skimage.morphology import ball, binary_dilation, binary_erosion, disk
 from sklearn.cluster import KMeans
@@ -141,8 +140,8 @@ def _endplate_extraction_msk(subreg_tmp: NII, normal: np.ndarray, _extract=True)
     projected = projected / projected.max() * (body.shape[1] - 1)  # Scale to body dimensions
     projected = np.round(projected).astype(int) + 1  # Convert to integers starting from 1
 
-    out_arr[_extract_endplate_np(body, projected, normal) == 1] = Location.Vertebral_Body_Endplate_Inferior.value
-    out_arr[_extract_endplate_np(body, projected, normal, lower=True) == 1] = Location.Vertebral_Body_Endplate_Superior.value
+    out_arr[_extract_endplate_np(body, projected, normal) == 1] = Location.Vertebral_Body_Endplate_Superior.value
+    out_arr[_extract_endplate_np(body, projected, normal, lower=True) == 1] = Location.Vertebral_Body_Endplate_Inferior.value
 
     return subreg_tmp.set_array(out_arr)
 
@@ -161,7 +160,7 @@ def endplate_extraction(idx, vert: NII, subreg: NII, poi: POI) -> NII | None:
 
     vert_ = vert.reorient(verbose=False)
     subreg = subreg.reorient(verbose=False)
-
+    poi = poi.reorient()
     out = vert_.extract_label(idx) * subreg.extract_label(vertebra_body, keep_label=True)
     crop = out.compute_crop(dist=3)
     out_c = out.apply_crop(crop)

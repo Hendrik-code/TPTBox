@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # noqa: INP001
 import argparse
 import time
@@ -69,7 +71,7 @@ for name, subj in bgi.enumerate_subjects(sort=True):
     except BaseException:
         out.unlink(missing_ok=True)
         skipped.append(name + "_FAIL")
-        # raise
+        raise
 print("These subject have no T2w images:", len(skipped_no_t2w), skipped_no_t2w) if len(skipped_no_t2w) != 0 else None
 if len(skipped_to_many) != 0:
     logger.on_warning(

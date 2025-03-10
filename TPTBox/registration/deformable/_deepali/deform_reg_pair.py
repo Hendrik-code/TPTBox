@@ -23,7 +23,7 @@ from deepali.spatial import (
 from torch import Tensor
 from torch.nn import Module
 
-from TPTBox.core.nii_wrapper import NII
+from TPTBox.core.nii_wrapper import NII, to_nii
 from TPTBox.registration.deformable._deepali.engine import RegistrationEngine
 from TPTBox.registration.deformable._deepali.hooks import RegistrationEvalHook, RegistrationStepHook, normalize_grad_hook, smooth_grad_hook
 from TPTBox.registration.deformable._deepali.optim import new_optimizer
@@ -103,21 +103,31 @@ def get_normalize_config(config: dict[str, Any], image: Image, channels: dict[st
     return {"shift": shift, "scale": scale}
 
 
-def append_mask(
-    image: Image,
-    channels: dict[str, tuple[int, int]],
-    config: dict[str, Any],
-) -> Image:
+def append_mask(image: Image, mask_nii: NII | None, channels: dict[str, tuple[int, int]], config: dict[str, Any]) -> Image:
     r"""Append foreground mask to data tensor."""
     data = image.tensor()
-    if "img" in channels:
-        lower_threshold, upper_threshold = get_clamp_config(config, channels)
+    if mask_nii is None:
+        if "img" in channels:
+            lower_threshold, upper_threshold = get_clamp_config(config, channels)
 
-        mask = deepali_functional.threshold(data[slice(*channels["img"])], lower_threshold, upper_threshold)
+            mask = deepali_functional.threshold(data[slice(*channels["img"])], lower_threshold, upper_threshold)
+        else:
+            mask = torch.ones((1,) + data.shape[1:], dtype=data.dtype, device=data.device)
+
     else:
-        mask = torch.ones((1,) + data.shape[1:], dtype=data.dtype, device=data.device)
+        # torch.nn.functional.one_hot
+        mask = mask_nii.to_deepali().tensor().long()
+
+        # mask = torch.nn.functional.one_hot(mask)
+        # print(data.shape, mask.shape)
+        # mask = mask.swapaxes(-1, 0).squeeze_(-1)
+        # print(data.shape, mask.shape)
+
+        # channels["msk"] = (data.shape[0], data.shape[0] + mask.shape[0])
+        # data = torch.cat([data, mask.to(device=image.device).type(data.dtype)], dim=0)
     data = torch.cat([data, mask.type(data.dtype)], dim=0)
     channels["msk"] = (data.shape[0] - 1, data.shape[0])
+
     return Image(data, image.grid())
 
 
@@ -254,18 +264,21 @@ def new_loss_terms(config: dict[str, Any]) -> dict[str, Module]:
 
 
 def register_pairwise(  # noqa: C901
-    target: PathStr | NII,
-    source: PathStr | NII,
+    target: NII,
+    source: NII,
+    target_seg: NII | None,
+    source_seg: NII | None,
     config: dict[str, Any] | None = None,
     verbose: bool | int = False,
     debug: bool | int = False,
     device: Device | None = None,
+    finest_spacing=None,
 ) -> SpatialTransform:
     r"""Register pair of images using ``torch.autograd`` and ``torch.optim``."""
     # Configuration
     if config is None:
         config = load_config(Path(__file__).parent / "deformable_config.yaml")
-    target = NII.load(target, True)
+    target = to_nii(target, False)
     loss_config = config["loss"]["config"]
     loss_weights = config["loss"]["weights"]
     model_name = config["model"]["name"]
@@ -277,7 +290,9 @@ def register_pairwise(  # noqa: C901
     levels = config["pyramid"]["levels"]
     coarsest_level = config["pyramid"]["coarsest_level"]
     finest_level = config["pyramid"]["finest_level"]
-    finest_spacing = target.spacing
+    if finest_spacing is None:
+        finest_spacing = target.spacing
+
     min_size = config["pyramid"]["min_size"]
     pyramid_dims = config["pyramid"]["pyramid_dims"]
     device = get_device_config(config, device)
@@ -296,8 +311,8 @@ def register_pairwise(  # noqa: C901
     start_reg = timer()
 
     # Append foreground masks
-    target_image = append_mask(target_image, target_chns, config)
-    source_image = append_mask(source_image, source_chns, config)
+    target_image = append_mask(target_image, target_seg, target_chns, config)
+    source_image = append_mask(source_image, source_seg, source_chns, config)
     # Clamp and rescale images
     norm_params = get_normalize_config(config, target_image, target_chns)
     target_image = normalize_data_(target_image, target_chns, **norm_params)

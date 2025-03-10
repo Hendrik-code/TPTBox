@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import json
 from collections.abc import Callable, MutableMapping, Sequence
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from typing import Union
 
 import numpy as np
 from scipy import interpolate
@@ -13,21 +16,29 @@ from TPTBox.core import vert_constants
 from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.vert_constants import COORDINATE, POI_DICT, Abstract_lvl, Location, Vertebra_Instance, log, log_file, logging
 
-POI_ID = (
-    tuple[int, int]
-    | slice
-    | tuple[Location, Location]
-    | tuple[Location, int]
-    | tuple[int, Location]
-    | tuple[Vertebra_Instance, Location]
-    | tuple[Vertebra_Instance, int]
-)
+POI_ID = Union[
+    tuple[int, int],
+    slice,
+    tuple[Location, Location],
+    tuple[Location, int],
+    tuple[int, Location],
+    tuple[Vertebra_Instance, Location],
+    tuple[Vertebra_Instance, int],
+]
 
-MAPPING = dict[int | str, int | str] | dict[int, int] | dict[int, int | None] | dict[int, None] | dict[int | str, int | str | None] | None
+MAPPING = Union[
+    dict[Union[int, str], Union[int, str]],
+    dict[int, int],
+    dict[int, Union[int, None]],
+    dict[int, None],
+    dict[Union[int, str], Union[int, str, None]],
+    None
+]
+
 DIMENSIONS = 3
 
 
-class Abstract_POI_Definition:
+class _Abstract_POI_Definition:
     def __init__(
         self,
         path: str | Path | None = None,
@@ -49,8 +60,8 @@ class Abstract_POI_Definition:
         self.subregion_name2idx = {value: key for key, value in subregion.items()}
 
 
-def unpack_poi_id(key: POI_ID, definition: Abstract_POI_Definition) -> tuple[int, int]:
-    if isinstance(key, int | np.integer):
+def unpack_poi_id(key: POI_ID, definition: _Abstract_POI_Definition) -> tuple[int, int]:
+    if isinstance(key, (int, np.integer)):
         region = int(key % vert_constants.LABEL_MAX)
         subregion = int(key // vert_constants.LABEL_MAX)
     elif isinstance(key, slice):
@@ -82,10 +93,10 @@ class POI_Descriptor(AbstractSet, MutableMapping):
         self,
         *,
         default: POI_DICT | None = None,
-        definition: Abstract_POI_Definition | None = None,
+        definition: _Abstract_POI_Definition | None = None,
     ):
         if definition is None:
-            definition = Abstract_POI_Definition(
+            definition = _Abstract_POI_Definition(
                 region=vert_constants.v_idx2name,
                 subregion=vert_constants.subreg_idx2name,
             )
@@ -257,7 +268,7 @@ class POI_Descriptor(AbstractSet, MutableMapping):
     def normalize_input_data(cls, dic: dict):
         _centroids = cls()
         for k, v in dic.items():
-            if isinstance(k, (tuple, list)) and isinstance(v, (tuple, list)) and len(v) == DIMENSIONS:
+            if isinstance(k, (tuple, list)) and isinstance(v, (tuple, list, np.ndarray)) and len(v) == DIMENSIONS:
                 _centroids[k[0], k[1]] = tuple(v)  # type: ignore
             elif isinstance(k, (int, float)) and isinstance(v, tuple) and len(v) == DIMENSIONS:
                 _centroids[0, int(k)] = v  # type: ignore
@@ -265,7 +276,7 @@ class POI_Descriptor(AbstractSet, MutableMapping):
                 for k2, v2 in v.items():
                     _centroids[int(k), int(k2)] = v2  # type: ignore
             else:
-                raise ValueError(dic, type(dic))
+                raise ValueError(k, type(k), v, tuple(v))
         return _centroids
 
     def pop(self, key: POI_ID, default):
@@ -281,12 +292,17 @@ class POI_Descriptor(AbstractSet, MutableMapping):
 
 @dataclass
 class Abstract_POI(Has_Grid):
-    _centroids: POI_Descriptor = field(default_factory=lambda: POI_Descriptor(), repr=False, kw_only=True)
+    _centroids: POI_Descriptor = field(default_factory=lambda: POI_Descriptor(), repr=False)
     centroids: POI_Descriptor = field(repr=False, hash=False, compare=False, default=None)  # type: ignore
     format: int | None = field(default=None, repr=False, compare=False)
-    info: dict = field(default_factory=dict, compare=False)  # additional info (key,value pairs)
     level_one_info: type[Abstract_lvl] = Vertebra_Instance  # Must be Enum and must has order_dict
     level_two_info: type[Abstract_lvl] = Location
+    info: dict = field(default_factory=dict, compare=False, init=True)  # additional info (key,value pairs)
+
+    def __post_init__(self):
+        if not isinstance(self._centroids, POI_Descriptor):
+            self._centroids = POI_Descriptor.normalize_input_data(self._centroids)
+
 
     @property
     def centroids(self) -> POI_Descriptor:
@@ -313,12 +329,14 @@ class Abstract_POI(Has_Grid):
         return self.copy(ctd)
 
     @property
-    def is_global(self) -> bool: ...
+    def is_global(self) -> bool:
+        ...
 
     def clone(self, **qargs):
         return self.copy(**qargs)
 
-    def copy(self, centroids: POI_Descriptor | None = None, **qargs) -> Self: ...
+    def copy(self, centroids: POI_Descriptor | None = None, **qargs) -> Self:
+        ...
 
     def map_labels(
         self,
@@ -580,6 +598,15 @@ class Abstract_POI(Has_Grid):
         return self.extract_subregion(*location, inplace=True)
 
     def extract_vert(self, *vert_label: int, inplace=False):
+        import warnings
+
+        warnings.warn("extract_vert id deprecated use extract_region instead", stacklevel=5)  # TODO remove in version 2.0
+        return self.extract_region(*vert_label, inplace=inplace)
+
+    def extract_vert_(self, *vert_label: int):
+        return self.extract_vert(*vert_label, inplace=True)
+
+    def extract_region(self, *vert_label: int, inplace=False):
         vert_labels = tuple(vert_label)
         extracted_centroids = POI_Descriptor()
         for x1, x2, y in self.centroids.items():
@@ -590,8 +617,8 @@ class Abstract_POI(Has_Grid):
             return self
         return self.copy(centroids=extracted_centroids)
 
-    def extract_vert_(self, *vert_label: int):
-        return self.extract_vert(*vert_label, inplace=True)
+    def extract_region_(self, *vert_label: int):
+        return self.extract_region(*vert_label, inplace=True)
 
     def round(self, ndigits, inplace=False):
         """Round the centroid coordinates to a specified number of digits.

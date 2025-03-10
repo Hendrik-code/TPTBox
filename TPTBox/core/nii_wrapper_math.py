@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import operator
 from numbers import Number
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Union
 
 import numpy as np
 from skimage.metrics import peak_signal_noise_ratio as psnr
@@ -36,11 +38,11 @@ if TYPE_CHECKING:
             ...
         def get_c_val(self)->int:
             ...
-    C = NII|Number|np.ndarray
+    C = Union[NII, Number, np.ndarray]
 else:
     class NII_Proxy:
         pass
-    C = Self|Number|np.ndarray
+    C = Union[Self,Number,np.ndarray]
 class NII_Math(NII_Proxy,Has_Grid):
     def _binary_opt(self, other:C, opt,inplace = False)-> Self:
         if isinstance(other,NII_Math):
@@ -50,8 +52,12 @@ class NII_Math(NII_Proxy,Has_Grid):
         return self.set_array(opt(self.get_array()),inplace=inplace,verbose=False)
     def __add__(self,p2):
         return self._binary_opt(p2,operator.add)
+    def __radd__(self,p2):
+        return self._binary_opt(p2,operator.add)
     def __sub__(self,p2):
         return self._binary_opt(p2,operator.sub)
+    def __rsub__(self,p2)->Self:
+        return (-self)._binary_opt(p2,operator.add)
     def __mul__(self,p2):
         return self._binary_opt(p2,operator.mul)
     def __pow__(self,p2):
@@ -172,9 +178,11 @@ class NII_Math(NII_Proxy,Has_Grid):
         arr2 = arr.copy()
         arr[arr2>=threshold] = 1
         arr[arr2<=threshold] = 0
-        nii = self.set_array(arr,inplace,verbose=False)
-        nii.seg =True
+        nii = self if inplace else self.copy()
+        nii.seg = True
+        nii:NII = nii.set_array(arr,inplace,verbose=False)
         nii.c_val = 0
+        nii.set_dtype_('smallest_int')
         return nii
 
     def nan_to_num(self, num=0,inplace=False):
@@ -202,7 +210,7 @@ class NII_Math(NII_Proxy,Has_Grid):
         return ssim_value
 
 
-    def betti_numbers(self: "NII",verbose=False) -> dict[int, tuple[int, int, int]]: # type: ignore
+    def betti_numbers(self: NII,verbose=False) -> dict[int, tuple[int, int, int]]: # type: ignore
         """
         Calculate Betti numbers for connected components in a 3D image.
 
