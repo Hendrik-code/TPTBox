@@ -2,15 +2,14 @@ from __future__ import annotations
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-import numpy as np
 from tqdm import tqdm
 
 from TPTBox import Print_Logger, Vertebra_Instance, calc_poi_from_subreg_vert
 from TPTBox.core.compat import zip_strict
 from TPTBox.core.nii_wrapper import NII
 from TPTBox.core.poi import POI
-from TPTBox.core.poi_fun._help import paint_into_NII, to_local_np
-from TPTBox.core.poi_fun.ray_casting import calculate_pca_normal_np, max_distance_ray_cast_convex, set_above_3_point_plane
+from TPTBox.core.poi_fun._help import to_local_np
+from TPTBox.core.poi_fun.ray_casting import calculate_pca_normal_np, max_distance_ray_cast_convex
 from TPTBox.core.vert_constants import Location
 
 _log = Print_Logger()
@@ -64,7 +63,7 @@ def _process_vertebra_A(idx, vert: NII, spine: NII, next_id, poi) -> NII | None:
 
     try:
         a = endplate_extraction(idx, vert, spine, poi)
-        b = endplate_extraction(next_id.value, vert, spine, poi)
+        b = endplate_extraction(next_id, vert, spine, poi)
         if a is None or b is None:
             return None
         a = a.extract_label(Location.Vertebral_Body_Endplate_Inferior)
@@ -72,8 +71,14 @@ def _process_vertebra_A(idx, vert: NII, spine: NII, next_id, poi) -> NII | None:
     except ValueError:
         return None
     ivd: NII = (a + b).calc_convex_hull(None)
-    ivd[spine != 0] = 0
-    ivd = ivd.filter_connected_components(1, max_count_component=1, connectivity=1)
+    # ivd: NII = (
+    #    (a + b).dilate_msk(1, 1, verbose=False).erode_msk(3, 1, ignore_direction="S", verbose=False)
+    #    # .calc_convex_hull(None)
+    # )
+    # ivd[a != 0] = 2
+    # ivd[b != 0] = 3
+    # ivd[spine != 0] += 10
+    # ivd = ivd.filter_connected_components(1, max_count_component=1, connectivity=1)
     ivd = ivd * (100 + idx)
     return ivd
 
@@ -124,44 +129,89 @@ def _process_vertebra(
     if result is None:
         return None
     idx, verts_ids, vert, spine, poi, crop, next_id = result
-    ivd_1 = _process_vertebra_A(idx, vert, spine, next_id, poi)
-    ivd_2 = _process_vertebra_B(idx, vert, spine, next_id, dilate)
+    # TODO get_endplate is not working.
+    ivd_1 = None  # _process_vertebra_A(idx, vert, spine, next_id.value, poi)
+    ivd_2 = _process_vertebra_B(idx, vert, spine, next_id, dilate)  # * 0
 
     if ivd_1 is not None:
         ivd_2[ivd_2 == 0] = ivd_1[ivd_2 == 0]
-    try:
-        a = set_above_3_point_plane(
-            ivd_2.copy(),
-            poi[idx, Location.Ligament_Attachment_Point_Anterior_Longitudinal_Inferior_Right.value],
-            poi[idx, Location.Vertebra_Corpus.value],
-            poi[idx, Location.Ligament_Attachment_Point_Anterior_Longitudinal_Inferior_Left.value],
-            value=222,
-        )
-        b = set_above_3_point_plane(
-            ivd_2.copy(),
-            poi[idx, Location.Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Right.value],
-            poi[idx, Location.Vertebra_Corpus.value],
-            poi[idx, Location.Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Left.value],
-            value=222,
-        )
-        ivd_2[np.logical_and(a == 222, ivd_2 != 0)] = 222
-        ivd_2[np.logical_and(b == 222, ivd_2 != 0)] = 222
-        # ivd_2.filter_connected_components_(
-        #    (idx + 100), max_count_component=1, connectivity=1, keep_label=True
-        # )
-    except Exception as e:
-        print("Exception", e)
+    # try:
+    #    set_above_3_point_plane(
+    #        ivd_2,
+    #        poi[
+    #            idx,
+    #            Location.Ligament_Attachment_Point_Anterior_Longitudinal_Inferior_Right.value,
+    #        ],
+    #        poi[idx, Location.Vertebra_Corpus.value],
+    #        poi[
+    #            idx,
+    #            Location.Ligament_Attachment_Point_Anterior_Longitudinal_Inferior_Left.value,
+    #        ],
+    #        inplace=True,
+    #    )
+    #    set_above_3_point_plane(
+    #        ivd_2,
+    #        poi[
+    #            idx,
+    #            Location.Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Right.value,
+    #        ],
+    #        poi[idx, Location.Vertebra_Corpus.value],
+    #        poi[
+    #            idx,
+    #            Location.Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Left.value,
+    #        ],
+    #        inplace=True,
+    #    )
+    # except Exception as e:
+    #    print("Exception", e)
+    # try:
+    #    set_above_3_point_plane(
+    #        ivd_2,
+    #        poi[
+    #            next_id,
+    #            Location.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Right.value,
+    #        ],
+    #        poi[next_id, Location.Vertebra_Corpus.value],
+    #        poi[
+    #            next_id,
+    #            Location.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Left.value,
+    #        ],
+    #        inplace=True,
+    #        invert=-1,
+    #    )
+    #    set_above_3_point_plane(
+    #        ivd_2,
+    #        poi[
+    #            next_id,
+    #            Location.Ligament_Attachment_Point_Posterior_Longitudinal_Superior_Right.value,
+    #        ],
+    #        poi[next_id, Location.Vertebra_Corpus.value],
+    #        poi[
+    #            next_id,
+    #            Location.Ligament_Attachment_Point_Posterior_Longitudinal_Superior_Left.value,
+    #        ],
+    #        inplace=True,
+    #        invert=-1,
+    #    )
+    # except Exception as e:
+    #    print("Exception", e)
     return ivd_2, crop
 
 
 def compute_fake_ivd(vert_full: NII, subreg_full: NII, poi: POI, dilate=1):
     subreg_ids_required_for_ivd_generation = [
-        Location.Vertebra_Direction_Inferior,
+        # Location.Inferior_Articular_Left,
+        # Location.Inferior_Articular_Right,
+        # Location.Vertebra_Direction_Inferior,
         Location.Vertebra_Corpus,
-        Location.Ligament_Attachment_Point_Anterior_Longitudinal_Inferior_Right,
-        Location.Ligament_Attachment_Point_Anterior_Longitudinal_Inferior_Left,
-        Location.Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Right,
-        Location.Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Left,
+        # Location.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Right,
+        # Location.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Left,
+        # Location.Ligament_Attachment_Point_Posterior_Longitudinal_Superior_Right,
+        # Location.Ligament_Attachment_Point_Posterior_Longitudinal_Superior_Left,
+        # Location.Ligament_Attachment_Point_Anterior_Longitudinal_Inferior_Right,
+        # Location.Ligament_Attachment_Point_Anterior_Longitudinal_Inferior_Left,
+        # Location.Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Right,
+        # Location.Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Left,
     ]
     _sub = poi.keys_subregion()
     if any(f.value not in _sub for f in subreg_ids_required_for_ivd_generation):
@@ -228,15 +278,21 @@ def calculate_IVD_POI(vert: NII, subreg: NII, poi: POI, ivd_location: set[Locati
 if __name__ == "__main__":
     from pathlib import Path
 
-    from TPTBox import to_nii
+    from TPTBox import Location, calc_poi_from_subreg_vert, to_nii
+    from TPTBox.core.poi_fun.ray_casting import add_spline_to_img
 
-    path = Path("/DATA/NAS/datasets_processed/CT_spine/dataset-shockroom-without-fx/derivatives_spine_r/sub-ctsr01552/ses-20190525/")
-
-    vert = to_nii(path / "sub-ctsr01552_ses-20190525_sequ-19_seg-vert_msk.nii.gz", True)
-    subreg = to_nii(path / "sub-ctsr01552_ses-20190525_sequ-19_seg-subreg_msk.nii.gz", True)
-    poi = None  # POI.load(path / "sub-ctsr00850_ses-20170927_sequ-6_seg-subreg_ctd.json")
-    # TODO CROP-late
-    poi = calculate_IVD_POI(vert, subreg, poi)
-    print(poi)
-
-    paint_into_NII(poi, vert, rays=None).save(path / "test.nii.gz")
+    idx = 20
+    root = Path("/DATA/NAS/datasets_processed/CT_fullbody/dataset-watrinet/source/dataset-myelom/sub-CTFU03866_ses-20180724_sequ-202_ct/")
+    # ct, subreg, vert, idx = get_test_ct()
+    subreg = to_nii(root / "spine.nii.gz", True)
+    vert = to_nii(root / "vert.nii.gz", True)
+    poi = calc_poi_from_subreg_vert(vert, subreg, subreg_id=[50])
+    subreg2 = add_spline_to_img(subreg, poi, override_seg=False, dilate=9)
+    # vert_ = vert.reorient()
+    # subreg.reorient_()
+    #
+    # poi.fit_spline(location=spline_subreg_point_id, vertebra=True)
+    subreg2 = compute_fake_ivd(vert, subreg2, poi)
+    # assert subreg2 is not None
+    # subreg2.reorient_(vert.orientation)
+    subreg2.save(root / "endplate-test.nii.gz")

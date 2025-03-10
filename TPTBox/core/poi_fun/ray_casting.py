@@ -283,7 +283,7 @@ def calculate_pca_normal_np(segmentation: np.ndarray, pca_component, zoom=None, 
     return normal_vector
 
 
-def set_above_3_point_plane(
+def set_label_above_3_point_plane(
     array: NII | np.ndarray,
     p1,
     p2,
