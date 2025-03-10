@@ -988,6 +988,8 @@ def load_poi(ctd_path: POI_Reference, verbose=True) -> POI:  # noqa: ARG001
     else:
         raise TypeError(f"{type(ctd_path)}\n{ctd_path}")
     ### format_POI_old has no META header
+    if isinstance(dict_list, dict):
+        return _load_form_POI_spine_r(dict_list)
     if "direction" not in dict_list[0] and "vert_label" in dict_list[0]:
         return _load_format_POI_old(dict_list)  # This file if used in the old POI-pipeline and is deprecated
 
@@ -1555,3 +1557,16 @@ def calc_poi_average(
     # Sort the new ctd by keys
     ctd = dict(sorted(ctd.items()))
     return POI(centroids=ctd, orientation=pois[0].orientation, zoom=pois[0].zoom, shape=pois[0].shape, rotation=pois[0].rotation)
+
+def _load_form_POI_spine_r(data: dict):
+    orientation = None
+    centroids = POI_Descriptor()
+    for d in data["centroids"]["centroids"]: 
+        if "direction" in d:
+            orientation = d["direction"]
+            continue
+        centroids[d["label"], 50] = (d["X"],d["Y"],d["Z"])
+    zoom = data["Spacing"]
+    shape = data["Shape"]
+    return POI(centroids, orientation=orientation, zoom=zoom, shape=shape, info=data, rotation=None)  # type: ignore
+
