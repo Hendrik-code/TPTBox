@@ -96,6 +96,7 @@ class Test_testsamples(unittest.TestCase):
 
     def test_POIs_CT(self):
         _, subreg_nii, vert_nii, label = get_test_ct()
+
         ignore_list = [
             Location.Implant_Entry_Left,
             Location.Implant_Entry_Right,
