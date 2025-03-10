@@ -182,6 +182,10 @@ class POI(Abstract_POI):
         else:
             self._zoom = tuple(round(float(v), ROUNDING_LVL) for v in value)  # type: ignore
 
+    @spacing.setter
+    def spacing(self, value):
+        self.zoom = value
+
     def clone(self, **qargs):
         return self.copy(**qargs)
 
@@ -560,12 +564,7 @@ class POI(Abstract_POI):
         return self.copy(centroids=points, zoom=voxel_spacing, shape=shp)
 
     def rescale_(self, voxel_spacing: ZOOMS = (1, 1, 1), decimals=3, verbose: logging = False) -> Self:
-        return self.rescale(
-            voxel_spacing=voxel_spacing,
-            decimals=decimals,
-            verbose=verbose,
-            inplace=True,
-        )
+        return self.rescale(voxel_spacing=voxel_spacing, decimals=decimals, verbose=verbose, inplace=True)
 
     def to_global(self):
         """Converts the Centroids object to a global POI_Global object.
@@ -666,8 +665,8 @@ class POI(Abstract_POI):
             affine = self.affine
         arr = np.zeros(self.shape_int)
         arr2 = np.zeros(self.shape_int)
-        s1 = min(s // 2, 1)
-        s2 = min(s - s1, 1)
+        s1 = max(s // 2, 1)
+        s2 = max(s - s1, 1)
         from math import ceil, floor
 
         if sphere:
@@ -723,7 +722,7 @@ class POI(Abstract_POI):
         return self.copy(filtered_centroids)
 
     @classmethod
-    def load(cls, poi: POI_Reference):
+    def load(cls, poi: POI_Reference, reference: Has_Grid | None = None):
         """Load a Centroids object from various input sources.
 
         This method provides a convenient way to load a Centroids object from different sources,
@@ -761,7 +760,18 @@ class POI(Abstract_POI):
             >>> existing_poi = POI(...)
             >>> loaded_poi = POI.load(existing_poi)
         """
-        return load_poi(poi)
+        poi_obj = load_poi(poi)
+        if reference is not None:
+            if poi_obj.spacing is None:
+                poi_obj.spacing = reference.spacing
+            if poi_obj.rotation is None:
+                poi_obj.rotation = reference.rotation
+            if poi_obj.shape is None:
+                poi_obj.shape = reference.shape
+            if poi_obj.origin is None:
+                poi_obj.origin = reference.origin
+            reference.assert_affine(poi_obj)
+        return poi_obj
 
     def assert_affine(
         self,
@@ -1468,12 +1478,7 @@ def _is_not_yet_computed(ids_in_arr: Sequence[int], extend_to: POI | None, subre
 
 
 def calc_centroids(
-    msk: Image_Reference,
-    decimals=3,
-    first_stage=-1,
-    second_stage: int | Location = 50,
-    extend_to: POI | None = None,
-    inplace: bool = False,
+    msk: Image_Reference, decimals=3, first_stage=-1, second_stage: int | Location = 50, extend_to: POI | None = None, inplace: bool = False
 ) -> POI:
     """
     Calculates the centroid coordinates of each region in the given mask image.
@@ -1531,10 +1536,7 @@ def calc_centroids(
 ######## Utility #######
 
 
-def calc_poi_average(
-    pois: list[POI],
-    keep_points_not_present_in_all_pois: bool = False,
-) -> POI:
+def calc_poi_average(pois: list[POI], keep_points_not_present_in_all_pois: bool = False) -> POI:
     """Calculates average of POI across list of POIs and removes all points that are not fully present in all given POIs
 
     Args:
