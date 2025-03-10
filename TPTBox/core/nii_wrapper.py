@@ -1260,7 +1260,7 @@ class NII(NII_Math):
             cc = {i: self.set_array(k) for i,k in cc.items()}
         return cc, cc_n
 
-    def get_connected_components(self, labels: int |list[int]=1, connectivity: int = 3, verbose: bool=False,inplace=False) -> Self:
+    def get_connected_components(self, labels: int |list[int]=1, connectivity: int = 3, verbose: bool=False,inplace=False) -> Self:  # noqa: ARG002
         out = np_get_largest_k_connected_components(self.get_seg_array(), label_ref=labels, connectivity=connectivity, return_original_labels=False)
         return self.set_array(out,inplace=inplace)
 
