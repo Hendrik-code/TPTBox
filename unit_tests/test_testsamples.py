@@ -86,7 +86,7 @@ class Test_testsamples(unittest.TestCase):
         for i in range(n):
             if locs is None:
                 locs = [l for l in Location if l not in ignore_list and random.random() < (i + 1) / n * 3]
-            poi = calc_poi_from_subreg_vert(vert_nii, subreg_nii, subreg_id=locs, verbose=False, _print_phases=True).extract_vert(vert_id)
+            poi = calc_poi_from_subreg_vert(vert_nii, subreg_nii, subreg_id=locs, verbose=False, _print_phases=True).extract_region(vert_id)
             for l in locs:
                 self.assertIn((vert_id, l.value), poi)
             poi.assert_affine(
