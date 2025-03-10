@@ -1261,18 +1261,21 @@ class NII(NII_Math):
         return cc, cc_n
 
     def get_connected_components(self, labels: int |list[int]=1, connectivity: int = 3, verbose: bool=False,inplace=False) -> Self:
-        arr = self.get_seg_array()
-        cc, _ = np_connected_components(arr, connectivity=connectivity, label_ref=labels, verbose=verbose)
-        out = None
-
-        for i,k in cc.items():
-            if out is None:
-                out = k
-            else:
-                out += i*k
-        if out is None:
-            return self if inplace else self.copy()
+        out = np_get_largest_k_connected_components(self.get_seg_array(), label_ref=labels, connectivity=connectivity, return_original_labels=False)
         return self.set_array(out,inplace=inplace)
+
+        #arr = self.get_seg_array()
+        #cc, _ = np_connected_components(arr, connectivity=connectivity, label_ref=labels, verbose=verbose)
+        #out = None
+
+        #for i,k in cc.items():
+        #    if out is None:
+        #        out = k
+        #    else:
+        #        out += i*k
+        #if out is None:
+        #    return self if inplace else self.copy()
+        #return self.set_array(out,inplace=inplace)
 
     def filter_connected_components(self, labels: int |list[int]|None,min_volume:int=0,max_volume:int|None=None, max_count_component = None, connectivity: int = 3,removed_to_label=0,keep_label=False, inplace=False):
         """

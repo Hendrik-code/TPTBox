@@ -706,6 +706,7 @@ def np_get_largest_k_connected_components(
     min_volume: float = 0,
     max_volume: float | None = None,
     removed_to_label=0,
+    _return_unsorted=False,
 ) -> UINTARRAY:
     """finds the largest k connected components in a given array (does NOT work with zero as label!)
 
@@ -733,6 +734,8 @@ def np_get_largest_k_connected_components(
     arr2[np.isin(arr, labels, invert=True)] = 0  # type:ignore
 
     labels_out, n = connected_components(arr2, connectivity=connectivity, return_N=True)
+    if _return_unsorted:
+        return labels_out
     if k is None:
         k = n
     k = min(k, n)  # if k > N, will return all N but still sorted
