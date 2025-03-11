@@ -1213,16 +1213,3 @@ def calc_poi_average(pois: list[POI], keep_points_not_present_in_all_pois: bool 
     # Sort the new ctd by keys
     ctd = dict(sorted(ctd.items()))
     return POI(centroids=ctd, orientation=pois[0].orientation, zoom=pois[0].zoom, shape=pois[0].shape, rotation=pois[0].rotation)
-
-
-def _load_form_POI_spine_r(data: dict):
-    orientation = None
-    centroids = POI_Descriptor()
-    for d in data["centroids"]["centroids"]:
-        if "direction" in d:
-            orientation = d["direction"]
-            continue
-        centroids[d["label"], 50] = (d["X"], d["Y"], d["Z"])
-    zoom = data["Spacing"]
-    shape = data["Shape"]
-    return POI(centroids, orientation=orientation, zoom=zoom, shape=shape, info=data, rotation=None)  # type: ignore
