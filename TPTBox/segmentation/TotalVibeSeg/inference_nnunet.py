@@ -67,9 +67,11 @@ def run_inference_on_file(
         run_inference,
     )
 
-    download_weights(idx)
-
-    nnunet_path = next(next(iter(model_path.glob(f"*{idx}*"))).glob("*__nnUNetPlans*"))
+    download_weights(idx, model_path)
+    try:
+        nnunet_path = next(next(iter(model_path.glob(f"*{idx:03}*"))).glob("*__nnUNet*ResEnc*"))
+    except StopIteration:
+        nnunet_path = next(next(iter(model_path.glob(f"*{idx:03}*"))).glob("*__nnUNetPlans*"))
     folds = [int(f.name.split("fold_")[-1]) for f in nnunet_path.glob("fold*")]
     if max_folds is not None:
         folds = folds[:max_folds]
