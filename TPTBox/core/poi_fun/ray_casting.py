@@ -27,6 +27,18 @@ def max_distance_ray_cast_convex(
     direction_vector: np.ndarray,
     acc_delta: float = 0.00005,
 ):
+    """
+    Computes the maximum distance a ray can travel inside a convex region before exiting.
+
+    Parameters:
+    region (NII): The region of interest as a 3D NIfTI image.
+    start_coord (COORDINATE | np.ndarray): The starting coordinate of the ray.
+    direction_vector (np.ndarray): The direction vector of the ray.
+    acc_delta (float, optional): The accuracy threshold for bisection search. Default is 0.00005.
+
+    Returns:
+    np.ndarray: The exit coordinate of the ray within the region.
+    """
     start_point_np = np.asarray(start_coord)
     if start_point_np is None:
         return None
@@ -201,12 +213,30 @@ def max_distance_ray_cast_convex_poi(
     poi: POI,
     region: NII,
     vert_id: int,
-    bb: tuple[slice, slice, slice],
+    bb: tuple[slice, slice, slice] | None,
     normal_vector_points: tuple[Location, Location] | DIRECTIONS = "R",
     start_point: Location | np.ndarray = Location.Vertebra_Corpus,
     log: Logger_Interface = _log,
     acc_delta: float = 0.00005,
 ):
+    """
+    Computes the maximum distance a ray can travel inside a convex region for a point of interest (POI).
+
+    Parameters:
+    poi (POI): The point of interest.
+    region (NII): The region of interest as a 3D NIfTI image.
+    vert_id (int): The vertebra identifier.
+    bb (tuple[slice, slice, slice] | None): Bounding box constraints.
+    normal_vector_points (tuple[Location, Location] | DIRECTIONS, optional):
+        Two locations defining the normal vector or a predefined direction. Default is "R".
+    start_point (Location | np.ndarray, optional):
+        The starting location or coordinate of the ray. Default is Location.Vertebra_Corpus.
+    log (Logger_Interface, optional): Logger instance for error handling. Default is _log.
+    acc_delta (float, optional): The accuracy threshold for bisection search. Default is 0.00005.
+
+    Returns:
+    np.ndarray: The exit coordinate of the ray within the region.
+    """
     start_point_np = to_local_np(start_point, bb, poi, vert_id, log) if isinstance(start_point, Location) else start_point
     if start_point_np is None:
         return None
