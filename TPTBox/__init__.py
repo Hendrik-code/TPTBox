@@ -21,6 +21,7 @@ from TPTBox.core.nii_wrapper import (
     to_nii_interpolateable,
     to_nii_optional,
     to_nii_seg,
+    Has_Grid,
 )
 from TPTBox.core.poi import AX_CODES, POI, POI_Reference, calc_centroids, calc_poi_from_subreg_vert
 from TPTBox.core.poi import calc_poi_from_two_segs

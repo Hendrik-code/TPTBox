@@ -209,17 +209,21 @@ class Deformable_Registration:
         """
         return self.transform_nii(*args, **kwds)
 
+    def get_dump(self):
+        return (self.transform, self.target_grid, self.input_grid, self.align_corners)
+
     def save(self, path: str | Path):
         with open(path, "wb") as w:
-            pickle.dump(
-                (self.transform, self.target_grid, self.input_grid, self.align_corners),
-                w,
-            )
+            pickle.dump(self.get_dump(), w)
 
     @classmethod
     def load(cls, path):
         with open(path, "rb") as w:
-            transform, grid, mov, align_corners = pickle.load(w)
+            return cls.load_(pickle.load(w))
+
+    @classmethod
+    def load_(cls, w):
+        transform, grid, mov, align_corners = w
         self = cls.__new__(cls)
         self.transform = transform
         self.target_grid = grid

@@ -234,8 +234,7 @@ class NII(NII_Math):
             raise KeyError(f"Missing expected header field: {e}") from None
         ref_orientation = header.get("ref_orientation")
         for i in ["ref_orientation","dimension","space directions","space origin""space","type","endian"]:
-            if i in header :
-                del header[i]
+            header.pop(i, None)
         for key in list(header.keys()):
             if "_Extent" in key:
                 del header[key]
@@ -1427,6 +1426,27 @@ class NII(NII_Math):
         assert self.seg and mask_other.seg
         return np_calc_overlapping_labels(self.get_seg_array(), mask_other.get_seg_array())
 
+    def is_segmentation_in_border(self,minimum=0, voxel_tolerance: int = 2,use_mm=False):
+        """
+        Checks if the segmentation is touching the border of the image volume.
+
+        Parameters:
+        - minimum (int, optional): Minimum intensity threshold for segmentation. Defaults to 0.
+        - voxel_tolerance (int, optional): Number of voxels allowed as tolerance from the border. Defaults to 2.
+        - use_mm (bool, optional): Whether to use millimeter units instead of voxels. Defaults to False.
+
+        Returns:
+        - bool: True if the segmentation is within the defined voxel tolerance of the border, False otherwise.
+        """
+        slices = self.compute_crop(minimum,dist=0,use_mm=use_mm)
+        shp = self.shape
+        seg_at_border = False
+        for d in range(3):
+            if slices[d].start <= voxel_tolerance or slices[d].stop - 1 >= shp[d] - voxel_tolerance:
+                seg_at_border = True
+                break
+        return seg_at_border
+
     def truncate_labels_beyond_reference_(
         self, idx: int | list[int] = 1, not_beyond: int | list[int] = 1, fill: int = 0,  axis: DIRECTIONS = "S", inclusion: bool = False, inplace: bool = True
     ):
@@ -1618,8 +1638,7 @@ class NII(NII_Math):
             'encoding': 'gzip',
             **_header,**self.info
         }
-        if "Segmentation_ConversionParameters" in header:
-            del header["Segmentation_ConversionParameters"]
+        header.pop("Segmentation_ConversionParameters", None)
         # Save NRRD file
 
         log.print(f"Saveing {file}",verbose=verbose,ltype=Log_Type.SAVE,end='\r')
