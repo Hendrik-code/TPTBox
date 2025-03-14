@@ -102,7 +102,7 @@ class Has_Grid(Grid_Proxy):
 
     def assert_affine(
         self,
-        other: Self | NII | POI | None = None,
+        other: Self | Has_Grid | None = None,
         ignore_missing_values: bool = False,
         affine: AFFINE | None = None,
         zoom: ZOOMS | None = None,
@@ -120,7 +120,7 @@ class Has_Grid(Grid_Proxy):
         """Checks if the different metadata is equal to some comparison entries
 
         Args:
-            other (Self | POI | None, optional): If set, will assert each entry of that object instead. Defaults to None.
+            other (Has_Grid | None, optional): If set, will assert each entry of that object instead. Defaults to None.
             affine (AFFINE | None, optional): Affine matrix to compare against. If none, will not assert affine. Defaults to None.
             zms (Zooms | None, optional): Zoom to compare against. If none, will not assert zoom. Defaults to None.
             orientation (Ax_Codes | None, optional): Orientation to compare against. If none, will not assert orientation. Defaults to None.
@@ -250,7 +250,12 @@ class Has_Grid(Grid_Proxy):
         from TPTBox import POI
 
         p = {} if points is None else points
-        return POI(p, orientation=self.orientation, zoom=self.zoom, shape=self.shape, rotation=self.rotation, origin=self.origin)
+        args = {}
+        if isinstance(self, POI):
+            args["level_one_info"] = self.level_one_info
+            args["level_two_info"] = self.level_two_info
+
+        return POI(p, orientation=self.orientation, zoom=self.zoom, shape=self.shape, rotation=self.rotation, origin=self.origin, **args)
 
     def make_empty_nii(self, seg=False, _arr=None):
         from TPTBox import NII
@@ -258,13 +263,13 @@ class Has_Grid(Grid_Proxy):
         if _arr is None:
             _arr = np.zeros(self.shape_int)
         else:
-            assert (
-                _arr.shape == self.shape_int
-            ), f"Expected the correct shape for generating a image from Grid; Got {_arr.shape}, expected {self.shape_int}"
+            assert _arr.shape == self.shape_int, (
+                f"Expected the correct shape for generating a image from Grid; Got {_arr.shape}, expected {self.shape_int}"
+            )
         nii = nib.Nifti1Image(_arr, affine=self.affine)
         return NII(nii, seg=seg)
 
-    def make_nii(self, arr: np.ndarray, seg=False):
+    def make_nii(self, arr: np.ndarray | None = None, seg=False):
         """Make a nii with the same grid as object. Shape must fit the Grid.
 
         Args:
@@ -274,6 +279,8 @@ class Has_Grid(Grid_Proxy):
         Returns:
             NII
         """
+        if arr is None:
+            arr = np.zeros(self.shape_int)
         return self.make_empty_nii(_arr=arr, seg=seg)
 
     def global_to_local(self, x: COORDINATE):
