@@ -33,8 +33,7 @@ def np_extract_label(
     arr: np.ndarray,
     label: int | list[int],
     to_label: int = 1,
-    use_crop: bool = False,
-    inplace: bool = True,
+    inplace: bool = False,
 ) -> np.ndarray:
     """Extracts a label from an given arr (works with zero as well!)
 
@@ -47,31 +46,24 @@ def np_extract_label(
     Returns:
         np.ndarray: _description_
     """
+    if isinstance(label, int) and to_label == 1 and not inplace:
+        return arr == label
+
     if to_label == 0:
         warnings.warn("np_extract_label: to_label is zero, this can have unforeseen consequences!", UserWarning, stacklevel=4)
     if not inplace:
         arr = arr.copy()
 
-    if use_crop:
-        crop = np_bbox_binary(arr, px_dist=1)
-        arrc = arr[crop]
-    else:
-        arrc = arr
-
     if isinstance(label, list):
         assert 0 not in label, "label 0 is not supported in list mode"
-        arr_msk = np.isin(arrc, label)
-        arrc[arr_msk] = to_label
-        arrc[~arr_msk] = 0
-        if use_crop:
-            arr[crop] = arrc
+        arr_msk = np.isin(arr, label)
+        arr[arr_msk] = to_label
+        arr[~arr_msk] = 0
         return arr
 
     if label != 0:
-        arrc[arr != label] = 0
-        arrc[arr == label] = to_label
-        if use_crop:
-            arr[crop] = arrc
+        arr[arr != label] = 0
+        arr[arr == label] = to_label
         return arr
     # label == 0
     arr[arr != 0] = to_label + 1
@@ -102,6 +94,25 @@ def np_volume(arr: UINTARRAY, include_zero: bool = False) -> dict[int, int]:
         return {idx: i for idx, i in dict(enumerate(cc3dstatistics(arr, use_crop=False)["voxel_counts"])).items() if i > 0}
     else:
         return {idx: i for idx, i in dict(enumerate(cc3dstatistics(arr)["voxel_counts"])).items() if i > 0 and idx != 0}
+
+
+def np_is_empty(arr: UINTARRAY | INTARRAY) -> bool:
+    """Returns true if the array is empty (only zeros)
+
+    Args:
+        arr (UINTARRAY): input uint array
+
+    Returns:
+        bool: True if array is empty
+
+    #### ON UINT:
+    #### is faster than np_count_nonzero(arr) > 0
+    #### is faster than arr.max() == 0
+    #### is faster than arr.nonzero()[0].size == 0
+    #### ON INT: arr.max() == 0 is faster
+    #### arr.max() best compromise between INT and UINT and shape
+    """
+    return arr.max() == 0
 
 
 def np_count_nonzero(arr: np.ndarray) -> int:
@@ -502,7 +513,7 @@ def np_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 
         list of boundary coordinates as slices tuple
     """
     assert img is not None, "bbox_nd: received None as image"
-    assert np_count_nonzero(img) > 0, "bbox_nd: img is empty, cannot calculate a bbox"
+    assert not np_is_empty(img), "bbox_nd: img is empty, cannot calculate a bbox"
     n = img.ndim
     shp = img.shape
     if isinstance(px_dist, int):
@@ -684,8 +695,7 @@ def np_connected_components(
     subreg_cc = {}
     subreg_cc_n = {}
     for subreg in labels:  # type:ignore
-        img_subreg = np_extract_label(arr, subreg, inplace=False)
-        labels_out, n = connected_components(img_subreg, connectivity=connectivity, return_N=True)
+        labels_out, n = connected_components(arr == subreg, connectivity=connectivity, return_N=True)
         subreg_cc[subreg] = labels_out
         subreg_cc_n[subreg] = n
     if verbose:
@@ -846,7 +856,6 @@ def np_fill_holes(
     arr: np.ndarray,
     label_ref: LABEL_REFERENCE = None,
     slice_wise_dim: int | None = None,
-    use_crop: bool = True,
 ) -> np.ndarray:
     """Fills holes in segmentations
 
@@ -862,20 +871,13 @@ def np_fill_holes(
     assert arr.ndim == 3 or slice_wise_dim is None, "slice_wise_dim set but array is 3D"
     labels: Sequence[int] = _to_labels(arr, label_ref)
 
-    if use_crop:
-        gcrop = np_bbox_binary(arr, px_dist=1)
-        arrc = arr[gcrop]
-    else:
-        arrc = arr
+    gcrop = np_bbox_binary(arr, px_dist=1)
+    arrc = arr[gcrop]
 
     for l in labels:  # type:ignore
-        arr_l = arrc.copy()
-        arr_l = np_extract_label(arr_l, l)
-        if use_crop:
-            crop = np_bbox_binary(arr_l, px_dist=1)
-            arr_lc = arr_l[crop]
-        else:
-            arr_lc = arr_l
+        arr_l = np_extract_label(arrc, l)
+        crop = np_bbox_binary(arr_l, px_dist=1)
+        arr_lc = arr_l[crop]
         if slice_wise_dim is None:
             filled = fill(arr_lc).astype(arr.dtype)
         else:
@@ -884,13 +886,9 @@ def np_fill_holes(
             filled = np.stack([fill(x) for x in filled])
             filled = np.swapaxes(filled, 0, slice_wise_dim)
         filled[filled != 0] = l
-        if use_crop:
-            arrc[crop][arrc[crop] == 0] = filled[arrc[crop] == 0]
-        else:
-            arrc[arrc == 0] = filled[arrc == 0]
+        arrc[crop][arrc[crop] == 0] = filled[arrc[crop] == 0]
 
-    if use_crop:
-        arr[gcrop] = arrc
+    arr[gcrop] = arrc
     return arr
 
 
@@ -945,7 +943,7 @@ def np_smooth_gaussian_labelwise(
     sem_labels_plus_background = sem_labels.copy()
     sem_labels_plus_background.append(0)
     for l in sem_labels_plus_background[:-1]:
-        arr_l = np_extract_label(arr.copy(), l).astype(float)
+        arr_l = (arr == l).astype(float)
         if l in label_to_smooth:
             arr_l = gaussian_filter(
                 arr_l,
@@ -959,13 +957,10 @@ def np_smooth_gaussian_labelwise(
         smoothed_arrs.append(arr_l)
 
     # background
-    arr_bg = arr.copy()
-    arr_bg[arr_bg > 0] = 2
-    arr_bg[arr_bg == 0] = 1
-    arr_bg[arr_bg == 2] = 0
+    arr_bg = np_extract_label(arr, label=0, inplace=False).astype(float)
     if smooth_background:
         arr_bg = gaussian_filter(
-            arr_bg.astype(float),
+            arr_bg,
             sigma=sigma,
             mode=boundary_mode,
             truncate=truncate,
@@ -1006,7 +1001,7 @@ def np_calc_convex_hull(
         h = arr * 0
         for i in range(arr.shape[axis]):
             slices = _select_axis_dynamically(axis=axis, index=i, n_dims=n_dims)
-            if np.count_nonzero(arr[slices]) == 0:
+            if np_is_empty(arr[slices]):
                 continue
             try:
                 convex_hull_slice = _convex_hull(arr[slices], verbose=verbose)[0].astype(arr.dtype)
@@ -1261,17 +1256,8 @@ def np_map_labels_based_on_majority_label_mask_overlap(
 
     label_list: list[int] = [l for l in np_unique(arr) if l in labels]
     for l in label_list:
-        arr_l = np_extract_label(arr, l)
-        if dilate_pixel > 0:
-            arr_ld = arr_l.copy()
-            arr_ld = np_dilate_msk(
-                arr_ld,
-                n_pixel=dilate_pixel,
-                label_ref=1,
-                connectivity=3,
-            )
-        else:
-            arr_ld = arr_l
+        arr_l = np_extract_label(arr, l, inplace=False)
+        arr_ld = np_dilate_msk(arr_l, n_pixel=dilate_pixel, label_ref=1, connectivity=3) if dilate_pixel > 0 else arr_l
 
         mult = label_mask * arr_ld
         labels, count = np.unique(mult, return_counts=True)
