@@ -985,6 +985,7 @@ def load_poi(ctd_path: POI_Reference, verbose=True) -> POI:  # noqa: ARG001
         AssertionError: If `ctd_path` is not a recognized type.
 
     """
+    ### Check Datatype ###
     if isinstance(ctd_path, POI):
         return ctd_path
     elif isinstance(ctd_path, bids_files.BIDS_FILE):
@@ -1000,10 +1001,13 @@ def load_poi(ctd_path: POI_Reference, verbose=True) -> POI:  # noqa: ARG001
         return calc_poi_from_subreg_vert(vert, subreg, subreg_id=ids)
     else:
         raise TypeError(f"{type(ctd_path)}\n{ctd_path}")
-    ### format_POI_old has no META header
+    ### New Spine_r has a dict instead of a dict list. ###
+    if isinstance(dict_list, dict):
+        return _load_form_POI_spine_r2(dict_list)
+    ### format_POI_old has no META header ###
     if "direction" not in dict_list[0] and "vert_label" in dict_list[0]:
         return _load_format_POI_old(dict_list)  # This file if used in the old POI-pipeline and is deprecated
-
+    ### Ours ###
     assert "direction" in dict_list[0], f'File format error: first index must be a "Direction" but got {dict_list[0]}'
     axcode: AX_CODES = tuple(dict_list[0]["direction"])  # type: ignore
     zoom: ZOOMS = dict_list[0].get("zoom", None)  # type: ignore
@@ -1087,6 +1091,29 @@ def _load_format_POI_old(dict_list):
             t = tuple(float(x) for x in t)
             centroids[vert_id, sub_id] = t
     return POI(centroids, orientation=("R", "P", "I"), zoom=(1, 1, 1), shape=None, format=FORMAT_OLD_POI, rotation=None)  # type: ignore
+
+
+def _load_form_POI_spine_r2(data: dict):
+    orientation = None
+    centroids = POI_Descriptor()
+    for d in data["centroids"]["centroids"]:
+        if "direction" in d:
+            orientation = d["direction"]
+            continue
+        centroids[d["label"], 50] = (d["X"], d["Y"], d["Z"])
+    zoom = data.get("Spacing")
+    shape = data.get("Shape")
+    rotation = data.get("Rotation")  # Does not exist
+    origin = data.get("Origin")  # Does not exist
+    return POI(
+        centroids,
+        orientation=orientation,  # type: ignore
+        zoom=zoom,  # type: ignore
+        shape=shape,  # type: ignore
+        info=data,
+        rotation=rotation,  # type: ignore
+        origin=origin,  # type: ignore
+    )
 
 
 def _load_POI_centroids(

@@ -29,9 +29,11 @@ WEIGHTS_URL_ = "https://github.com/robert-graf/TotalVibeSegmentator/releases/dow
 env_name = "TOTALVIBE_WEIGHTS_PATH"
 
 
-def get_weights_dir(idx) -> Path:
+def get_weights_dir(idx, model_path: Path | None = None) -> Path:
     if env_name in os.environ:
         weights_dir: Path = Path(os.environ[env_name])
+    elif model_path is not None and model_path.exists():
+        weights_dir = model_path
     else:
         assert Path(__file__).parent.name == "TotalVibeSeg", Path(__file__).parent
 
@@ -98,8 +100,8 @@ def _download(weights_url, weights_dir, text="") -> None:
     os.remove(zip_path)  # noqa: PTH107
 
 
-def download_weights(idx) -> Path:
-    weights_dir = get_weights_dir(idx)
+def download_weights(idx, model_path: Path | None = None) -> Path:
+    weights_dir = get_weights_dir(idx, model_path)
 
     # Check if weights are downloaded
     if not weights_dir.exists():

@@ -15,8 +15,10 @@ sacrum_w_o_arcus = (Vertebra_Instance.COCC.value, Vertebra_Instance.S6.value, Ve
 sacrum_w_o_direction = (Vertebra_Instance.COCC.value,)
 
 
-def to_local_np(loc: Location, bb: tuple[slice, slice, slice], poi: POI, label, log: Logger_Interface, verbose=True):
+def to_local_np(loc: Location, bb: tuple[slice, slice, slice] | None, poi: POI, label, log: Logger_Interface, verbose=True):
     if (label, loc.value) in poi:
+        if bb is None:
+            return np.asarray(poi[label, loc.value])
         return np.asarray([a - b.start for a, b in zip_strict(poi[label, loc.value], bb)])
     if verbose:
         log.on_fail(f"region={label},subregion={loc.value} is missing")
@@ -67,7 +69,7 @@ def timing(f):
         ts = time()
         result = f(*args, **kw)
         te = time()
-        _log.on_neutral(f"func:{f.__name__!r} took: {te-ts:2.4f} sec")
+        _log.on_neutral(f"func:{f.__name__!r} took: {te - ts:2.4f} sec")
         return result
 
     return wrap
