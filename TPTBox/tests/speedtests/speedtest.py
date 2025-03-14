@@ -6,11 +6,13 @@ from time import perf_counter
 
 import numpy as np
 from tqdm import tqdm
+import random
 
 
 def speed_test_input(inp, functions: list[Callable], assert_equal_function: Callable | None = None, *args, **kwargs):
     time_measures = {}
     outs = {}
+    random.shuffle(functions)
     for f in functions:
         start = perf_counter()
         input_copy = deepcopy(inp)
@@ -55,5 +57,8 @@ def speed_test(
                 time_sums[k] = []
             time_sums[k].append(v)
 
-    for k, v in time_sums.items():
-        print(k, "\t", round(sum(v) / repeats, ndigits=6), "+-", round(np.std(v), ndigits=6))
+    times_sorted = dict(sorted(time_sums.items(), key=lambda x: sum(x[1]) / repeats))
+    for idx, (k, v) in enumerate(times_sorted.items()):
+        print(idx + 1, round(sum(v) / repeats, ndigits=6), "+-", round(np.std(v), ndigits=6), "\t", k)
+    # for k, v in time_sums.items():
+    #    print(k, "\t", round(sum(v) / repeats, ndigits=6), "+-", round(np.std(v), ndigits=6))
