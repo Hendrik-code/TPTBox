@@ -74,10 +74,13 @@ def np_extract_label(
 
 def cc3dstatistics(arr: UINTARRAY, use_crop: bool = True) -> dict:
     assert np.issubdtype(arr.dtype, np.unsignedinteger), f"cc3dstatistics expects uint type, got {arr.dtype}"
-    if use_crop:
-        crop = np_bbox_binary(arr)
-        arrc = arr[crop]
-        return _cc3dstats(arrc)
+    try:
+        if use_crop:
+            crop = np_bbox_binary(arr, raise_error=False, px_dist=2)
+            arrc = arr[crop]
+            return _cc3dstats(arrc)
+    except ValueError as e:
+        print(e)
     return _cc3dstats(arr)
 
 
@@ -314,10 +317,7 @@ def np_dilate_msk(
         # try:
         arr_bin = arr.copy()
         arr_bin[np.isin(arr_bin, labels, invert=True)] = 0
-        try:
-            crop = np_bbox_binary(arr_bin, px_dist=1 + n_pixel)
-        except AssertionError:
-            crop = tuple([slice(None)] * arr.ndim)
+        crop = np_bbox_binary(arr_bin, px_dist=1 + n_pixel, raise_error=False)
         arrc = arr[crop]
     else:
         arrc = arr
@@ -340,10 +340,7 @@ def np_dilate_msk(
             data = out.copy()
             data[i != data] = 0
             if use_crop:
-                try:
-                    lcrop = np_bbox_binary(data, px_dist=2)
-                except AssertionError:
-                    continue
+                lcrop = np_bbox_binary(data, px_dist=2, raise_error=False)
                 data = data[lcrop]
             msk_ibe_data = _binary_dilation(data, struct=struct)
 
@@ -390,10 +387,7 @@ def np_erode_msk(
         # try:
         arr_bin = arr.copy()
         arr_bin[np.isin(arr_bin, labels, invert=True)] = 0
-        try:
-            crop = np_bbox_binary(arr_bin, px_dist=1 + n_pixel)
-        except AssertionError:
-            crop = tuple([slice(None)] * arr.ndim)
+        crop = np_bbox_binary(arr_bin, px_dist=1 + n_pixel, raise_error=False)
         arrc = arr[crop]
     else:
         arrc = arr
@@ -411,10 +405,7 @@ def np_erode_msk(
         data = msk_i_data.copy()
         data[i != data] = 0
         if use_crop:
-            try:
-                lcrop = np_bbox_binary(data, px_dist=1)
-            except AssertionError:
-                continue
+            lcrop = np_bbox_binary(data, px_dist=1, raise_error=False)
             data = data[lcrop]
         msk_ibe_data = binary_erosion(data, structure=struct, iterations=n_pixel, border_value=border_value)
         data[~msk_ibe_data] = 0  # type: ignore
@@ -502,7 +493,7 @@ def np_calc_crop_around_centerpoint(
     )
 
 
-def np_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 0) -> tuple[slice, ...]:
+def np_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 0, raise_error=True) -> tuple[slice, ...]:
     """calculates a bounding box in n dimensions given a image (factor ~2 times faster than compute_crop)
 
     Args:
@@ -513,7 +504,11 @@ def np_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 
         list of boundary coordinates as slices tuple
     """
     assert img is not None, "bbox_nd: received None as image"
-    assert not np_is_empty(img), "bbox_nd: img is empty, cannot calculate a bbox"
+    if np_is_empty(img):
+        if raise_error:
+            assert AssertionError("bbox_nd: img is empty, cannot calculate a bbox")
+        return tuple([slice(None)] * img.ndim)
+
     n = img.ndim
     shp = img.shape
     if isinstance(px_dist, int):
@@ -561,14 +556,6 @@ def np_center_of_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.
         # print(i, size_t)
         ctd_bbox.append(bbox_nd[i].start + (size_t // 2))
     return ctd_bbox
-
-
-def np_approx_center_of_mass(seg: np.ndarray, label_ref: LABEL_REFERENCE = None) -> dict[int, COORDINATE]:
-    import warnings
-
-    warnings.warn("np_approx_center_of_mass deprecated use np_center_of_mass instead", stacklevel=3)  # TODO remove in version 1.0
-    assert label_ref is None, "the new function does not need a label_ref"
-    return np_center_of_mass(seg)
 
 
 def _np_get_min_max_pad(pos: int, img_size: int, cutout_size: int, add_pad_size: int = 0) -> tuple[int, int, int, int]:
@@ -714,6 +701,8 @@ def np_get_largest_k_connected_components(
     return_original_labels: bool = True,
     min_volume: float = 0,
     max_volume: float | None = None,
+    removed_to_label=0,
+    _return_unsorted=False,
 ) -> UINTARRAY:
     """finds the largest k connected components in a given array (does NOT work with zero as label!)
 
@@ -741,6 +730,8 @@ def np_get_largest_k_connected_components(
     arr2[np.isin(arr, labels, invert=True)] = 0  # type:ignore
 
     labels_out, n = connected_components(arr2, connectivity=connectivity, return_N=True)
+    if _return_unsorted:
+        return labels_out
     if k is None:
         k = n
     k = min(k, n)  # if k > N, will return all N but still sorted
@@ -760,7 +751,8 @@ def np_get_largest_k_connected_components(
         if k == i:
             break
         i += 1
-
+    if removed_to_label != 0:
+        arr[np.logical_and(labels_out != 0, arr == 0)] = removed_to_label
     if return_original_labels:
         arr *= cc_out > 0  # to get original labels
         return arr
@@ -856,6 +848,8 @@ def np_fill_holes(
     arr: np.ndarray,
     label_ref: LABEL_REFERENCE = None,
     slice_wise_dim: int | None = None,
+    use_crop: bool = True,
+    pbar: bool = False,
 ) -> np.ndarray:
     """Fills holes in segmentations
 
@@ -871,13 +865,23 @@ def np_fill_holes(
     assert arr.ndim == 3 or slice_wise_dim is None, "slice_wise_dim set but array is 3D"
     labels: Sequence[int] = _to_labels(arr, label_ref)
 
-    gcrop = np_bbox_binary(arr, px_dist=1)
-    arrc = arr[gcrop]
+    if use_crop:
+        gcrop = np_bbox_binary(arr, px_dist=1, raise_error=False)
+        arrc = arr[gcrop]
+    else:
+        arrc = arr
+    if pbar:
+        from tqdm import tqdm
 
+        labels = tqdm(labels, desc="fill_holes")  # type: ignore
     for l in labels:  # type:ignore
-        arr_l = np_extract_label(arrc, l)
-        crop = np_bbox_binary(arr_l, px_dist=1)
-        arr_lc = arr_l[crop]
+        arr_l = arrc.copy()
+        arr_l = np_extract_label(arr_l, l)
+        if use_crop:
+            crop = np_bbox_binary(arr_l, px_dist=1, raise_error=False)
+            arr_lc = arr_l[crop]
+        else:
+            arr_lc = arr_l
         if slice_wise_dim is None:
             filled = fill(arr_lc).astype(arr.dtype)
         else:

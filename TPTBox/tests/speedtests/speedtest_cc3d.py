@@ -10,7 +10,6 @@ if __name__ == "__main__":
 
     from TPTBox.core.np_utils import (
         _to_labels,
-        np_approx_center_of_mass,
         np_bbox_binary,
         np_bounding_boxes,
         np_center_of_mass,
