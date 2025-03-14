@@ -36,7 +36,7 @@ class POI_Global(Abstract_POI):
             local_poi = input_poi.copy()
             global_points = poi.POI_Descriptor(definition=local_poi.centroids.definition)
             for k1, k2, v in local_poi.items():
-                global_points[k1:k2] = local_poi.local_to_global(v)
+                global_points[k1:k2] = local_poi.local_to_global(v, itk_coords)
             self.info = input_poi.info.copy()
             self.format = input_poi.format
         else:
@@ -87,6 +87,12 @@ class POI_Global(Abstract_POI):
             poi.POI: The converted POI.
         """
         return self.to_other(poi.POI.load(ref))
+
+    def to_global(self):
+        return self
+
+    def resample_from_to(self, msk: Has_Grid):
+        return self.to_other(msk)
 
     def to_other(self, msk: Has_Grid, verbose=False) -> poi.POI:
         """
