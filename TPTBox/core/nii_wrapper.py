@@ -21,6 +21,7 @@ from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.nii_wrapper_math import NII_Math
 from TPTBox.core.np_utils import (
     _pad_to_parameters,
+    np_is_empty,
     np_calc_boundary_mask,
     np_calc_convex_hull,
     np_calc_overlapping_labels,
@@ -865,6 +866,15 @@ class NII(NII_Math):
             return self.copy(nii)
     def resample_from_to_(self, to_vox_map:Image_Reference|Has_Grid|tuple[SHAPE,AFFINE,ZOOMS], mode:MODES='nearest', c_val:float|None=None,verbose:logging=True,aline_corners=False):
         return self.resample_from_to(to_vox_map,mode=mode,c_val=c_val,inplace=True,verbose=verbose,align_corners=aline_corners)
+
+    @property
+    def is_empty(self) -> bool:
+        """Checks if the array in the nifti is empty
+
+        Returns:
+            bool: Whether the nifti is empty or not
+        """
+        return np_is_empty(self.get_array())
 
     def n4_bias_field_correction(
         self,
@@ -1716,7 +1726,6 @@ class NII(NII_Math):
         arr_bg = np_extract_label(arr_bg, label=0, to_label=1)
         return self.set_array(arr_bg, inplace, False)
 
-
     def extract_label(self,label:int|Enum|Sequence[int]|Sequence[Enum], keep_label=False,inplace=False):
         '''If this NII is a segmentation you can single out one label with [0,1].'''
         assert self.seg, "extracting a label only makes sense for a segmentation mask"
@@ -1724,6 +1733,7 @@ class NII(NII_Math):
 
         if isinstance(label, Sequence):
             label_int:list[int] = [idx.value if isinstance(idx,Enum) else idx for idx in label]
+            assert 0 not in label_int, 'Zero label does not make sense. This is the background'
             if 1 not in label_int:
                 seg_arr[seg_arr == 1] = 0
             for idx in label_int:
