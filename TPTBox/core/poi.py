@@ -234,7 +234,7 @@ class POI(Abstract_POI):
             format=self.format,
         )
 
-    def local_to_global(self, x: COORDINATE) -> COORDINATE:
+    def local_to_global(self, x: COORDINATE, itk_coords=False) -> COORDINATE:
         """Converts local coordinates to global coordinates using zoom, rotation, and origin.
 
         Args:
@@ -262,6 +262,8 @@ class POI(Abstract_POI):
         assert self.origin is not None, "Attribute 'origin' must be set before calling local_to_global."
 
         a = self.rotation @ (np.array(x) * np.array(self.zoom)) + self.origin
+        if itk_coords:
+            a = (-a[0], -a[1], a[2])
         # return tuple(a.tolist())
         return tuple(round(float(v), ROUNDING_LVL) for v in a)
 
@@ -566,7 +568,7 @@ class POI(Abstract_POI):
     def rescale_(self, voxel_spacing: ZOOMS = (1, 1, 1), decimals=3, verbose: logging = False) -> Self:
         return self.rescale(voxel_spacing=voxel_spacing, decimals=decimals, verbose=verbose, inplace=True)
 
-    def to_global(self):
+    def to_global(self, itk_coords=False):
         """Converts the Centroids object to a global POI_Global object.
 
         This method converts the local POI coordinates to global coordinates using the Centroids' zoom,
@@ -581,7 +583,7 @@ class POI(Abstract_POI):
         """
         import TPTBox.core.poi_fun.poi_global as pg
 
-        return pg.POI_Global(self)
+        return pg.POI_Global(self, itk_coords=itk_coords)
 
     def resample_from_to(self, ref: Has_Grid):
         return self.to_global().to_other(ref)
@@ -773,111 +775,6 @@ class POI(Abstract_POI):
             reference.assert_affine(poi_obj)
         return poi_obj
 
-    def assert_affine(
-        self,
-        other: Self | NII | None = None,
-        ignore_missing_values: bool = False,
-        affine: AFFINE | None = None,
-        zoom: ZOOMS | None = None,
-        orientation: AX_CODES | None = None,
-        rotation: ROTATION | None = None,
-        origin: ORIGIN | None = None,
-        shape: SHAPE | None = None,
-        shape_tolerance: float = 0.0,
-        origin_tolerance: float = 0.0,
-        error_tolerance: float = 1e-4,
-        raise_error: bool = True,
-        verbose: logging = False,
-        text="",
-    ):
-        """Checks if the different metadata is equal to some comparison entries
-
-        Args:
-            other (Self | POI | None, optional): If set, will assert each entry of that object instead. Defaults to None.
-            affine (AFFINE | None, optional): Affine matrix to compare against. If none, will not assert affine. Defaults to None.
-            zms (Zooms | None, optional): Zoom to compare against. If none, will not assert zoom. Defaults to None.
-            orientation (Ax_Codes | None, optional): Orientation to compare against. If none, will not assert orientation. Defaults to None.
-            origin (ORIGIN | None, optional): Origin to compare against. If none, will not assert origin. Defaults to None.
-            shape (SHAPE | None, optional): Shape to compare against. If none, will not assert shape. Defaults to None.
-            shape_tolerance (float, optional): error tolerance in shape as float, as POIs can have float shapes. Defaults to 0.0.
-            error_tolerance (float, optional): Accepted error tolerance in all assertions except shape. Defaults to 1e-4.
-            raise_error (bool, optional): If true, will raise AssertionError if anything is found. Defaults to True.
-            verbose (logging, optional): If true, will print out each assertion mismatch. Defaults to False.
-
-        Raises:
-            AssertionError: If any of the assertions failed and raise_error is True
-
-        Returns:
-            bool: True if there are no assertion errors
-        """
-        found_errors: list[str] = []
-
-        # Make Checks
-        if other is not None:
-            other_data = other._extract_affine()
-            other_match = self.assert_affine(
-                other=None,
-                **other_data,
-                raise_error=raise_error,
-                shape_tolerance=shape_tolerance,
-                error_tolerance=error_tolerance,
-                origin_tolerance=origin_tolerance,
-            )
-            if not other_match:
-                found_errors.append(f"object mismatch {self!s}, {other!s}")
-        if affine is not None and (not ignore_missing_values or self.affine is not None):
-            if self.affine is None:
-                found_errors.append(f"affine mismatch {self.affine}, {affine}")
-            else:
-                affine_diff = self.affine - affine
-                affine_match = np.all([abs(a) <= error_tolerance for a in affine_diff.flatten()])
-                found_errors.append(f"affine mismatch {self.affine}, {affine}") if not affine_match else None
-        if rotation is not None and (not ignore_missing_values or self.rotation is not None):
-            if self.rotation is None:
-                found_errors.append(f"rotation mismatch {self.rotation}, {rotation}")
-            else:
-                rotation_diff = self.rotation - rotation
-                rotation_match = np.all([abs(a) <= error_tolerance for a in rotation_diff.flatten()])
-                found_errors.append(f"rotation mismatch {self.rotation}, {rotation}") if not rotation_match else None
-        if zoom is not None and (not ignore_missing_values or self.zoom is not None):
-            if self.zoom is None:
-                found_errors.append(f"zoom mismatch {self.zoom}, {zoom}")
-            else:
-                zms_diff = (self.zoom[i] - zoom[i] for i in range(3))
-                zms_match = np.all([abs(a) <= error_tolerance for a in zms_diff])
-                found_errors.append(f"zoom mismatch {self.zoom}, {zoom}") if not zms_match else None
-        if orientation is not None and (not ignore_missing_values or self.affine is not None):
-            if self.orientation is None:
-                found_errors.append(f"orientation mismatch {self.orientation}, {orientation}")
-            else:
-                orientation_match = np.all([i == orientation[idx] for idx, i in enumerate(self.orientation)])
-                found_errors.append(f"orientation mismatch {self.orientation}, {orientation}") if not orientation_match else None
-        if origin is not None and (not ignore_missing_values or self.origin is not None):
-            if self.origin is None:
-                found_errors.append(f"origin mismatch {self.origin}, {origin}")
-            else:
-                origin_diff = (self.origin[i] - origin[i] for i in range(3))
-                origin_match = np.all([abs(a) <= origin_tolerance for a in origin_diff])
-                found_errors.append(f"origin mismatch {self.origin}, {origin}") if not origin_match else None
-        if shape is not None and (not ignore_missing_values or self.shape is not None):
-            if self.shape is None:
-                found_errors.append(f"shape mismatch {self.shape}, {shape}")
-            else:
-                shape_diff = (float(self.shape[i]) - float(shape[i]) for i in range(3))
-                shape_match = np.all([abs(a) <= shape_tolerance for a in shape_diff])
-                found_errors.append(f"shape mismatch {self.shape}, {shape}") if not shape_match else None
-
-        # Print errors
-        for err in found_errors:
-            log.print(err, Log_Type.FAIL, verbose=verbose)
-
-        # Final conclusion and possible raising of AssertionError
-        has_errors = len(found_errors) > 0
-        if raise_error and has_errors:
-            raise AssertionError(f"assert_affine failed with {text} {found_errors}")
-
-        return not has_errors
-
     def __eq__(self, value: object) -> bool:
         if not isinstance(value, POI):
             return False
@@ -943,6 +840,7 @@ def _poi_to_dict_list(ctd: POI, additional_info: dict | None, save_hint=0, verbo
             dict_list.append({"label": v, "X": x, "Y": y, "Z": z})
         elif save_hint == FORMAT_POI:
             v_name = ctd.level_one_info._get_name(vert_id, no_raise=True)
+            subreg_id = ctd.level_two_info._get_name(subreg_id, no_raise=True)  # noqa: PLW2901
             # sub_name = v_idx2name[subreg_id]
             if v_name not in temp_dict:
                 temp_dict[v_name] = {}
