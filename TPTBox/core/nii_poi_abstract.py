@@ -71,8 +71,11 @@ class Has_Grid(Grid_Proxy):
         self.zoom = value
 
     def __str__(self) -> str:
-        #origin={tuple(np.around(self.origin, decimals=2))}
-        return f"shape={self.shape},spacing={tuple(np.around(self.zoom, decimals=2))}, origin={self.origin}, ori={self.orientation}"  # type: ignore
+        try:
+            origin = {tuple(np.around(self.origin, decimals=2))}
+        except Exception:
+            origin = self.origin
+        return f"shape={self.shape},spacing={tuple(np.around(self.zoom, decimals=2))}, origin={origin}, ori={self.orientation}"  # type: ignore
 
     @property
     def affine(self):
@@ -95,8 +98,15 @@ class Has_Grid(Grid_Proxy):
         self.rotation = rotation
         self.origin = origin.tolist()
 
-    def _extract_affine(self: Has_Grid, rm_key=()):
-        out = {"zoom": self.spacing, "origin": self.origin, "shape": self.shape, "rotation": self.rotation, "orientation": self.orientation}
+    def _extract_affine(self: Has_Grid, rm_key=(), **args):
+        out = {
+            "zoom": self.spacing,
+            "origin": self.origin,
+            "shape": self.shape,
+            "rotation": self.rotation,
+            "orientation": self.orientation,
+            **args,
+        }
         for k in rm_key:
             out.pop(k)
         return out

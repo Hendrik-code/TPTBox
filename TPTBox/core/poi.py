@@ -6,6 +6,7 @@ import warnings
 from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import TypeVar, Union
 
@@ -34,6 +35,7 @@ from TPTBox.core.vert_constants import (
     TRIPLE,
     ZOOMS,
     Abstract_lvl,
+    Any,
     Location,
     Sentinel,
     Vertebra_Instance,
@@ -754,13 +756,13 @@ class POI(Abstract_POI, Has_Grid):
         return self.centroids == value2.centroids
 
 
-def _loc2int(i: int | Location):
+def _loc2int(i: int | Abstract_lvl):
     if isinstance(i, int):
         return i
     return i.value
 
 
-def _loc2int_list(i: int | Location | Sequence[int | Location]):
+def _loc2int_list(i: int | Abstract_lvl | Sequence[int | Abstract_lvl]):
     if isinstance(i, Sequence):
         return [_loc2int(j) for j in i]
     if isinstance(i, int):
@@ -769,15 +771,12 @@ def _loc2int_list(i: int | Location | Sequence[int | Location]):
 
 
 def _int2loc(
-    i: int | Location | Sequence[int | Location] | Sequence[Location] | Sequence[int],
-) -> Location | Sequence[Location]:
+    i: int | Abstract_lvl | Sequence[int | Abstract_lvl] | Sequence[Abstract_lvl] | Sequence[int],
+) -> Abstract_lvl | Sequence[Abstract_lvl]:
     if isinstance(i, Sequence):
         return [_int2loc(j) for j in i]  # type: ignore
     elif isinstance(i, int):
-        # try:
         return Location(i)
-        # except Exception:
-        #    return i
     return i
 
 
@@ -785,7 +784,7 @@ def calc_poi_from_two_segs(
     msk_reference: Image_Reference,
     subreg_reference: Image_Reference | None,
     out_path: Path | str,
-    subreg_id: int | Location | Sequence[int | Location] | None = None,
+    subreg_id: int | Abstract_lvl | Sequence[int | Abstract_lvl] | None = None,
     verbose=True,
     override=False,
     decimals=3,
@@ -902,7 +901,7 @@ def calc_poi_from_subreg_vert(
     buffer_file: str | Path | None = None,  # used by wrapper  # noqa: ARG001
     save_buffer_file=False,  # used by wrapper  # noqa: ARG001
     decimals=2,
-    subreg_id: int | Location | Sequence[int | Location] | Sequence[Location] | Sequence[int] = 50,
+    subreg_id: int | Abstract_lvl | Sequence[int | Abstract_lvl] | Sequence[Abstract_lvl] | Sequence[int] = 50,
     verbose: logging = True,
     extend_to: POI | None = None,
     # use_vertebra_special_action=True,
@@ -1037,7 +1036,7 @@ def calc_poi_from_subreg_vert(
         # print("step 6", subreg_id_int)
         compute_non_centroid_pois(
             extend_to,
-            _int2loc(list(subreg_id_int)),
+            _int2loc(list(subreg_id_int)),  # type: ignore
             vert_msk,
             subreg_msk,
             _vert_ids=_vert_ids,
@@ -1129,7 +1128,12 @@ def _is_not_yet_computed(ids_in_arr: Sequence[int], extend_to: POI | None, subre
 
 
 def calc_centroids(
-    msk: Image_Reference, decimals=3, first_stage=-1, second_stage: int | Location = 50, extend_to: POI | None = None, inplace: bool = False
+    msk: Image_Reference,
+    decimals=3,
+    first_stage: int | Abstract_lvl = -1,
+    second_stage: int | Abstract_lvl = 50,
+    extend_to: POI | None = None,
+    inplace: bool = False,
 ) -> POI:
     """
     Calculates the centroid coordinates of each region in the given mask image.
@@ -1155,8 +1159,13 @@ def calc_centroids(
         - The region label is assumed to be an integer.
         - NaN values in the binary mask are ignored.
     """
-    if isinstance(second_stage, Location):
+    args = {}
+    if isinstance(second_stage, Abstract_lvl):
         second_stage = second_stage.value
+        args["level_two_info"] = type(second_stage)
+    if isinstance(first_stage, Abstract_lvl):
+        first_stage = first_stage.value
+        args["level_one_info"] = type(first_stage)
     assert first_stage == -1 or second_stage == -1, "first or second dimension must be fixed."
     msk_nii = to_nii(msk, seg=True)
     msk_data = msk_nii.get_seg_array()
@@ -1181,7 +1190,7 @@ def calc_centroids(
             ctd_list[first_stage, int(i)] = tuple(round(x, decimals) for x in ctr_mass)
         else:
             ctd_list[int(i), second_stage] = tuple(round(x, decimals) for x in ctr_mass)
-    return POI(ctd_list, orientation=axc, **msk_nii._extract_affine(rm_key=["orientation"]))
+    return POI(ctd_list, orientation=axc, **msk_nii._extract_affine(rm_key=["orientation"]), **args)
 
 
 ######## Utility #######
