@@ -7,6 +7,7 @@ from typing_extensions import Self
 from TPTBox.core import poi
 from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.poi_fun.poi_abstract import Abstract_POI, POI_Descriptor
+from TPTBox.core.vert_constants import Abstract_lvl
 
 ###### GLOBAL POI #####
 
@@ -17,31 +18,42 @@ class POI_Global(Abstract_POI):
     Inherits from the `Abstract_POI` class and contains methods for converting the POI to different coordinate systems.
     """
 
-    def __init__(self, input_poi: poi.POI | POI_Descriptor | dict[str, dict[str, tuple[float, ...]]], itk_coords: bool = False):
+    def __init__(
+        self,
+        input_poi: poi.POI | POI_Descriptor | dict[str, dict[str, tuple[float, ...]]],
+        itk_coords: bool = False,
+        level_one_info: type[Abstract_lvl] | None = None,  # Must be Enum and must has order_dict
+        level_two_info: type[Abstract_lvl] | None = None,
+        info: dict | None = None,
+    ):
+        args = {}
+        if level_one_info is not None:
+            args["level_one_info"] = level_one_info
+        if level_one_info is not None:
+            args["level_two_info"] = level_two_info
         self.itk_coords = itk_coords
-
+        _format = poi.FORMAT_GLOBAL
         if isinstance(input_poi, dict):
             global_points = POI_Descriptor()
-            self.info = {}
-            self.format = None
             for k1, d1 in input_poi.items():
                 for k2, v in d1.items():
                     global_points[k1:k2] = v
-
-        if isinstance(input_poi, POI_Descriptor):
+        elif isinstance(input_poi, POI_Descriptor):
             global_points = input_poi
-            self.info = {}
-            self.format = None
+
         elif isinstance(input_poi, poi.POI):
             local_poi = input_poi.copy()
             global_points = poi.POI_Descriptor(definition=local_poi.centroids.definition)
             for k1, k2, v in local_poi.items():
                 global_points[k1:k2] = local_poi.local_to_global(v, itk_coords)
-            self.info = input_poi.info.copy()
-            self.format = input_poi.format
+            info = input_poi.info.copy()
+            _format = input_poi.format
         else:
-            raise NotImplementedError(input_poi)
-        self._centroids = global_points
+            raise NotImplementedError(type(input_poi))
+        if info is None:
+            info = {}
+
+        super().__init__(_centroids=global_points, format=_format, info=info, **args)
 
     def __str__(self) -> str:
         return str(self._centroids)
@@ -86,7 +98,14 @@ class POI_Global(Abstract_POI):
         Returns:
             poi.POI: The converted POI.
         """
-        return self.to_other(poi.POI.load(ref))
+        p = poi.POI.load(ref)
+        assert isinstance(p, poi.POI), "Not implemented"
+        if isinstance(p, poi.POI):
+            return self.to_other(p)
+        else:
+            assert self.itk_coords == p.itk_coords, "itk_coords not implemented"  # TODO
+            return self  # type: ignore
+            # TODO Generics ref -> output type
 
     def to_global(self):
         return self

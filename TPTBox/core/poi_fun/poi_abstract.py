@@ -32,7 +32,7 @@ MAPPING = Union[
     dict[int, Union[int, None]],
     dict[int, None],
     dict[Union[int, str], Union[int, str, None]],
-    None
+    None,
 ]
 
 DIMENSIONS = 3
@@ -291,7 +291,7 @@ class POI_Descriptor(AbstractSet, MutableMapping):
 
 
 @dataclass
-class Abstract_POI(Has_Grid):
+class Abstract_POI:
     _centroids: POI_Descriptor = field(default_factory=lambda: POI_Descriptor(), repr=False)
     centroids: POI_Descriptor = field(repr=False, hash=False, compare=False, default=None)  # type: ignore
     format: int | None = field(default=None, repr=False, compare=False)
@@ -302,7 +302,6 @@ class Abstract_POI(Has_Grid):
     def __post_init__(self):
         if not isinstance(self._centroids, POI_Descriptor):
             self._centroids = POI_Descriptor.normalize_input_data(self._centroids)
-
 
     @property
     def centroids(self) -> POI_Descriptor:
@@ -329,14 +328,12 @@ class Abstract_POI(Has_Grid):
         return self.copy(ctd)
 
     @property
-    def is_global(self) -> bool:
-        ...
+    def is_global(self) -> bool: ...
 
     def clone(self, **qargs):
         return self.copy(**qargs)
 
-    def copy(self, centroids: POI_Descriptor | None = None, **qargs) -> Self:
-        ...
+    def copy(self, centroids: POI_Descriptor | None = None, **qargs) -> Self: ...
 
     def map_labels(
         self,
