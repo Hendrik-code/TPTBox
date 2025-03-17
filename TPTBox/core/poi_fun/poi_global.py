@@ -7,6 +7,7 @@ from typing_extensions import Self
 from TPTBox.core import poi
 from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.poi_fun.poi_abstract import Abstract_POI, POI_Descriptor
+from TPTBox.core.poi_fun.save_load import FORMAT_GLOBAL
 from TPTBox.core.vert_constants import Abstract_lvl
 
 ###### GLOBAL POI #####
@@ -32,7 +33,7 @@ class POI_Global(Abstract_POI):
         if level_one_info is not None:
             args["level_two_info"] = level_two_info
         self.itk_coords = itk_coords
-        _format = poi.FORMAT_GLOBAL
+        _format = FORMAT_GLOBAL
         if isinstance(input_poi, dict):
             global_points = POI_Descriptor()
             for k1, d1 in input_poi.items():

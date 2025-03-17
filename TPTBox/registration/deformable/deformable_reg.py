@@ -236,13 +236,15 @@ class Deformable_Registration:
             return cls.load_(pickle.load(w))
 
     @classmethod
-    def load_(cls, w):
+    def load_(cls, w, gpu=0, ddevice: DEVICES = "cuda"):
         transform, grid, mov, align_corners = w
         self = cls.__new__(cls)
         self.transform = transform
         self.target_grid = grid
         self.input_grid = mov
         self.align_corners = align_corners
+        self.gpu = gpu
+        self.ddevice = ddevice
         return self
 
 
