@@ -13,7 +13,7 @@ import nibabel as nib
 import nibabel.orientations as nio
 import numpy as np
 from scipy.ndimage import center_of_mass
-from typing_extensions import Self, TypeGuard  # noqa: UP035
+from typing_extensions import TYPE_CHECKING, Self, TypeGuard  # noqa: UP035
 
 from TPTBox.core import bids_files
 from TPTBox.core.compat import zip_strict
@@ -45,6 +45,9 @@ from TPTBox.core.vert_constants import (
     v_name2idx,
 )
 from TPTBox.logger import Log_Type
+
+if TYPE_CHECKING:
+    from TPTBox import POI_Global
 
 
 ### LEGACY DEFINITIONS ###
@@ -78,7 +81,7 @@ ctd_info_blacklist = [
 
 
 @dataclass
-class POI(Abstract_POI):
+class POI(Abstract_POI, Has_Grid):
     """
     This class represents a collection of POIs used to define points of interest in medical imaging data.
 
@@ -581,15 +584,21 @@ class POI(Abstract_POI):
             >>> POI_obj = Centroids(...)
             >>> global_obj = POI_obj.to_global()
         """
-        import TPTBox.core.poi_fun.poi_global as pg
+        from TPTBox import POI_Global
 
-        return pg.POI_Global(self, itk_coords=itk_coords)
+        return POI_Global(self, itk_coords=itk_coords)
 
     def resample_from_to(self, ref: Has_Grid):
         return self.to_global().to_other(ref)
 
     def save(
-        self, out_path: Path | str, make_parents=False, additional_info: dict | None = None, verbose: logging = True, save_hint=2
+        self,
+        out_path: Path | str,
+        make_parents=False,
+        additional_info: dict | None = None,
+        save_hint=2,
+        resample_reference: Has_Grid | None = None,
+        verbose: logging = True,
     ) -> None:
         """
         Saves the POIs to a JSON file.
@@ -610,33 +619,9 @@ class POI(Abstract_POI):
             >>> POIs = Centroids(...)
             >>> POIs.save("output/POIs.json")
         """
-        _file_types = ["json"]
-        file_ending = Path(out_path).name.split(".")[-1]
-        if file_ending not in _file_types:
-            raise ValueError(f"Not supported file ending for POI: {file_ending} not in {_file_types}")
-        if make_parents:
-            Path(out_path).parent.mkdir(exist_ok=True, parents=True)
-
-        self.sort()
-        out_path = str(out_path)
-        if len(self.centroids) == 0:
-            log.print("POIs empty, not saved:", out_path, ltype=Log_Type.FAIL, verbose=verbose)
-            return
-        json_object, print_add = _poi_to_dict_list(self, additional_info, save_hint, verbose)
-
-        # Problem with python 3 and int64 serialization.
-        def convert(o):
-            if isinstance(o, np.integer):
-                return int(o)
-            if isinstance(o, np.floating):
-                return float(o)
-            if isinstance(o, np.ndarray):
-                return o.tolist()
-            raise TypeError(type(o))
-
-        with open(out_path, "w") as f:
-            json.dump(json_object, f, default=convert, indent=4)
-        log.print("POIs saved:", out_path, print_add, ltype=Log_Type.SAVE, verbose=verbose)
+        return poi_save(
+            self, out_path, make_parents, additional_info, verbose=verbose, save_hint=save_hint, resample_reference=resample_reference
+        )
 
     def make_point_cloud_nii(self, affine=None, s=8, sphere=False):
         """Create point cloud NIfTI images from the POI coordinates.
@@ -724,7 +709,7 @@ class POI(Abstract_POI):
         return self.copy(filtered_centroids)
 
     @classmethod
-    def load(cls, poi: POI_Reference, reference: Has_Grid | None = None):
+    def load(cls, poi: POI_Reference, reference: Has_Grid | None = None, allow_global=False) -> POI:
         """Load a Centroids object from various input sources.
 
         This method provides a convenient way to load a Centroids object from different sources,
@@ -762,18 +747,32 @@ class POI(Abstract_POI):
             >>> existing_poi = POI(...)
             >>> loaded_poi = POI.load(existing_poi)
         """
+        from TPTBox import POI_Global
+
         poi_obj = load_poi(poi)
         if reference is not None:
-            if poi_obj.spacing is None:
-                poi_obj.spacing = reference.spacing
-            if poi_obj.rotation is None:
-                poi_obj.rotation = reference.rotation
-            if poi_obj.shape is None:
-                poi_obj.shape = reference.shape
-            if poi_obj.origin is None:
-                poi_obj.origin = reference.origin
-            reference.assert_affine(poi_obj)
-        return poi_obj
+            if isinstance(poi_obj, POI_Global):
+                poi_obj = poi_obj.resample_from_to(reference)
+            else:
+                if poi_obj.spacing is None:
+                    poi_obj.spacing = reference.spacing
+                if poi_obj.rotation is None:
+                    poi_obj.rotation = reference.rotation
+                if poi_obj.shape is None:
+                    poi_obj.shape = reference.shape
+                if poi_obj.origin is None:
+                    poi_obj.origin = reference.origin
+                reference.assert_affine(poi_obj)
+        if isinstance(poi_obj, POI_Global) and not allow_global:
+            warnings.warn(
+                f"{poi} is a POI with global coordinates, but you loaded it with POI.load(), \n"
+                + "Use POI_Global.load() if you want to load a POI_Global \n"
+                + "Use reference=... to resample the global POI to a Grid \n"
+                + "or allow_global = True if you want allow a mix of POI and POI_Global\n",
+                UserWarning,
+                stacklevel=4,
+            )
+        return poi_obj  # type: ignore
 
     def __eq__(self, value: object) -> bool:
         if not isinstance(value, POI):
@@ -793,22 +792,43 @@ def _is_Point3D(obj) -> TypeGuard[_Point3D]:
 FORMAT_DOCKER = 0
 FORMAT_GRUBER = 1
 FORMAT_POI = 2
+FORMAT_GLOBAL = 3
 FORMAT_OLD_POI = 10
-format_key = {FORMAT_DOCKER: "docker", FORMAT_GRUBER: "guber", FORMAT_POI: "POI"}
+
+format_key = {FORMAT_DOCKER: "docker", FORMAT_GRUBER: "guber", FORMAT_POI: "POI", FORMAT_GLOBAL: "POI_GLOBAL"}
 format_key2value = {value: key for key, value in format_key.items()}
+global_spacing_name_key2value = {"itk": True, "nib": False}
+global_spacing_name = {value: key for key, value in global_spacing_name_key2value.items()}
+global_formats = (FORMAT_GLOBAL,)
 
 
-def _poi_to_dict_list(ctd: POI, additional_info: dict | None, save_hint=0, verbose: logging = False):  # noqa: C901
-    ori: dict[str, str | COORDINATE | AX_CODES] = {"direction": ctd.orientation}
-    print_out = ""
-    if ctd.zoom is not None:
-        ori["zoom"] = ctd.zoom
-    if ctd.origin is not None:
-        ori["origin"] = ctd.origin  # type: ignore
-    if ctd.rotation is not None:
-        ori["rotation"] = ctd.rotation  # type: ignore
-    if ctd.shape is not None:
-        ori["shape"] = ctd.shape  # type: ignore
+def _poi_to_dict_list(  # noqa: C901
+    ctd: POI | POI_Global, additional_info: dict | None, save_hint=0, resample_reference: Has_Grid | None = None, verbose: logging = False
+):
+    from TPTBox import POI_Global
+
+    if isinstance(ctd, POI_Global) and resample_reference is None:
+        save_hint = FORMAT_GLOBAL
+    # noqa: C901
+    if save_hint in global_formats:
+        ctd = ctd.to_global()
+        ori: dict[str, str | COORDINATE | AX_CODES] = {}
+    else:
+        if resample_reference is not None:
+            ctd = ctd.resample_from_to(resample_reference)
+        assert isinstance(ctd, POI), f"Try to save a {type(ctd)} in local coords without a resample_reverence"
+
+        ori: dict[str, str | COORDINATE | AX_CODES] = {"direction": ctd.orientation}
+        print_out = ""
+        if ctd.zoom is not None:
+            ori["zoom"] = ctd.zoom
+        if ctd.origin is not None:
+            ori["origin"] = ctd.origin  # type: ignore
+        if ctd.rotation is not None:
+            ori["rotation"] = ctd.rotation  # type: ignore
+        if ctd.shape is not None:
+            ori["shape"] = ctd.shape  # type: ignore
+
     if save_hint in format_key:
         ori["format"] = format_key[save_hint]  # type: ignore
         print_out = "in format " + format_key[save_hint]
@@ -827,6 +847,7 @@ def _poi_to_dict_list(ctd: POI, additional_info: dict | None, save_hint=0, verbo
     dict_list: list[_Orientation | (_Point3D | dict)] = [ori]
 
     if save_hint == FORMAT_OLD_POI:
+        assert isinstance(ctd, POI)
         ctd = ctd.rescale((1, 1, 1), verbose=verbose).reorient_(("R", "P", "I"), verbose=verbose)
         dict_list = []
 
@@ -838,7 +859,7 @@ def _poi_to_dict_list(ctd: POI, additional_info: dict | None, save_hint=0, verbo
         elif save_hint == FORMAT_GRUBER:
             v = v_idx2name[vert_id].replace("T", "TH") + "_" + conversion_poi2text[subreg_id]
             dict_list.append({"label": v, "X": x, "Y": y, "Z": z})
-        elif save_hint == FORMAT_POI:
+        elif save_hint in (FORMAT_POI, FORMAT_GLOBAL):
             v_name = ctd.level_one_info._get_name(vert_id, no_raise=True)
             subreg_id = ctd.level_two_info._get_name(subreg_id, no_raise=True)  # noqa: PLW2901
             # sub_name = v_idx2name[subreg_id]
@@ -861,11 +882,68 @@ def _poi_to_dict_list(ctd: POI, additional_info: dict | None, save_hint=0, verbo
     return dict_list, print_out
 
 
-######### Load #############
+######### Load and Save #############
 # Handling POIs #
 
 
-def load_poi(ctd_path: POI_Reference, verbose=True) -> POI:  # noqa: ARG001
+def poi_save(
+    poi: POI | POI_Global,
+    out_path: Path | str,
+    make_parents=False,
+    additional_info: dict | None = None,
+    resample_reference: Has_Grid | None = None,
+    verbose: logging = True,
+    save_hint=2,
+) -> None:
+    """
+    Saves the POIs to a JSON file.
+
+    Args:
+        out_path (Path | str): The path where the JSON file will be saved.
+        make_parents (bool, optional): If True, create any necessary parent directories for the output file.
+            Defaults to False.
+        verbose (bool, optional): If True, print status messages to the console. Defaults to True.
+        save_hint: 0 Default, 1 Gruber, 2 POI (readable), 10 ISO-POI (outdated)
+    Returns:
+        None
+
+    Raises:
+        TypeError: If any of the POIs have an invalid type.
+
+    Example:
+        >>> POIs = Centroids(...)
+        >>> POIs.save("output/POIs.json")
+    """
+    _file_types = ["json"]
+    file_ending = Path(out_path).name.split(".")[-1]
+    if file_ending not in _file_types:
+        raise ValueError(f"Not supported file ending for POI: {file_ending} not in {_file_types}")
+    if make_parents:
+        Path(out_path).parent.mkdir(exist_ok=True, parents=True)
+
+    poi.sort()
+    out_path = str(out_path)
+    if len(poi.centroids) == 0:
+        log.print("POIs empty, not saved:", out_path, ltype=Log_Type.FAIL, verbose=verbose)
+        return
+    json_object, print_add = _poi_to_dict_list(poi, additional_info, save_hint, resample_reference, verbose)
+
+    # Problem with python 3 and int64 serialization.
+    def convert(o):
+        if isinstance(o, np.integer):
+            return int(o)
+        if isinstance(o, np.floating):
+            return float(o)
+        if isinstance(o, np.ndarray):
+            return o.tolist()
+        raise TypeError(type(o))
+
+    with open(out_path, "w") as f:
+        json.dump(json_object, f, default=convert, indent=4)
+    log.print("POIs saved:", out_path, print_add, ltype=Log_Type.SAVE, verbose=verbose)
+
+
+def load_poi(ctd_path: POI_Reference, verbose=True) -> POI | POI_Global:  # noqa: ARG001
     """
     Load POIs from a file or a BIDS file object.
 
@@ -905,22 +983,30 @@ def load_poi(ctd_path: POI_Reference, verbose=True) -> POI:  # noqa: ARG001
     ### format_POI_old has no META header ###
     if "direction" not in dict_list[0] and "vert_label" in dict_list[0]:
         return _load_format_POI_old(dict_list)  # This file if used in the old POI-pipeline and is deprecated
+    ### Ours Global Space ##
+    format_ = dict_list[0].get("format", None)
+    format_ = format_key2value[format_] if format_ is not None else None
+    level_one_info = _register_lvl[dict_list[0].get("level_one_info", Vertebra_Instance.__name__)]
+    level_two_info = _register_lvl[dict_list[0].get("level_two_info", Location.__name__)]
+    info = {k: v for k, v in dict_list[0].items() if k not in ctd_info_blacklist}
+    if format_ == FORMAT_GLOBAL:
+        from TPTBox import POI_Global
+
+        centroids = POI_Descriptor()
+        itk_coords = global_spacing_name_key2value[dict_list[0].get("coordinate_system", "nib")]
+        _load_POI_centroids(dict_list, centroids, level_one_info, level_two_info)
+        return POI_Global(centroids, itk_coords=itk_coords, level_one_info=level_two_info, level_two_info=level_two_info, info=info)
+
     ### Ours ###
     assert "direction" in dict_list[0], f'File format error: first index must be a "Direction" but got {dict_list[0]}'
     axcode: AX_CODES = tuple(dict_list[0]["direction"])  # type: ignore
     zoom: ZOOMS = dict_list[0].get("zoom", None)  # type: ignore
     shape = dict_list[0].get("shape", None)  # type: ignore
     shape = tuple(shape) if shape is not None else None
-    format_ = dict_list[0].get("format", None)
     origin = dict_list[0].get("origin", None)
     origin = tuple(origin) if origin is not None else None
     rotation: ROTATION = dict_list[0].get("rotation", None)
-    level_one_info = _register_lvl[dict_list[0].get("level_one_info", Vertebra_Instance.__name__)]
-    level_two_info = _register_lvl[dict_list[0].get("level_two_info", Location.__name__)]
 
-    info = {k: v for k, v in dict_list[0].items() if k not in ctd_info_blacklist}
-
-    format_ = format_key2value[format_] if format_ is not None else None
     centroids = POI_Descriptor()
     if format_ in (FORMAT_DOCKER, FORMAT_GRUBER) or format_ is None:
         _load_docker_centroids(dict_list, centroids, format_)
@@ -1025,7 +1111,7 @@ def _load_POI_centroids(
     for vert_id, v in d.items():
         vert_id = level_one_info._get_id(vert_id, no_raise=True)  # noqa: PLW2901
         for sub_id, t in v.items():
-            sub_id = level_two_info._get_id(sub_id)  # noqa: PLW2901
+            sub_id = level_two_info._get_id(sub_id, no_raise=True)  # noqa: PLW2901
             centroids[vert_id, sub_id] = tuple(t)
 
 
