@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 
 from typing_extensions import Self
 
 from TPTBox.core import poi
 from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.poi_fun.poi_abstract import Abstract_POI, POI_Descriptor
-from TPTBox.core.poi_fun.save_load import FORMAT_GLOBAL
-from TPTBox.core.vert_constants import Abstract_lvl
+from TPTBox.core.poi_fun.save_load import FORMAT_GLOBAL, load_poi, save_poi
+from TPTBox.core.vert_constants import Abstract_lvl, logging
 
 ###### GLOBAL POI #####
 
@@ -144,3 +145,25 @@ class POI_Global(Abstract_POI):
         p.info = deepcopy(self.info)
         p.itk_coords = self.itk_coords
         return p  # type: ignore
+
+    @classmethod
+    def load(cls, poi: poi.POI_Reference, itk_coords: bool | None = None) -> Self:
+        poi_obj = load_poi(poi)
+        if not isinstance(poi_obj, POI_Global):
+            poi_obj = poi_obj.to_global(itk_coords if itk_coords is not None else False)
+        if itk_coords is not None:
+            assert itk_coords == poi_obj.itk_coords, "not implemented swichting to/from itk_coords to nii "
+        return poi_obj  # type: ignore
+
+    def save(
+        self,
+        out_path: str | Path,
+        make_parents=False,
+        additional_info: dict | None = None,
+        save_hint=FORMAT_GLOBAL,
+        resample_reference: Has_Grid | None = None,
+        verbose: logging = True,
+    ):
+        return save_poi(
+            self, out_path, make_parents, additional_info, save_hint=save_hint, resample_reference=resample_reference, verbose=verbose
+        )

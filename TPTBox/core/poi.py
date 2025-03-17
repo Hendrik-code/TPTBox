@@ -587,7 +587,7 @@ class POI(Abstract_POI, Has_Grid):
             >>> POIs = Centroids(...)
             >>> POIs.save("output/POIs.json")
         """
-        return save_load.poi_save(
+        return save_load.save_poi(
             self, out_path, make_parents, additional_info, verbose=verbose, save_hint=save_hint, resample_reference=resample_reference
         )
 
