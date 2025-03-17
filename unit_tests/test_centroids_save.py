@@ -15,7 +15,7 @@ import nibabel as nib
 import numpy as np
 
 import TPTBox.core.bids_files as bids
-from TPTBox import POI
+from TPTBox import POI, POI_Global
 from TPTBox.core.nii_wrapper import AX_CODES, NII
 from TPTBox.core.vert_constants import conversion_poi2text
 
@@ -100,10 +100,28 @@ class Test_Centroids(unittest.TestCase):
             cdt = cdt.rescale((1, 1, 1), verbose=False).reorient_(("R", "P", "I"))
             cdt.shape = None  # type: ignore
             cdt.rotation = None  # type: ignore
-            print(cdt)
-            print(cdt2.rotation)
-
             self.assertEqual(cdt, cdt2)
+            Path(p).unlink()
+
+    def test_save_Glob(self):
+        for _ in range(repeats):
+            p = Path(s, "test_save_glob.json")
+            cdt = get_centroids(x=get_random_shape(), num_point=20).to_global()
+            cdt.save(p, verbose=False)
+            cdt2 = POI_Global.load(p)
+            self.assertEqual(cdt, cdt2)
+            Path(p).unlink()
+
+    def test_save_Glob_2(self):
+        for _ in range(repeats):
+            p = Path(s, "test_save_glob_2.json")
+            cdt = get_centroids(x=get_random_shape(), num_point=20)
+            glob_poi = cdt.to_global()
+            cdt.save(p, verbose=False)
+            glob_poi.save(p, verbose=False)
+            cdt_a = POI_Global.load(p)
+            cdt_b = POI_Global.load(p)
+            self.assertEqual(cdt_a, cdt_b)
             Path(p).unlink()
 
     def test_save_all(self):

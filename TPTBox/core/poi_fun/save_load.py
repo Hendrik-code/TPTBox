@@ -78,7 +78,7 @@ ctd_info_blacklist = [
 ]  # "location"
 
 
-def poi_save(
+def save_poi(
     poi: POI | POI_Global,
     out_path: Path | str,
     make_parents=False,
@@ -270,7 +270,7 @@ def load_poi(ctd_path: POI_Reference, verbose=True) -> POI | POI_Global:  # noqa
         centroids = POI_Descriptor()
         itk_coords = global_spacing_name_key2value[dict_list[0].get("coordinate_system", "nib")]
         _load_POI_centroids(dict_list, centroids, level_one_info, level_two_info)
-        return POI_Global(centroids, itk_coords=itk_coords, level_one_info=level_two_info, level_two_info=level_two_info, info=info)
+        return POI_Global(centroids, itk_coords=itk_coords, level_one_info=level_one_info, level_two_info=level_two_info, info=info)
 
     ### Ours ###
     assert "direction" in dict_list[0], f'File format error: first index must be a "Direction" but got {dict_list[0]}'
