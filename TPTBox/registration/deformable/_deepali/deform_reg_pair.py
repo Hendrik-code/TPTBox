@@ -34,6 +34,8 @@ def get_device_config(config: dict[str, Any], device: str | torch.device | None 
     r"""Get configured PyTorch device."""
     if device is None:
         device = config.get("device", "cpu")
+    if isinstance(device, torch.device):
+        return device
     if isinstance(device, int):
         device = f"cuda:{device}"
     elif device == "cuda":
@@ -271,7 +273,7 @@ def register_pairwise(  # noqa: C901
     config: dict[str, Any] | None = None,
     verbose: bool | int = False,
     debug: bool | int = False,
-    device: Device | None = None,
+    device: str | Device | None = None,
     finest_spacing=None,
 ) -> SpatialTransform:
     r"""Register pair of images using ``torch.autograd`` and ``torch.optim``."""
@@ -296,7 +298,6 @@ def register_pairwise(  # noqa: C901
     min_size = config["pyramid"]["min_size"]
     pyramid_dims = config["pyramid"]["pyramid_dims"]
     device = get_device_config(config, device)
-
     verbose = int(verbose)
     debug = int(debug)
     if verbose > 0:
