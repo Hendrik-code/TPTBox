@@ -695,9 +695,9 @@ class NII(NII_Math):
         else:
             arr_padded = arr
 
-        crop_rel_x = int(round((shp_x - crop_x) / 2.0))
-        crop_rel_y = int(round((shp_y - crop_y) / 2.0))
-        crop_rel_z = int(round((shp_z - crop_z) / 2.0))
+        crop_rel_x = round((shp_x - crop_x) / 2.0)
+        crop_rel_y = round((shp_y - crop_y) / 2.0)
+        crop_rel_z = round((shp_z - crop_z) / 2.0)
 
         crop_slices = (slice(crop_rel_x, crop_rel_x + crop_x),slice(crop_rel_y, crop_rel_y + crop_y),slice(crop_rel_z, crop_rel_z + crop_z))
         arr_cropped = arr_padded[crop_slices]

@@ -167,8 +167,7 @@ def run_all(
                 "spacing_type": spacing_type,
                 **metrics,
             }
-            if "dice scores" in row:
-                del row["dice scores"]
+            row.pop("dice scores", None)
             data.append(row)
 
         df_ = pd.DataFrame(data)
