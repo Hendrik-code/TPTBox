@@ -112,6 +112,32 @@ class Abstract_lvl(Enum):
             return int(s)
 
 
+class Any(Abstract_lvl):
+    def __init_subclass__(cls, **kwargs):
+        _register_lvl[str(cls.__name__)] = cls
+
+    @classmethod
+    def save_as_name(cls) -> bool:
+        return False
+
+    @classmethod
+    def _get_name(cls, i: int, no_raise=True) -> str:  # noqa: ARG003
+        return str(i)
+
+    @classmethod
+    def _get_id(cls, s: str | int, no_raise=True) -> int:  # noqa: ARG003
+        self_name = str(cls.__name__)
+        for n, cl in _register_lvl.items():
+            if n == self_name:
+                continue
+            try:
+                s = cl._get_id(cls, s, no_raise=False)
+                return s  # type: ignore # noqa: TRY300
+            except Exception:
+                pass
+        return int(s)
+
+
 class Full_Body_Instance(Abstract_lvl):
     skull = 1
     clavicula_right = 2
