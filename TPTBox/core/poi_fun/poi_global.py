@@ -90,7 +90,7 @@ class POI_Global(Abstract_POI):
         """
         return self.to_other(poi.to_nii(ref))
 
-    def to_other_poi(self, ref: poi.POI_Reference) -> poi.POI:
+    def to_other_poi(self, ref: poi.POI | Self):
         """
         Convert the POI to another POI.
 
@@ -101,19 +101,25 @@ class POI_Global(Abstract_POI):
             poi.POI: The converted POI.
         """
         p = poi.POI.load(ref)
-        assert isinstance(p, poi.POI), "Not implemented"
-        if isinstance(p, poi.POI):
+        if isinstance(ref, poi.POI):
             return self.to_other(p)
-        else:
-            assert self.itk_coords == p.itk_coords, "itk_coords not implemented"  # TODO
-            return self  # type: ignore
-            # TODO Generics ref -> output type
+        elif isinstance(ref, Self):
+            return self.to_cord_system(ref.itk_coords)
 
     def to_global(self):
         return self
 
     def resample_from_to(self, msk: Has_Grid):
         return self.to_other(msk)
+
+    def to_cord_system(self, itk_coords: bool, inplace=False):
+        out = self if inplace else self.copy()
+        if self.itk_coords == itk_coords:
+            return out
+        out.itk_coords = itk_coords
+        for k1, k2, v in self.items():
+            out[k1, k2] = (-v[0], -v[1], v[2])
+        return out
 
     def to_other(self, msk: Has_Grid, verbose=False) -> poi.POI:
         """
