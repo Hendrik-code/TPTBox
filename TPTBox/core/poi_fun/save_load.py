@@ -145,7 +145,7 @@ def _poi_to_dict_list(  # noqa: C901
     # noqa: C901
     if save_hint in global_formats:
         ctd = ctd.to_global()
-        ori: dict[str, str | COORDINATE | AX_CODES] = {}
+        ori: dict[str, str | COORDINATE | AX_CODES] = {"coordinate_system": global_spacing_name[ctd.itk_coords]}
     else:
         if resample_reference is not None:
             ctd = ctd.resample_from_to(resample_reference)

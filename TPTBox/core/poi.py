@@ -554,7 +554,9 @@ class POI(Abstract_POI, Has_Grid):
         """
         from TPTBox import POI_Global
 
-        return POI_Global(self, itk_coords=itk_coords)
+        return POI_Global(
+            self, itk_coords=itk_coords, level_one_info=self.level_one_info, level_two_info=self.level_two_info, info=self.info.copy()
+        )
 
     def resample_from_to(self, ref: Has_Grid):
         return self.to_global().to_other(ref)
