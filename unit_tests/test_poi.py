@@ -17,13 +17,10 @@ from TPTBox.core.nii_wrapper import NII
 from TPTBox.core.poi import (
     LABEL_MAX,
     POI,
-    Location,
-    _poi_to_dict_list,
     calc_centroids,
-    calc_centroids_from_two_masks,
     calc_poi_from_subreg_vert,
-    load_poi,
 )
+from TPTBox.core.poi_fun.save_load import _poi_to_dict_list, load_poi
 from TPTBox.tests.test_utils import extract_affine, get_poi, get_random_ax_code, overlap, repeats, sqr1d
 
 

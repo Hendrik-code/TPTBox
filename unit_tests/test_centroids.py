@@ -13,7 +13,8 @@ import nibabel as nib
 
 from TPTBox import POI, calc_centroids
 from TPTBox.core.nii_wrapper import NII
-from TPTBox.core.poi import LABEL_MAX, _poi_to_dict_list, calc_centroids_from_two_masks, calc_poi_from_subreg_vert, load_poi
+from TPTBox.core.poi import LABEL_MAX, calc_poi_from_subreg_vert
+from TPTBox.core.poi_fun.save_load import _poi_to_dict_list, load_poi
 from TPTBox.core.vert_constants import Location
 from TPTBox.tests.test_utils import get_nii, get_random_ax_code, overlap, repeats
 from unit_tests.test_centroids_save import get_centroids
