@@ -22,9 +22,12 @@ def get_ds_info(idx) -> dict:
     try:
         nnunet_path = next(next(iter(model_path.glob(f"*{idx}*"))).glob("*__nnUNetPlans*"))
     except StopIteration:
-        Print_Logger().print(f"Please add Dataset {idx} to {model_path}", Log_Type.FAIL)
-        model_path.mkdir(exist_ok=True, parents=True)
-        sys.exit()
+        try:
+            nnunet_path = next(next(iter(model_path.glob(f"*{idx}*"))).glob("*__nnUNet*ResEnc*"))
+        except StopIteration:
+            Print_Logger().print(f"Please add Dataset {idx} to {model_path}", Log_Type.FAIL)
+            model_path.mkdir(exist_ok=True, parents=True)
+            sys.exit()
     with open(Path(nnunet_path, "dataset.json")) as f:
         ds_info = json.load(f)
     return ds_info
