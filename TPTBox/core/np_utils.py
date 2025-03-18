@@ -9,13 +9,13 @@ from typing import Any, TypeVar, Union
 import numpy as np
 import scipy
 from cc3d import (
-    connected_components,  # pip install connected-components-3d
-    contacts,
-    region_graph,
-    voxel_connectivity_graph,
+    connected_components as _connected_components,  # pip install connected-components-3d
 )
+from cc3d import contacts as _contacts
+from cc3d import region_graph as _region_graph
 from cc3d import statistics as _cc3dstats
-from fill_voids import fill
+from cc3d import voxel_connectivity_graph as _voxel_connectivity_graph
+from fill_voids import fill as _fill
 from numpy.typing import NDArray
 from scipy.ndimage import binary_erosion, center_of_mass, gaussian_filter, generate_binary_structure
 from skimage.measure import euler_number, label
@@ -206,7 +206,7 @@ def np_contacts(arr: UINTARRAY, connectivity: int):
     assert 2 <= arr.ndim <= 3, f"expected 2D or 3D, but got {arr.ndim}"
     assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
     connectivity = min(connectivity * 4, 8) if arr.ndim == 2 else 6 if connectivity == 1 else 18 if connectivity == 2 else 26
-    return contacts(arr, connectivity=connectivity)
+    return _contacts(arr, connectivity=connectivity)
 
 
 def np_region_graph(arr: UINTARRAY, connectivity: int):
@@ -222,7 +222,7 @@ def np_region_graph(arr: UINTARRAY, connectivity: int):
     assert 2 <= arr.ndim <= 3, f"expected 2D or 3D, but got {arr.ndim}"
     assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
     connectivity = min(connectivity * 4, 8) if arr.ndim == 2 else 6 if connectivity == 1 else 18 if connectivity == 2 else 26
-    return region_graph(arr, connectivity=connectivity)
+    return _region_graph(arr, connectivity=connectivity)
 
 
 def np_voxel_connectivity_graph(arr: UINTARRAY, connectivity: int):
@@ -255,7 +255,7 @@ def np_voxel_connectivity_graph(arr: UINTARRAY, connectivity: int):
     assert 2 <= arr.ndim <= 3, f"expected 2D or 3D, but got {arr.ndim}"
     assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
     connectivity = min(connectivity * 4, 8) if arr.ndim == 2 else 6 if connectivity == 1 else 18 if connectivity == 2 else 26
-    return voxel_connectivity_graph(arr, connectivity=connectivity)
+    return _voxel_connectivity_graph(arr, connectivity=connectivity)
 
 
 def np_dice(seg: np.ndarray, gt: np.ndarray, binary_compare: bool = False, label: int = 1):
@@ -682,7 +682,7 @@ def np_connected_components(
     subreg_cc = {}
     subreg_cc_n = {}
     for subreg in labels:  # type:ignore
-        labels_out, n = connected_components(arr == subreg, connectivity=connectivity, return_N=True)
+        labels_out, n = _connected_components(arr == subreg, connectivity=connectivity, return_N=True)
         subreg_cc[subreg] = labels_out
         subreg_cc_n[subreg] = n
     if verbose:
@@ -729,7 +729,7 @@ def np_get_largest_k_connected_components(
     labels: Sequence[int] = _to_labels(arr, label_ref)
     arr2[np.isin(arr, labels, invert=True)] = 0  # type:ignore
 
-    labels_out, n = connected_components(arr2, connectivity=connectivity, return_N=True)
+    labels_out, n = _connected_components(arr2, connectivity=connectivity, return_N=True)
     if _return_unsorted:
         return labels_out
     if k is None:
@@ -883,11 +883,11 @@ def np_fill_holes(
         else:
             arr_lc = arr_l
         if slice_wise_dim is None:
-            filled = fill(arr_lc).astype(arr.dtype)
+            filled = _fill(arr_lc).astype(arr.dtype)
         else:
             assert 0 <= slice_wise_dim <= arr.ndim - 1, f"slice_wise_dim needs to be in range [0, {arr.ndim - 1}]"
             filled = np.swapaxes(arr_lc.copy(), 0, slice_wise_dim)
-            filled = np.stack([fill(x) for x in filled])
+            filled = np.stack([_fill(x) for x in filled])
             filled = np.swapaxes(filled, 0, slice_wise_dim)
         filled[filled != 0] = l
         arrc[crop][arrc[crop] == 0] = filled[arrc[crop] == 0]
