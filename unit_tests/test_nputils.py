@@ -217,21 +217,21 @@ class Test_bids_file(unittest.TestCase):
         a[1:4, 1:4] = 1
 
         # k less than N
-        a_cc = np_utils.np_get_largest_k_connected_components(a, k=2, return_original_labels=False)
+        a_cc = np_utils.np_filter_connected_components(a, largest_k_components=2, return_original_labels=False)
         a_volume = np_utils.np_volume(a_cc)
         print(a_volume)
         self.assertTrue(len(a_volume) == 2)
         self.assertTrue(a_volume[1] > a_volume[2])
 
         # k == N
-        a_cc = np_utils.np_get_largest_k_connected_components(a, k=3, return_original_labels=False)
+        a_cc = np_utils.np_filter_connected_components(a, largest_k_components=3, return_original_labels=False)
         a_volume = np_utils.np_volume(a_cc)
         print(a_volume)
         self.assertTrue(len(a_volume) == 3)
         self.assertTrue(a_volume[1] > a_volume[2] > a_volume[3])
 
         # k > N
-        a_cc = np_utils.np_get_largest_k_connected_components(a, k=20, return_original_labels=False)
+        a_cc = np_utils.np_filter_connected_components(a, largest_k_components=20, return_original_labels=False)
         a_volume = np_utils.np_volume(a_cc)
         print(a_volume)
         self.assertTrue(len(a_volume) == 3)

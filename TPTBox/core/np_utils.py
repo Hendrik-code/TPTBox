@@ -18,7 +18,8 @@ from cc3d import voxel_connectivity_graph as _voxel_connectivity_graph
 from fill_voids import fill as _fill
 from numpy.typing import NDArray
 from scipy.ndimage import binary_erosion, center_of_mass, gaussian_filter, generate_binary_structure
-from skimage.measure import euler_number, label
+from skimage.measure import euler_number as _euler_number
+from skimage.measure import label as _label
 
 from TPTBox.core.compat import zip_strict
 from TPTBox.core.vert_constants import COORDINATE, LABEL_MAP, LABEL_REFERENCE
@@ -108,12 +109,10 @@ def np_is_empty(arr: UINTARRAY | INTARRAY) -> bool:
     Returns:
         bool: True if array is empty
 
-    #### ON UINT:
+    #### ON UINT and INT:
     #### is faster than np_count_nonzero(arr) > 0
-    #### is faster than arr.max() == 0
     #### is faster than arr.nonzero()[0].size == 0
-    #### ON INT: arr.max() == 0 is faster
-    #### arr.max() best compromise between INT and UINT and shape
+    #### is faster than arr.sum() > 0
     """
     return arr.max() == 0
 
@@ -384,10 +383,7 @@ def np_erode_msk(
     labels: list[int] = _to_labels(arr, label_ref)
 
     if use_crop:
-        # try:
-        arr_bin = arr.copy()
-        arr_bin[np.isin(arr_bin, labels, invert=True)] = 0
-        crop = np_bbox_binary(arr_bin, px_dist=1 + n_pixel, raise_error=False)
+        crop = np_bbox_binary(np.isin(arr, labels, invert=False), px_dist=1 + n_pixel, raise_error=False)
         arrc = arr[crop]
     else:
         arrc = arr
@@ -656,16 +652,44 @@ def np_point_coordinates(
 def np_connected_components(
     arr: UINTARRAY,
     connectivity: int = 3,
-    label_ref: LABEL_REFERENCE = None,
-    verbose: bool = False,
-) -> tuple[dict[int, UINTARRAY], dict[int, int]]:
+    include_zero: bool = False,
+) -> tuple[UINTARRAY, int]:
     """Calculates the connected components of a given array (works with zeros as well!)
 
     Args:
         arr: input arr
-        labels (int | list[int] | None, optional): Labels that the connected components algorithm should be applied to. If none, applies on all labels found in arr. Defaults to None.
         connectivity: in range [1,3]. For 2D images, 2 and 3 is the same.
+        include_zero (bool): If true, will treat the background (0) as another label to calculate connected components from. Significantly slower! Defaults to False.
         verbose: If true, will print out if the array does not have any CC
+
+    Returns:
+        arr_cc: UINTARRAY, N: int
+    """
+
+    assert np.min(arr) == 0, f"min value of mask not zero, got {np.min(arr)}"
+    assert np.max(arr) >= 0, f"wrong normalization, max value is not >= 0, got {np_unique(arr)}"
+    assert 2 <= arr.ndim <= 3, f"expected 2D or 3D, but got {arr.ndim}"
+    assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
+    connectivity = min((connectivity + 1) * 2, 8) if arr.ndim == 2 else 6 if connectivity == 1 else 18 if connectivity == 2 else 26
+
+    if include_zero:
+        arr[arr == 0] = arr.max() + 1
+    return _connected_components(arr, connectivity=connectivity, return_N=True)
+
+
+def np_connected_components_per_label(
+    arr: UINTARRAY,
+    connectivity: int = 3,
+    label_ref: LABEL_REFERENCE = None,
+    include_zero: bool = False,
+) -> dict[int, UINTARRAY]:
+    """Calculates the connected components of a given array (works with zeros as well!)
+
+    Args:
+        arr: input arr
+        connectivity: in range [1,3]. For 2D images, 2 and 3 is the same.
+        labels (int | list[int] | None, optional): Labels that the connected components algorithm should be applied to. If none, applies on all labels found in arr. Defaults to None.
+        include_zero (bool): If true, will treat the background (0) as another label to calculate connected components from. Significantly slower! Defaults to False.
 
     Returns:
         subreg_cc: dict[label, cc_idx, arr], subreg_cc_N: dict[label, n_connected_components]
@@ -678,31 +702,34 @@ def np_connected_components(
     connectivity = min((connectivity + 1) * 2, 8) if arr.ndim == 2 else 6 if connectivity == 1 else 18 if connectivity == 2 else 26
 
     labels: Sequence[int] = _to_labels(arr, label_ref)
-
+    # if zero, map it to unused label
+    if include_zero:
+        zero_label = arr.max() + 1
+        arr[arr == 0] = zero_label
+        labels = list(labels)
+        labels.append(0)
+    # call connected components
+    labels_out = _connected_components(arr, connectivity=connectivity, return_N=False)
+    # if zero, map it back for assignment
+    if include_zero:
+        arr[arr == zero_label] = 0
+    # assign the cc according to original label
     subreg_cc = {}
-    subreg_cc_n = {}
     for subreg in labels:  # type:ignore
-        labels_out, n = _connected_components(arr == subreg, connectivity=connectivity, return_N=True)
-        subreg_cc[subreg] = labels_out
-        subreg_cc_n[subreg] = n
-    if verbose:
-        print(
-            "Components founds (label,N): ",
-            {i: subreg_cc_n[i] for i in labels},
-        )
-    return subreg_cc, subreg_cc_n
+        subreg_cc[subreg] = labels_out * (arr == subreg)
+
+    return subreg_cc
 
 
-def np_get_largest_k_connected_components(
+def np_filter_connected_components(
     arr: UINTARRAY,
-    k: int | None = None,
+    largest_k_components: int | None = None,
     label_ref: LABEL_REFERENCE = None,
     connectivity: int = 3,
     return_original_labels: bool = True,
     min_volume: float = 0,
     max_volume: float | None = None,
     removed_to_label=0,
-    _return_unsorted=False,
 ) -> UINTARRAY:
     """finds the largest k connected components in a given array (does NOT work with zero as label!)
 
@@ -717,7 +744,7 @@ def np_get_largest_k_connected_components(
         np.ndarray: array with the largest k connected components
     """
 
-    assert k is None or k > 0
+    assert largest_k_components is None or largest_k_components > 0
     assert 2 <= arr.ndim <= 3, f"expected 2D or 3D, but got {arr.ndim}"
     assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
     if arr.ndim == 2:  # noqa: SIM108
@@ -730,15 +757,14 @@ def np_get_largest_k_connected_components(
     arr2[np.isin(arr, labels, invert=True)] = 0  # type:ignore
 
     labels_out, n = _connected_components(arr2, connectivity=connectivity, return_N=True)
-    if _return_unsorted:
-        return labels_out
-    if k is None:
-        k = n
-    k = min(k, n)  # if k > N, will return all N but still sorted
+    if largest_k_components is None:
+        largest_k_components = n
+    assert largest_k_components is not None
+    largest_k_components = min(largest_k_components, n)  # if k > N, will return all N but still sorted
     label_volume_pairs = [(i, vol) for i, vol in np_volume(labels_out).items() if vol > 0]
-    k = min(k, len(label_volume_pairs))
+    largest_k_components = min(largest_k_components, len(label_volume_pairs))
     label_volume_pairs.sort(key=lambda x: x[1], reverse=True)
-    preserve: list[int] = [(x[0], x[1]) for x in label_volume_pairs[:k]]
+    preserve: list[tuple[int, int]] = [(x[0], x[1]) for x in label_volume_pairs[:largest_k_components]]
 
     cc_out = np.zeros(arr.shape, dtype=arr.dtype)
     i = 1
@@ -748,8 +774,68 @@ def np_get_largest_k_connected_components(
         if max_volume is not None and volume > max_volume:
             continue
         cc_out[labels_out == preserve_label] = i
-        if k == i:
+        if largest_k_components == i:
             break
+        i += 1
+    if removed_to_label != 0:
+        arr[np.logical_and(labels_out != 0, arr == 0)] = removed_to_label
+    if return_original_labels:
+        arr *= cc_out > 0  # to get original labels
+        return arr
+    return cc_out
+
+
+def np_filter_connected_components2(
+    arr: UINTARRAY,
+    largest_k_components: int | None = None,
+    label_ref: LABEL_REFERENCE = None,
+    connectivity: int = 3,
+    return_original_labels: bool = True,
+    min_volume: float = 0,
+    max_volume: float | None = None,
+    removed_to_label=0,
+) -> UINTARRAY:
+    """finds the largest k connected components in a given array (does NOT work with zero as label!)
+
+    Args:
+        arr (np.ndarray): input array
+        k (int | None): finds the k-largest components. If k is None, will find all connected components and still sort them by size
+        labels (int | list[int] | None, optional): Labels that the algorithm should be applied to. If none, applies on all labels found in arr. Defaults to None.
+        connectivity: in range [1,3]. For 2D images, 2 and 3 is the same.
+        return_original_labels (bool): If set to False, will label the components from 1 to k. Defaults to True
+
+    Returns:
+        np.ndarray: array with the largest k connected components
+    """
+
+    assert largest_k_components is None or largest_k_components > 0
+    assert 2 <= arr.ndim <= 3, f"expected 2D or 3D, but got {arr.ndim}"
+    assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
+    if arr.ndim == 2:  # noqa: SIM108
+        connectivity = min(connectivity * 2, 8)  # 1:4, 2:8, 3:8
+    else:
+        connectivity = 6 if connectivity == 1 else 18 if connectivity == 2 else 26
+
+    arr2 = arr.copy()
+    labels: Sequence[int] = _to_labels(arr, label_ref)
+    arr2[np.isin(arr, labels, invert=True)] = 0  # type:ignore
+
+    labels_out, n = _connected_components(arr2, connectivity=connectivity, return_N=True)
+    if largest_k_components is None:
+        largest_k_components = n
+    assert largest_k_components is not None
+    largest_k_components = min(largest_k_components, n)  # if k > N, will return all N but still sorted
+    label_volume_pairs = [
+        (i, vol) for i, vol in np_volume(labels_out).items() if vol >= min_volume and (max_volume is None or vol <= max_volume)
+    ]
+    largest_k_components = min(largest_k_components, len(label_volume_pairs))
+    label_volume_pairs.sort(key=lambda x: x[1], reverse=True)
+    preserve: list[int] = [x[0] for x in label_volume_pairs[:largest_k_components]]
+
+    cc_out = np.zeros(arr.shape, dtype=arr.dtype)
+    i = 1
+    for preserve_label in preserve:
+        cc_out[labels_out == preserve_label] = i
         i += 1
     if removed_to_label != 0:
         arr[np.logical_and(labels_out != 0, arr == 0)] = removed_to_label
@@ -773,6 +859,8 @@ def np_get_connected_components_center_of_mass(
     Returns:
         _type_: _description_
     """
+    # Per label argument true/false
+    #
     if sort_by_axis is not None:
         assert 0 <= sort_by_axis <= len(arr.shape) - 1, f"sort_by_axis {sort_by_axis} invalid with an array of shape {arr.shape}"  # type:ignore
     subreg_cc, _ = np_connected_components(
@@ -875,8 +963,8 @@ def np_fill_holes(
 
         labels = tqdm(labels, desc="fill_holes")  # type: ignore
     for l in labels:  # type:ignore
-        arr_l = arrc.copy()
-        arr_l = np_extract_label(arr_l, l)
+        arr_l = arr == l
+        # arr_l = np_extract_label(arr_l, l)
         if use_crop:
             crop = np_bbox_binary(arr_l, px_dist=1, raise_error=False)
             arr_lc = arr_l[crop]
@@ -1301,12 +1389,12 @@ def _pad_to_parameters(origin_shape: list[int] | tuple[int, int, int], target_sh
     return padding, crop, requires_crop
 
 
-def _to_labels(arr: np.ndarray, labels: LABEL_REFERENCE = None) -> Sequence[int]:
-    if labels is None:
-        labels = list(np_unique(arr))
-    if not isinstance(labels, Sequence):
-        labels = [labels]
-    return labels
+def _to_labels(arr: np.ndarray, label_ref: LABEL_REFERENCE = None) -> Sequence[int]:
+    if label_ref is None:
+        label_ref = list(np_unique(arr))
+    if not isinstance(label_ref, Sequence):
+        label_ref = [label_ref]
+    return label_ref
 
 
 def _generate_binary_structure(n_dim: int, connectivity: int, kernel_size: int = 3):

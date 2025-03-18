@@ -25,12 +25,12 @@ if __name__ == "__main__":
         return arr
 
     def normal(arr):
-        return cc3dstatistics(arr)
+        return cc3dstatistics(arr, use_crop=False)
 
     def crop(arr):
         crop = np_bbox_binary(arr)
         arr = arr[crop]
-        return cc3dstatistics(arr)
+        return cc3dstatistics(arr, use_crop=False)
 
     speed_test(
         repeats=50,

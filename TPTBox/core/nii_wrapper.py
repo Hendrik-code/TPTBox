@@ -33,7 +33,7 @@ from TPTBox.core.np_utils import (
     np_fill_holes,
     np_fill_holes_global_with_majority_voting,
     np_get_connected_components_center_of_mass,
-    np_get_largest_k_connected_components,
+    np_filter_connected_components,
     np_is_empty,
     np_map_labels,
     np_map_labels_based_on_majority_label_mask_overlap,
@@ -42,6 +42,7 @@ from TPTBox.core.np_utils import (
     np_unique,
     np_unique_withoutzero,
     np_volume,
+    np_bbox_binary,
 )
 from TPTBox.logger.log_file import Log_Type
 
@@ -627,28 +628,9 @@ class NII(NII_Math):
             - If other_crop is not None, the computed slice is combined with the slice of another image to obtain a common region of interest.
             - Only None slice is supported for combining slices.
         """
-        shp = self.shape
-        zms = self.zoom
-
-        d = np.around(dist / np.asarray(zms)).astype(int) if use_mm else (int(dist),int(dist),int(dist))
+        d = np.around(dist / np.asarray(self.zoom)).astype(int) if use_mm else (int(dist),int(dist),int(dist))
         array = self.get_array() #+ minimum
-        msk_bin = np.zeros(array.shape,dtype=bool)
-        #bool_arr[array<minimum] = 0
-        msk_bin[array>minimum] = 1
-        #msk_bin = np.asanyarray(bool_arr, dtype=bool)
-        msk_bin[np.isnan(msk_bin)] = 0
-        cor_msk = np.where(msk_bin > 0)
-        if cor_msk[0].shape[0] == 0:
-            raise ValueError(f'Array would be reduced to zero size; Before {self}; {self.unique()=}')
-        c_min = [cor_msk[0].min(), cor_msk[1].min(), cor_msk[2].min()]
-        c_max = [cor_msk[0].max(), cor_msk[1].max(), cor_msk[2].max()]
-        x0 = max(0, c_min[0] - d[0])
-        y0 = max(0, c_min[1] - d[1])
-        z0 = max(0, c_min[2] - d[2])
-        x1 = min(shp[0], c_max[0] + d[0])
-        y1 = min(shp[1], c_max[1] + d[1])
-        z1 = min(shp[2], c_max[2] + d[2])
-        ex_slice = [slice(x0, x1+1), slice(y0, y1+1), slice(z0, z1+1)]
+        ex_slice = np_bbox_binary(array > minimum, px_dist=d)
 
         if other_crop is not None:
             assert all((a.step is None) for a in other_crop), 'Only None slice is supported for combining x'
@@ -1270,7 +1252,7 @@ class NII(NII_Math):
         return cc, cc_n
 
     def get_connected_components(self, labels: int |list[int]=1, connectivity: int = 3, verbose: bool=False,inplace=False) -> Self:  # noqa: ARG002
-        out = np_get_largest_k_connected_components(self.get_seg_array(), label_ref=labels, connectivity=connectivity, return_original_labels=False)
+        out = np_filter_connected_components(self.get_seg_array(), label_ref=labels, connectivity=connectivity, return_original_labels=False)
         return self.set_array(out,inplace=inplace)
 
         #arr = self.get_seg_array()
@@ -1341,7 +1323,7 @@ class NII(NII_Math):
             return_original_labels (bool): If set to False, will label the components from 1 to k. Defaults to True
         """
         msk_i_data = self.get_seg_array()
-        out = np_get_largest_k_connected_components(msk_i_data, k=k, label_ref=labels, connectivity=connectivity, return_original_labels=return_original_labels,min_volume=min_volume,max_volume=max_volume,removed_to_label=removed_to_label)
+        out = np_filter_connected_components(msk_i_data, largest_k_components=k, label_ref=labels, connectivity=connectivity, return_original_labels=return_original_labels,min_volume=min_volume,max_volume=max_volume,removed_to_label=removed_to_label)
         return self.set_array(out,inplace=inplace)
 
     def compute_surface_mask(self, connectivity: int, dilated_surface: bool = False):
