@@ -1169,19 +1169,13 @@ def calc_centroids(
     assert first_stage == -1 or second_stage == -1, "first or second dimension must be fixed."
     msk_nii = to_nii(msk, seg=True)
     msk_data = msk_nii.get_seg_array()
-    axc: AX_CODES = nio.aff2axcodes(msk_nii.affine)  # type: ignore
     if extend_to is None:
         ctd_list = POI_Descriptor()
     else:
         if not inplace:
             extend_to = extend_to.copy()
         ctd_list = extend_to.centroids
-        extend_to.assert_affine(
-            msk_nii,
-            shape_tolerance=0.5,
-            origin_tolerance=0.5,
-        )
-        # assert extend_to.orientation == axc, (extend_to.orientation, axc)
+        extend_to.assert_affine(msk_nii, shape_tolerance=0.5, origin_tolerance=0.5)
     for i in msk_nii.unique():
         msk_temp = np.zeros(msk_data.shape, dtype=bool)
         msk_temp[msk_data == i] = True
@@ -1190,7 +1184,7 @@ def calc_centroids(
             ctd_list[first_stage, int(i)] = tuple(round(x, decimals) for x in ctr_mass)
         else:
             ctd_list[int(i), second_stage] = tuple(round(x, decimals) for x in ctr_mass)
-    return POI(ctd_list, orientation=axc, **msk_nii._extract_affine(rm_key=["orientation"]), **args)
+    return POI(ctd_list, **msk_nii._extract_affine(), **args)
 
 
 ######## Utility #######
