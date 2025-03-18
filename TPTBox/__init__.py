@@ -21,12 +21,11 @@ from TPTBox.core.nii_wrapper import (
     to_nii_interpolateable,
     to_nii_optional,
     to_nii_seg,
+    Has_Grid,
 )
 from TPTBox.core.poi import AX_CODES, POI, POI_Reference, calc_centroids, calc_poi_from_subreg_vert
 from TPTBox.core.poi import calc_poi_from_two_segs
 from TPTBox.core.poi import calc_poi_from_two_segs as calc_poi_labeled_buffered
-from TPTBox.core.poi import load_poi
-from TPTBox.core.poi import load_poi as load_centroids
 from TPTBox.core.poi_fun.poi_global import POI_Global
 from TPTBox.core.vert_constants import ZOOMS, Location, Vertebra_Instance, v_idx2name, v_idx_order, v_name2idx
 

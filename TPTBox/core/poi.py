@@ -6,19 +6,21 @@ import warnings
 from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
-from typing import TypedDict, TypeVar, Union
+from typing import TypeVar, Union
 
 import nibabel as nib
 import nibabel.orientations as nio
 import numpy as np
 from scipy.ndimage import center_of_mass
-from typing_extensions import Self, TypeGuard  # noqa: UP035
+from typing_extensions import Self
 
 from TPTBox.core import bids_files
 from TPTBox.core.compat import zip_strict
 from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.nii_wrapper import NII, Image_Reference, to_nii, to_nii_optional
+from TPTBox.core.poi_fun import save_load
 from TPTBox.core.poi_fun.poi_abstract import Abstract_POI, POI_Descriptor
 from TPTBox.core.vert_constants import (
     AFFINE,
@@ -33,52 +35,23 @@ from TPTBox.core.vert_constants import (
     TRIPLE,
     ZOOMS,
     Abstract_lvl,
+    Any,
     Location,
     Sentinel,
     Vertebra_Instance,
-    _register_lvl,
-    conversion_poi,
-    conversion_poi2text,
     log,
     logging,
-    v_idx2name,
     v_name2idx,
 )
 from TPTBox.logger import Log_Type
 
-
-### LEGACY DEFINITIONS ###
-class _Point3D(TypedDict):
-    X: float
-    Y: float
-    Z: float
-    label: int
-
-
-class _Orientation(TypedDict):
-    direction: tuple[str, str, str]
-
-
-_Centroid_DictList = Sequence[Union[_Orientation, _Point3D]]
-
-
 ### CURRENT TYPE DEFINITIONS
 C = TypeVar("C", bound="POI")
 POI_Reference = Union[bids_files.BIDS_FILE, Path, str, tuple[Image_Reference, Image_Reference, Sequence[int]], C]
-ctd_info_blacklist = [
-    "zoom",
-    "shape",
-    "direction",
-    "format",
-    "rotation",
-    "origin",
-    "level_one_info",
-    "level_two_info",
-]  # "location"
 
 
 @dataclass
-class POI(Abstract_POI):
+class POI(Abstract_POI, Has_Grid):
     """
     This class represents a collection of POIs used to define points of interest in medical imaging data.
 
@@ -234,7 +207,7 @@ class POI(Abstract_POI):
             format=self.format,
         )
 
-    def local_to_global(self, x: COORDINATE) -> COORDINATE:
+    def local_to_global(self, x: COORDINATE, itk_coords=False) -> COORDINATE:
         """Converts local coordinates to global coordinates using zoom, rotation, and origin.
 
         Args:
@@ -262,6 +235,8 @@ class POI(Abstract_POI):
         assert self.origin is not None, "Attribute 'origin' must be set before calling local_to_global."
 
         a = self.rotation @ (np.array(x) * np.array(self.zoom)) + self.origin
+        if itk_coords:
+            a = (-a[0], -a[1], a[2])
         # return tuple(a.tolist())
         return tuple(round(float(v), ROUNDING_LVL) for v in a)
 
@@ -566,7 +541,7 @@ class POI(Abstract_POI):
     def rescale_(self, voxel_spacing: ZOOMS = (1, 1, 1), decimals=3, verbose: logging = False) -> Self:
         return self.rescale(voxel_spacing=voxel_spacing, decimals=decimals, verbose=verbose, inplace=True)
 
-    def to_global(self):
+    def to_global(self, itk_coords=False):
         """Converts the Centroids object to a global POI_Global object.
 
         This method converts the local POI coordinates to global coordinates using the Centroids' zoom,
@@ -579,15 +554,23 @@ class POI(Abstract_POI):
             >>> POI_obj = Centroids(...)
             >>> global_obj = POI_obj.to_global()
         """
-        import TPTBox.core.poi_fun.poi_global as pg
+        from TPTBox import POI_Global
 
-        return pg.POI_Global(self)
+        return POI_Global(
+            self, itk_coords=itk_coords, level_one_info=self.level_one_info, level_two_info=self.level_two_info, info=self.info.copy()
+        )
 
     def resample_from_to(self, ref: Has_Grid):
         return self.to_global().to_other(ref)
 
     def save(
-        self, out_path: Path | str, make_parents=False, additional_info: dict | None = None, verbose: logging = True, save_hint=2
+        self,
+        out_path: Path | str,
+        make_parents=False,
+        additional_info: dict | None = None,
+        save_hint=2,
+        resample_reference: Has_Grid | None = None,
+        verbose: logging = True,
     ) -> None:
         """
         Saves the POIs to a JSON file.
@@ -608,33 +591,9 @@ class POI(Abstract_POI):
             >>> POIs = Centroids(...)
             >>> POIs.save("output/POIs.json")
         """
-        _file_types = ["json"]
-        file_ending = Path(out_path).name.split(".")[-1]
-        if file_ending not in _file_types:
-            raise ValueError(f"Not supported file ending for POI: {file_ending} not in {_file_types}")
-        if make_parents:
-            Path(out_path).parent.mkdir(exist_ok=True, parents=True)
-
-        self.sort()
-        out_path = str(out_path)
-        if len(self.centroids) == 0:
-            log.print("POIs empty, not saved:", out_path, ltype=Log_Type.FAIL, verbose=verbose)
-            return
-        json_object, print_add = _poi_to_dict_list(self, additional_info, save_hint, verbose)
-
-        # Problem with python 3 and int64 serialization.
-        def convert(o):
-            if isinstance(o, np.integer):
-                return int(o)
-            if isinstance(o, np.floating):
-                return float(o)
-            if isinstance(o, np.ndarray):
-                return o.tolist()
-            raise TypeError(type(o))
-
-        with open(out_path, "w") as f:
-            json.dump(json_object, f, default=convert, indent=4)
-        log.print("POIs saved:", out_path, print_add, ltype=Log_Type.SAVE, verbose=verbose)
+        return save_load.save_poi(
+            self, out_path, make_parents, additional_info, verbose=verbose, save_hint=save_hint, resample_reference=resample_reference
+        )
 
     def make_point_cloud_nii(self, affine=None, s=8, sphere=False):
         """Create point cloud NIfTI images from the POI coordinates.
@@ -683,14 +642,14 @@ class POI(Abstract_POI):
         else:
             for region, subregion, (x, y, z) in self.items():
                 arr[
-                    max(int(floor(x - s1 / self.zoom[0])) + 1, 0) : min(int(ceil(x + s2 / self.zoom[0] + 1)), self.shape[0]),
-                    max(int(floor(y - s1 / self.zoom[1])) + 1, 0) : min(int(ceil(y + s2 / self.zoom[1] + 1)), self.shape[1]),
-                    max(int(floor(z - s1 / self.zoom[2])) + 1, 0) : min(int(ceil(z + s2 / self.zoom[2] + 1)), self.shape[2]),
+                    max((floor(x - s1 / self.zoom[0])) + 1, 0) : min((ceil(x + s2 / self.zoom[0] + 1)), self.shape[0]),
+                    max((floor(y - s1 / self.zoom[1])) + 1, 0) : min((ceil(y + s2 / self.zoom[1] + 1)), self.shape[1]),
+                    max((floor(z - s1 / self.zoom[2])) + 1, 0) : min((ceil(z + s2 / self.zoom[2] + 1)), self.shape[2]),
                 ] = region
                 arr2[
-                    max(int(floor(x - s1 / self.zoom[0])) + 1, 0) : min(int(ceil(x + s2 / self.zoom[0] + 1)), self.shape[0]),
-                    max(int(floor(y - s1 / self.zoom[1])) + 1, 0) : min(int(ceil(y + s2 / self.zoom[1] + 1)), self.shape[1]),
-                    max(int(floor(z - s1 / self.zoom[2])) + 1, 0) : min(int(ceil(z + s2 / self.zoom[2] + 1)), self.shape[2]),
+                    max((floor(x - s1 / self.zoom[0])) + 1, 0) : min((ceil(x + s2 / self.zoom[0] + 1)), self.shape[0]),
+                    max((floor(y - s1 / self.zoom[1])) + 1, 0) : min((ceil(y + s2 / self.zoom[1] + 1)), self.shape[1]),
+                    max((floor(z - s1 / self.zoom[2])) + 1, 0) : min((ceil(z + s2 / self.zoom[2] + 1)), self.shape[2]),
                 ] = subregion
         nii = nib.Nifti1Image(arr, affine=affine)
         nii2 = nib.Nifti1Image(arr2, affine=affine)
@@ -722,7 +681,7 @@ class POI(Abstract_POI):
         return self.copy(filtered_centroids)
 
     @classmethod
-    def load(cls, poi: POI_Reference, reference: Has_Grid | None = None):
+    def load(cls, poi: POI_Reference, reference: Has_Grid | None = None, allow_global=False) -> POI:
         """Load a Centroids object from various input sources.
 
         This method provides a convenient way to load a Centroids object from different sources,
@@ -760,123 +719,32 @@ class POI(Abstract_POI):
             >>> existing_poi = POI(...)
             >>> loaded_poi = POI.load(existing_poi)
         """
-        poi_obj = load_poi(poi)
+        from TPTBox import POI_Global
+
+        poi_obj = save_load.load_poi(poi)
         if reference is not None:
-            if poi_obj.spacing is None:
-                poi_obj.spacing = reference.spacing
-            if poi_obj.rotation is None:
-                poi_obj.rotation = reference.rotation
-            if poi_obj.shape is None:
-                poi_obj.shape = reference.shape
-            if poi_obj.origin is None:
-                poi_obj.origin = reference.origin
-            reference.assert_affine(poi_obj)
-        return poi_obj
-
-    def assert_affine(
-        self,
-        other: Self | NII | None = None,
-        ignore_missing_values: bool = False,
-        affine: AFFINE | None = None,
-        zoom: ZOOMS | None = None,
-        orientation: AX_CODES | None = None,
-        rotation: ROTATION | None = None,
-        origin: ORIGIN | None = None,
-        shape: SHAPE | None = None,
-        shape_tolerance: float = 0.0,
-        origin_tolerance: float = 0.0,
-        error_tolerance: float = 1e-4,
-        raise_error: bool = True,
-        verbose: logging = False,
-        text="",
-    ):
-        """Checks if the different metadata is equal to some comparison entries
-
-        Args:
-            other (Self | POI | None, optional): If set, will assert each entry of that object instead. Defaults to None.
-            affine (AFFINE | None, optional): Affine matrix to compare against. If none, will not assert affine. Defaults to None.
-            zms (Zooms | None, optional): Zoom to compare against. If none, will not assert zoom. Defaults to None.
-            orientation (Ax_Codes | None, optional): Orientation to compare against. If none, will not assert orientation. Defaults to None.
-            origin (ORIGIN | None, optional): Origin to compare against. If none, will not assert origin. Defaults to None.
-            shape (SHAPE | None, optional): Shape to compare against. If none, will not assert shape. Defaults to None.
-            shape_tolerance (float, optional): error tolerance in shape as float, as POIs can have float shapes. Defaults to 0.0.
-            error_tolerance (float, optional): Accepted error tolerance in all assertions except shape. Defaults to 1e-4.
-            raise_error (bool, optional): If true, will raise AssertionError if anything is found. Defaults to True.
-            verbose (logging, optional): If true, will print out each assertion mismatch. Defaults to False.
-
-        Raises:
-            AssertionError: If any of the assertions failed and raise_error is True
-
-        Returns:
-            bool: True if there are no assertion errors
-        """
-        found_errors: list[str] = []
-
-        # Make Checks
-        if other is not None:
-            other_data = other._extract_affine()
-            other_match = self.assert_affine(
-                other=None,
-                **other_data,
-                raise_error=raise_error,
-                shape_tolerance=shape_tolerance,
-                error_tolerance=error_tolerance,
-                origin_tolerance=origin_tolerance,
+            if isinstance(poi_obj, POI_Global):
+                poi_obj = poi_obj.resample_from_to(reference)
+            else:
+                if poi_obj.spacing is None:
+                    poi_obj.spacing = reference.spacing
+                if poi_obj.rotation is None:
+                    poi_obj.rotation = reference.rotation
+                if poi_obj.shape is None:
+                    poi_obj.shape = reference.shape
+                if poi_obj.origin is None:
+                    poi_obj.origin = reference.origin
+                reference.assert_affine(poi_obj)
+        if isinstance(poi_obj, POI_Global) and not allow_global:
+            warnings.warn(
+                f"{poi} is a POI with global coordinates, but you loaded it with POI.load(), \n"
+                + "Use POI_Global.load() if you want to load a POI_Global \n"
+                + "Use reference=... to resample the global POI to a Grid \n"
+                + "or allow_global = True if you want allow a mix of POI and POI_Global\n",
+                UserWarning,
+                stacklevel=4,
             )
-            if not other_match:
-                found_errors.append(f"object mismatch {self!s}, {other!s}")
-        if affine is not None and (not ignore_missing_values or self.affine is not None):
-            if self.affine is None:
-                found_errors.append(f"affine mismatch {self.affine}, {affine}")
-            else:
-                affine_diff = self.affine - affine
-                affine_match = np.all([abs(a) <= error_tolerance for a in affine_diff.flatten()])
-                found_errors.append(f"affine mismatch {self.affine}, {affine}") if not affine_match else None
-        if rotation is not None and (not ignore_missing_values or self.rotation is not None):
-            if self.rotation is None:
-                found_errors.append(f"rotation mismatch {self.rotation}, {rotation}")
-            else:
-                rotation_diff = self.rotation - rotation
-                rotation_match = np.all([abs(a) <= error_tolerance for a in rotation_diff.flatten()])
-                found_errors.append(f"rotation mismatch {self.rotation}, {rotation}") if not rotation_match else None
-        if zoom is not None and (not ignore_missing_values or self.zoom is not None):
-            if self.zoom is None:
-                found_errors.append(f"zoom mismatch {self.zoom}, {zoom}")
-            else:
-                zms_diff = (self.zoom[i] - zoom[i] for i in range(3))
-                zms_match = np.all([abs(a) <= error_tolerance for a in zms_diff])
-                found_errors.append(f"zoom mismatch {self.zoom}, {zoom}") if not zms_match else None
-        if orientation is not None and (not ignore_missing_values or self.affine is not None):
-            if self.orientation is None:
-                found_errors.append(f"orientation mismatch {self.orientation}, {orientation}")
-            else:
-                orientation_match = np.all([i == orientation[idx] for idx, i in enumerate(self.orientation)])
-                found_errors.append(f"orientation mismatch {self.orientation}, {orientation}") if not orientation_match else None
-        if origin is not None and (not ignore_missing_values or self.origin is not None):
-            if self.origin is None:
-                found_errors.append(f"origin mismatch {self.origin}, {origin}")
-            else:
-                origin_diff = (self.origin[i] - origin[i] for i in range(3))
-                origin_match = np.all([abs(a) <= origin_tolerance for a in origin_diff])
-                found_errors.append(f"origin mismatch {self.origin}, {origin}") if not origin_match else None
-        if shape is not None and (not ignore_missing_values or self.shape is not None):
-            if self.shape is None:
-                found_errors.append(f"shape mismatch {self.shape}, {shape}")
-            else:
-                shape_diff = (float(self.shape[i]) - float(shape[i]) for i in range(3))
-                shape_match = np.all([abs(a) <= shape_tolerance for a in shape_diff])
-                found_errors.append(f"shape mismatch {self.shape}, {shape}") if not shape_match else None
-
-        # Print errors
-        for err in found_errors:
-            log.print(err, Log_Type.FAIL, verbose=verbose)
-
-        # Final conclusion and possible raising of AssertionError
-        has_errors = len(found_errors) > 0
-        if raise_error and has_errors:
-            raise AssertionError(f"assert_affine failed with {text} {found_errors}")
-
-        return not has_errors
+        return poi_obj  # type: ignore
 
     def __eq__(self, value: object) -> bool:
         if not isinstance(value, POI):
@@ -888,229 +756,13 @@ class POI(Abstract_POI):
         return self.centroids == value2.centroids
 
 
-######## Saving #######
-def _is_Point3D(obj) -> TypeGuard[_Point3D]:
-    return "label" in obj and "X" in obj and "Y" in obj and "Z" in obj
-
-
-FORMAT_DOCKER = 0
-FORMAT_GRUBER = 1
-FORMAT_POI = 2
-FORMAT_OLD_POI = 10
-format_key = {FORMAT_DOCKER: "docker", FORMAT_GRUBER: "guber", FORMAT_POI: "POI"}
-format_key2value = {value: key for key, value in format_key.items()}
-
-
-def _poi_to_dict_list(ctd: POI, additional_info: dict | None, save_hint=0, verbose: logging = False):  # noqa: C901
-    ori: dict[str, str | COORDINATE | AX_CODES] = {"direction": ctd.orientation}
-    print_out = ""
-    if ctd.zoom is not None:
-        ori["zoom"] = ctd.zoom
-    if ctd.origin is not None:
-        ori["origin"] = ctd.origin  # type: ignore
-    if ctd.rotation is not None:
-        ori["rotation"] = ctd.rotation  # type: ignore
-    if ctd.shape is not None:
-        ori["shape"] = ctd.shape  # type: ignore
-    if save_hint in format_key:
-        ori["format"] = format_key[save_hint]  # type: ignore
-        print_out = "in format " + format_key[save_hint]
-
-    ori["level_one_info"] = str(ctd.level_one_info.__name__)
-    ori["level_two_info"] = str(ctd.level_two_info.__name__)
-    if additional_info is not None:
-        for k, v in additional_info.items():
-            if k not in ori:
-                ori[k] = v
-
-    for k, v in ctd.info.items():
-        if k not in ori:
-            ori[k] = v
-
-    dict_list: list[_Orientation | (_Point3D | dict)] = [ori]
-
-    if save_hint == FORMAT_OLD_POI:
-        ctd = ctd.rescale((1, 1, 1), verbose=verbose).reorient_(("R", "P", "I"), verbose=verbose)
-        dict_list = []
-
-    temp_dict = {}
-    ctd.sort()
-    for vert_id, subreg_id, (x, y, z) in ctd.items():
-        if save_hint == FORMAT_DOCKER:
-            dict_list.append({"label": subreg_id * LABEL_MAX + vert_id, "X": x, "Y": y, "Z": z})
-        elif save_hint == FORMAT_GRUBER:
-            v = v_idx2name[vert_id].replace("T", "TH") + "_" + conversion_poi2text[subreg_id]
-            dict_list.append({"label": v, "X": x, "Y": y, "Z": z})
-        elif save_hint == FORMAT_POI:
-            v_name = ctd.level_one_info._get_name(vert_id, no_raise=True)
-            # sub_name = v_idx2name[subreg_id]
-            if v_name not in temp_dict:
-                temp_dict[v_name] = {}
-            temp_dict[v_name][subreg_id] = (x, y, z)
-        elif save_hint == FORMAT_OLD_POI:
-            if vert_id not in temp_dict:
-                temp_dict[vert_id] = {}
-            temp_dict[vert_id][str(subreg_id)] = str((float(x), float(y), float(z)))
-        else:
-            raise NotImplementedError(save_hint)
-    if len(temp_dict) != 0:
-        if save_hint == FORMAT_OLD_POI:
-            for k, v in temp_dict.items():
-                out_dict = {"vert_label": str(k), **v}
-                dict_list.append(out_dict)
-        else:
-            dict_list.append(temp_dict)
-    return dict_list, print_out
-
-
-######### Load #############
-# Handling POIs #
-
-
-def load_poi(ctd_path: POI_Reference, verbose=True) -> POI:  # noqa: ARG001
-    """
-    Load POIs from a file or a BIDS file object.
-
-    Args:
-        ctd_path (Centroid_Reference): Path to a file or BIDS file object from which to load POIs.
-            Alternatively, it can be a tuple containing the following items:
-            - vert: str, the name of the vertebra.
-            - subreg: str, the name of the subregion.
-            - ids: list[int | Location], a list of integers and/or Location objects used to filter the POIs.
-
-    Returns:
-        A Centroids object containing the loaded POIs.
-
-    Raises:
-        AssertionError: If `ctd_path` is not a recognized type.
-
-    """
-    if isinstance(ctd_path, POI):
-        return ctd_path
-    elif isinstance(ctd_path, bids_files.BIDS_FILE):
-        dict_list: _Centroid_DictList = ctd_path.open_json()  # type: ignore
-    elif isinstance(ctd_path, (Path, str)):
-        with open(ctd_path) as json_data:
-            dict_list: _Centroid_DictList = json.load(json_data)
-            json_data.close()
-    elif isinstance(ctd_path, tuple):
-        vert = ctd_path[0]
-        subreg = ctd_path[1]
-        ids: list[int | Location] = ctd_path[2]  # type: ignore
-        return calc_poi_from_subreg_vert(vert, subreg, subreg_id=ids)
-    else:
-        raise TypeError(f"{type(ctd_path)}\n{ctd_path}")
-    ### format_POI_old has no META header
-    if "direction" not in dict_list[0] and "vert_label" in dict_list[0]:
-        return _load_format_POI_old(dict_list)  # This file if used in the old POI-pipeline and is deprecated
-
-    assert "direction" in dict_list[0], f'File format error: first index must be a "Direction" but got {dict_list[0]}'
-    axcode: AX_CODES = tuple(dict_list[0]["direction"])  # type: ignore
-    zoom: ZOOMS = dict_list[0].get("zoom", None)  # type: ignore
-    shape = dict_list[0].get("shape", None)  # type: ignore
-    shape = tuple(shape) if shape is not None else None
-    format_ = dict_list[0].get("format", None)
-    origin = dict_list[0].get("origin", None)
-    origin = tuple(origin) if origin is not None else None
-    rotation: ROTATION = dict_list[0].get("rotation", None)
-    level_one_info = _register_lvl[dict_list[0].get("level_one_info", Vertebra_Instance.__name__)]
-    level_two_info = _register_lvl[dict_list[0].get("level_two_info", Location.__name__)]
-
-    info = {k: v for k, v in dict_list[0].items() if k not in ctd_info_blacklist}
-
-    format_ = format_key2value[format_] if format_ is not None else None
-    centroids = POI_Descriptor()
-    if format_ in (FORMAT_DOCKER, FORMAT_GRUBER) or format_ is None:
-        _load_docker_centroids(dict_list, centroids, format_)
-    elif format_ == FORMAT_POI:
-        _load_POI_centroids(dict_list, centroids, level_one_info, level_two_info)
-    else:
-        raise NotImplementedError(format_)
-    return POI(
-        centroids=centroids,
-        orientation=axcode,
-        zoom=zoom,
-        shape=shape,  # type: ignore
-        format=format_,
-        info=info,
-        origin=origin,  # type: ignore
-        rotation=rotation,  # type: ignore
-        level_one_info=level_one_info,
-        level_two_info=level_two_info,
-    )  # type: ignore
-
-
-def _load_docker_centroids(dict_list, centroids: POI_Descriptor, format_):  # noqa: ARG001
-    for d in dict_list[1:]:
-        assert "direction" not in d, f'File format error: only first index can be a "direction" but got {dict_list[0]}'
-        if "nan" in str(d):  # skipping NaN POIs
-            continue
-        elif _is_Point3D(d):
-            try:
-                a = int(d["label"])
-                subreg = a // LABEL_MAX
-                if subreg == 0:
-                    subreg = 50
-                centroids[a % LABEL_MAX, subreg] = (d["X"], d["Y"], d["Z"])
-            except Exception:
-                try:
-                    number, subreg = str(d["label"]).split("_", maxsplit=1)
-                    number = number.replace("TH", "T").replace("SA", "S1")
-                    vert_id = v_name2idx[number]
-                    subreg_id = conversion_poi[subreg]
-                    centroids[vert_id, subreg_id] = (d["X"], d["Y"], d["Z"])
-                except Exception:
-                    print(f"Label {d['label']} is not an integer and cannot be converted to an int")
-                    centroids[0, d["label"]] = (d["X"], d["Y"], d["Z"])
-        else:
-            raise ValueError(d)
-
-
-def _load_format_POI_old(dict_list):
-    # [
-    # {
-    #    "vert_label": "8",
-    #    "85": "(281, 185, 274)",
-    #    ...
-    # }{...}
-    # ...
-    # ]
-    centroids = POI_Descriptor()
-    for d in dict_list:
-        d: dict[str, str]
-        vert_id = int(d["vert_label"])
-        for k, v in d.items():
-            if k == "vert_label":
-                continue
-            sub_id = int(k)
-            t = v.replace("(", "").replace(")", "").replace(" ", "").split(",")
-            t = tuple(float(x) for x in t)
-            centroids[vert_id, sub_id] = t
-    return POI(centroids, orientation=("R", "P", "I"), zoom=(1, 1, 1), shape=None, format=FORMAT_OLD_POI, rotation=None)  # type: ignore
-
-
-def _load_POI_centroids(
-    dict_list,
-    centroids: POI_Descriptor,
-    level_one_info: Abstract_lvl,
-    level_two_info: Abstract_lvl,
-):
-    assert len(dict_list) == 2
-    d: dict[int | str, dict[int | str, tuple[float, float, float]]] = dict_list[1]
-    for vert_id, v in d.items():
-        vert_id = level_one_info._get_id(vert_id, no_raise=True)  # noqa: PLW2901
-        for sub_id, t in v.items():
-            sub_id = level_two_info._get_id(sub_id)  # noqa: PLW2901
-            centroids[vert_id, sub_id] = tuple(t)
-
-
-def _loc2int(i: int | Location):
+def _loc2int(i: int | Abstract_lvl):
     if isinstance(i, int):
         return i
     return i.value
 
 
-def _loc2int_list(i: int | Location | Sequence[int | Location]):
+def _loc2int_list(i: int | Abstract_lvl | Sequence[int | Abstract_lvl]):
     if isinstance(i, Sequence):
         return [_loc2int(j) for j in i]
     if isinstance(i, int):
@@ -1119,15 +771,12 @@ def _loc2int_list(i: int | Location | Sequence[int | Location]):
 
 
 def _int2loc(
-    i: int | Location | Sequence[int | Location] | Sequence[Location] | Sequence[int],
-) -> Location | Sequence[Location]:
+    i: int | Abstract_lvl | Sequence[int | Abstract_lvl] | Sequence[Abstract_lvl] | Sequence[int],
+) -> Abstract_lvl | Sequence[Abstract_lvl]:
     if isinstance(i, Sequence):
         return [_int2loc(j) for j in i]  # type: ignore
     elif isinstance(i, int):
-        # try:
         return Location(i)
-        # except Exception:
-        #    return i
     return i
 
 
@@ -1135,7 +784,7 @@ def calc_poi_from_two_segs(
     msk_reference: Image_Reference,
     subreg_reference: Image_Reference | None,
     out_path: Path | str,
-    subreg_id: int | Location | Sequence[int | Location] | None = None,
+    subreg_id: int | Abstract_lvl | Sequence[int | Abstract_lvl] | None = None,
     verbose=True,
     override=False,
     decimals=3,
@@ -1199,6 +848,7 @@ def calc_poi_from_two_segs(
     if (sub_nii is None or not check_every_point) and out_path.exists():
         return POI.load(out_path)
     if subreg_id is None:
+        assert sub_nii is not None
         subreg_id = sub_nii.unique()
     if sub_nii is not None:
         ctd = calc_poi_from_subreg_vert(
@@ -1251,7 +901,7 @@ def calc_poi_from_subreg_vert(
     buffer_file: str | Path | None = None,  # used by wrapper  # noqa: ARG001
     save_buffer_file=False,  # used by wrapper  # noqa: ARG001
     decimals=2,
-    subreg_id: int | Location | Sequence[int | Location] | Sequence[Location] | Sequence[int] = 50,
+    subreg_id: int | Abstract_lvl | Sequence[int | Abstract_lvl] | Sequence[Abstract_lvl] | Sequence[int] = 50,
     verbose: logging = True,
     extend_to: POI | None = None,
     # use_vertebra_special_action=True,
@@ -1280,7 +930,7 @@ def calc_poi_from_subreg_vert(
         crop = subreg_msk.compute_crop(maximum_size=crop)
     # crop = (slice(0, subreg_msk.shape[0]), slice(0, subreg_msk.shape[1]), slice(0, subreg_msk.shape[2]))
     except ValueError:
-        return POI({}, **vert_msk._extract_affine(), format=FORMAT_POI) if extend_to is None else extend_to.copy()
+        return POI({}, **vert_msk._extract_affine(), format=save_load.FORMAT_POI) if extend_to is None else extend_to.copy()
     vert_msk.assert_affine(subreg_msk)
     vert_msk = vert_msk.apply_crop(crop)
     subreg_msk = subreg_msk.apply_crop(crop)
@@ -1288,7 +938,7 @@ def calc_poi_from_subreg_vert(
         POI(
             {},
             **vert_msk._extract_affine(),
-            format=FORMAT_POI,
+            format=save_load.FORMAT_POI,
             level_one_info=Vertebra_Instance,
             level_two_info=Location,
         )
@@ -1381,12 +1031,12 @@ def calc_poi_from_subreg_vert(
     subreg_arr[subreg_arr >= 100] = 0
 
     if extend_to is None:
-        extend_to = POI({}, **vert_msk._extract_affine(), format=FORMAT_POI)
+        extend_to = POI({}, **vert_msk._extract_affine(), format=save_load.FORMAT_POI)
     if len(subreg_id_int) != 0:
         # print("step 6", subreg_id_int)
         compute_non_centroid_pois(
             extend_to,
-            _int2loc(list(subreg_id_int)),
+            _int2loc(list(subreg_id_int)),  # type: ignore
             vert_msk,
             subreg_msk,
             _vert_ids=_vert_ids,
@@ -1436,7 +1086,7 @@ def calc_centroids_from_two_masks(
         limit_ids_of_lvl_2 = subreg_msk.unique()
     # Recursive call for multiple subregion ids
     if extend_to is None:
-        poi = POI({}, **vert_msk._extract_affine(), format=FORMAT_POI)
+        poi = POI({}, **vert_msk._extract_affine(), format=save_load.FORMAT_POI)
     else:
         poi = extend_to.apply_crop(crop)
         vert_msk.assert_affine(poi)
@@ -1478,7 +1128,12 @@ def _is_not_yet_computed(ids_in_arr: Sequence[int], extend_to: POI | None, subre
 
 
 def calc_centroids(
-    msk: Image_Reference, decimals=3, first_stage=-1, second_stage: int | Location = 50, extend_to: POI | None = None, inplace: bool = False
+    msk: Image_Reference,
+    decimals=3,
+    first_stage: int | Abstract_lvl = -1,
+    second_stage: int | Abstract_lvl = 50,
+    extend_to: POI | None = None,
+    inplace: bool = False,
 ) -> POI:
     """
     Calculates the centroid coordinates of each region in the given mask image.
@@ -1504,24 +1159,23 @@ def calc_centroids(
         - The region label is assumed to be an integer.
         - NaN values in the binary mask are ignored.
     """
-    if isinstance(second_stage, Location):
+    args = {}
+    if isinstance(second_stage, Abstract_lvl):
         second_stage = second_stage.value
+        args["level_two_info"] = type(second_stage)
+    if isinstance(first_stage, Abstract_lvl):
+        first_stage = first_stage.value
+        args["level_one_info"] = type(first_stage)
     assert first_stage == -1 or second_stage == -1, "first or second dimension must be fixed."
     msk_nii = to_nii(msk, seg=True)
     msk_data = msk_nii.get_seg_array()
-    axc: AX_CODES = nio.aff2axcodes(msk_nii.affine)  # type: ignore
     if extend_to is None:
         ctd_list = POI_Descriptor()
     else:
         if not inplace:
             extend_to = extend_to.copy()
         ctd_list = extend_to.centroids
-        extend_to.assert_affine(
-            msk_nii,
-            shape_tolerance=0.5,
-            origin_tolerance=0.5,
-        )
-        # assert extend_to.orientation == axc, (extend_to.orientation, axc)
+        extend_to.assert_affine(msk_nii, shape_tolerance=0.5, origin_tolerance=0.5)
     for i in msk_nii.unique():
         msk_temp = np.zeros(msk_data.shape, dtype=bool)
         msk_temp[msk_data == i] = True
@@ -1530,7 +1184,7 @@ def calc_centroids(
             ctd_list[first_stage, int(i)] = tuple(round(x, decimals) for x in ctr_mass)
         else:
             ctd_list[int(i), second_stage] = tuple(round(x, decimals) for x in ctr_mass)
-    return POI(ctd_list, orientation=axc, **msk_nii._extract_affine(rm_key=["orientation"]))
+    return POI(ctd_list, **msk_nii._extract_affine(), **args)
 
 
 ######## Utility #######

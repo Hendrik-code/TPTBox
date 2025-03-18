@@ -14,14 +14,15 @@ from typing_extensions import Self
 
 from TPTBox.core import vert_constants
 from TPTBox.core.nii_poi_abstract import Has_Grid
-from TPTBox.core.vert_constants import COORDINATE, POI_DICT, Abstract_lvl, Location, Vertebra_Instance, log, log_file, logging
+from TPTBox.core.vert_constants import COORDINATE, POI_DICT, Abstract_lvl, Any, Location, Vertebra_Instance, log, log_file, logging
 
 POI_ID = Union[
     tuple[int, int],
     slice,
-    tuple[Location, Location],
-    tuple[Location, int],
-    tuple[int, Location],
+    tuple[Union[Abstract_lvl, int], Union[Abstract_lvl, int]],
+    tuple[Abstract_lvl, Abstract_lvl],
+    tuple[Abstract_lvl, int],
+    tuple[int, Abstract_lvl],
     tuple[Vertebra_Instance, Location],
     tuple[Vertebra_Instance, int],
 ]
@@ -32,7 +33,7 @@ MAPPING = Union[
     dict[int, Union[int, None]],
     dict[int, None],
     dict[Union[int, str], Union[int, str, None]],
-    None
+    None,
 ]
 
 DIMENSIONS = 3
@@ -291,18 +292,17 @@ class POI_Descriptor(AbstractSet, MutableMapping):
 
 
 @dataclass
-class Abstract_POI(Has_Grid):
+class Abstract_POI:
     _centroids: POI_Descriptor = field(default_factory=lambda: POI_Descriptor(), repr=False)
     centroids: POI_Descriptor = field(repr=False, hash=False, compare=False, default=None)  # type: ignore
     format: int | None = field(default=None, repr=False, compare=False)
-    level_one_info: type[Abstract_lvl] = Vertebra_Instance  # Must be Enum and must has order_dict
-    level_two_info: type[Abstract_lvl] = Location
+    level_one_info: type[Abstract_lvl] = Any
+    level_two_info: type[Abstract_lvl] = Any
     info: dict = field(default_factory=dict, compare=False, init=True)  # additional info (key,value pairs)
 
     def __post_init__(self):
         if not isinstance(self._centroids, POI_Descriptor):
             self._centroids = POI_Descriptor.normalize_input_data(self._centroids)
-
 
     @property
     def centroids(self) -> POI_Descriptor:
@@ -329,14 +329,12 @@ class Abstract_POI(Has_Grid):
         return self.copy(ctd)
 
     @property
-    def is_global(self) -> bool:
-        ...
+    def is_global(self) -> bool: ...
 
     def clone(self, **qargs):
         return self.copy(**qargs)
 
-    def copy(self, centroids: POI_Descriptor | None = None, **qargs) -> Self:
-        ...
+    def copy(self, centroids: POI_Descriptor | None = None, **qargs) -> Self: ...
 
     def map_labels(
         self,
@@ -442,7 +440,7 @@ class Abstract_POI(Has_Grid):
         self,
         smoothness: int = 10,
         samples_per_poi=20,
-        location: int | Location = Location.Vertebra_Corpus,
+        location: int | Abstract_lvl = Location.Vertebra_Corpus,
         vertebra=False,
     ) -> tuple[np.ndarray, np.ndarray]:
         """
@@ -461,7 +459,7 @@ class Abstract_POI(Has_Grid):
                 - spline_1st_derivative: A 2D NumPy array representing the first derivative of the spline curve.
                 shape: first dimension to select a cord, second dimension to select all X/Y/Z
         """
-        if isinstance(location, Location):
+        if isinstance(location, Abstract_lvl):
             location = location.value
         if location not in self.keys_subregion() and not isinstance(location, Sequence):
             raise ValueError(f"The location {location} is not computed in this POI class")
@@ -567,7 +565,7 @@ class Abstract_POI(Has_Grid):
 
         obj: Self = self.copy() if inplace is False else self
         for loc in label:
-            if isinstance(loc, Location):
+            if isinstance(loc, Abstract_lvl):
                 loc = loc.value  # noqa: PLW2901
             obj.centroids.pop(loc, None)
         return obj
@@ -578,12 +576,12 @@ class Abstract_POI(Has_Grid):
     def remove(self, *label: tuple[int, int], inplace=False):
         obj: Self = self.copy() if inplace is False else self
         for loc in label:
-            if isinstance(loc, Location):
+            if isinstance(loc, Abstract_lvl):
                 loc = loc.value  # noqa: PLW2901
             obj.centroids.pop(loc, None)
         return obj
 
-    def extract_subregion(self, *location: Location | int, inplace=False):
+    def extract_subregion(self, *location: Abstract_lvl | int, inplace=False):
         location_values = tuple(l if isinstance(l, int) else l.value for l in location)
         extracted_centroids = POI_Descriptor()
         for x1, x2, y in self.centroids.items():
@@ -594,7 +592,7 @@ class Abstract_POI(Has_Grid):
             return self
         return self.copy(centroids=extracted_centroids)
 
-    def extract_subregion_(self, *location: Location | int):
+    def extract_subregion_(self, *location: Abstract_lvl | int):
         return self.extract_subregion(*location, inplace=True)
 
     def extract_vert(self, *vert_label: int, inplace=False):
@@ -705,7 +703,7 @@ class Abstract_POI(Has_Grid):
             distances[(region, subregion)] = float(distance)
         return distances
 
-    def calculate_distances_poi_two_locations(self, a: Location | int, b: Location | int, keep_zoom=False) -> dict[int, float]:
+    def calculate_distances_poi_two_locations(self, a: Abstract_lvl | int, b: Abstract_lvl | int, keep_zoom=False) -> dict[int, float]:
         if isinstance(a, Enum):
             a = a.value
         if isinstance(b, Enum):
