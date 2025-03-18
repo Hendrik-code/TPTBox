@@ -761,70 +761,6 @@ def np_filter_connected_components(
         largest_k_components = n
     assert largest_k_components is not None
     largest_k_components = min(largest_k_components, n)  # if k > N, will return all N but still sorted
-    label_volume_pairs = [(i, vol) for i, vol in np_volume(labels_out).items() if vol > 0]
-    largest_k_components = min(largest_k_components, len(label_volume_pairs))
-    label_volume_pairs.sort(key=lambda x: x[1], reverse=True)
-    preserve: list[tuple[int, int]] = [(x[0], x[1]) for x in label_volume_pairs[:largest_k_components]]
-
-    cc_out = np.zeros(arr.shape, dtype=arr.dtype)
-    i = 1
-    for preserve_label, volume in preserve:
-        if volume < min_volume:
-            continue
-        if max_volume is not None and volume > max_volume:
-            continue
-        cc_out[labels_out == preserve_label] = i
-        if largest_k_components == i:
-            break
-        i += 1
-    if removed_to_label != 0:
-        arr[np.logical_and(labels_out != 0, arr == 0)] = removed_to_label
-    if return_original_labels:
-        arr *= cc_out > 0  # to get original labels
-        return arr
-    return cc_out
-
-
-def np_filter_connected_components2(
-    arr: UINTARRAY,
-    largest_k_components: int | None = None,
-    label_ref: LABEL_REFERENCE = None,
-    connectivity: int = 3,
-    return_original_labels: bool = True,
-    min_volume: float = 0,
-    max_volume: float | None = None,
-    removed_to_label=0,
-) -> UINTARRAY:
-    """finds the largest k connected components in a given array (does NOT work with zero as label!)
-
-    Args:
-        arr (np.ndarray): input array
-        k (int | None): finds the k-largest components. If k is None, will find all connected components and still sort them by size
-        labels (int | list[int] | None, optional): Labels that the algorithm should be applied to. If none, applies on all labels found in arr. Defaults to None.
-        connectivity: in range [1,3]. For 2D images, 2 and 3 is the same.
-        return_original_labels (bool): If set to False, will label the components from 1 to k. Defaults to True
-
-    Returns:
-        np.ndarray: array with the largest k connected components
-    """
-
-    assert largest_k_components is None or largest_k_components > 0
-    assert 2 <= arr.ndim <= 3, f"expected 2D or 3D, but got {arr.ndim}"
-    assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
-    if arr.ndim == 2:  # noqa: SIM108
-        connectivity = min(connectivity * 2, 8)  # 1:4, 2:8, 3:8
-    else:
-        connectivity = 6 if connectivity == 1 else 18 if connectivity == 2 else 26
-
-    arr2 = arr.copy()
-    labels: Sequence[int] = _to_labels(arr, label_ref)
-    arr2[np.isin(arr, labels, invert=True)] = 0  # type:ignore
-
-    labels_out, n = _connected_components(arr2, connectivity=connectivity, return_N=True)
-    if largest_k_components is None:
-        largest_k_components = n
-    assert largest_k_components is not None
-    largest_k_components = min(largest_k_components, n)  # if k > N, will return all N but still sorted
     label_volume_pairs = [
         (i, vol) for i, vol in np_volume(labels_out).items() if vol >= min_volume and (max_volume is None or vol <= max_volume)
     ]
@@ -863,11 +799,10 @@ def np_get_connected_components_center_of_mass(
     #
     if sort_by_axis is not None:
         assert 0 <= sort_by_axis <= len(arr.shape) - 1, f"sort_by_axis {sort_by_axis} invalid with an array of shape {arr.shape}"  # type:ignore
-    subreg_cc, _ = np_connected_components(
+    subreg_cc, _ = np_connected_components_per_label(
         arr.copy(),
         connectivity=connectivity,
         label_ref=label,
-        verbose=False,
     )
     coms = list(np_center_of_mass(subreg_cc[label]).values())
 
@@ -1232,10 +1167,10 @@ def np_betti_numbers(img: np.ndarray, verbose=False) -> tuple[int, int, int]:
     # calculate the Betti numbers B0, B2
     # then use Euler characteristic to get B1
     # get the label connected regions for foreground
-    _, b0 = label(padded, return_num=True, connectivity=N26)  # 26 neighborhoods for foreground
-    euler_char_num = euler_number(padded, connectivity=N26)  # 26 neighborhoods for foreground
+    _, b0 = _label(padded, return_num=True, connectivity=N26)  # 26 neighborhoods for foreground
+    euler_char_num = _euler_number(padded, connectivity=N26)  # 26 neighborhoods for foreground
     # get the label connected regions for background
-    _, b2 = label(1 - padded, return_num=True, connectivity=N6)  # 6 neighborhoods for background
+    _, b2 = _label(1 - padded, return_num=True, connectivity=N6)  # 6 neighborhoods for background
     # NOTE: need to subtract 1 from b2
     b2 -= 1
     b1 = b0 + b2 - euler_char_num  # Euler number = Betti:0 - Betti:1 + Betti:2
