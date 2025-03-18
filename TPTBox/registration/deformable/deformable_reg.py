@@ -231,9 +231,9 @@ class Deformable_Registration:
             pickle.dump(self.get_dump(), w)
 
     @classmethod
-    def load(cls, path):
+    def load(cls, path, gpu=0, ddevice: DEVICES = "cuda"):
         with open(path, "rb") as w:
-            return cls.load_(pickle.load(w))
+            return cls.load_(pickle.load(w), gpu, ddevice)
 
     @classmethod
     def load_(cls, w, gpu=0, ddevice: DEVICES = "cuda"):
