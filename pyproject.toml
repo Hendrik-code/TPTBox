@@ -29,6 +29,7 @@ tqdm = "*"
 joblib = "*"
 scikit-learn = "*"
 antspyx = "0.4.2"
+hf-deepali = "*"
 
 [tool.poetry.dev-dependencies]
 pytest = ">=8.1.1"
