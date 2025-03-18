@@ -30,7 +30,7 @@ joblib = "*"
 scikit-learn = "*"
 antspyx = "0.4.2"
 hf-deepali = "*"
-
+pkg_resources = "*" # deepali requires
 [tool.poetry.dev-dependencies]
 pytest = ">=8.1.1"
 vtk = "*"
@@ -152,7 +152,7 @@ ignore = [
     "N802",    # function name lowercase
     "F811",
     "N803",
-    "B905", # strict= in zip 
+    "B905", # strict= in zip
     "UP007", # Union and "|" python 3.9
 ]
 
