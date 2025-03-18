@@ -19,6 +19,7 @@ from torch import device
 
 from TPTBox import NII, POI, Image_Reference, to_nii
 from TPTBox.core.compat import zip_strict
+from TPTBox.core.internal.deep_learning_utils import DEVICES, get_device
 from TPTBox.core.nii_poi_abstract import Grid as TPTBox_Grid
 from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.registration.deformable._deepali import deform_reg_pair
@@ -36,15 +37,19 @@ def _load_config(path):
 
 
 def _warp_image(
-    source_image: deepaliImage, target_grid: Deepali_Grid, transform: SpatialTransform, mode="linear", device="cuda"
+    source_image: deepaliImage, target_grid: Deepali_Grid, transform: SpatialTransform, mode="linear", ddevice: DEVICES = "cuda", gpu=1
 ) -> torch.Tensor:
+    device = get_device(ddevice, gpu)
     warp_func = TransformImage(target=target_grid, source=target_grid, sampling=mode, padding=source_image.min()).to(device)
     with torch.inference_mode():
-        data = warp_func(transform.tensor(), source_image)
+        data = warp_func(transform.tensor(), source_image.to(device))
     return data
 
 
-def _warp_poi(poi_moving: POI, target_grid: TPTBox_Grid, transform: SpatialTransform, align_corners, device="cuda") -> POI:
+def _warp_poi(
+    poi_moving: POI, target_grid: TPTBox_Grid, transform: SpatialTransform, align_corners, ddevice: DEVICES = "cuda", gpu=1
+) -> POI:
+    device = get_device(ddevice, gpu)
     keys: list[tuple[int, int]] = []
     points = []
     for key, key2, (x, y, z) in poi_moving.items():
@@ -54,19 +59,19 @@ def _warp_poi(poi_moving: POI, target_grid: TPTBox_Grid, transform: SpatialTrans
     with torch.inference_mode():
         data = torch.Tensor(points)
         transform.to(device)
-        data2 = data
+        # data2 = data
         data = transform.inverse(update_buffers=True).points(
-            data,
+            data.to(device),
             axes=Axes.GRID,
             to_axes=Axes.GRID,
             grid=poi_moving.to_deepali_grid(align_corners),
             to_grid=target_grid.to_deepali_grid(align_corners),
         )
-        print(data2 - data)
+        # print(data2 - data)
 
     out_poi = target_grid.make_empty_POI()
     for (key, key2), (x, y, z) in zip_strict(keys, data.cpu()):
-        print(key, key2, x, y, z)
+        # print(key, key2, x, y, z)
         out_poi[key, key2] = (x.item(), y.item(), z.item())
     return out_poi
 
@@ -91,11 +96,12 @@ class Deformable_Registration:
         normalize: Literal["MRI", "CT"] | None = None,
         quantile: float = 0.95,
         reference_image: Image_Reference | None = None,
-        device: Device | str | None = cuda,
         align_corners: bool = False,
         verbose=1,
         config: Path | str | dict = Path(__file__).parent / "settings.json",
         spacing_type=1,
+        gpu=0,
+        ddevice: DEVICES = "cuda",
     ) -> None:
         """
         Initialize the deformable registration process.
@@ -109,7 +115,9 @@ class Deformable_Registration:
             device (Device | None): The computational device for the process, default is CUDA.
             align_corners (bool): Whether to align the corners during grid resampling.
         """
-
+        self.gpu = gpu
+        self.ddevice: DEVICES = ddevice
+        device = get_device(ddevice, gpu)
         fix = to_nii(fixed_image).copy()
         mov = to_nii(moving_image).copy()
 
@@ -160,7 +168,7 @@ class Deformable_Registration:
         )
 
     @torch.no_grad()
-    def transform_nii(self, img: NII, device="cuda", target: Has_Grid | None = None) -> NII:
+    def transform_nii(self, img: NII, gpu: int | None = None, ddevice: DEVICES | None = None, target: Has_Grid | None = None) -> NII:
         """
         Apply the computed transformation to a given NII image.
 
@@ -173,26 +181,32 @@ class Deformable_Registration:
         target_grid_nii = self.target_grid if target is None else target
         target_grid = target_grid_nii.to_deepali_grid(self.align_corners)
         source_image = img.resample_from_to(self.input_grid).to_deepali()
-
         data = _warp_image(
             source_image,
             target_grid,
             self.transform,
             "nearest" if img.seg else "linear",
-            device=device,
+            ddevice=ddevice if ddevice is not None else self.ddevice,
+            gpu=gpu if gpu is not None else self.gpu,
         ).squeeze()
         data: torch.Tensor = data.permute(*torch.arange(data.ndim - 1, -1, -1))  # type: ignore
         out = target_grid_nii.make_nii(data.detach().cpu().numpy(), img.seg)
         return out
 
-    def transform_poi(self, poi: POI, device="cuda"):
+    def transform_poi(
+        self,
+        poi: POI,
+        gpu: int | None = None,
+        ddevice: DEVICES | None = None,
+    ):
         source_image = poi.resample_from_to(self.target_grid)
         data = _warp_poi(
             source_image,
             self.target_grid,
             self.transform,
             self.align_corners,
-            device=device,
+            ddevice=ddevice if ddevice is not None else self.ddevice,
+            gpu=gpu if gpu is not None else self.gpu,
         )
         return data.resample_from_to(self.target_grid)
 
@@ -209,22 +223,28 @@ class Deformable_Registration:
         """
         return self.transform_nii(*args, **kwds)
 
+    def get_dump(self):
+        return (self.transform, self.target_grid, self.input_grid, self.align_corners)
+
     def save(self, path: str | Path):
         with open(path, "wb") as w:
-            pickle.dump(
-                (self.transform, self.target_grid, self.input_grid, self.align_corners),
-                w,
-            )
+            pickle.dump(self.get_dump(), w)
 
     @classmethod
     def load(cls, path):
         with open(path, "rb") as w:
-            transform, grid, mov, align_corners = pickle.load(w)
+            return cls.load_(pickle.load(w))
+
+    @classmethod
+    def load_(cls, w, gpu=0, ddevice: DEVICES = "cuda"):
+        transform, grid, mov, align_corners = w
         self = cls.__new__(cls)
         self.transform = transform
         self.target_grid = grid
         self.input_grid = mov
         self.align_corners = align_corners
+        self.gpu = gpu
+        self.ddevice = ddevice
         return self
 
 
