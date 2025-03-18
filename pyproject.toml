@@ -29,8 +29,8 @@ tqdm = "*"
 joblib = "*"
 scikit-learn = "*"
 antspyx = "0.4.2"
-hf-deepali = "*"
-pkg_resources = "*" # deepali requires
+#hf-deepali = "*"
+
 [tool.poetry.dev-dependencies]
 pytest = ">=8.1.1"
 vtk = "*"
@@ -38,6 +38,7 @@ pre-commit = "*"
 pyvista = "^0.43.2"
 coverage = ">=7.0.1"
 pytest-mock = "^3.6.0"
+
 
 
 [build-system]
