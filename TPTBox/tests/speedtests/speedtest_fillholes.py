@@ -7,7 +7,7 @@ if __name__ == "__main__":
     from scipy.ndimage import center_of_mass
 
     from TPTBox.core.nii_wrapper import NII
-    from TPTBox.core.np_utils import _to_labels, np_bbox_binary, np_connected_components, np_fill_holes, fill, np_extract_label
+    from TPTBox.core.np_utils import _to_labels, np_bbox_binary, np_connected_components, np_fill_holes, _fill, np_extract_label
     from TPTBox.tests.speedtests.speedtest import speed_test
     from TPTBox.tests.test_utils import get_nii
 
@@ -44,11 +44,11 @@ if __name__ == "__main__":
             arr_lc = arr_l[crop]
 
             if slice_wise_dim is None:
-                filled = fill(arr_lc).astype(arr.dtype)
+                filled = _fill(arr_lc).astype(arr.dtype)
             else:
                 assert 0 <= slice_wise_dim <= arr.ndim - 1, f"slice_wise_dim needs to be in range [0, {arr.ndim - 1}]"
                 filled = np.swapaxes(arr_lc, 0, slice_wise_dim)
-                filled = np.stack([fill(x) for x in filled])
+                filled = np.stack([_fill(x) for x in filled])
                 filled = np.swapaxes(filled, 0, slice_wise_dim)
             filled[filled != 0] = l
             arrc[crop][arrc[crop] == 0] = filled[arrc[crop] == 0]
@@ -71,11 +71,11 @@ if __name__ == "__main__":
             arr_lc = arr_l[crop]
 
             if slice_wise_dim is None:
-                filled = fill(arr_lc).astype(arr.dtype)
+                filled = _fill(arr_lc).astype(arr.dtype)
             else:
                 assert 0 <= slice_wise_dim <= arr.ndim - 1, f"slice_wise_dim needs to be in range [0, {arr.ndim - 1}]"
                 filled = np.swapaxes(arr_lc, 0, slice_wise_dim)
-                filled = np.stack([fill(x) for x in filled])
+                filled = np.stack([_fill(x) for x in filled])
                 filled = np.swapaxes(filled, 0, slice_wise_dim)
             filled[filled != 0] = l
 
