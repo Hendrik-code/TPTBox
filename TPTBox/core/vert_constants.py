@@ -107,6 +107,9 @@ class Abstract_lvl(Enum):
         try:
             return cls[s].value
         except KeyError:
+            for c in cls:
+                if c.name.lower() == s.lower():
+                    return c.value
             if not no_raise:
                 raise
             return int(s)

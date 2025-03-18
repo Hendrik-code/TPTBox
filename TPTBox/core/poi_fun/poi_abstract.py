@@ -19,7 +19,7 @@ from TPTBox.core.vert_constants import COORDINATE, POI_DICT, Abstract_lvl, Any, 
 POI_ID = Union[
     tuple[int, int],
     slice,
-    tuple[Abstract_lvl | int, Abstract_lvl | int],
+    tuple[Union[Abstract_lvl, int], Union[Abstract_lvl, int]],
     tuple[Abstract_lvl, Abstract_lvl],
     tuple[Abstract_lvl, int],
     tuple[int, Abstract_lvl],
