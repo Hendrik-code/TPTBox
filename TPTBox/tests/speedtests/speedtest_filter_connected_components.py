@@ -8,14 +8,13 @@ if __name__ == "__main__":
 
     from TPTBox.core.nii_wrapper import NII
     from TPTBox.core.np_utils import (
-        _to_labels,
         _connected_components,
+        _to_labels,
         np_bbox_binary,
         np_calc_overlapping_labels,
         np_connected_components,
-        np_filter_connected_components,
-        np_filter_connected_components2,
         np_extract_label,
+        np_filter_connected_components,
         np_unique,
         np_unique_withoutzero,
     )
@@ -34,45 +33,13 @@ if __name__ == "__main__":
     def np_cc_labelwise1(arr: np.ndarray):
         return np_filter_connected_components(arr, min_volume=10, max_volume=50, largest_k_components=3)
 
-    def np_cc_labelwise2(arr: np.ndarray):
-        return np_filter_connected_components2(arr, min_volume=10, max_volume=50, largest_k_components=3)
-
-    # def np_cc_once(arr: np.ndarray):
-    #    # call cc once, then relabel
-    #    connectivity = 3
-    #    connectivity = min((connectivity + 1) * 2, 8) if arr.ndim == 2 else 6 if connectivity == 1 else 18 if connectivity == 2 else 26
-    #
-    #    labels: list[int] = np_unique(arr)
-    #
-    #    subreg_cc = {}
-    #    subreg_cc_n = {}
-    #    crop = np_bbox_binary(arr)
-    #    arrc = arr[crop]
-    #    zarr = np.zeros((len(labels), *arr.shape), dtype=arr.dtype)
-    #
-    #    labels_out = connected_components(arrc, connectivity=connectivity, return_N=False)
-    #    for sidx, subreg in enumerate(labels):  # type:ignore
-    #        arrcc[crop][np.logical_and()]
-    #        # arr[s == subreg]
-    #        # img_subreg = np_extract_label(arrc, subreg, inplace=False)
-    #        # lcrop = np_bbox_binary(img_subreg)
-    #        img_subregc = img_subreg[lcrop]
-    #        img_subreg[lcrop] = labels_out[lcrop] * img_subregc
-    #
-    #        arrcc = zarr[sidx]
-    #        arrcc[crop] = img_subreg
-    #        subreg_cc[subreg] = arrcc
-    #        subreg_cc_n[subreg] = len(np_unique_withoutzero(img_subreg[lcrop]))
-    #    return subreg_cc[1]  # , subreg_cc_n
-
     speed_test(
         repeats=50,
         get_input_func=get_nii_array,
         functions=[
             np_cc_labelwise1,
-            np_cc_labelwise2,
         ],
-        assert_equal_function=lambda x, y: True,  # np.array_equal(x, y),
+        assert_equal_function=lambda x, y: True,  # np.array_equal(x, y),  # noqa: ARG005
         # np.all([x[i] == y[i] for i in range(x.shape[0])]),  # noqa: ARG005
         # np.all([x[i] == y[i] for i in range(len(x))])
     )
