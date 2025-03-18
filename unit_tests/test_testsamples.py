@@ -214,10 +214,10 @@ class Test_testsamples(unittest.TestCase):
         poi[123, 44] = (random.randint(0, mri.shape[0] - 1), random.randint(0, mri.shape[1] - 1), random.randint(0, mri.shape[2] - 1))
         poi[123, 45] = (random.randint(0, mri.shape[0] - 1), random.randint(0, mri.shape[1] - 1), random.randint(0, mri.shape[2] - 1))
 
-        deform = Deformable_Registration(mov, mov, reference_image=mov)
+        deform = Deformable_Registration(mov, mov, reference_image=mov, ddevice="cpu")
         if save:
             deform.save(test_save)
-            deform = Deformable_Registration.load(test_save)
+            deform = Deformable_Registration.load(test_save, ddevice="cpu")
         mov2 = mov.copy()
         mov2.seg = True
         mov2[mov > -10000] = 0

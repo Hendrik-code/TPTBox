@@ -166,22 +166,22 @@ class nnUNetPredictor:
         if "ignore" in dataset_json["labels"]:
             num_output_channels -= 1
 
-            network = get_network_from_plans(
-                plans_manager,  # type: ignore
-                dataset_json,
-                configuration_manager,  # type: ignore
-                num_input_channels,
-                num_output_channels=num_output_channels,
-                deep_supervision=False,
-            )
-            self.network = network
+        network = get_network_from_plans(
+            plans_manager,  # type: ignore
+            dataset_json,
+            configuration_manager,  # type: ignore
+            num_input_channels,
+            num_output_channels=num_output_channels,
+            deep_supervision=False,
+        )
+        self.network = network
 
-            self.plans_manager = plans_manager
-            self.configuration_manager = configuration_manager
-            self.list_of_parameters = parameters  # Lists of model folds
-            self.dataset_json = dataset_json
-            self.trainer_name = trainer_name
-            self.allowed_mirroring_axes = inference_allowed_mirroring_axes
+        self.plans_manager = plans_manager
+        self.configuration_manager = configuration_manager
+        self.list_of_parameters = parameters  # Lists of model folds
+        self.dataset_json = dataset_json
+        self.trainer_name = trainer_name
+        self.allowed_mirroring_axes = inference_allowed_mirroring_axes
         self.label_manager = plans_manager.get_label_manager(dataset_json)
         if (
             ("nnUNet_compile" in os.environ.keys())
