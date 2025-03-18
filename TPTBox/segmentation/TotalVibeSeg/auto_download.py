@@ -29,9 +29,11 @@ WEIGHTS_URL_ = "https://github.com/robert-graf/TotalVibeSegmentator/releases/dow
 env_name = "TOTALVIBE_WEIGHTS_PATH"
 
 
-def get_weights_dir(idx) -> Path:
+def get_weights_dir(idx, model_path: Path | None = None) -> Path:
     if env_name in os.environ:
         weights_dir: Path = Path(os.environ[env_name])
+    elif model_path is not None and model_path.exists():
+        weights_dir = model_path
     else:
         assert Path(__file__).parent.name == "TotalVibeSeg", Path(__file__).parent
 
@@ -65,10 +67,11 @@ def user_guard(func: Any) -> Any:
 
 
 @user_guard
-def _download_weights(idx=85) -> None:
+def _download_weights(idx=85, addendum="") -> None:
     weights_dir = get_weights_dir(idx)
-    weights_url = WEIGHTS_URL_ + f"{idx:03}.zip"
+    weights_url = WEIGHTS_URL_ + f"{idx:03}{addendum}.zip"
     _download(weights_url, weights_dir, text="pretrained weights")
+    addendum_download(idx)
 
 
 def _download(weights_url, weights_dir, text="") -> None:
@@ -98,10 +101,21 @@ def _download(weights_url, weights_dir, text="") -> None:
     os.remove(zip_path)  # noqa: PTH107
 
 
-def download_weights(idx) -> Path:
+def addendum_download(idx):
     weights_dir = get_weights_dir(idx)
+    next_zip = weights_dir / "other_downloads.json"
+    if next_zip.exists():
+        with open(next_zip) as f:
+            add = json.load(f)
+        [_download_weights(idx, addendum=a) for a in add]
+        next_zip.unlink()
+
+
+def download_weights(idx, model_path: Path | None = None) -> Path:
+    weights_dir = get_weights_dir(idx, model_path)
 
     # Check if weights are downloaded
     if not weights_dir.exists():
         _download_weights(idx)
+    addendum_download(idx)
     return weights_dir
