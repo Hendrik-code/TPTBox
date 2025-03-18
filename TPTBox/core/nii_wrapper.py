@@ -62,7 +62,7 @@ from .vert_constants import (
 )
 
 if TYPE_CHECKING:
-    pass
+    from torch import device
 MODES = Literal["constant", "nearest", "reflect", "wrap"]
 _unpacked_nii = tuple[np.ndarray, AFFINE, nib.nifti1.Nifti1Header]
 _formatwarning = warnings.formatwarning
@@ -1042,7 +1042,7 @@ class NII(NII_Math):
         from TPTBox.core.sitk_utils import nii_to_sitk
         return nii_to_sitk(self)
 
-    def to_deepali(self,align_corners: bool = True,dtype=None,device = "cuda"):
+    def to_deepali(self,align_corners: bool = True,dtype=None,device:device|str = "cpu"):
         import torch
         try:
             from deepali.data import Image as deepaliImage  # type: ignore
