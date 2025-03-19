@@ -1237,7 +1237,7 @@ class NII(NII_Math):
         cc = {i: self.set_array(k) for i,k in out.items()}
         return cc
 
-    def filter_connected_components(self, labels: int |list[int]|None,min_volume:int=0,max_volume:int|None=None, max_count_component = None, connectivity: int = 3,removed_to_label=0,keep_label=False, inplace=False,):
+    def filter_connected_components(self, labels: int |list[int]|None=None,min_volume:int=0,max_volume:int|None=None, max_count_component = None, connectivity: int = 3,removed_to_label=0,keep_label=False, inplace=False,):
         """
         Filter connected components in a segmentation array based on specified volume constraints.
 
