@@ -25,7 +25,7 @@ if __name__ == "__main__":
     # def nii_extract(nii: NII):
     #    return nii.extract_label([1, 2, 3, 4, 5]).get_seg_array()
 
-    extract_label_one = 2
+    extract_one_label = 2
     extract_label = [2, 3, 4, 5]
 
     def dummy(arr_bin: np.ndarray):
@@ -34,16 +34,16 @@ if __name__ == "__main__":
     # EXTRACT ONE LABEL
 
     def np_extract_one(arr: np.ndarray):
-        return np_extract_label(arr, extract_label_one)
+        return np_extract_label(arr, extract_one_label)
 
     def np_extract_one_nii(arr: np.ndarray):
         arr = arr.copy()
-        arr[arr != extract_label_one] = 0
-        arr[arr == extract_label_one] = 1
+        arr[arr != extract_one_label] = 0
+        arr[arr == extract_one_label] = 1
         return arr
 
     def np_extract_one_equal(arr: np.ndarray):
-        return arr == extract_label_one
+        return arr == extract_one_label
 
     # EXTRACT LIST OF LABELS
 
