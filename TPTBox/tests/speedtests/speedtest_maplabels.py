@@ -17,7 +17,7 @@ if __name__ == "__main__":
 
     def get_nii_array():
         num_points = random.randint(1, 15)
-        nii, points, orientation, sizes = get_nii(x=(350, 350, 350), num_point=num_points)
+        nii, points, orientation, sizes = get_nii(x=(150, 150, 150), num_point=num_points)
         # nii.map_labels_({1: -1}, verbose=False)
         arr = nii.get_seg_array().astype(int)
         # arr[arr == 1] = -1
@@ -28,7 +28,7 @@ if __name__ == "__main__":
         return np_map_labels(arr, {1: 2})
 
     def map_labels2(arr: np.ndarray):
-        crop = np_bbox_binary(np_extract_label(arr, 1, inplace=False))
+        crop = np_bbox_binary(arr == 1)
         arr2 = arr[crop]
         arr2 = np_map_labels(arr2, {1: 2})
         arr[crop] = arr2

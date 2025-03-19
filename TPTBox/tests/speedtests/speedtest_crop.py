@@ -25,10 +25,10 @@ if __name__ == "__main__":
         return nii
 
     def nii_compute_crop(nii: NII):
-        return nii.compute_crop()
+        return nii.compute_crop(dist=1, minimum=2)
 
     def np_compute_crop(nii: NII):
-        return np_bbox_binary(nii.get_seg_array())
+        return np_bbox_binary(nii.get_seg_array() > 2, px_dist=1)
 
     speed_test(
         repeats=50,
