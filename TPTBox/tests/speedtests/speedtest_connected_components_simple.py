@@ -8,8 +8,8 @@ if __name__ == "__main__":
 
     from TPTBox.core.nii_wrapper import NII
     from TPTBox.core.np_utils import (
-        _to_labels,
         _connected_components,
+        _to_labels,
         np_bbox_binary,
         np_calc_overlapping_labels,
         np_connected_components,
@@ -36,12 +36,12 @@ if __name__ == "__main__":
         connectivity = min((connectivity + 1) * 2, 8) if arr.ndim == 2 else 6 if connectivity == 1 else 18 if connectivity == 2 else 26
         if include_zero:
             arr[arr == 0] = arr.max() + 1
-        labels_out, N = _connected_components(arr, connectivity=connectivity, return_N=True)
+        labels_out, n = _connected_components(arr, connectivity=connectivity, return_N=True)
         return labels_out
 
-    def np_cc_once_N_false(arr: np.ndarray, connectivity: int = 3, include_zero: bool = True):
+    def np_cc_once_N_false(arr: np.ndarray, connectivity: int = 3, include_zero: bool = True):  # noqa: ARG001
         connectivity = min((connectivity + 1) * 2, 8) if arr.ndim == 2 else 6 if connectivity == 1 else 18 if connectivity == 2 else 26
-        labels_out, N = _connected_components(arr, connectivity=connectivity, return_N=True)
+        labels_out, n = _connected_components(arr, connectivity=connectivity, return_N=True)
         return labels_out
 
     def np_cc_once(arr: np.ndarray, connectivity: int = 3, include_zero: bool = True):
@@ -87,7 +87,7 @@ if __name__ == "__main__":
             np_cc_once_N,
             np_cc_once_N_false,
         ],
-        assert_equal_function=lambda x, y: True,  # np.all([x[i] == y[i] for i in range(x.shape[0])]),
+        assert_equal_function=lambda x, y: True,  # np.all([x[i] == y[i] for i in range(x.shape[0])]),  # noqa: ARG005
         # np.all([x[i] == y[i] for i in range(x.shape[0])]),  # noqa: ARG005
         # np.all([x[i] == y[i] for i in range(len(x))])
     )

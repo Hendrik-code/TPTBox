@@ -7,7 +7,7 @@ if __name__ == "__main__":
     from scipy.ndimage import center_of_mass
 
     from TPTBox.core.nii_wrapper import NII
-    from TPTBox.core.np_utils import _to_labels, np_count_nonzero, np_volume, np_bbox_binary, np_unique_withoutzero
+    from TPTBox.core.np_utils import _to_labels, np_bbox_binary, np_count_nonzero, np_unique_withoutzero, np_volume
     from TPTBox.tests.speedtests.speedtest import speed_test
     from TPTBox.tests.test_utils import get_nii
 
