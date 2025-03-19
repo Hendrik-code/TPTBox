@@ -15,7 +15,7 @@ if __name__ == "__main__":
 
     def get_nii_array():
         num_points = random.randint(5, 10)
-        nii, points, orientation, sizes = get_nii(x=(500, 500, 500), num_point=num_points)
+        nii, points, orientation, sizes = get_nii(x=(300, 300, 300), num_point=num_points)
         # nii.map_labels_({1: -1}, verbose=False)
         arr = nii.get_seg_array().astype(np.uint8)
         # arr[arr == 1] = -1
@@ -31,34 +31,7 @@ if __name__ == "__main__":
     def dummy(arr_bin: np.ndarray):
         return arr_bin + arr_bin
 
-    # EXTRACT ONE LABEL
-
-    def np_extract_one(arr: np.ndarray):
-        return np_extract_label(arr, extract_label_one)
-
-    def np_extract_one_nii(arr: np.ndarray):
-        arr = arr.copy()
-        arr[arr != extract_label_one] = 0
-        arr[arr == extract_label_one] = 1
-        return arr
-
-    def np_extract_one_equal(arr: np.ndarray):
-        return arr == extract_label_one
-
-    # EXTRACT LIST OF LABELS
-
-    def np_extractlist(arr: np.ndarray):
-        return np_extract_label(arr, extract_label, inplace=False)
-
-    def np_extractlist_isin(arr: np.ndarray):
-        arr = arr.copy()
-        arr_msk = np.isin(arr, extract_label)
-        arr[arr_msk] = 1
-        arr[~arr_msk] = 0
-        return arr
-
-    def np_extractlist_for(arr: np.ndarray):
-        arr = arr.copy()
+    def np_extractloop(arr: np.ndarray):
         if 1 not in extract_label:
             arr[arr == 1] = 0
         for idx in extract_label:
@@ -66,10 +39,30 @@ if __name__ == "__main__":
         arr[arr != 1] = 0
         return arr
 
+    def np_extractloop_indexing(arr: np.ndarray):
+        arrl = arr.copy()
+        for l in extract_label:
+            arr += dummy(arrl == l)
+        return arr
+
+    def np_extractloop_indexing2(arr: np.ndarray):
+        arrl = arr.copy()
+        for l in extract_label:
+            arrl[arrl != l] = 0
+            arrl[arrl == l] = 1
+            arr += dummy(arrl)
+        return arr
+
+    def np_extractloop_e(arr: np.ndarray):
+        arrl = arr.copy()
+        for l in extract_label:
+            arr += dummy(np_extract_label(arrl, l))
+        return arr
+
     speed_test(
         repeats=50,
         get_input_func=get_nii_array,
-        functions=[np_extractlist, np_extractlist_isin, np_extractlist_for],
+        functions=[np_extractloop, np_extractloop_indexing, np_extractloop_indexing2, np_extractloop_e],
         assert_equal_function=lambda x, y: np.array_equal(x, y),  # noqa: ARG005
         # np.all([x[i] == y[i] for i in range(len(x))])
     )

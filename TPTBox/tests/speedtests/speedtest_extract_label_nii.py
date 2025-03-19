@@ -28,34 +28,21 @@ if __name__ == "__main__":
         return nii.extract_label(extract_label)
 
     def nii_extract2(nii: NII):
-        return nii.set_array(np_extract_label(nii.get_seg_array(), extract_label))
+        return nii.set_array(np_extract_label(nii.get_seg_array(), extract_label, inplace=False))
 
-    def nii_extractnew(nii: NII):
-        return nii.extract_labelnew(extract_label)
-
-    def dummy(nii: NII):
-        return nii + nii
-
-    def extractloop_indexing(nii: NII):
-        for l in extract_label:
-            nii = dummy(nii == l)
-        return nii
-
-    def extractloop_e(nii: NII):
-        for l in extract_label:
-            nii = dummy(nii.extract_label(l))
-        return nii
+    def nii_extract3(nii: NII):
+        return nii.set_array(np_extract_label(nii.get_seg_array(), extract_label, inplace=True))
 
     speed_test(
         repeats=100,
         get_input_func=get_nii_array,
         functions=[
-            nii_extractnew,
             nii_extract,
             nii_extract2,
+            nii_extract3,
         ],
         # functions=[extractloop_e, extractloop_indexing],
-        assert_equal_function=lambda x, y: np.all([x[i, :, :] == y[i, :, :] for i in range(x.shape[0])]),  # noqa: ARG005
+        assert_equal_function=lambda x, y: np.array_equal(x, y),  # noqa: ARG005
         # np.all([x[i] == y[i] for i in range(len(x))])
     )
     # print(time_measures)
