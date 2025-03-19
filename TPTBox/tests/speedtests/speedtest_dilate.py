@@ -17,7 +17,7 @@ if __name__ == "__main__":
 
     def get_nii_array():
         num_points = random.randint(1, 10)
-        nii, points, orientation, sizes = get_nii(x=(1000, 1000, 350), num_point=num_points)
+        nii, points, orientation, sizes = get_nii(x=(100, 100, 100), num_point=num_points)
         # nii.map_labels_({1: -1}, verbose=False)
         # arr = nii.get_seg_array().astype(int)
         # arr[arr == 1] = -1
@@ -59,7 +59,10 @@ if __name__ == "__main__":
     speed_test(
         repeats=50,
         get_input_func=get_nii_array,
-        functions=[np_dilate_withLcrop, np_dilate_withBcrop, np_dilate_withcrop],
+        functions=[
+            np_erode_withoutcrop,
+            np_erode_withcrop,
+        ],
         assert_equal_function=lambda x, y: np.all([x[i] == y[i] for i in range(x.shape[0])]),  # noqa: ARG005
         # np.all([x[i] == y[i] for i in range(len(x))])
     )

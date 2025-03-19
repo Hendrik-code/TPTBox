@@ -21,19 +21,22 @@ from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.nii_wrapper_math import NII_Math
 from TPTBox.core.np_utils import (
     _pad_to_parameters,
+    np_bbox_binary,
     np_calc_boundary_mask,
     np_calc_convex_hull,
     np_calc_overlapping_labels,
     np_center_of_mass,
     np_compute_surface,
     np_connected_components,
+    np_connected_components_per_label,
     np_dilate_msk,
     np_erode_msk,
     np_extract_label,
     np_fill_holes,
     np_fill_holes_global_with_majority_voting,
+    np_filter_connected_components,
     np_get_connected_components_center_of_mass,
-    np_get_largest_k_connected_components,
+    np_is_empty,
     np_map_labels,
     np_map_labels_based_on_majority_label_mask_overlap,
     np_point_coordinates,
@@ -626,28 +629,10 @@ class NII(NII_Math):
             - If other_crop is not None, the computed slice is combined with the slice of another image to obtain a common region of interest.
             - Only None slice is supported for combining slices.
         """
-        shp = self.shape
-        zms = self.zoom
-
-        d = np.around(dist / np.asarray(zms)).astype(int) if use_mm else (int(dist),int(dist),int(dist))
+        d = np.around(dist / np.asarray(self.zoom)).astype(int) if use_mm else (int(dist),int(dist),int(dist))
         array = self.get_array() #+ minimum
-        msk_bin = np.zeros(array.shape,dtype=bool)
-        #bool_arr[array<minimum] = 0
-        msk_bin[array>minimum] = 1
-        #msk_bin = np.asanyarray(bool_arr, dtype=bool)
-        msk_bin[np.isnan(msk_bin)] = 0
-        cor_msk = np.where(msk_bin > 0)
-        if cor_msk[0].shape[0] == 0:
-            raise ValueError(f'Array would be reduced to zero size; Before {self}; {self.unique()=}')
-        c_min = [cor_msk[0].min(), cor_msk[1].min(), cor_msk[2].min()]
-        c_max = [cor_msk[0].max(), cor_msk[1].max(), cor_msk[2].max()]
-        x0 = max(0, c_min[0] - d[0])
-        y0 = max(0, c_min[1] - d[1])
-        z0 = max(0, c_min[2] - d[2])
-        x1 = min(shp[0], c_max[0] + d[0])
-        y1 = min(shp[1], c_max[1] + d[1])
-        z1 = min(shp[2], c_max[2] + d[2])
-        ex_slice = [slice(x0, x1+1), slice(y0, y1+1), slice(z0, z1+1)]
+
+        ex_slice = list(np_bbox_binary(array > minimum, px_dist=d))
 
         if other_crop is not None:
             assert all((a.step is None) for a in other_crop), 'Only None slice is supported for combining x'
@@ -865,6 +850,15 @@ class NII(NII_Math):
     def resample_from_to_(self, to_vox_map:Image_Reference|Has_Grid|tuple[SHAPE,AFFINE,ZOOMS], mode:MODES='nearest', c_val:float|None=None,verbose:logging=True,aline_corners=False):
         return self.resample_from_to(to_vox_map,mode=mode,c_val=c_val,inplace=True,verbose=verbose,align_corners=aline_corners)
 
+    @property
+    def is_empty(self) -> bool:
+        """Checks if the array in the nifti is empty
+
+        Returns:
+            bool: Whether the nifti is empty or not
+        """
+        return np_is_empty(self.get_array())
+
     def n4_bias_field_correction(
         self,
         threshold = 60,
@@ -958,6 +952,7 @@ class NII(NII_Math):
         log.print(f"Shifted from range {mi, ma} to range {self.min(), self.max()}", verbose=verbose)
 
     def match_histograms(self, reference:Image_Reference,c_val = 0,inplace=False):
+        assert not self.seg
         ref_nii = to_nii(reference)
         assert ref_nii.seg is False
         assert self.seg is False
@@ -1106,6 +1101,7 @@ class NII(NII_Math):
             The method uses binary erosion with a 3D structuring element to erode the mask by the specified number of voxels.
 
         """
+        assert self.seg
         log.print("erode mask",end='\r',verbose=verbose)
         msk_i_data = self.get_seg_array()
         labels = self.unique() if labels is None else labels
@@ -1138,6 +1134,7 @@ class NII(NII_Math):
             The method uses binary dilation with a 3D structuring element to dilate the mask by the specified number of voxels.
 
         """
+        assert self.seg
         log.print("dilate mask",end='\r',verbose=verbose)
         if labels is None:
             labels = self.unique()
@@ -1167,29 +1164,18 @@ class NII(NII_Math):
         Returns:
             NII: If inplace is True, returns the current NIfTI image object with filled holes. Otherwise, returns a new NIfTI image object with filled holes.
         """
+        assert self.seg
         if labels is None:
             labels = list(self.unique())
 
         if isinstance(labels, int):
             labels = [labels]
 
-        if use_crop:
-            try:
-                crop = (self if labels is None else self.extract_label(labels)).compute_crop(dist=1)
-            except ValueError:
-                return self if inplace else self.copy()
-
-            msk_i_data_org = self.get_seg_array()
-            seg_arr = msk_i_data_org[crop]
-        else:
-            seg_arr = self.get_seg_array()
+        seg_arr = self.get_seg_array()
         if isinstance(slice_wise_dim,str):
             slice_wise_dim = self.get_axis(slice_wise_dim)
         #seg_arr = self.get_seg_array()
         filled = np_fill_holes(seg_arr, label_ref=labels, slice_wise_dim=slice_wise_dim, use_crop=use_crop)
-        if use_crop:
-            msk_i_data_org[crop] = filled
-            filled = msk_i_data_org
         return self.set_array(filled,inplace=inplace)
 
     def fill_holes_(self, labels: LABEL_REFERENCE = None, slice_wise_dim: int | None = None, verbose:logging=True,use_crop=True):
@@ -1240,43 +1226,18 @@ class NII(NII_Math):
         """
         return self.set_array(np_calc_boundary_mask(self.get_array(),threshold),inplace=inplace,verbose=False)
 
-    def get_segmentation_connected_components(self, labels: int |list[int], connectivity: int = 3, transform_back_to_nii: bool = False, verbose: bool=False):
-        """Calculates and returns the connected components of this segmentation NII
-
-        Args:
-            label (int): the label(s) of the connected components
-            connectivity (int, optional): Connectivity for the connected components. Defaults to 3.
-            transform_back_to_nii (bool): If True, will map the labels to nifty, not numpy arrays. Defaults to False.
-
-        Returns:
-            cc: dict[label, cc_idx, arr], cc_n: dict[label, int]
-        """
-        import warnings
-        warnings.warn("get_segmentation_connected_components id deprecated",stacklevel=5) #TODO remove in version 1.0
-        arr = self.get_seg_array()
-        cc, cc_n = np_connected_components(arr, connectivity=connectivity, label_ref=labels, verbose=verbose)
-        if transform_back_to_nii:
-            cc = {i: self.set_array(k) for i,k in cc.items()}
-        return cc, cc_n
-
-    def get_connected_components(self, labels: int |list[int]=1, connectivity: int = 3, verbose: bool=False,inplace=False) -> Self:  # noqa: ARG002
-        out = np_get_largest_k_connected_components(self.get_seg_array(), label_ref=labels, connectivity=connectivity, return_original_labels=False)
+    def get_connected_components(self, labels: int |list[int]=1, connectivity: int = 3, include_zero: bool=False,inplace=False) -> Self:  # noqa: ARG002
+        assert self.seg, "This only works on segmentations"
+        out, _ = np_connected_components(self.get_seg_array(), label_ref=labels, connectivity=connectivity, include_zero=include_zero)
         return self.set_array(out,inplace=inplace)
 
-        #arr = self.get_seg_array()
-        #cc, _ = np_connected_components(arr, connectivity=connectivity, label_ref=labels, verbose=verbose)
-        #out = None
+    def get_connected_components_per_label(self, labels: int |list[int]=1, connectivity: int = 3, include_zero: bool=False) -> dict[int, Self]:  # noqa: ARG002
+        assert self.seg, "This only works on segmentations"
+        out = np_connected_components_per_label(self.get_seg_array(), label_ref=labels, connectivity=connectivity, include_zero=include_zero)
+        cc = {i: self.set_array(k) for i,k in out.items()}
+        return cc
 
-        #for i,k in cc.items():
-        #    if out is None:
-        #        out = k
-        #    else:
-        #        out += i*k
-        #if out is None:
-        #    return self if inplace else self.copy()
-        #return self.set_array(out,inplace=inplace)
-
-    def filter_connected_components(self, labels: int |list[int]|None,min_volume:int=0,max_volume:int|None=None, max_count_component = None, connectivity: int = 3,removed_to_label=0,keep_label=False, inplace=False):
+    def filter_connected_components(self, labels: int |list[int]|None,min_volume:int=0,max_volume:int|None=None, max_count_component = None, connectivity: int = 3,removed_to_label=0,keep_label=False, inplace=False,):
         """
         Filter connected components in a segmentation array based on specified volume constraints.
 
@@ -1291,22 +1252,22 @@ class NII(NII_Math):
         Returns:
         None
         """
-        nii = self.get_largest_k_segmentation_connected_components(max_count_component,labels,connectivity=connectivity,return_original_labels=keep_label,min_volume=min_volume,max_volume=max_volume,removed_to_label=removed_to_label)
-        if keep_label and labels is not None:
-            if isinstance(labels,int):
-                labels = [labels]
-            old_labels = [i for i in self.unique() if i not in labels]
-            if len(old_labels) != 0:
-                s = self.extract_label(old_labels,keep_label=True)
-                nii[s != 0] = s[s!=0]
+        assert self.seg, "This only works on segmentations"
+        arr = np_filter_connected_components(self.get_seg_array(), largest_k_components=max_count_component,label_ref=labels,connectivity=connectivity,return_original_labels=keep_label,min_volume=min_volume,max_volume=max_volume,removed_to_label=removed_to_label,)
+        #if keep_label and labels is not None:
+        #    if isinstance(labels,int):
+        #        labels = [labels]
+        #    old_labels = [i for i in self.unique() if i not in labels]
+        #    if len(old_labels) != 0:
+        #        s = self.extract_label(old_labels,keep_label=True)
+        #        nii[s != 0] = s[s!=0]
         #print("filter",nii.unique())
         #assert max_count_component is None or nii.max() <= max_count_component, nii.unique()
-        if inplace:
-            return self.set_array_(nii.get_array())
-        return nii
+        return self.set_array(arr, inplace=inplace)
     def filter_connected_components_(self, labels: int |list[int]|None,min_volume:int=0,max_volume:int|None=None, max_count_component = None, connectivity: int = 3,keep_label=False):
         return self.filter_connected_components(labels,min_volume=min_volume,max_volume=max_volume, max_count_component = max_count_component, connectivity = connectivity,keep_label=keep_label,inplace=True)
-    def get_segmentation_connected_components_center_of_mass(self, label: int, connectivity: int = 3, sort_by_axis: int | None = None):
+
+    def get_segmentation_connected_components_center_of_mass(self, label: int, connectivity: int = 3, sort_by_axis: int | None = None) -> list[COORDINATE]:
         """Calculates the center of mass of the different connected components of a given label in an array
 
         Args:
@@ -1317,11 +1278,12 @@ class NII(NII_Math):
         Returns:
             _type_: _description_
         """
+        assert self.seg, "This only works on segmentations"
         arr = self.get_seg_array()
         return np_get_connected_components_center_of_mass(arr, label=label, connectivity=connectivity, sort_by_axis=sort_by_axis)
 
 
-    def get_largest_k_segmentation_connected_components(self, k: int | None, labels: int | list[int] | None = None, connectivity: int = 1, return_original_labels: bool = True,inplace=False,min_volume:int=0,max_volume:int|None=None,removed_to_label=0):
+    def get_largest_k_segmentation_connected_components(self, k: int | None, labels: int | list[int] | None = None, connectivity: int = 1, return_original_labels: bool = True,inplace=False,min_volume:int=0,max_volume:int|None=None,removed_to_label=0) -> Self:
         """Finds the largest k connected components in a given array (does NOT work with zero as label!)
 
         Args:
@@ -1330,26 +1292,29 @@ class NII(NII_Math):
             labels (int | list[int] | None, optional): Labels that the algorithm should be applied to. If none, applies on all labels found in this NII. Defaults to None.
             return_original_labels (bool): If set to False, will label the components from 1 to k. Defaults to True
         """
+        raise DeprecationWarning("Use filter_connected_components instead")
         msk_i_data = self.get_seg_array()
-        out = np_get_largest_k_connected_components(msk_i_data, k=k, label_ref=labels, connectivity=connectivity, return_original_labels=return_original_labels,min_volume=min_volume,max_volume=max_volume,removed_to_label=removed_to_label)
+        out = np_filter_connected_components(msk_i_data, largest_k_components=k, label_ref=labels, connectivity=connectivity, return_original_labels=return_original_labels,min_volume=min_volume,max_volume=max_volume,removed_to_label=removed_to_label)
         return self.set_array(out,inplace=inplace)
 
-    def compute_surface_mask(self, connectivity: int, dilated_surface: bool = False):
+    def compute_surface_mask(self, connectivity: int, dilated_surface: bool = False) -> Self:
         """ Removes everything but surface voxels
 
         Args:
             connectivity (int): Connectivity for surface calculation
             dilated_surface (bool): If False, will return msk - eroded mask. If true, will return dilated msk - msk
         """
+        assert self.seg, "This only works on segmentations"
         return self.set_array(np_compute_surface(self.get_seg_array(), connectivity=connectivity, dilated_surface=dilated_surface))
 
 
-    def compute_surface_points(self, connectivity: int, dilated_surface: bool = False):
+    def compute_surface_points(self, connectivity: int, dilated_surface: bool = False) -> list[tuple[int,int,int]]:
+        assert self.seg, "This only works on segmentations"
         surface = self.compute_surface_mask(connectivity, dilated_surface)
         return np_point_coordinates(surface.get_seg_array()) # type: ignore
 
 
-    def fill_holes_global_with_majority_voting(self, connectivity: int = 3, inplace: bool = False, verbose: bool = False):
+    def fill_holes_global_with_majority_voting(self, connectivity: int = 3, inplace: bool = False, verbose: bool = False) -> Self:
         """Fills 3D holes globally, and resolves inter-label conflicts with majority voting by neighbors
 
         Args:
@@ -1360,12 +1325,12 @@ class NII(NII_Math):
         Returns:
             NII:
         """
-        assert self.seg, "only works with segmentation masks"
+        assert self.seg, "This only works on segmentations"
         arr = np_fill_holes_global_with_majority_voting(self.get_seg_array(), connectivity=connectivity, verbose=verbose, inplace=inplace)
         return self.set_array(arr,inplace=inplace)
 
 
-    def map_labels_based_on_majority_label_mask_overlap(self, label_mask: Self, labels: int | list[int] | None = None, dilate_pixel: int = 1, inplace: bool = False):
+    def map_labels_based_on_majority_label_mask_overlap(self, label_mask: Self, labels: int | list[int] | None = None, dilate_pixel: int = 1, inplace: bool = False) -> Self:
         """Relabels all individual labels from input array to the majority labels of a given label_mask
 
         Args:
@@ -1378,7 +1343,7 @@ class NII(NII_Math):
             NII: Relabeled nifti
         """
         assert self.seg and label_mask.seg, "This only works on segmentations"
-        return self.set_array(np_map_labels_based_on_majority_label_mask_overlap(self.get_seg_array(), label_mask.get_seg_array(), labels=labels, dilate_pixel=dilate_pixel, inplace=inplace), inplace=inplace,)
+        return self.set_array(np_map_labels_based_on_majority_label_mask_overlap(self.get_seg_array(), label_mask.get_seg_array(), label_ref=labels, dilate_pixel=dilate_pixel, inplace=inplace), inplace=inplace,)
 
 
     def get_segmentation_difference_to(self, mask_gt: Self, ignore_background_tp: bool = False) -> Self:
@@ -1390,6 +1355,7 @@ class NII(NII_Math):
         Returns:
             NII: Difference NII (1: FN, 2: TP, 3: FP, 4: Wrong label)
         """
+        assert self.seg and mask_gt.seg, "This only works on segmentations"
         if self.orientation != mask_gt.orientation:
             mask_gt = mask_gt.reorient_same_as(self)
 
@@ -1426,7 +1392,7 @@ class NII(NII_Math):
         assert self.seg and mask_other.seg
         return np_calc_overlapping_labels(self.get_seg_array(), mask_other.get_seg_array())
 
-    def is_segmentation_in_border(self,minimum=0, voxel_tolerance: int = 2,use_mm=False):
+    def is_segmentation_in_border(self,minimum=0, voxel_tolerance: int = 2,use_mm=False) -> bool:
         """
         Checks if the segmentation is touching the border of the image volume.
 
@@ -1738,7 +1704,6 @@ class NII(NII_Math):
         arr_bg = np_extract_label(arr_bg, label=0, to_label=1)
         return self.set_array(arr_bg, inplace, False)
 
-
     def extract_label(self,label:int|Enum|Sequence[int]|Sequence[Enum], keep_label=False,inplace=False):
         '''If this NII is a segmentation you can single out one label with [0,1].'''
         assert self.seg, "extracting a label only makes sense for a segmentation mask"
@@ -1746,11 +1711,8 @@ class NII(NII_Math):
 
         if isinstance(label, Sequence):
             label_int:list[int] = [idx.value if isinstance(idx,Enum) else idx for idx in label]
-            if 1 not in label_int:
-                seg_arr[seg_arr == 1] = 0
-            for idx in label_int:
-                seg_arr[seg_arr == idx] = 1
-            seg_arr[seg_arr != 1] = 0
+            assert 0 not in label_int, 'Zero label does not make sense. This is the background'
+            seg_arr = np_extract_label(seg_arr, label_int, to_label=1, inplace=True)
         else:
             if isinstance(label,Enum):
                 label = label.value
@@ -1758,8 +1720,7 @@ class NII(NII_Math):
                 label = int(label)
 
             assert label != 0, 'Zero label does not make sense. This is the background'
-            seg_arr[seg_arr != label] = 0
-            seg_arr[seg_arr == label] = 1
+            seg_arr = np_extract_label(seg_arr, label, to_label=1, inplace=True)
         if keep_label:
             seg_arr = seg_arr * self.get_seg_array()
         return self.set_array(seg_arr,inplace=inplace)
