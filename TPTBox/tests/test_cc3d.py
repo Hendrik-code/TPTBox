@@ -8,7 +8,7 @@ if __name__ == "__main__":
     from scipy.ndimage import center_of_mass
 
     from TPTBox.core.nii_wrapper import NII
-    from TPTBox.core.np_utils import _to_labels, _connected_components, np_bbox_binary, np_connected_components, np_extract_label, np_unique
+    from TPTBox.core.np_utils import _connected_components, _to_labels, np_bbox_binary, np_connected_components, np_extract_label, np_unique
     from TPTBox.tests.test_utils import get_nii
 
     arr = np.array(
