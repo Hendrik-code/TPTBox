@@ -8,8 +8,8 @@ if __name__ == "__main__":
 
     from TPTBox.core.nii_wrapper import NII
     from TPTBox.core.np_utils import (
-        _to_labels,
         _connected_components,
+        _to_labels,
         np_bbox_binary,
         np_calc_overlapping_labels,
         np_connected_components,
@@ -75,7 +75,7 @@ if __name__ == "__main__":
             np_cc_labelwise1,
             np_cc_labelwise2,
         ],
-        assert_equal_function=lambda x, y: True,  # np.array_equal(x, y),
+        assert_equal_function=lambda x, y: True,  # np.array_equal(x, y),  # noqa: ARG005
         # np.all([x[i] == y[i] for i in range(x.shape[0])]),  # noqa: ARG005
         # np.all([x[i] == y[i] for i in range(len(x))])
     )

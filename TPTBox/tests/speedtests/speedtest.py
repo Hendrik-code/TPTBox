@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+import random
+import timeit
 from collections.abc import Callable
 from copy import deepcopy
 from time import perf_counter
 
 import numpy as np
 from tqdm import tqdm
-import random
-import timeit
 
 
 def speed_test_input(
