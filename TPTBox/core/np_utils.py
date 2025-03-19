@@ -74,7 +74,9 @@ def np_extract_label(
 
 
 def cc3dstatistics(arr: UINTARRAY, use_crop: bool = True) -> dict:
-    assert np.issubdtype(arr.dtype, np.unsignedinteger), f"cc3dstatistics expects uint type, got {arr.dtype}"
+    assert np.issubdtype(arr.dtype, np.unsignedinteger) or np.issubdtype(
+        arr.dtype, np.bool_
+    ), f"cc3dstatistics expects uint type, got {arr.dtype}"
     try:
         if use_crop:
             crop = np_bbox_binary(arr, raise_error=False, px_dist=2)
