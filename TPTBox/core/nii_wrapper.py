@@ -646,7 +646,7 @@ class NII(NII_Math):
                     min_w = min_w.stop - min_w.start  # noqa: PLW2901
                 curr_w =  ex_slice[i].stop - ex_slice[i].start
                 dif = min_w - curr_w
-                if min_w > 0:
+                if min_w > 0 and dif > 0:
                     new_start = ex_slice[i].start - floor(dif/2)
                     new_goal = ex_slice[i].stop + ceil(dif/2)
                     if new_goal > self.shape[i]:

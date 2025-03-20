@@ -329,12 +329,14 @@ class Abstract_POI:
         return self.copy(ctd)
 
     @property
-    def is_global(self) -> bool: ...
+    def is_global(self) -> bool:
+        ...
 
     def clone(self, **qargs):
         return self.copy(**qargs)
 
-    def copy(self, centroids: POI_Descriptor | None = None, **qargs) -> Self: ...
+    def copy(self, centroids: POI_Descriptor | None = None, **qargs) -> Self:
+        ...
 
     def map_labels(
         self,
@@ -689,7 +691,7 @@ class Abstract_POI:
         if not keep_zoom and not self.is_global:
             self = self.rescale((1, 1, 1), verbose=False)  # type: ignore  # noqa: PLW0642
         if not self.is_global:
-            if target_point.zoom != self.zoom or target_point.shape != self.zoom:
+            if target_point.zoom != self.zoom or target_point.shape != self.shape:
                 target_point = target_point.resample_from_to(self)  # type: ignore
             else:
                 target_point.assert_affine(self)
@@ -702,6 +704,41 @@ class Abstract_POI:
             distance = ((c[0] - x) ** 2 + (c[1] - y) ** 2 + (c[2] - z) ** 2) ** 0.5
             distances[(region, subregion)] = float(distance)
         return distances
+
+    def calculate_distances_poi_across_regions(
+        self,
+        target_point: Self,
+    ) -> dict[tuple[int, int], dict[tuple[int, int], float]]:
+        """Calculate the distances between all points and each centroid in local spacing of the first POI.
+
+        Args:
+            target_point (Tuple[float, float, float]): The target point represented as a tuple of x, y, and z coordinates.
+
+        Returns:
+            Dict[Tuple[int, int], float]: A dictionary containing the distances between the target point and each centroid.
+            The keys are tuples of two integers representing the region and subregion labels of the centroids,
+            and the values are the distances (in millimeters) between the target point and each centroid.
+        """
+
+        assert self.is_global == target_point.is_global
+        if not self.is_global:
+            if target_point.zoom != self.zoom or target_point.shape != self.shape:
+                target_point = target_point.resample_from_to(self)  # type: ignore
+            else:
+                target_point.assert_affine(self)
+
+        distances2target = {}
+        for region, subregion, (x, y, z) in target_point.items():
+            distances = {}
+            for r2, s2, (x2, y2, z2) in self.items():
+                if subregion != s2:
+                    continue
+                distance_vector = np.array([x, y, z]) - np.array([x2, y2, z2])
+                distance_vector = np.multiply(distance_vector, self.zoom)
+                distance = np.linalg.norm(distance_vector)
+                distances[(r2, subregion)] = float(distance)
+            distances2target[(region, subregion)] = distances
+        return distances2target
 
     def calculate_distances_poi_two_locations(self, a: Abstract_lvl | int, b: Abstract_lvl | int, keep_zoom=False) -> dict[int, float]:
         if isinstance(a, Enum):
