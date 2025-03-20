@@ -74,9 +74,9 @@ def np_extract_label(
 
 
 def cc3dstatistics(arr: UINTARRAY, use_crop: bool = True) -> dict:
-    assert np.issubdtype(arr.dtype, np.unsignedinteger) or np.issubdtype(
-        arr.dtype, np.bool_
-    ), f"cc3dstatistics expects uint type, got {arr.dtype}"
+    assert np.issubdtype(arr.dtype, np.unsignedinteger) or np.issubdtype(arr.dtype, np.bool_), (
+        f"cc3dstatistics expects uint type, got {arr.dtype}"
+    )
     try:
         if use_crop:
             crop = np_bbox_binary(arr, raise_error=False, px_dist=2)
@@ -461,9 +461,9 @@ def np_calc_crop_around_centerpoint(
     n_dim = len(poi)
     if isinstance(pad_to_size, int):
         pad_to_size = np.ones(n_dim) * pad_to_size
-    assert (
-        n_dim == len(arr.shape) == len(cutout_size) == len(pad_to_size)
-    ), f"dimension mismatch, got dim {n_dim}, poi {poi}, arr shape {arr.shape}, cutout {cutout_size}, pad_to_size {pad_to_size}"
+    assert n_dim == len(arr.shape) == len(cutout_size) == len(pad_to_size), (
+        f"dimension mismatch, got dim {n_dim}, poi {poi}, arr shape {arr.shape}, cutout {cutout_size}, pad_to_size {pad_to_size}"
+    )
 
     poi = tuple(int(i) for i in poi)
     shape = arr.shape
@@ -707,7 +707,8 @@ def np_connected_components_per_label(
     assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
     connectivity = min((connectivity + 1) * 2, 8) if arr.ndim == 2 else 6 if connectivity == 1 else 18 if connectivity == 2 else 26
 
-    labels: Sequence[int] = _to_labels(arr, label_ref)
+    present_labels = np_unique(arr)
+    labels: Sequence[int] = present_labels if label_ref is None else [i for i in _to_labels(arr, label_ref) if i in present_labels]
     # if zero, map it to unused label
     if include_zero:
         zero_label = arr.max() + 1
