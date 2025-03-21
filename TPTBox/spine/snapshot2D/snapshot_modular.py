@@ -611,12 +611,8 @@ def make_2d_slice(
                 ctd_list=ctd_reo,
                 axial_heights=axial_heights,
             )
-
-    # elif visualization_type == visualization_type.Mean_Intensity:
-    #    plane_dict = {"S": "ax", "I": "ax", "L": "sag", "R": "sag", "A": "cor", "P": "cor"}
-    #    idx_view = {plane_dict[s]: i for i, s in enumerate(to_ax)}
-    else:
-        raise NotImplementedError(visualization_type)
+        else:
+            raise NotImplementedError(visualization_type)
 
     if rescale_to_iso:
         if sag.ndim == 2:
@@ -699,7 +695,7 @@ class Snapshot_Frame:
 def to_cdt(ctd_bids: POI_Reference | None) -> POI | None:
     if ctd_bids is None:
         return None
-    ctd = POI.load(ctd_bids)
+    ctd = POI.load(ctd_bids, allow_global=True)
     if len(ctd) > 0:  # handle case if empty centroid file given
         return ctd
     print("[!][snp] To few centroids", ctd)
@@ -754,6 +750,8 @@ def create_snapshot(  # noqa: C901
         seg = seg.reorient_(to_ax) if seg is not None else None
         assert not isinstance(seg, tuple), "seg is a tuple"
         if ctd is not None:
+            if ctd.is_global:
+                ctd = ctd.resample_from_to(img)
             ctd = ctd.reorient(img.orientation) if ctd.shape is not None else ctd.reorient_centroids_to(img)
             if ctd.zoom not in (img.zoom, None):
                 ctd.rescale_(img.zoom)
