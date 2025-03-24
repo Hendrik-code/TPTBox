@@ -58,7 +58,7 @@ class Deformable_Registration(General_Registration):
         gpu=0,
         ddevice: DEVICES = "cuda",
         # foreground_mask
-        mask_foreground=False,
+        mask_foreground=True,
         foreground_lower_threshold: Optional[int] = None,  # None means min
         foreground_upper_threshold: Optional[int] = None,  # None means max
         # normalize

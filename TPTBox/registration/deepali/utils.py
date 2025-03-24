@@ -188,6 +188,11 @@ def normalize_img(image: Image, normalize_strategy: Optional[Literal["auto", "CT
     else:
         raise NotImplementedError(normalize_strategy)
     scale = max_v - min_v
+    if abs(scale) <= 0.00000000000001:
+        from warnings import warn
+
+        warn("Detected empty image", stacklevel=6)
+        scale = 1
     data -= min_v
     data /= scale
     return Image(data, image.grid())

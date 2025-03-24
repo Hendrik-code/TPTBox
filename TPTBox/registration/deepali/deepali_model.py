@@ -91,11 +91,9 @@ def _warp_poi(poi_moving: POI, target_grid: TPTBox_Grid, transform: SpatialTrans
             grid=poi_moving.to_deepali_grid(align_corners),
             to_grid=target_grid.to_deepali_grid(align_corners),
         )
-        # print(data2 - data)
 
     out_poi = target_grid.make_empty_POI()
     for (key, key2), (x, y, z) in zip_strict(keys, data.cpu()):
-        # print(key, key2, x, y, z)
         out_poi[key, key2] = (x.item(), y.item(), z.item())
     return out_poi
 
@@ -126,7 +124,7 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         gpu=0,
         ddevice: DEVICES = "cuda",
         # foreground_mask
-        mask_foreground=True,
+        mask_foreground=False,
         foreground_lower_threshold: Optional[int] = None,  # None means min
         foreground_upper_threshold: Optional[int] = None,  # None means max
         # normalize
@@ -172,6 +170,7 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         ## Load configuration and perform registration
         self.target_grid = fix.to_gird()
         self.input_grid = mov.to_gird()
+
         super().__init__(
             source=source.to_deepali(),
             target=fix.to_deepali(),
@@ -251,7 +250,7 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         return self.transform_nii(*args, **kwds)
 
     def get_dump(self):
-        return (self.transform, self.target_grid, self.input_grid, self.align_corners)
+        return (self.transform, self.target_grid, self.input_grid)
 
     def save(self, path: str | Path):
         with open(path, "wb") as w:
@@ -264,12 +263,10 @@ class General_Registration(DeepaliPairwiseImageTrainer):
 
     @classmethod
     def load_(cls, w, gpu=0, ddevice: DEVICES = "cuda"):
-        transform, grid, mov, align_corners = w
+        transform, grid, mov = w
         self = cls.__new__(cls)
         self.transform = transform
         self.target_grid = grid
         self.input_grid = mov
-        self.align_corners = align_corners
-        self.gpu = gpu
-        self.ddevice = ddevice
+        self.device = get_device(ddevice, gpu)
         return self
