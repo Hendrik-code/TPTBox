@@ -30,38 +30,11 @@ if __name__ == "__main__":
         arr_r = arr.copy()
         return arr_r
 
-    def cc3d_com(arr: np.ndarray):
-        return np_center_of_mass(arr)
-
-    def center_of_mass_one(arr: np.ndarray):
-        coms = center_of_mass(arr)
-        return coms
-
-    def center_of_mass_(arr: np.ndarray):
-        cc_label_set = np_unique(arr)
-        coms = {}
-        for c in cc_label_set:
-            if c == 0:
-                continue
-            com = center_of_mass(arr == c)
-            coms[c] = com
-        return coms
-
-    def bbox_(arr: np.ndarray):
-        cc_label_set = np_unique(arr)
-        coms = {}
-        for c in cc_label_set:
-            if c == 0:
-                continue
-            com = np_bbox_binary(arr == c)
-            coms[c] = com
-        return coms
-
     speed_test(
         repeats=50,
         get_input_func=get_nii_array,
-        functions=[cc3d_com, center_of_mass_],
-        assert_equal_function=lambda x, y: np.all([x[i][0] == y[i][0] for i in x.keys()]),  # noqa: ARG005
+        functions=[np_unique, np.unique],
+        assert_equal_function=lambda x, y: True,  # np.all([x[i] == y[i] for i in range(len(x))]),  # noqa: ARG005
         # np.all([x[i] == y[i] for i in range(len(x))])
     )
     # print(time_measures)

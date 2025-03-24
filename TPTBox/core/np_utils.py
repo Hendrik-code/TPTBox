@@ -9,16 +9,17 @@ from typing import Any, TypeVar, Union
 import numpy as np
 import scipy
 from cc3d import (
-    connected_components,  # pip install connected-components-3d
-    contacts,
-    region_graph,
-    voxel_connectivity_graph,
+    connected_components as _connected_components,  # pip install connected-components-3d
 )
+from cc3d import contacts as _contacts
+from cc3d import region_graph as _region_graph
 from cc3d import statistics as _cc3dstats
-from fill_voids import fill
+from cc3d import voxel_connectivity_graph as _voxel_connectivity_graph
+from fill_voids import fill as _fill
 from numpy.typing import NDArray
 from scipy.ndimage import binary_erosion, center_of_mass, gaussian_filter, generate_binary_structure
-from skimage.measure import euler_number, label
+from skimage.measure import euler_number as _euler_number
+from skimage.measure import label as _label
 
 from TPTBox.core.compat import zip_strict
 from TPTBox.core.vert_constants import COORDINATE, LABEL_MAP, LABEL_REFERENCE
@@ -33,7 +34,6 @@ def np_extract_label(
     arr: np.ndarray,
     label: int | list[int],
     to_label: int = 1,
-    use_crop: bool = False,
     inplace: bool = True,
 ) -> np.ndarray:
     """Extracts a label from an given arr (works with zero as well!)
@@ -47,31 +47,24 @@ def np_extract_label(
     Returns:
         np.ndarray: _description_
     """
+    if isinstance(label, int) and to_label == 1:
+        return arr == label
+
     if to_label == 0:
         warnings.warn("np_extract_label: to_label is zero, this can have unforeseen consequences!", UserWarning, stacklevel=4)
     if not inplace:
         arr = arr.copy()
 
-    if use_crop:
-        crop = np_bbox_binary(arr, px_dist=1, raise_error=False)
-        arrc = arr[crop]
-    else:
-        arrc = arr
-
     if isinstance(label, list):
         assert 0 not in label, "label 0 is not supported in list mode"
-        arr_msk = np.isin(arrc, label)
-        arrc[arr_msk] = to_label
-        arrc[~arr_msk] = 0
-        if use_crop:
-            arr[crop] = arrc
+        arr_msk = np.isin(arr, label)
+        arr[arr_msk] = to_label
+        arr[~arr_msk] = 0
         return arr
 
     if label != 0:
-        arrc[arr != label] = 0
-        arrc[arr == label] = to_label
-        if use_crop:
-            arr[crop] = arrc
+        arr[arr != label] = 0
+        arr[arr == label] = to_label
         return arr
     # label == 0
     arr[arr != 0] = to_label + 1
@@ -81,7 +74,9 @@ def np_extract_label(
 
 
 def cc3dstatistics(arr: UINTARRAY, use_crop: bool = True) -> dict:
-    assert np.issubdtype(arr.dtype, np.unsignedinteger), f"cc3dstatistics expects uint type, got {arr.dtype}"
+    assert np.issubdtype(arr.dtype, np.unsignedinteger) or np.issubdtype(arr.dtype, np.bool_), (
+        f"cc3dstatistics expects uint type, got {arr.dtype}"
+    )
     try:
         if use_crop:
             crop = np_bbox_binary(arr, raise_error=False, px_dist=2)
@@ -105,6 +100,23 @@ def np_volume(arr: UINTARRAY, include_zero: bool = False) -> dict[int, int]:
         return {idx: i for idx, i in dict(enumerate(cc3dstatistics(arr, use_crop=False)["voxel_counts"])).items() if i > 0}
     else:
         return {idx: i for idx, i in dict(enumerate(cc3dstatistics(arr)["voxel_counts"])).items() if i > 0 and idx != 0}
+
+
+def np_is_empty(arr: UINTARRAY | INTARRAY) -> bool:
+    """Returns true if the array is empty (only zeros)
+
+    Args:
+        arr (UINTARRAY): input uint array
+
+    Returns:
+        bool: True if array is empty
+
+    #### ON UINT and INT:
+    #### is faster than np_count_nonzero(arr) > 0
+    #### is faster than arr.nonzero()[0].size == 0
+    #### is faster than arr.sum() > 0
+    """
+    return arr.max() == 0
 
 
 def np_count_nonzero(arr: np.ndarray) -> int:
@@ -195,7 +207,7 @@ def np_contacts(arr: UINTARRAY, connectivity: int):
     assert 2 <= arr.ndim <= 3, f"expected 2D or 3D, but got {arr.ndim}"
     assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
     connectivity = min(connectivity * 4, 8) if arr.ndim == 2 else 6 if connectivity == 1 else 18 if connectivity == 2 else 26
-    return contacts(arr, connectivity=connectivity)
+    return _contacts(arr, connectivity=connectivity)
 
 
 def np_region_graph(arr: UINTARRAY, connectivity: int):
@@ -211,7 +223,7 @@ def np_region_graph(arr: UINTARRAY, connectivity: int):
     assert 2 <= arr.ndim <= 3, f"expected 2D or 3D, but got {arr.ndim}"
     assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
     connectivity = min(connectivity * 4, 8) if arr.ndim == 2 else 6 if connectivity == 1 else 18 if connectivity == 2 else 26
-    return region_graph(arr, connectivity=connectivity)
+    return _region_graph(arr, connectivity=connectivity)
 
 
 def np_voxel_connectivity_graph(arr: UINTARRAY, connectivity: int):
@@ -244,7 +256,7 @@ def np_voxel_connectivity_graph(arr: UINTARRAY, connectivity: int):
     assert 2 <= arr.ndim <= 3, f"expected 2D or 3D, but got {arr.ndim}"
     assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
     connectivity = min(connectivity * 4, 8) if arr.ndim == 2 else 6 if connectivity == 1 else 18 if connectivity == 2 else 26
-    return voxel_connectivity_graph(arr, connectivity=connectivity)
+    return _voxel_connectivity_graph(arr, connectivity=connectivity)
 
 
 def np_dice(seg: np.ndarray, gt: np.ndarray, binary_compare: bool = False, label: int = 1):
@@ -329,10 +341,7 @@ def np_dilate_msk(
             data = out.copy()
             data[i != data] = 0
             if use_crop:
-                try:
-                    lcrop = np_bbox_binary(data, px_dist=2)
-                except AssertionError:
-                    continue
+                lcrop = np_bbox_binary(data, px_dist=2, raise_error=False)
                 data = data[lcrop]
             msk_ibe_data = _binary_dilation(data, struct=struct)
 
@@ -376,10 +385,7 @@ def np_erode_msk(
     labels: list[int] = _to_labels(arr, label_ref)
 
     if use_crop:
-        # try:
-        arr_bin = arr.copy()
-        arr_bin[np.isin(arr_bin, labels, invert=True)] = 0
-        crop = np_bbox_binary(arr_bin, px_dist=1 + n_pixel, raise_error=False)
+        crop = np_bbox_binary(np.isin(arr, labels, invert=False), px_dist=1 + n_pixel, raise_error=False)
         arrc = arr[crop]
     else:
         arrc = arr
@@ -397,10 +403,7 @@ def np_erode_msk(
         data = msk_i_data.copy()
         data[i != data] = 0
         if use_crop:
-            try:
-                lcrop = np_bbox_binary(data, px_dist=1)
-            except AssertionError:
-                continue
+            lcrop = np_bbox_binary(data, px_dist=1, raise_error=False)
             data = data[lcrop]
         msk_ibe_data = binary_erosion(data, structure=struct, iterations=n_pixel, border_value=border_value)
         data[~msk_ibe_data] = 0  # type: ignore
@@ -499,9 +502,9 @@ def np_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 
         list of boundary coordinates as slices tuple
     """
     assert img is not None, "bbox_nd: received None as image"
-    if np_count_nonzero(img) == 0:
+    if np_is_empty(img):
         if raise_error:
-            assert AssertionError("bbox_nd: img is empty, cannot calculate a bbox")
+            raise ValueError("bbox_nd: img is empty, cannot calculate a bbox")
         return tuple([slice(None)] * img.ndim)
 
     n = img.ndim
@@ -551,14 +554,6 @@ def np_center_of_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.
         # print(i, size_t)
         ctd_bbox.append(bbox_nd[i].start + (size_t // 2))
     return ctd_bbox
-
-
-def np_approx_center_of_mass(seg: np.ndarray, label_ref: LABEL_REFERENCE = None) -> dict[int, COORDINATE]:
-    import warnings
-
-    warnings.warn("np_approx_center_of_mass deprecated use np_center_of_mass instead", stacklevel=3)  # TODO remove in version 1.0
-    assert label_ref is None, "the new function does not need a label_ref"
-    return np_center_of_mass(seg)
 
 
 def _np_get_min_max_pad(pos: int, img_size: int, cutout_size: int, add_pad_size: int = 0) -> tuple[int, int, int, int]:
@@ -658,17 +653,49 @@ def np_point_coordinates(
 
 def np_connected_components(
     arr: UINTARRAY,
+    label_ref: LABEL_REFERENCE | None = None,
     connectivity: int = 3,
-    label_ref: LABEL_REFERENCE = None,
-    verbose: bool = False,
-) -> tuple[dict[int, UINTARRAY], dict[int, int]]:
+    include_zero: bool = False,
+) -> tuple[UINTARRAY, int]:
     """Calculates the connected components of a given array (works with zeros as well!)
 
     Args:
         arr: input arr
-        labels (int | list[int] | None, optional): Labels that the connected components algorithm should be applied to. If none, applies on all labels found in arr. Defaults to None.
         connectivity: in range [1,3]. For 2D images, 2 and 3 is the same.
+        include_zero (bool): If true, will treat the background (0) as another label to calculate connected components from. Significantly slower! Defaults to False.
         verbose: If true, will print out if the array does not have any CC
+
+    Returns:
+        arr_cc: UINTARRAY, N: int
+    """
+    assert np.min(arr) == 0, f"min value of mask not zero, got {np.min(arr)}"
+    assert np.max(arr) >= 0, f"wrong normalization, max value is not >= 0, got {np_unique(arr)}"
+    assert 2 <= arr.ndim <= 3, f"expected 2D or 3D, but got {arr.ndim}"
+    assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
+    connectivity = min((connectivity + 1) * 2, 8) if arr.ndim == 2 else 6 if connectivity == 1 else 18 if connectivity == 2 else 26
+
+    labels: Sequence[int] = _to_labels(arr, label_ref)
+    if include_zero:
+        arr[arr == 0] = arr.max() + 1
+    arr[np.isin(arr, labels, invert=True)] = 0
+    cc_map, n = _connected_components(arr, connectivity=connectivity, return_N=True)
+    return cc_map, n
+
+
+def np_connected_components_per_label(
+    arr: UINTARRAY,
+    connectivity: int = 3,
+    label_ref: LABEL_REFERENCE = None,
+    include_zero: bool = False,
+) -> dict[int, UINTARRAY]:
+    """Calculates the connected components of a given array for each label in label_ref (works with zeros as well!)
+    It returns a dictionary mapping the labels in label_ref to its corresponding connected components mask
+
+    Args:
+        arr: input arr
+        connectivity: in range [1,3]. For 2D images, 2 and 3 is the same.
+        labels (int | list[int] | None, optional): Labels that the connected components algorithm should be applied to. If none, applies on all labels found in arr. Defaults to None.
+        include_zero (bool): If true, will treat the background (0) as another label to calculate connected components from. Significantly slower! Defaults to False.
 
     Returns:
         subreg_cc: dict[label, cc_idx, arr], subreg_cc_N: dict[label, n_connected_components]
@@ -680,33 +707,36 @@ def np_connected_components(
     assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
     connectivity = min((connectivity + 1) * 2, 8) if arr.ndim == 2 else 6 if connectivity == 1 else 18 if connectivity == 2 else 26
 
-    labels: Sequence[int] = _to_labels(arr, label_ref)
-
+    present_labels = np_unique(arr)
+    labels: Sequence[int] = present_labels if label_ref is None else [i for i in _to_labels(arr, label_ref) if i in present_labels]
+    # if zero, map it to unused label
+    if include_zero:
+        zero_label = arr.max() + 1
+        arr[arr == 0] = zero_label
+        labels = list(labels)
+        labels.append(0)
+    # call connected components
+    labels_out = _connected_components(arr, connectivity=connectivity, return_N=False)
+    # if zero, map it back for assignment
+    if include_zero:
+        arr[arr == zero_label] = 0
+    # assign the cc according to original label
     subreg_cc = {}
-    subreg_cc_n = {}
     for subreg in labels:  # type:ignore
-        img_subreg = np_extract_label(arr, subreg, inplace=False)
-        labels_out, n = connected_components(img_subreg, connectivity=connectivity, return_N=True)
-        subreg_cc[subreg] = labels_out
-        subreg_cc_n[subreg] = n
-    if verbose:
-        print(
-            "Components founds (label,N): ",
-            {i: subreg_cc_n[i] for i in labels},
-        )
-    return subreg_cc, subreg_cc_n
+        subreg_cc[subreg] = labels_out * (arr == subreg)
+
+    return subreg_cc
 
 
-def np_get_largest_k_connected_components(
+def np_filter_connected_components(
     arr: UINTARRAY,
-    k: int | None = None,
+    largest_k_components: int | None = None,
     label_ref: LABEL_REFERENCE = None,
     connectivity: int = 3,
     return_original_labels: bool = True,
     min_volume: float = 0,
     max_volume: float | None = None,
     removed_to_label=0,
-    _return_unsorted=False,
 ) -> UINTARRAY:
     """finds the largest k connected components in a given array (does NOT work with zero as label!)
 
@@ -721,7 +751,7 @@ def np_get_largest_k_connected_components(
         np.ndarray: array with the largest k connected components
     """
 
-    assert k is None or k > 0
+    assert largest_k_components is None or largest_k_components > 0
     assert 2 <= arr.ndim <= 3, f"expected 2D or 3D, but got {arr.ndim}"
     assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
     if arr.ndim == 2:  # noqa: SIM108
@@ -733,27 +763,22 @@ def np_get_largest_k_connected_components(
     labels: Sequence[int] = _to_labels(arr, label_ref)
     arr2[np.isin(arr, labels, invert=True)] = 0  # type:ignore
 
-    labels_out, n = connected_components(arr2, connectivity=connectivity, return_N=True)
-    if _return_unsorted:
-        return labels_out
-    if k is None:
-        k = n
-    k = min(k, n)  # if k > N, will return all N but still sorted
-    label_volume_pairs = [(i, vol) for i, vol in np_volume(labels_out).items() if vol > 0]
-    k = min(k, len(label_volume_pairs))
+    labels_out, n = _connected_components(arr2, connectivity=connectivity, return_N=True)
+    if largest_k_components is None:
+        largest_k_components = n
+    assert largest_k_components is not None
+    largest_k_components = min(largest_k_components, n)  # if k > N, will return all N but still sorted
+    label_volume_pairs = [
+        (i, vol) for i, vol in np_volume(labels_out).items() if vol >= min_volume and (max_volume is None or vol <= max_volume)
+    ]
+    largest_k_components = min(largest_k_components, len(label_volume_pairs))
     label_volume_pairs.sort(key=lambda x: x[1], reverse=True)
-    preserve: list[int] = [(x[0], x[1]) for x in label_volume_pairs[:k]]
+    preserve: list[int] = [x[0] for x in label_volume_pairs[:largest_k_components]]
 
     cc_out = np.zeros(arr.shape, dtype=arr.dtype)
     i = 1
-    for preserve_label, volume in preserve:
-        if volume < min_volume:
-            continue
-        if max_volume is not None and volume > max_volume:
-            continue
+    for preserve_label in preserve:
         cc_out[labels_out == preserve_label] = i
-        if k == i:
-            break
         i += 1
     if removed_to_label != 0:
         arr[np.logical_and(labels_out != 0, arr == 0)] = removed_to_label
@@ -777,13 +802,14 @@ def np_get_connected_components_center_of_mass(
     Returns:
         _type_: _description_
     """
+    # Per label argument true/false
+    #
     if sort_by_axis is not None:
         assert 0 <= sort_by_axis <= len(arr.shape) - 1, f"sort_by_axis {sort_by_axis} invalid with an array of shape {arr.shape}"  # type:ignore
-    subreg_cc, _ = np_connected_components(
+    subreg_cc = np_connected_components_per_label(
         arr.copy(),
         connectivity=connectivity,
         label_ref=label,
-        verbose=False,
     )
     coms = list(np_center_of_mass(subreg_cc[label]).values())
 
@@ -849,7 +875,11 @@ def np_translate_arr(arr: np.ndarray, translation_vector: tuple[int, int] | tupl
 
 
 def np_fill_holes(
-    arr: np.ndarray, label_ref: LABEL_REFERENCE = None, slice_wise_dim: int | None = None, use_crop: bool = True, pbar=False
+    arr: np.ndarray,
+    label_ref: LABEL_REFERENCE = None,
+    slice_wise_dim: int | None = None,
+    use_crop: bool = True,
+    pbar: bool = False,
 ) -> np.ndarray:
     """Fills holes in segmentations
 
@@ -875,19 +905,19 @@ def np_fill_holes(
 
         labels = tqdm(labels, desc="fill_holes")  # type: ignore
     for l in labels:  # type:ignore
-        arr_l = arrc.copy()
-        arr_l = np_extract_label(arr_l, l)
+        arr_l = arrc == l
+        # arr_l = np_extract_label(arr_l, l)
         if use_crop:
             crop = np_bbox_binary(arr_l, px_dist=1, raise_error=False)
             arr_lc = arr_l[crop]
         else:
             arr_lc = arr_l
         if slice_wise_dim is None:
-            filled = fill(arr_lc).astype(arr.dtype)
+            filled = _fill(arr_lc).astype(arr.dtype)
         else:
             assert 0 <= slice_wise_dim <= arr.ndim - 1, f"slice_wise_dim needs to be in range [0, {arr.ndim - 1}]"
             filled = np.swapaxes(arr_lc.copy(), 0, slice_wise_dim)
-            filled = np.stack([fill(x) for x in filled])
+            filled = np.stack([_fill(x) for x in filled])
             filled = np.swapaxes(filled, 0, slice_wise_dim)
         filled[filled != 0] = l
         if use_crop:
@@ -897,6 +927,8 @@ def np_fill_holes(
 
     if use_crop:
         arr[gcrop] = arrc
+    else:
+        arr = arrc
     return arr
 
 
@@ -951,7 +983,7 @@ def np_smooth_gaussian_labelwise(
     sem_labels_plus_background = sem_labels.copy()
     sem_labels_plus_background.append(0)
     for l in sem_labels_plus_background[:-1]:
-        arr_l = np_extract_label(arr.copy(), l).astype(float)
+        arr_l = (arr == l).astype(float)
         if l in label_to_smooth:
             arr_l = gaussian_filter(
                 arr_l,
@@ -965,13 +997,10 @@ def np_smooth_gaussian_labelwise(
         smoothed_arrs.append(arr_l)
 
     # background
-    arr_bg = arr.copy()
-    arr_bg[arr_bg > 0] = 2
-    arr_bg[arr_bg == 0] = 1
-    arr_bg[arr_bg == 2] = 0
+    arr_bg = np_extract_label(arr, label=0, inplace=False).astype(float)
     if smooth_background:
         arr_bg = gaussian_filter(
-            arr_bg.astype(float),
+            arr_bg,
             sigma=sigma,
             mode=boundary_mode,
             truncate=truncate,
@@ -1012,7 +1041,7 @@ def np_calc_convex_hull(
         h = arr * 0
         for i in range(arr.shape[axis]):
             slices = _select_axis_dynamically(axis=axis, index=i, n_dims=n_dims)
-            if np.count_nonzero(arr[slices]) == 0:
+            if np_is_empty(arr[slices]):
                 continue
             try:
                 convex_hull_slice = _convex_hull(arr[slices], verbose=verbose)[0].astype(arr.dtype)
@@ -1151,10 +1180,10 @@ def np_betti_numbers(img: np.ndarray, verbose=False) -> tuple[int, int, int]:
     # calculate the Betti numbers B0, B2
     # then use Euler characteristic to get B1
     # get the label connected regions for foreground
-    _, b0 = label(padded, return_num=True, connectivity=N26)  # 26 neighborhoods for foreground
-    euler_char_num = euler_number(padded, connectivity=N26)  # 26 neighborhoods for foreground
+    _, b0 = _label(padded, return_num=True, connectivity=N26)  # 26 neighborhoods for foreground
+    euler_char_num = _euler_number(padded, connectivity=N26)  # 26 neighborhoods for foreground
     # get the label connected regions for background
-    _, b2 = label(1 - padded, return_num=True, connectivity=N6)  # 6 neighborhoods for background
+    _, b2 = _label(1 - padded, return_num=True, connectivity=N6)  # 6 neighborhoods for background
     # NOTE: need to subtract 1 from b2
     b2 -= 1
     b1 = b0 + b2 - euler_char_num  # Euler number = Betti:0 - Betti:1 + Betti:2
@@ -1227,14 +1256,13 @@ def np_fill_holes_global_with_majority_voting(
         # go for each fill holed CC
         seg_nii_bin_fh[seg_nii_bin == 1] = 0
         cc_msk, _ = np_connected_components(seg_nii_bin_fh, connectivity=connectivity)
-        cc_msk = cc_msk[1]
         # delete voxels that are already labeled
         cc_msk[seg_nii_bin != 0] = 0
         seg_nii_new = np_map_labels_based_on_majority_label_mask_overlap(
             cc_msk,
             label_mask=arr_c,
             dilate_pixel=1,
-            labels=1,
+            label_ref=1,
             inplace=False,
         )
         arr_c[seg_nii_new != 0] = seg_nii_new[seg_nii_new != 0]
@@ -1244,7 +1272,7 @@ def np_fill_holes_global_with_majority_voting(
 def np_map_labels_based_on_majority_label_mask_overlap(
     arr: UINTARRAY,
     label_mask: np.ndarray,
-    labels: int | list[int] | None = None,
+    label_ref: LABEL_REFERENCE = None,
     dilate_pixel: int = 1,
     inplace: bool = False,
 ):
@@ -1262,29 +1290,19 @@ def np_map_labels_based_on_majority_label_mask_overlap(
     """
     arr_c = arr if inplace else arr.copy()
 
-    if isinstance(labels, int):
-        labels = [labels]
+    labels = _to_labels(arr, label_ref)
 
     label_list: list[int] = [l for l in np_unique(arr) if l in labels]
     for l in label_list:
-        arr_l = np_extract_label(arr, l)
-        if dilate_pixel > 0:
-            arr_ld = arr_l.copy()
-            arr_ld = np_dilate_msk(
-                arr_ld,
-                n_pixel=dilate_pixel,
-                label_ref=1,
-                connectivity=3,
-            )
-        else:
-            arr_ld = arr_l
+        arr_l = np_extract_label(arr, l, inplace=False)
+        arr_ld = np_dilate_msk(arr_l.copy(), n_pixel=dilate_pixel, label_ref=1, connectivity=3) if dilate_pixel > 0 else arr_l
 
         mult = label_mask * arr_ld
-        labels, count = np.unique(mult, return_counts=True)
-        if 0 in labels:
-            labels = labels[1:]
+        label_ref, count = np.unique(mult, return_counts=True)
+        if 0 in label_ref:
+            label_ref = label_ref[1:]
             count = count[1:]
-        newlabel = labels[np.argmax(count)]
+        newlabel = label_ref[np.argmax(count)]
         arr_c[arr_l != 0] = newlabel
     return arr_c
 
@@ -1317,12 +1335,12 @@ def _pad_to_parameters(origin_shape: list[int] | tuple[int, int, int], target_sh
     return padding, crop, requires_crop
 
 
-def _to_labels(arr: np.ndarray, labels: LABEL_REFERENCE = None) -> Sequence[int]:
-    if labels is None:
-        labels = list(np_unique(arr))
-    if not isinstance(labels, Sequence):
-        labels = [labels]
-    return labels
+def _to_labels(arr: np.ndarray, label_ref: LABEL_REFERENCE = None) -> Sequence[int]:
+    if label_ref is None:
+        label_ref = list(np_unique(arr))
+    if not isinstance(label_ref, Sequence):
+        label_ref = [label_ref]
+    return label_ref
 
 
 def _generate_binary_structure(n_dim: int, connectivity: int, kernel_size: int = 3):
