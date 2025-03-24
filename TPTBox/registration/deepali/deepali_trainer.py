@@ -2,6 +2,7 @@ import math
 import time
 from collections import OrderedDict, defaultdict
 from collections.abc import Callable, Generator, Sequence
+from copy import copy
 from timeit import default_timer as timer
 from typing import Literal, Optional, Union
 
@@ -75,7 +76,7 @@ class DeepaliPairwiseImageTrainer:
         # target_seg: Optional[Union[Image, PathStr]] = None,  # Masking the registration target
         device: Union[torch.device, str, int] = "cuda",
         # foreground_mask
-        mask_foreground=True,
+        mask_foreground=False,
         foreground_lower_threshold: Optional[int] = None,  # None means min
         foreground_upper_threshold: Optional[int] = None,  # None means max
         # normalize
@@ -182,7 +183,7 @@ class DeepaliPairwiseImageTrainer:
         if transform_args is None:
             transform_args = {}
 
-        self.dtype = torch.float32
+        self._dtype = torch.float32
         self.device = get_device_config(device)
         self.foreground_lower_threshold = foreground_lower_threshold
         self.foreground_upper_threshold = foreground_upper_threshold
@@ -218,14 +219,18 @@ class DeepaliPairwiseImageTrainer:
         # self.source_seg = self._read(source_seg)
         # self.target_seg = self._read(target_seg)
         # generate mask
+
         if mask_foreground:
             self.source_mask, self.target_mask = self.on_generate_masking(self.source, self.target)
+            self.source_mask = self._read(self.source_mask)
+            self.target_mask = self._read(self.target_mask)
         else:
             self.source_mask, self.target_mask = None, None
         # normalize
         self.source, self.target = self.on_normalize(self.source, self.target)
         # self.source_seg, self.target_seg = self.on_normalize_seg(self.source_seg, self.target_seg)
         # Pyramid
+
         self.source_pyramid, self.target_pyramid = self.make_pyramid(
             self.source, self.target, pyramid_levels, finest_level, coarsest_level, dims, pyramid_finest_spacing, pyramid_min_size
         )
@@ -249,17 +254,29 @@ class DeepaliPairwiseImageTrainer:
     # def on_normalize_seg(self, source_seg: Optional[Image], target_seg: Optional[Image]):
     #    return clamp_mask(source_seg), clamp_mask(target_seg)
 
-    def _read(self, source):
+    def _read(self, source) -> Image:
         if isinstance(source, PathStr):
-            return Image.read(source, dtype=self.dtype, device=self.device)
-        if hasattr(source, "to_deepali"):
-            source = source.to_deepali(dtype=self.dtype, device=self.device)
+            return Image.read(source, dtype=self._dtype, device=self.device)
+        elif hasattr(source, "to_deepali"):
+            source = source.to_deepali(dtype=self._dtype, device=self.device)
+        else:
+            source = source.to(dtype=self._dtype, device=self.device)
         return source
+
+    def _pyramid(self, target_image: Image):
+        return target_image.pyramid(
+            self._p_levels,
+            start=self._p_finest_level,
+            end=self._p_coarsest_level,
+            dims=self._p_pyramid_dims,
+            spacing=self._p_finest_spacing,  # type: ignore
+            min_size=self._p_min_size,
+        )
 
     def make_pyramid(
         self,
-        target_image: Image,
         source_image: Image,
+        target_image: Image,
         levels: Optional[int] = None,
         finest_level: int = 0,
         coarsest_level: Optional[int] = None,
@@ -270,30 +287,22 @@ class DeepaliPairwiseImageTrainer:
         if levels is None or levels == 1:
             return None, None
         coarsest_level = levels - 1
-        assert coarsest_level < levels, "coarsest_level is smaller levels"
-        assert finest_level < 0, "finest_level is negative"
-        assert coarsest_level < 0, "coarsest_level is negative"
+        assert coarsest_level < levels, f"{coarsest_level=} is smaller {levels=}"
+        assert finest_level >= 0, f"{finest_level=} is negative"
+        assert coarsest_level >= 0, f"{coarsest_level=} is negative"
         self.finest_level = finest_level
         self.coarsest_level = coarsest_level
         if finest_spacing is None:
             finest_spacing = target_image.spacing()
-        target_pyramid = target_image.pyramid(
-            levels,
-            start=finest_level,
-            end=coarsest_level,
-            dims=pyramid_dims,
-            spacing=finest_spacing,  # type: ignore
-            min_size=min_size,
-        )
+        self._p_levels = levels
+        self._p_finest_level = finest_level
+        self._p_coarsest_level = coarsest_level
+        self._p_pyramid_dims = pyramid_dims
+        self._p_finest_spacing = finest_spacing
+        self._p_min_size = min_size
 
-        source_pyramid = source_image.pyramid(
-            levels,
-            start=finest_level,
-            end=coarsest_level,
-            dims=pyramid_dims,
-            spacing=finest_spacing,  # type: ignore
-            min_size=min_size,
-        )
+        target_pyramid = self._pyramid(target_image)
+        source_pyramid = self._pyramid(source_image)
         if self.verbose > 2:
             print("Target image pyramid:")
             print_pyramid_info(target_pyramid)
@@ -366,6 +375,7 @@ class DeepaliPairwiseImageTrainer:
         # Transform target grid points
         x = target.grid().coords(device=target_data.device).unsqueeze(0)  # grid_points
         y: Tensor = grid_transform(x, grid=True)
+        assert len(self.loss_terms) != 0, "No losses defined"
         ### Sum of pairwise image dissimilarity terms ###
         data_terms = self._loss_terms_of_type(PairwiseImageLoss)
         misc_excl |= set(data_terms.keys())
@@ -534,12 +544,14 @@ class DeepaliPairwiseImageTrainer:
         ##
         target_grid = target_image.grid()
         source_grid = source_image.grid()
-
         self.transform = grid_transform
         self._sample_image = SampleImage(
             target=target_grid, source=source_grid, sampling=sampling, padding=PaddingMode.ZEROS, align_centers=False
         ).to(self.device)
         grad_sigma = self.smooth_grad
+
+        _eval_hooks = copy(self._eval_hooks)
+        _step_hooks = copy(self._step_hooks)
         if isinstance(self.transform, NonRigidTransform) and grad_sigma > 0:
             self.register_eval_hook(smooth_grad_hook(self.transform, sigma=grad_sigma))
         self.register_eval_hook(normalize_grad_hook(self.transform))
@@ -558,6 +570,9 @@ class DeepaliPairwiseImageTrainer:
             self.loss_values.append(value)
             if self.max_history is not None and len(self.loss_values) > self.max_history:
                 self.loss_values.pop(0)
+
+        self._eval_hooks = _eval_hooks
+        self._step_hooks = _step_hooks
 
     def _load_initial_transform(self, transform: SpatialTransform):
         if self.model_init:
@@ -617,6 +632,9 @@ class DeepaliPairwiseImageTrainer:
             ## loop pyramid
             source_pyramid = self.source_pyramid
             target_pyramid = self.target_pyramid
+            target_mask = self.target_mask
+            if self.target_mask is not None:
+                target_mask_pyramid = self._pyramid(self.target_mask)
             assert target_pyramid is not None
             finest_level = self.finest_level
             coarsest_level = self.coarsest_level
@@ -624,6 +642,7 @@ class DeepaliPairwiseImageTrainer:
             finest_grid = target_pyramid[finest_level].grid()
             coarsest_grid = target_pyramid[coarsest_level].grid()
             post_transform = get_post_transform(finest_grid, source_grid, self.align)
+
             transform_downsample = self.model_args.pop("downsample", 0)
             transform_grid = coarsest_grid.downsample(transform_downsample)
             transform = self.on_make_transform(self.transform_name, grid=transform_grid, groups=1, **self.model_args)
@@ -635,6 +654,8 @@ class DeepaliPairwiseImageTrainer:
             for level in range(coarsest_level, finest_level - 1, -1):
                 target_image = target_pyramid[level]
                 source_image = source_pyramid[level]
+                if self.target_mask is not None:
+                    self.target_mask = torch.ceil(target_mask_pyramid[level]).to(dtype=torch.int8)
                 ## Initialize transformation
                 if level != coarsest_level:
                     start = timer()
@@ -648,4 +669,5 @@ class DeepaliPairwiseImageTrainer:
                 print(f"Registered images in {timer() - start_reg:.3f}s")
             if self.verbose > 0:
                 print()
+            self.target_mask = target_mask
             return grid_transform

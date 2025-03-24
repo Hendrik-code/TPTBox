@@ -106,7 +106,7 @@ def print_eval_loss_hook_tqdm(level: int, max_steps: int) -> RegistrationEvalHoo
     def fn(_: "DeepaliPairwiseImageTrainer", num_steps: int, num_eval: int, result: "RegistrationResult") -> None:
         loss = float(result["loss"])
         message = f"  {num_steps:>4d}:"
-        message += f" {loss:>12.05f} (loss)"
+        message += f" {loss:>5.05f}4 (loss)"
         weights: dict[str, Union[str, float]] = result.get("weights", {})
         losses: dict[str, Tensor] = result["losses"]
         for name, value in losses.items():
@@ -118,7 +118,7 @@ def print_eval_loss_hook_tqdm(level: int, max_steps: int) -> RegistrationEvalHoo
                 value *= weight
             elif "+" in weight:
                 weight = f"({weight})"
-            message += f", {value:>12.05f} [{weight} * {name}]"
+            message += f", {value:>5.05f}[{weight}*{name}]"
         if num_eval > 1:
             message += " [evals={num_eval:d}]"
         # print("...", message, flush=True)
