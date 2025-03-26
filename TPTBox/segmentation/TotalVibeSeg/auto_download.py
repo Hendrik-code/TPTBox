@@ -67,11 +67,12 @@ def user_guard(func: Any) -> Any:
 
 
 @user_guard
-def _download_weights(idx=85, addendum="") -> None:
+def _download_weights(idx=85, addendum="", first=True) -> None:
     weights_dir = get_weights_dir(idx)
     weights_url = WEIGHTS_URL_ + f"{idx:03}{addendum}.zip"
     _download(weights_url, weights_dir, text="pretrained weights")
-    addendum_download(idx)
+    if first:
+        addendum_download(idx)
 
 
 def _download(weights_url, weights_dir, text="") -> None:
@@ -107,7 +108,7 @@ def addendum_download(idx):
     if next_zip.exists():
         with open(next_zip) as f:
             add = json.load(f)
-        [_download_weights(idx, addendum=a) for a in add]
+        [_download_weights(idx, addendum=a, first=False) for a in add]
         next_zip.unlink()
 
 

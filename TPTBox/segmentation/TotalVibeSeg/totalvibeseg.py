@@ -101,7 +101,8 @@ def run_totalvibeseg(
         gpu=gpu,
         ddevice=ddevice,
         padd=padd,
-        keep_size=keep_size**args,
+        keep_size=keep_size,
+        **args,
     )
 
 
