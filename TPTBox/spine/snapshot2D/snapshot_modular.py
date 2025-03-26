@@ -390,7 +390,7 @@ def curve_projection_axial_fallback(img_data, x_ctd, heights: list[float] | None
 
 
 def make_isotropic2d(arr2d: np.ndarray, zms2d, msk=False) -> np.ndarray:
-    if arr2d.dtype in (np.float64, np.float16, np.float32):
+    if np.issubdtype(arr2d.dtype, np.floating):
         arr2d = arr2d.astype(int)
     xs = list(range(arr2d.shape[0]))
     ys = list(range(arr2d.shape[1]))
@@ -405,8 +405,8 @@ def make_isotropic2d(arr2d: np.ndarray, zms2d, msk=False) -> np.ndarray:
     pts = np.vstack([xx.ravel(), yy.ravel()]).T
     try:
         lt = interpolator(pts)
-    except Exception:
-        raise ValueError(f"Needs to be casted into a other type: arr2d {arr2d.dtype}")  # noqa: B904
+    except Exception as e:
+        raise ValueError(f"Needs to be casted into a other type: arr2d {arr2d.dtype}") from e  # noqa: B904
     img = np.reshape(lt, new_shp, order="F")
     return img
 

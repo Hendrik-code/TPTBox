@@ -1,31 +1,37 @@
 import re
+import sys
 from collections.abc import Sequence
 from contextlib import ContextDecorator
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional, Tuple, TypeVar, Union
+from typing import Literal, Optional, Union
 
 import torch
-import yaml
-from deepali.core import Axes, Device, Grid, PathStr
+import torch.optim
+from deepali.core import Axes, Grid, PathStr
 from deepali.core import functional as U
 from deepali.data import FlowField, Image
-from deepali.losses import RegistrationResult, new_loss
-from deepali.modules import TransformImage
+from deepali.losses import (
+    BSplineLoss,
+    DisplacementLoss,
+    LandmarkPointDistance,
+    PairwiseImageLoss,
+    ParamsLoss,
+    PointSetDistance,
+)
 from deepali.spatial import (
     DisplacementFieldTransform,
     HomogeneousTransform,
-    NonRigidTransform,
     QuaternionRotation,
     RigidQuaternionTransform,
-    SequentialTransform,
     SpatialTransform,
     Translation,
 )
-from torch import Tensor, Type
+from torch import Tensor
 from torch.nn import Module
 
 RE_WEIGHT = re.compile(r"^((?P<mul>[0-9]+(\.[0-9]+)?)\s*[\* ])?\s*(?P<chn>[a-zA-Z0-9_-]+)\s*(\+\s*(?P<add>[0-9]+(\.[0-9]+)?))?$")
 RE_TERM_VAR = re.compile(r"^[a-zA-Z0-9_-]+\((?P<var>[a-zA-Z0-9_]+)\)$")
+LOSS = Union[PairwiseImageLoss, PointSetDistance, LandmarkPointDistance, DisplacementLoss, BSplineLoss, ParamsLoss]
 
 
 def get_device_config(device: Union[torch.device, str, int]) -> torch.device:
@@ -217,3 +223,57 @@ def print_pyramid_info(pyramid: dict[int, Image]) -> None:
         domain = ", ".join([f"{n:.2f}" for n in grid.cube_extent()])
         print(f"- Level {level}:" + f" size=({size})" + f", origin=({origin})" + f", extent=({extent})" + f", domain=({domain})")
     print()
+
+
+def new_loss(
+    name: str,
+    *args,
+    _remove_weight=True,
+    **kwargs,
+) -> LOSS:
+    r"""Initialize new loss module.
+
+    Args:
+        name: Name of loss type.
+        args: Loss arguments.
+        kwargs: Loss keyword arguments.
+
+    Returns:
+        New loss module.
+
+    """
+    if _remove_weight:
+        _ = kwargs.pop("weight", None)
+    cls = getattr(sys.modules["deepali.losses"], name, None)
+    if cls is None:
+        raise ValueError(f"new_loss() unknown loss {name}")
+    if cls is Module or not issubclass(cls, Module):
+        raise TypeError(f"new_loss() '{name}' is not a subclass of torch.nn.Module")
+    return cls(*args, **kwargs)  # type: ignore
+
+
+def parse_loss(loss_terms, weights):
+    if isinstance(loss_terms, Sequence):
+        if weights is None:
+            weights = {}
+        else:
+            assert isinstance(weights, Sequence), "when loss_terms is a list weighting must also be a list"
+            weights = {l if isinstance(l, str) else type(l).__name__: i for i, l in zip(weights, loss_terms)}
+        loss_terms = {l if isinstance(l, str) else type(l).__name__: l for l in loss_terms}
+    if weights is None:
+        weights = {}
+    assert not isinstance(weights, list), "weights and loss_terms should be the same list/dict if weights not None"
+    for k, v in loss_terms.items():
+        if isinstance(v, str):
+            loss_terms[k] = new_loss(v)  # type: ignore
+        elif isinstance(v, tuple):
+            if len(v) == 2:
+                name, args = v
+                if isinstance(args, dict):
+                    loss_terms[k] = new_loss(name, **args)  # type: ignore
+                else:
+                    loss_terms[k] = new_loss(name, *args)  # type: ignore
+            elif len(v) == 3:
+                loss_terms[k] = new_loss(v[0], *v[1], **v[2])  # type: ignore
+
+    return loss_terms, weights

@@ -32,10 +32,58 @@ from TPTBox.registration.deformable._deepali import deform_reg_pair
 cuda = device("cuda")
 
 
-class Deformable_Registration(General_Registration):
+def _load_config(path):
+    r"""Load registration parameters from configuration file."""
+    config_path = Path(path).absolute()
+    config_text = config_path.read_text()
+    if config_path.suffix == ".json":
+        return json.loads(config_text)
+    return yaml.safe_load(config_text)
+
+
+def _warp_image(
+    source_image: deepaliImage, target_grid: Deepali_Grid, transform: SpatialTransform, mode="linear", ddevice: DEVICES = "cuda", gpu=1
+) -> torch.Tensor:
+    device = get_device(ddevice, gpu)
+    warp_func = TransformImage(target=target_grid, source=target_grid, sampling=mode, padding=source_image.min()).to(device)
+    with torch.inference_mode():
+        data = warp_func(transform.tensor(), source_image.to(device))
+    return data
+
+
+def _warp_poi(
+    poi_moving: POI, target_grid: TPTBox_Grid, transform: SpatialTransform, align_corners, ddevice: DEVICES = "cuda", gpu=1
+) -> POI:
+    device = get_device(ddevice, gpu)
+    keys: list[tuple[int, int]] = []
+    points = []
+    for key, key2, (x, y, z) in poi_moving.items():
+        keys.append((key, key2))
+        points.append((x, y, z))
+        print(key, key2, (x, y, z))
+    with torch.inference_mode():
+        data = torch.Tensor(points)
+        transform.to(device)
+        # data2 = data
+        data = transform.inverse(update_buffers=True).points(
+            data.to(device),
+            axes=Axes.GRID,
+            to_axes=Axes.GRID,
+            grid=poi_moving.to_deepali_grid(align_corners),
+            to_grid=target_grid.to_deepali_grid(align_corners),
+        )
+        # print(data2 - data)
+
+    out_poi = target_grid.make_empty_POI()
+    for (key, key2), (x, y, z) in zip_strict(keys, data.cpu()):
+        # print(key, key2, x, y, z)
+        out_poi[key, key2] = (x.item(), y.item(), z.item())
+    return out_poi
+
+
+class Deformable_Registration:
     """
     A class for performing deformable registration between a fixed and moving image.
-
     Attributes:
         transform (torch.Tensor): The transformation matrix resulting from the registration.
         ref_nii (NII): Reference NII object used for registration.
@@ -47,99 +95,156 @@ class Deformable_Registration(General_Registration):
         self,
         fixed_image: Image_Reference,
         moving_image: Image_Reference,
+        fixed_image_seg: Image_Reference | None = None,
+        moving_image_seg: Image_Reference | None = None,
+        normalize: Literal["MRI", "CT"] | None = None,
+        quantile: float = 0.95,
         reference_image: Image_Reference | None = None,
-        source_pset=None,
-        target_pset=None,
-        source_landmarks=None,
-        target_landmarks=None,
-        # source_seg: Optional[Union[Image, PathStr]] = None,  # Masking the registration source
-        # target_seg: Optional[Union[Image, PathStr]] = None,  # Masking the registration target
-        device: Union[torch.device, str, int] | None = None,
+        align_corners: bool = False,
+        verbose=1,
+        config: Path | str | dict = Path(__file__).parent / "settings.json",
+        spacing_type=1,
         gpu=0,
         ddevice: DEVICES = "cuda",
-        # foreground_mask
-        mask_foreground=True,
-        foreground_lower_threshold: Optional[int] = None,  # None means min
-        foreground_upper_threshold: Optional[int] = None,  # None means max
-        # normalize
-        normalize_strategy: Optional[
-            Literal["auto", "CT", "MRI"]
-        ] = "auto",  # Override on_normalize for finer normalization schema or normalize before and set to None. auto: [min,max] -> [0,1]; None: Do noting
-        # Pyramid
-        pyramid_levels: Optional[int] = 3,  # 1/None = no pyramid; int: number of stacks, tuple from to (0 is finest)
-        finest_level: int = 0,
-        coarsest_level: Optional[int] = None,
-        pyramid_finest_spacing: Optional[Sequence[int] | torch.Tensor] = None,
-        pyramid_min_size=16,
-        dims=("x", "y", "z"),
-        align=False,
-        transform_name: str = "SVFFD",  # Names that are defined in deepali.spatial.LINEAR_TRANSFORMS and deepali.spatialNONRIGID_TRANSFORMS. Override on_make_transform for finer controle
-        transform_args: dict | None = None,
-        transform_init: PathStr | None = None,  # reload initial flowfield from file
-        optim_name="Adam",  # Optimizer name defined in torch.optim. or override on_optimizer finer controle
-        lr=0.001,  # Learning rate
-        optim_args=None,  # args of Optimizer with out lr
-        smooth_grad=0.0,
-        verbose=0,
-        max_steps: int | Sequence[int] = 1000,  # Early stopping.  override on_converged finer controle
-        max_history: int | None = None,
-        min_value=0.0,  # Early stopping.  override on_converged finer controle
-        min_delta=-0.0001,  # Early stopping.  override on_converged finer controle
-        loss_terms: list[LOSS] | dict[str, LOSS] | None = None,
-        weights: list[float] | dict[str, float] | None = None,
-        auto_run=True,
-    ):
-        if transform_args is None:
-            transform_args = {
-                "stride": [8, 8, 16],
-                "transpose": False,
-            }
-        if loss_terms is None:
-            loss_terms = {
-                "be": BSplineBending(stride=1),
-                "seg": LNCC(),
-            }
-        if weights is None:
-            weights = {"be": 0.001, "seg": 1}
+    ) -> None:
+        """
+        Initialize the deformable registration process.
+        Args:
+            fixed_image (Image_Reference): The fixed image to which the moving image is registered.
+            moving_image (Image_Reference): The moving image to be registered.
+            normalize (Literal["MRI", "CT"] | None): Normalization type; supports "MRI" or "CT" or no normalization.
+            quantile (float): Quantile for intensity normalization; recommended 0.95 for MRI.
+            reference_image (Image_Reference | None): Optional reference image for resampling.
+            device (Device | None): The computational device for the process, default is CUDA.
+            align_corners (bool): Whether to align the corners during grid resampling.
+        """
+        self.gpu = gpu
+        self.ddevice: DEVICES = ddevice
+        device = get_device(ddevice, gpu)
+        fix = to_nii(fixed_image).copy()
+        mov = to_nii(moving_image).copy()
 
-        super().__init__(
-            fixed_image=fixed_image,
-            moving_image=moving_image,
-            reference_image=reference_image,
-            source_pset=source_pset,
-            target_pset=target_pset,
-            source_landmarks=source_landmarks,
-            target_landmarks=target_landmarks,
-            device=device,
-            gpu=gpu,
-            ddevice=ddevice,
-            mask_foreground=mask_foreground,
-            foreground_lower_threshold=foreground_lower_threshold,
-            foreground_upper_threshold=foreground_upper_threshold,
-            normalize_strategy=normalize_strategy,
-            pyramid_levels=pyramid_levels,
-            finest_level=finest_level,
-            coarsest_level=coarsest_level,
-            pyramid_finest_spacing=pyramid_finest_spacing,
-            pyramid_min_size=pyramid_min_size,
-            dims=dims,
-            align=align,
-            transform_name=transform_name,
-            transform_args=transform_args,
-            transform_init=transform_init,
-            optim_name=optim_name,
-            lr=lr,
-            optim_args=optim_args,
-            smooth_grad=smooth_grad,
+        # Preprocessing
+        if normalize == "MRI":
+            fix.normalize_(quantile=quantile).clamp(0, 1)
+            mov.normalize_(quantile=quantile).clamp(0, 1)
+        elif normalize == "CT":
+            fix.clamp_(-1024, 1024).normalize_().clamp(0, 1)
+            mov.clamp_(-1024, 1024).normalize_().clamp(0, 1)
+        if spacing_type == 1:
+            finest_spacing = fix.spacing
+        elif spacing_type == 2:
+            finest_spacing = mov.spacing
+        elif spacing_type == 3:
+            finest_spacing = [max(a, b) for a, b in zip_strict(mov.spacing, fix.spacing)]
+        elif spacing_type == 4:
+            finest_spacing = [min(a, b) for a, b in zip_strict(mov.spacing, fix.spacing)]
+        else:
+            finest_spacing = None
+
+        if reference_image is None:
+            reference_image = fix
+        else:
+            fix = fix.resample_from_to(reference_image)
+
+        # Resample and save images
+        source = mov.resample_from_to_(reference_image)
+
+        # Load configuration and perform registration
+        deformable_simple = _load_config(config) if not isinstance(config, dict) else config
+        self.target_grid = fix.to_gird()
+        self.input_grid = mov.to_gird()
+        self.align_corners = align_corners
+        target_seg = to_nii(fixed_image_seg, True) if fixed_image_seg is not None else None
+        source_seg = None
+        if moving_image_seg is not None:
+            source_seg = to_nii(moving_image_seg, True).resample_from_to_(reference_image)
+        self.transform = deform_reg_pair.register_pairwise(
+            target=fix.copy(),
+            source=source.copy(),
+            target_seg=target_seg,
+            source_seg=source_seg,
+            config=deformable_simple,
+            device=device,  # type: ignore
             verbose=verbose,
-            max_steps=max_steps,
-            max_history=max_history,
-            min_value=min_value,
-            min_delta=min_delta,
-            loss_terms=loss_terms,
-            weights=weights,
-            auto_run=auto_run,
+            finest_spacing=finest_spacing,
         )
+
+    @torch.no_grad()
+    def transform_nii(self, img: NII, gpu: int | None = None, ddevice: DEVICES | None = None, target: Has_Grid | None = None) -> NII:
+        """
+        Apply the computed transformation to a given NII image.
+        Args:
+            img (NII): The NII image to be transformed.
+        Returns:
+            NII: The transformed image as an NII object.
+        """
+        target_grid_nii = self.target_grid if target is None else target
+        target_grid = target_grid_nii.to_deepali_grid(self.align_corners)
+        source_image = img.resample_from_to(self.input_grid).to_deepali()
+        data = _warp_image(
+            source_image,
+            target_grid,
+            self.transform,
+            "nearest" if img.seg else "linear",
+            ddevice=ddevice if ddevice is not None else self.ddevice,
+            gpu=gpu if gpu is not None else self.gpu,
+        ).squeeze()
+        data: torch.Tensor = data.permute(*torch.arange(data.ndim - 1, -1, -1))  # type: ignore
+        out = target_grid_nii.make_nii(data.detach().cpu().numpy(), img.seg)
+        return out
+
+    def transform_poi(
+        self,
+        poi: POI,
+        gpu: int | None = None,
+        ddevice: DEVICES | None = None,
+    ):
+        source_image = poi.resample_from_to(self.target_grid)
+        data = _warp_poi(
+            source_image,
+            self.target_grid,
+            self.transform,
+            self.align_corners,
+            ddevice=ddevice if ddevice is not None else self.ddevice,
+            gpu=gpu if gpu is not None else self.gpu,
+        )
+        return data.resample_from_to(self.target_grid)
+
+    def __call__(self, *args, **kwds) -> NII:
+        """
+        Call method to apply the transformation using the transform_nii method.
+        Args:
+            *args: Positional arguments for the transform_nii method.
+            **kwds: Keyword arguments for the transform_nii method.
+        Returns:
+            NII: The transformed image.
+        """
+        return self.transform_nii(*args, **kwds)
+
+    def get_dump(self):
+        return (self.transform, self.target_grid, self.input_grid, self.align_corners)
+
+    def save(self, path: str | Path):
+        with open(path, "wb") as w:
+            pickle.dump(self.get_dump(), w)
+
+    @classmethod
+    def load(cls, path, gpu=0, ddevice: DEVICES = "cuda"):
+        with open(path, "rb") as w:
+            return cls.load_(pickle.load(w), gpu, ddevice)
+
+    @classmethod
+    def load_(cls, w, gpu=0, ddevice: DEVICES = "cuda"):
+        transform, grid, mov, align_corners = w
+        self = cls.__new__(cls)
+        self.transform = transform
+        self.target_grid = grid
+        self.input_grid = mov
+        self.align_corners = align_corners
+        self.gpu = gpu
+        self.ddevice = ddevice
+        return self
 
 
 def test1(run=False):
