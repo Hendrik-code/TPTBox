@@ -43,6 +43,16 @@ def center_of_mass(tensor):
     return com
 
 
+class Tether(PairwiseImageLoss):
+    def forward(self, source: torch.Tensor, target: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
+        com_fixed = center_of_mass(target)
+        com_warped = center_of_mass(source)
+        l_com = torch.norm(com_fixed - com_warped)
+        if l_com < 10:
+            l_com = source.sum() * 0
+        return l_com  # type: ignore
+
+
 class Rigid_Registration(General_Registration):
     def __init__(
         self,

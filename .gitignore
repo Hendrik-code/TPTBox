@@ -160,5 +160,6 @@ tmp/*
 poetry.lock
 *.dcm
 *.pkl
+tutorials/tutorial_data_processing/*
 tutorials/*PixelPandemonium/*
 tutorials/dataset-PixelPandemonium/*

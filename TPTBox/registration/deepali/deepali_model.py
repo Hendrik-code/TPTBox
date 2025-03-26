@@ -146,12 +146,12 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         lr=0.01,  # Learning rate
         optim_args=None,  # args of Optimizer with out lr
         smooth_grad=0.0,
-        verbose=0,
+        verbose=99,
         max_steps: int | Sequence[int] = 250,  # Early stopping.  override on_converged finer controle
         max_history: int | None = None,
         min_value=0.0,  # Early stopping.  override on_converged finer controle
         min_delta=0.0,  # Early stopping.  override on_converged finer controle
-        loss_terms: list[LOSS] | dict[str, LOSS] | None = None,
+        loss_terms: list[LOSS | str] | dict[str, LOSS] | dict[str, str] | dict[str, tuple[str, dict]] | None = None,
         weights: list[float] | dict[str, float] | None = None,
         auto_run=True,
     ) -> None:

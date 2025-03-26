@@ -85,7 +85,7 @@ class Deformable_Registration(General_Registration):
         max_history: int | None = None,
         min_value=0.0,  # Early stopping.  override on_converged finer controle
         min_delta=-0.0001,  # Early stopping.  override on_converged finer controle
-        loss_terms: list[LOSS] | dict[str, LOSS] | None = None,
+        loss_terms: list[LOSS | str] | dict[str, LOSS] | dict[str, str] | dict[str, tuple[str, dict]] | None = None,
         weights: list[float] | dict[str, float] | None = None,
         auto_run=True,
     ):
@@ -97,7 +97,7 @@ class Deformable_Registration(General_Registration):
         if loss_terms is None:
             loss_terms = {
                 "be": BSplineBending(stride=1),
-                "seg": LNCC(),
+                "lncc": LNCC(),
             }
         if weights is None:
             weights = {"be": 0.001, "seg": 1}

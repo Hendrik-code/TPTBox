@@ -38,18 +38,19 @@ from torch.utils.hooks import RemovableHandle
 
 from .hooks import normalize_grad_hook, print_eval_loss_hook_tqdm, print_step_loss_hook_tqdm, smooth_grad_hook
 from .utils import (
+    LOSS,
     RE_TERM_VAR,
     OptimizerWrapper,
     get_device_config,
     get_post_transform,
     make_foreground_mask,
+    new_loss,
     normalize_img,
     overlap_mask,
+    parse_loss,
     print_pyramid_info,
     slope_of_least_squares_fit,
 )
-
-LOSS = Union[PairwiseImageLoss, PointSetDistance, LandmarkPointDistance, DisplacementLoss, BSplineLoss, ParamsLoss]
 
 
 def time_it(func):
@@ -103,7 +104,7 @@ class DeepaliPairwiseImageTrainer:
         max_history: int | None = None,
         min_value=0.0,  # Early stopping.  override on_converged finer controle
         min_delta=0.0,  # Early stopping.  override on_converged finer controle
-        loss_terms: list[LOSS] | dict[str, LOSS] | None = None,
+        loss_terms: list[LOSS | str] | dict[str, LOSS] | dict[str, str] | dict[str, tuple[str, dict]] | None = None,
         weights: list[float] | dict[str, float] | None = None,
     ) -> None:
         """
@@ -200,19 +201,7 @@ class DeepaliPairwiseImageTrainer:
         self.min_value = min_value
         self.min_delta = min_delta
         self.verbose = verbose
-        if isinstance(loss_terms, Sequence):
-            if weights is None:
-                weights = {}
-            else:
-                assert isinstance(weights, Sequence), "when loss_terms is a list weighting must also be a list"
-                weights = {type(l).__name__: i for i, l in zip(weights, loss_terms)}
-            loss_terms = {type(l).__name__: l for l in loss_terms}
-
-        if weights is None:
-            weights = {}
-        assert not isinstance(weights, list), "weights and loss_terms should be the same list/dict if weights not None"
-        self.loss_terms = loss_terms
-        self.weights = weights
+        self.loss_terms, self.weights = parse_loss(loss_terms, weights)
         # reading images
         self.source = self._read(source)
         self.target = self._read(target)
@@ -284,7 +273,7 @@ class DeepaliPairwiseImageTrainer:
         finest_spacing: Optional[Sequence[int] | torch.Tensor] = None,
         min_size=16,
     ):
-        if levels is None or levels == 1:
+        if levels is None or levels <= 1:
             return None, None
         coarsest_level = levels - 1
         assert coarsest_level < levels, f"{coarsest_level=} is smaller {levels=}"
@@ -326,6 +315,8 @@ class DeepaliPairwiseImageTrainer:
 
     def on_converged(self) -> bool:
         r"""Check convergence criteria."""
+        if self.min_delta == 0 and self.min_value == 0:
+            return False
         values = self.loss_values
         if not values:
             return False
@@ -362,69 +353,65 @@ class DeepaliPairwiseImageTrainer:
         for name, value in losses.items():
             w = weights.get(name, 1.0)
             if not isinstance(w, str):
-                value = w * value
+                value = w * value  # noqa: PLW2901
             loss += value.sum()
         return loss
 
-    def on_loss(self, grid_transform: SequentialTransform, target: Image, source: Image):
+    def on_loss(
+        self,
+        grid_transform: SequentialTransform,
+        target: Image,
+        source: Image,
+    ):
         r"""Evaluate pairwise image registration loss."""
         target_data = target.tensor()
         result = {}
         losses = {}
-        misc_excl = set()
         # Transform target grid points
         x = target.grid().coords(device=target_data.device).unsqueeze(0)  # grid_points
         y: Tensor = grid_transform(x, grid=True)
         assert len(self.loss_terms) != 0, "No losses defined"
         ### Sum of pairwise image dissimilarity terms ###
-        data_terms = self._loss_terms_of_type(PairwiseImageLoss)
-        misc_excl |= set(data_terms.keys())
-        if data_terms:
+        if self.loss_pairwise_image_terms:
             moved_data = self._sample_image(y, source.tensor())
             if self.source_mask is not None and self.target_mask is not None:
                 moved_mask = self._sample_image(y, self.source_mask)
                 mask = overlap_mask(moved_mask, self.target_mask)
             else:
                 mask = None
-            for name, term in data_terms.items():
+            for name, term in self.loss_pairwise_image_terms.items():
                 losses[name] = term(moved_data, target_data, mask=mask)
             result["source"] = moved_data
             result["target"] = target_data
             result["mask"] = mask
         ## Sum of pairwise point set distance terms
-        dist_terms = self._loss_terms_of_type(PointSetDistance)
-        misc_excl |= set(dist_terms.keys())
-        ldist_terms = {k: v for k, v in dist_terms.items() if isinstance(v, LandmarkPointDistance)}
-        dist_terms = {k: v for k, v in dist_terms.items() if k not in ldist_terms}
-        if dist_terms:
+        if self.loss_dist_terms:
             if self.source_pset is None:
                 raise RuntimeError(f"{type(self).__name__}() missing source point set")
             if self.target_pset is None:
                 raise RuntimeError(f"{type(self).__name__}() missing target point set")
             # Points are sampled in reverse
             t = self.transform(self.target_pset)
-            for name, term in dist_terms.items():
+            for name, term in self.loss_dist_terms.items():
                 losses[name] = term(t, self.source_pset)
-        if ldist_terms:
+        if self.loss_ldist_terms:
             if self.source_landmarks is None:
                 raise RuntimeError(f"{type(self).__name__}() missing source landmarks")
             if self.target_landmarks is None:
                 raise RuntimeError(f"{type(self).__name__}() missing target landmarks")
             t = self.transform(self.target_landmarks)
-            for name, term in ldist_terms.items():
+            for name, term in self.loss_ldist_terms.items():
                 losses[name] = term(t, self.source_landmarks)
         ### Sum of displacement field regularization terms ###
         # Buffered vector fields
-        disp_terms = self._loss_terms_of_type(DisplacementLoss)
-        misc_excl |= set(disp_terms.keys())
-        if len(disp_terms) != 0:
+        if len(self.disp_terms) != 0:
             variables = defaultdict(list)
             for name, buf in self.transform.named_buffers():
                 if buf.requires_grad:
                     var = name.rsplit(".", 1)[-1]
                     variables[var].append(buf)
             variables["w"] = [U.move_dim(y - x, -1, 1)]
-            for name, term in disp_terms.items():
+            for name, term in self.disp_terms.items():
                 match = RE_TERM_VAR.match(name)
                 if match:
                     var = match.group("var")
@@ -442,18 +429,13 @@ class DeepaliPairwiseImageTrainer:
                     value += term(buf)
                 losses[name] = value
         ### Sum of free-form deformation loss terms ###
-        bspline_transforms = self._transforms_of_type(BSplineTransform)
-        bspline_terms = self._loss_terms_of_type(BSplineLoss)
-        misc_excl |= set(bspline_terms.keys())
-        for name, term in bspline_terms.items():
+        for name, term in self.loss_bspline_terms.items():
             value = torch.tensor(0, dtype=torch.float, device=self.device)
-            for bspline_transform in bspline_transforms:
+            for bspline_transform in self.loss_bspline_transforms:
                 value += term(bspline_transform.data())
             losses[name] = value
         ### Sum of parameters loss terms ###
-        params_terms = self._loss_terms_of_type(ParamsLoss)
-        misc_excl |= set(params_terms.keys())
-        for name, term in params_terms.items():
+        for name, term in self.loss_params_terms.items():
             value = torch.tensor(0, dtype=torch.float, device=self.device)
             count = 0
             for params in self.transform.parameters():
@@ -463,8 +445,7 @@ class DeepaliPairwiseImageTrainer:
                 value /= count
             losses[name] = value
         # Sum of other regularization terms
-        misc_terms = {k: v for k, v in self.loss_terms.items() if k not in misc_excl}
-        for name, term in misc_terms.items():
+        for name, term in self.loss_misc_terms.items():
             losses[name] = term()
         # Calculate total loss
         result["losses"] = losses
@@ -488,7 +469,11 @@ class DeepaliPairwiseImageTrainer:
 
         """
         with OptimizerWrapper(opt, scheduler):
-            result = self.on_loss(grid_transform, target_image, source_image)
+            result = self.on_loss(
+                grid_transform,
+                target_image,
+                source_image,
+            )
             loss: Tensor = result["loss"]
             loss.backward()
             with torch.no_grad():
@@ -525,6 +510,24 @@ class DeepaliPairwiseImageTrainer:
 
         return self.run_level(grid_transform, target_image, source_image, opt, lr_sq, level, max_steps, sampling)
 
+    def on_split_losses(self):
+        misc_excl = set()
+        self.loss_terms = {a: l.to(self.device) for a, l in self.loss_terms.items()}
+        self.loss_pairwise_image_terms = self._loss_terms_of_type(PairwiseImageLoss)
+        misc_excl |= set(self.loss_pairwise_image_terms.keys())
+        dist_terms = self._loss_terms_of_type(PointSetDistance)
+        misc_excl |= set(dist_terms.keys())
+        self.loss_ldist_terms = {k: v for k, v in dist_terms.items() if isinstance(v, LandmarkPointDistance)}
+        self.loss_dist_terms = {k: v for k, v in dist_terms.items() if k not in self.loss_ldist_terms}
+        self.disp_terms = self._loss_terms_of_type(DisplacementLoss)
+        misc_excl |= set(self.disp_terms.keys())
+        self.loss_bspline_transforms = self._transforms_of_type(BSplineTransform)
+        self.loss_bspline_terms = self._loss_terms_of_type(BSplineLoss)
+        misc_excl |= set(self.loss_bspline_terms.keys())
+        self.loss_params_terms = self._loss_terms_of_type(ParamsLoss)
+        misc_excl |= set(self.loss_params_terms.keys())
+        self.loss_misc_terms = {k: v for k, v in self.loss_terms.items() if k not in misc_excl}
+
     def run_level(
         self,
         grid_transform: SequentialTransform,
@@ -538,10 +541,6 @@ class DeepaliPairwiseImageTrainer:
     ):
         ## Perform registration at current resolution level
         ## Initialize optimizer
-        self.loss_values = []
-        self.loss_terms = {a: l.to(self.device) for a, l in self.loss_terms.items()}
-        num_steps = 0
-        ##
         target_grid = target_image.grid()
         source_grid = source_image.grid()
         self.transform = grid_transform
@@ -549,6 +548,9 @@ class DeepaliPairwiseImageTrainer:
             target=target_grid, source=source_grid, sampling=sampling, padding=PaddingMode.ZEROS, align_centers=False
         ).to(self.device)
         grad_sigma = self.smooth_grad
+        self.loss_values = []
+        self.on_split_losses()
+        num_steps = 0
 
         _eval_hooks = copy(self._eval_hooks)
         _step_hooks = copy(self._step_hooks)
@@ -563,13 +565,14 @@ class DeepaliPairwiseImageTrainer:
         while num_steps < max_steps and not self.on_converged():
             value = self.on_step(grid_transform, target_image, source_image, opt, lr_sq, num_steps)
             num_steps += 1
-            if math.isnan(value):
-                raise RuntimeError(f"NaN value in registration loss at gradient step {num_steps}")
-            if math.isinf(value):
-                raise RuntimeError(f"Inf value in registration loss at gradient step {num_steps}")
-            self.loss_values.append(value)
-            if self.max_history is not None and len(self.loss_values) > self.max_history:
-                self.loss_values.pop(0)
+            with torch.no_grad():
+                if math.isnan(value):
+                    raise RuntimeError(f"NaN value in registration loss at gradient step {num_steps}")
+                if math.isinf(value):
+                    raise RuntimeError(f"Inf value in registration loss at gradient step {num_steps}")
+                self.loss_values.append(value)
+                if self.max_history is not None and len(self.loss_values) > self.max_history:
+                    self.loss_values.pop(0)
 
         self._eval_hooks = _eval_hooks
         self._step_hooks = _step_hooks
