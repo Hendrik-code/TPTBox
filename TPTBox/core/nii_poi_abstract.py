@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import sys
 import warnings
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import nibabel as nib
@@ -30,9 +29,6 @@ from .vert_constants import (
 )
 
 if TYPE_CHECKING:
-    from deepali.core import Grid as deepali_Grid
-
-    from TPTBox import NII, POI
 
     class Grid_Proxy:
         affine: AFFINE
@@ -72,10 +68,15 @@ class Has_Grid(Grid_Proxy):
 
     def __str__(self) -> str:
         try:
-            origin = {tuple(np.around(self.origin, decimals=2))}
+            origin = tuple(np.around(self.origin, decimals=2))
         except Exception:
             origin = self.origin
-        return f"shape={self.shape},spacing={tuple(np.around(self.zoom, decimals=2))}, origin={origin}, ori={self.orientation}"  # type: ignore
+        try:
+            zoom = tuple(np.around(self.zoom, decimals=2))
+        except Exception:
+            zoom = self.zoom
+
+        return f"shape={self.shape_int},spacing={zoom}, origin={origin}, ori={self.orientation}"  # type: ignore
 
     @property
     def affine(self):
@@ -102,7 +103,7 @@ class Has_Grid(Grid_Proxy):
         out = {
             "zoom": self.spacing,
             "origin": self.origin,
-            "shape": self.shape,
+            "shape": self.shape_int,
             "rotation": self.rotation,
             "orientation": self.orientation,
             **args,
@@ -201,7 +202,7 @@ class Has_Grid(Grid_Proxy):
             if self.shape is None:
                 found_errors.append(f"shape mismatch {self.shape}, {shape}")
             else:
-                shape_diff = (float(self.shape[i]) - float(shape[i]) for i in range(3))
+                shape_diff = (float(self.shape_int[i]) - float(shape[i]) for i in range(3))
                 shape_match = np.all([abs(a) <= shape_tolerance for a in shape_diff])
                 found_errors.append(f"shape mismatch {self.shape}, {shape}") if not shape_match else None
 
@@ -215,7 +216,7 @@ class Has_Grid(Grid_Proxy):
 
         return not has_errors
 
-    def get_plane(self, res_threshold: float | None = None) -> str:
+    def get_plane(self, res_threshold: float | None = 1) -> str:
         """Determines the orientation plane of the NIfTI image along the x, y, or z-axis.
 
         Returns:
@@ -233,7 +234,6 @@ class Has_Grid(Grid_Proxy):
         axc = np.array(nio.aff2axcodes(self.affine))
         zoom = self.zoom if res_threshold is None else tuple(max(i, res_threshold) for i in self.zoom)
         zms = np.around(zoom, 1)
-
         ix_max = np.array(zms == np.amax(zms))
         num_max = np_count_nonzero(ix_max)
         if num_max == 2:
@@ -331,6 +331,9 @@ class Has_Grid(Grid_Proxy):
         grid = grid.align_corners_(align_corners)
         return grid
 
+    def get_num_dims(self):
+        return len(self.shape)
+
 
 class Grid(Has_Grid):
     def __init__(self, **qargs) -> None:
@@ -338,4 +341,9 @@ class Grid(Has_Grid):
         for k, v in qargs.items():
             if k == "spacing":
                 k = "zoom"  # noqa: PLW2901
+            if k == "rotation":
+                v = np.array(v)
+                if len(v.shape) == 1:
+                    s = int(np.sqrt(v.shape[0]))
+                    v = v.reshape(s, s)
             setattr(self, k, v)
