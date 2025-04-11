@@ -164,8 +164,12 @@ class OptimizerWrapper(ContextDecorator):
                 self.scheduler.step()
 
 
-def overlap_mask(source_mask: Tensor, target_mask: Tensor) -> Optional[Tensor]:
+def overlap_mask(source_mask: Tensor | None, target_mask: Tensor | None) -> Optional[Tensor]:
     r"""Overlap mask at which to evaluate pairwise data term."""
+    if source_mask is None:
+        return target_mask
+    if target_mask is None:
+        return source_mask
     mask = source_mask.type(torch.int8)
     mask &= target_mask.type(torch.int8)
     return mask
@@ -186,8 +190,8 @@ def normalize_img(image: Image, normalize_strategy: Optional[Literal["auto", "CT
         max_v = torch.quantile(data[data > 0], q=0.95)
         min_v = 0
     elif normalize_strategy == "CT":
-        max_v = 1024
-        min_v = -1024
+        max_v = 500  # we dont use -1024 to 1024 to reduce the noise we see
+        min_v = -500
     elif normalize_strategy == "auto":
         max_v = image.max()
         min_v = image.min()
@@ -275,5 +279,5 @@ def parse_loss(loss_terms, weights):
                     loss_terms[k] = new_loss(name, *args)  # type: ignore
             elif len(v) == 3:
                 loss_terms[k] = new_loss(v[0], *v[1], **v[2])  # type: ignore
-
+    weights = {k: v if not isinstance(v, (list, tuple)) else v[::-1] for k, v in weights.items()}
     return loss_terms, weights

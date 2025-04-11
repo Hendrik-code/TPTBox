@@ -85,6 +85,8 @@ def print_eval_loss_hook(level: int, max_steps: int) -> RegistrationEvalHook:
                 value = value.mean()
             value = float(value)
             weight = weights.get(name, 1.0)
+            if isinstance(weight, (list, tuple)):
+                weight = weight[level]
             if not isinstance(weight, str):
                 value *= weight
             elif "+" in weight:
@@ -114,6 +116,9 @@ def print_eval_loss_hook_tqdm(level: int, max_steps: int) -> RegistrationEvalHoo
                 value = value.mean()
             value = float(value)
             weight = weights.get(name, 1.0)
+            if isinstance(weight, (list, tuple)):
+                weight = weight[level]
+
             if not isinstance(weight, str):
                 value *= weight
             elif "+" in weight:

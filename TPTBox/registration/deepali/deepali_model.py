@@ -14,28 +14,15 @@ import yaml
 from deepali.core import Axes, PathStr
 from deepali.core import Grid as Deepali_Grid
 from deepali.data import Image as deepaliImage
-from deepali.losses import (
-    BSplineLoss,
-    DisplacementLoss,
-    LandmarkPointDistance,
-    PairwiseImageLoss,
-    ParamsLoss,
-    PointSetDistance,
-)
 from deepali.modules import TransformImage
-from deepali.spatial import (
-    SpatialTransform,
-)
+from deepali.spatial import SpatialTransform
 
 from TPTBox import NII, POI, Image_Reference, to_nii
 from TPTBox.core.compat import zip_strict
 from TPTBox.core.internal.deep_learning_utils import DEVICES, get_device
 from TPTBox.core.nii_poi_abstract import Grid as TPTBox_Grid
 from TPTBox.core.nii_poi_abstract import Has_Grid
-from TPTBox.registration.deepali.deepali_model import PairwiseImageLoss
-from TPTBox.registration.deepali.deepali_trainer import DeepaliPairwiseImageTrainer
-
-LOSS = Union[PairwiseImageLoss, PointSetDistance, LandmarkPointDistance, DisplacementLoss, BSplineLoss, ParamsLoss]
+from TPTBox.registration.deepali.deepali_trainer import LOSS, DeepaliPairwiseImageTrainer
 
 
 def center_of_mass(tensor):
@@ -124,9 +111,8 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         gpu=0,
         ddevice: DEVICES = "cuda",
         # foreground_mask
-        mask_foreground=False,
-        foreground_lower_threshold: Optional[int] = None,  # None means min
-        foreground_upper_threshold: Optional[int] = None,  # None means max
+        fixed_mask: Image_Reference | None = None,
+        moving_mask: Image_Reference | None = None,
         # normalize
         normalize_strategy: Optional[
             Literal["auto", "CT", "MRI"]
@@ -179,9 +165,8 @@ class General_Registration(DeepaliPairwiseImageTrainer):
             source_landmarks=source_landmarks,
             target_landmarks=target_landmarks,
             device=device,
-            mask_foreground=mask_foreground,
-            foreground_lower_threshold=foreground_lower_threshold,
-            foreground_upper_threshold=foreground_upper_threshold,
+            target_mask=to_nii(fixed_mask, True).to_deepali() if fixed_mask is not None else None,
+            source_mask=to_nii(moving_mask, True).to_deepali() if moving_mask is not None else None,
             normalize_strategy=normalize_strategy,
             pyramid_levels=pyramid_levels,
             finest_level=finest_level,
