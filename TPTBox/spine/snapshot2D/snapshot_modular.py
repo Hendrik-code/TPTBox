@@ -166,7 +166,9 @@ def sag_cor_curve_projection(
 
     ctd_list.sort()
     if curve_location == Location.Vertebra_Corpus:
-        l = [v for k1, k2, v in ctd_list.items() if k2 in (0, 50, 40)]
+        s = ctd_list.keys_subregion()
+        ids = 50 if 50 in s else (40 if 40 in s else 0)
+        l = [v for k1, k2, v in ctd_list.items() if k2 == ids]
     else:
         l = [v for k1, k2, v in ctd_list.items() if k2 == curve_location.value]
 
@@ -752,6 +754,8 @@ def create_snapshot(  # noqa: C901
         if ctd is not None:
             if ctd.is_global:
                 ctd = ctd.resample_from_to(img)
+            if ctd.shape is None:
+                POI.load(ctd, img)
             ctd = ctd.reorient(img.orientation) if ctd.shape is not None else ctd.reorient_centroids_to(img)
             if ctd.zoom not in (img.zoom, None):
                 ctd.rescale_(img.zoom)
