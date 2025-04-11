@@ -188,6 +188,12 @@ class Logger_Interface(Protocol):
     def on_fail(self, *text, end="\n", verbose: bool | None = None, **qargs):
         self.print(*text, end=end, ltype=Log_Type.FAIL, verbose=verbose, **qargs)
 
+    def on_log(self, *text, end="\n", verbose: bool | None = None, **qargs):
+        self.print(*text, end=end, ltype=Log_Type.LOG, verbose=verbose, **qargs)
+
+    def on_bold(self, *text, end="\n", verbose: bool | None = None, **qargs):
+        self.print(*text, end=end, ltype=Log_Type.BOLD, verbose=verbose, **qargs)
+
     def on_save(self, *text, end="\n", verbose: bool | None = None, **qargs):
         self.print(*text, end=end, ltype=Log_Type.SAVE, verbose=verbose, **qargs)
 
