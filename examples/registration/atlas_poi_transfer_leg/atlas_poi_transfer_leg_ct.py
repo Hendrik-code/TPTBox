@@ -75,6 +75,7 @@ def generate_atlas_from_txt(
     atlas_id: int,
     text_file_is_left_leg: bool,
     segmentation_path: str | Path,
+    ct_path: str | Path,
     out_folder=Path("/DATA/NAS/datasets_processed/CT_fullbody/dataset-watrinet/atlas"),
 ):
     """
@@ -130,14 +131,15 @@ def generate_atlas_from_txt(
 
     # Prep atlas
     atlas_path = out_folder / f"atlas{atlas_id:03}.nii.gz"
+    atlas_ct_path = out_folder / f"atlas{atlas_id:03}_ct.nii.gz"
     atlas_path_v = out_folder / f"atlas{atlas_id:03}_visual.nii.gz"
     atlas_cms_poi_path = out_folder / f"atlas{atlas_id:03}_cms_poi.json"  # Center of mass
     atlas_poi_path = out_folder / f"atlas{atlas_id:03}_poi.json"
 
-    prep_Atlas(segmentation_path, atlas_path, atlas_cms_poi_path, text_file_is_left_leg, flip=True)
+    prep_Atlas(segmentation_path, ct_path, atlas_path, atlas_ct_path, atlas_cms_poi_path, text_file_is_left_leg, flip=True)
 
     if not atlas_path_v.exists() and not atlas_poi_path.exists():
-        seg = to_nii(segmentation_path, True)
+        seg = to_nii(atlas_path, True)
         poi = (
             parse_coordinates_to_poi(file_text, True).to_other(seg)
             if ".txt" in str(file_text)
@@ -160,7 +162,10 @@ def generate_atlas_from_txt(
         poi.to_global().save(atlas_poi_path)
         c = poi.make_point_cloud_nii()[1]
         c[c != 0] += 100
-        (to_nii(atlas_path, True) + c).save(atlas_path_v)
+        a = to_nii(atlas_path, True)
+        print(a, c)
+        a[c != 0] = 0
+        (a + c).save(atlas_path_v)
 
 
 def parse_coordinates(file_path: str | Path) -> dict[str, tuple[float, float, float]]:
@@ -213,7 +218,7 @@ PATELLA = 14
 LEGS = [13, PATELLA, 15, 16]
 
 
-def split_left_right_leg(nii: NII, c=2, min_volume=50):
+def split_left_right_leg(nii: NII, c=2, min_volume=50) -> NII:
     cc_patella = nii.extract_label(PATELLA).get_connected_components(1)
     nii = nii.extract_label(LEGS, keep_label=True)
     m = cc_patella.max()
@@ -254,9 +259,19 @@ def split_left_right_leg(nii: NII, c=2, min_volume=50):
 logger = No_Logger()
 
 
-def prep_Atlas(seg: NII | str | Path, out_atlas: Path, atlas_centroids: Path, atlas_left=True, flip=False, max_count_component=4):
-    if not out_atlas.exists():
+def prep_Atlas(
+    seg: NII | str | Path,
+    ct: NII | str | Path,
+    out_atlas: Path,
+    ct_atlas: Path,
+    atlas_centroids: Path,
+    atlas_left=True,
+    flip=False,
+    max_count_component=4,
+):
+    if not out_atlas.exists() or not ct_atlas.exists():
         seg = to_nii(seg, True)
+        ct = to_nii(ct, False)
         logger.on_text("split_left_right_leg")
         split_nii = split_left_right_leg(seg)
         atlas = split_nii.extract_label(1 if atlas_left else 2) * seg
@@ -264,13 +279,17 @@ def prep_Atlas(seg: NII | str | Path, out_atlas: Path, atlas_centroids: Path, at
             axis = atlas.get_axis("R")
             if axis == 0:
                 atlas = atlas.set_array(atlas.get_array()[::-1]).copy()
+                ct = atlas.set_array(ct.get_array()[::-1]).copy()
             elif axis == 1:
                 atlas = atlas.set_array(atlas.get_array()[:, ::-1]).copy()
+                ct = atlas.set_array(ct.get_array()[:, ::-1]).copy()
             elif axis == 2:
                 atlas = atlas.set_array(atlas.get_array()[:, :, ::-1]).copy()
-        atlas.filter_connected_components(atlas.unique(), max_count_component=max_count_component, keep_label=True, connectivity=1).save(
-            out_atlas
-        )
+                ct = atlas.set_array(ct.get_array()[:, :, ::-1]).copy()
+        atlas = atlas.filter_connected_components(atlas.unique(), max_count_component=max_count_component, keep_label=True, connectivity=1)
+        crop = atlas.compute_crop(1, dist=100)
+        atlas.apply_crop_(crop).save(out_atlas)
+        ct.apply_crop_(crop).save(ct_atlas)
     if atlas_centroids is not None and not atlas_centroids.exists():
         poi_atlas = calc_centroids(out_atlas, second_stage=40)
         poi_atlas.save(atlas_centroids)
@@ -477,6 +496,8 @@ class Register_Point_Atlas_One_Leg:
             coarsest_level=3,
             finest_level=0,
             verbose=verbose,
+            gpu=gpu,
+            ddevice=ddevice,
         )
 
         # self.reg_deform_p = Deformable_Registration_old(
