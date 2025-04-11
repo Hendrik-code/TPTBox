@@ -9,7 +9,7 @@ from typing import Literal, Optional, Union
 import torch
 import torch.optim
 from deepali.core import PaddingMode, PathStr, Sampling
-from deepali.core import functional as U
+from deepali.core import functional as U  # noqa: N812
 from deepali.data import FlowField, Image
 from deepali.losses import (
     BSplineLoss,
@@ -18,7 +18,6 @@ from deepali.losses import (
     PairwiseImageLoss,
     ParamsLoss,
     PointSetDistance,
-    RegistrationLoss,
     RegistrationResult,
 )
 from deepali.modules import SampleImage
@@ -36,15 +35,13 @@ from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 from torch.utils.hooks import RemovableHandle
 
-from .hooks import normalize_grad_hook, print_eval_loss_hook_tqdm, print_step_loss_hook_tqdm, smooth_grad_hook
-from .utils import (
+from ._hooks import normalize_grad_hook, print_eval_loss_hook_tqdm, print_step_loss_hook_tqdm, smooth_grad_hook
+from ._utils import (
     LOSS,
     RE_TERM_VAR,
     OptimizerWrapper,
     get_device_config,
     get_post_transform,
-    make_foreground_mask,
-    new_loss,
     normalize_img,
     overlap_mask,
     parse_loss,
@@ -91,18 +88,18 @@ class DeepaliPairwiseImageTrainer:
         pyramid_min_size=16,
         dims=("x", "y", "z"),
         align=False,
-        transform_name: str = "SVFFD",  # Names that are defined in deepali.spatial.LINEAR_TRANSFORMS and deepali.spatialNONRIGID_TRANSFORMS. Override on_make_transform for finer controle
+        transform_name: str = "SVFFD",  # Names that are defined in deepali.spatial.LINEAR_TRANSFORMS and deepali.spatialNONRIGID_TRANSFORMS. Override on_make_transform for finer control
         transform_args: dict | None = None,
         transform_init: PathStr | None = None,  # reload initial flowfield from file
-        optim_name="Adam",  # Optimizer name defined in torch.optim. or override on_optimizer finer controle
+        optim_name="Adam",  # Optimizer name defined in torch.optim. or override on_optimizer finer control
         lr: float | list[float] = 0.01,  # Learning rate
         optim_args=None,  # args of Optimizer with out lr
         smooth_grad=0.0,
         verbose=0,
-        max_steps: int | Sequence[int] = 250,  # Early stopping.  override on_converged finer controle
+        max_steps: int | Sequence[int] = 250,  # Early stopping.  override on_converged finer control
         max_history: int | None = None,
-        min_value=0.0,  # Early stopping.  override on_converged finer controle
-        min_delta=0.0,  # Early stopping.  override on_converged finer controle
+        min_value=0.0,  # Early stopping.  override on_converged finer control
+        min_delta=0.0,  # Early stopping.  override on_converged finer control
         loss_terms: list[LOSS | str] | dict[str, LOSS] | dict[str, str] | dict[str, tuple[str, dict]] | None = None,
         weights: list[float] | dict[str, float] | dict[str, list[float]] | None = None,
     ) -> None:
@@ -312,7 +309,7 @@ class DeepaliPairwiseImageTrainer:
         return value < self.min_value
 
     def _loss_terms_of_type(self, loss_type: type) -> dict[str, Module]:
-        r"""Get dictionary of loss terms of a specifictype."""
+        r"""Get dictionary of loss terms of a specific type."""
         return {name: module for name, module in self.loss_terms.items() if isinstance(module, loss_type)}  # type: ignore
 
     def _transforms_of_type(self, transform_type: type[SpatialTransform]) -> list[SpatialTransform]:
@@ -344,13 +341,7 @@ class DeepaliPairwiseImageTrainer:
             loss += value.sum()
         return loss
 
-    def on_loss(
-        self,
-        grid_transform: SequentialTransform,
-        target: Image,
-        source: Image,
-        level: int,
-    ):
+    def on_loss(self, grid_transform: SequentialTransform, target: Image, source: Image, level: int):  # noqa: C901
         r"""Evaluate pairwise image registration loss."""
         target_data = target.tensor()
         result = {}
@@ -363,6 +354,7 @@ class DeepaliPairwiseImageTrainer:
         if self.loss_pairwise_image_terms:
             moved_data = self._sample_image(y, source.tensor())
             if self.source_mask is not None and self.target_mask is not None:
+                # TODO this is from the reference implantation but is need way to much GPU...
                 moved_mask = self._sample_image(y, self.source_mask)
                 mask = overlap_mask(moved_mask, self.target_mask)
             else:
@@ -420,7 +412,7 @@ class DeepaliPairwiseImageTrainer:
         for name, term in self.loss_bspline_terms.items():
             value = torch.tensor(0, dtype=torch.float, device=self.device)
             for bspline_transform in self.loss_bspline_transforms:
-                value += term(bspline_transform.data())
+                value += term(bspline_transform.data())  # type: ignore
             losses[name] = value
         ### Sum of parameters loss terms ###
         for name, term in self.loss_params_terms.items():
@@ -623,7 +615,7 @@ class DeepaliPairwiseImageTrainer:
                 target_pyramid = self.target_pyramid
                 target_mask = self.target_mask
                 if self.target_mask is not None:
-                    target_mask_pyramid = self._pyramid(self.target_mask.to(torch.float32))
+                    target_mask_pyramid = self._pyramid(self.target_mask.to(torch.float32))  # type: ignore
                 assert target_pyramid is not None
                 finest_level = self.finest_level
                 coarsest_level = self.coarsest_level
