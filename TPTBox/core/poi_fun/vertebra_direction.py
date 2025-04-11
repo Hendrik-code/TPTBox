@@ -52,7 +52,7 @@ def calc_orientation_of_vertebra_PIR(
     # compute Spline in ISO space
     poi_iso = poi.rescale().reorient()
     body_spline, body_spline_der = poi_iso.fit_spline(location=spline_subreg_point_id, vertebra=True)
-    # Step 2 compute the back direction by spinal channel or arcus
+    # Step 2 compute the back direction by Spinosus_Process or arcus
     intersection_target = [Location.Spinosus_Process, Location.Arcus_Vertebrae]
     # We compute everything in iso space
     subreg_iso = subreg.rescale().reorient()
