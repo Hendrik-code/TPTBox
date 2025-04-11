@@ -4,8 +4,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 # Step 1
 from pathlib import Path
 
-from atlas_poi_transfer import parse_coordinates_to_poi, prep_Atlas
-
+from examples.atlas_poi_transfer_leg.atlas_poi_transfer_leg_ct import parse_coordinates_to_poi, prep_Atlas
 from TPTBox import POI, to_nii
 from TPTBox.core.vert_constants import Full_Body_Instance, Lower_Body
 
@@ -54,8 +53,7 @@ poi.to_global().save(atlas_poi_path)
 # Step 1
 from pathlib import Path
 
-from atlas_poi_transfer import Register_Point_Atlas
-
+from examples.atlas_poi_transfer_leg.atlas_poi_transfer_leg_ct import Register_Point_Atlas
 from TPTBox import POI, to_nii
 
 ##########################################
