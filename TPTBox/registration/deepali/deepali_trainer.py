@@ -77,9 +77,8 @@ class DeepaliPairwiseImageTrainer:
         # target_seg: Optional[Union[Image, PathStr]] = None,  # Masking the registration target
         device: Union[torch.device, str, int] = "cuda",
         # foreground_mask
-        mask_foreground=False,
-        foreground_lower_threshold: Optional[int] = None,  # None means min
-        foreground_upper_threshold: Optional[int] = None,  # None means max
+        source_mask: Union[Image, PathStr] | None = None,
+        target_mask: Union[Image, PathStr] | None = None,
         # normalize
         normalize_strategy: Optional[
             Literal["auto", "CT", "MRI"]
@@ -96,7 +95,7 @@ class DeepaliPairwiseImageTrainer:
         transform_args: dict | None = None,
         transform_init: PathStr | None = None,  # reload initial flowfield from file
         optim_name="Adam",  # Optimizer name defined in torch.optim. or override on_optimizer finer controle
-        lr=0.01,  # Learning rate
+        lr: float | list[float] = 0.01,  # Learning rate
         optim_args=None,  # args of Optimizer with out lr
         smooth_grad=0.0,
         verbose=0,
@@ -105,7 +104,7 @@ class DeepaliPairwiseImageTrainer:
         min_value=0.0,  # Early stopping.  override on_converged finer controle
         min_delta=0.0,  # Early stopping.  override on_converged finer controle
         loss_terms: list[LOSS | str] | dict[str, LOSS] | dict[str, str] | dict[str, tuple[str, dict]] | None = None,
-        weights: list[float] | dict[str, float] | None = None,
+        weights: list[float] | dict[str, float] | dict[str, list[float]] | None = None,
     ) -> None:
         """
         Initializes the DeepaliPairwiseImageTrainer for pairwise image registration.
@@ -119,11 +118,8 @@ class DeepaliPairwiseImageTrainer:
             target_landmarks (optional): Target landmark points for registration. Defaults to None.
             device (Union[torch.device, str, int]): Computation device ("cuda" or "cpu"). Defaults to "cuda".
 
-            mask_foreground (bool): Whether to mask the foreground in images. Defaults to True.
-            foreground_lower_threshold (Optional[int]): Lower intensity threshold for foreground masking.
-                If None, the minimum value is used. Defaults to None.
-            foreground_upper_threshold (Optional[int]): Upper intensity threshold for foreground masking.
-                If None, the maximum value is used. Defaults to None.
+            source_mask : ignore regions outside the mask
+            target_mask : ignore regions outside the mask
 
             normalize_strategy (Optional[Literal["auto", "CT", "MRI"]]): Strategy for intensity normalization.
                 - "auto": Normalizes intensities to [0,1] using min-max scaling.
@@ -186,15 +182,13 @@ class DeepaliPairwiseImageTrainer:
 
         self._dtype = torch.float32
         self.device = get_device_config(device)
-        self.foreground_lower_threshold = foreground_lower_threshold
-        self.foreground_upper_threshold = foreground_upper_threshold
         self.normalize_strategy: Optional[Literal["auto", "CT", "MRI"]] = normalize_strategy
         self.align = align
         self.transform_name = transform_name
         self.model_args = transform_args
         self.model_init = transform_init
         self.optim_name = optim_name
-        self.lr = lr
+        self.lr = lr if not isinstance(lr, (list, tuple)) else lr[::-1]
         self.optim_args = optim_args
         self.max_steps = max_steps
         self.max_history = max_history
@@ -209,12 +203,8 @@ class DeepaliPairwiseImageTrainer:
         # self.target_seg = self._read(target_seg)
         # generate mask
 
-        if mask_foreground:
-            self.source_mask, self.target_mask = self.on_generate_masking(self.source, self.target)
-            self.source_mask = self._read(self.source_mask)
-            self.target_mask = self._read(self.target_mask)
-        else:
-            self.source_mask, self.target_mask = None, None
+        self.source_mask = self._read(source_mask).type(torch.int8) if source_mask is not None else None
+        self.target_mask = self._read(target_mask).type(torch.int8) if target_mask is not None else None
         # normalize
         self.source, self.target = self.on_normalize(self.source, self.target)
         # self.source_seg, self.target_seg = self.on_normalize_seg(self.source_seg, self.target_seg)
@@ -230,12 +220,6 @@ class DeepaliPairwiseImageTrainer:
         self.smooth_grad = smooth_grad
         self._eval_hooks = OrderedDict()
         self._step_hooks = OrderedDict()
-
-    def on_generate_masking(self, source: Image, target: Image):
-        """Append foreground mask to data tensor."""
-        source_mask = make_foreground_mask(source, self.foreground_lower_threshold, self.foreground_upper_threshold)
-        target_mask = make_foreground_mask(target, self.foreground_lower_threshold, self.foreground_upper_threshold)
-        return source_mask, target_mask
 
     def on_normalize(self, source: Image, target: Image):
         return normalize_img(source, self.normalize_strategy), normalize_img(target, self.normalize_strategy)
@@ -302,7 +286,7 @@ class DeepaliPairwiseImageTrainer:
     def on_make_transform(self, transform_name, grid, groups=1, **model_args):
         return new_spatial_transform(transform_name, grid, groups=groups, **model_args)
 
-    def on_optimizer(self, grid_transform: SequentialTransform) -> tuple[Optimizer, Optional[LRScheduler]]:
+    def on_optimizer(self, grid_transform: SequentialTransform, level) -> tuple[Optimizer, Optional[LRScheduler]]:
         name = self.optim_name
         cls = getattr(torch.optim, name, None)
         if cls is None:
@@ -310,7 +294,7 @@ class DeepaliPairwiseImageTrainer:
         if not issubclass(cls, Optimizer):
             raise TypeError(f"Requested type '{name}' is not a subclass of torch.optim.Optimizer")
         kwargs = self.optim_args
-        kwargs["lr"] = self.lr
+        kwargs["lr"] = self.lr[level] if isinstance(self.lr, (list, tuple)) else self.lr
         return cls(grid_transform.parameters(), **kwargs), None
 
     def on_converged(self) -> bool:
@@ -346,12 +330,15 @@ class DeepaliPairwiseImageTrainer:
         transforms = list(_iter_transforms(self.transform))
         return transforms
 
-    def _weighted_sum(self, losses: dict[str, Tensor]) -> Tensor:
+    def _weighted_sum(self, losses: dict[str, Tensor], level) -> Tensor:
         r"""Compute weighted sum of loss terms."""
         loss = torch.tensor(0, dtype=torch.float, device=self.device)
         weights = self.weights
         for name, value in losses.items():
             w = weights.get(name, 1.0)
+            if isinstance(w, (list, tuple)):
+                w = w[level]
+
             if not isinstance(w, str):
                 value = w * value  # noqa: PLW2901
             loss += value.sum()
@@ -362,6 +349,7 @@ class DeepaliPairwiseImageTrainer:
         grid_transform: SequentialTransform,
         target: Image,
         source: Image,
+        level: int,
     ):
         r"""Evaluate pairwise image registration loss."""
         target_data = target.tensor()
@@ -450,7 +438,7 @@ class DeepaliPairwiseImageTrainer:
         # Calculate total loss
         result["losses"] = losses
         result["weights"] = self.weights
-        result["loss"] = self._weighted_sum(losses)
+        result["loss"] = self._weighted_sum(losses, level)
         return result
 
     def on_step(
@@ -461,6 +449,7 @@ class DeepaliPairwiseImageTrainer:
         opt,
         scheduler,
         num_steps,
+        level,
     ) -> torch.Tensor:
         r"""Perform one registration step.
 
@@ -469,11 +458,7 @@ class DeepaliPairwiseImageTrainer:
 
         """
         with OptimizerWrapper(opt, scheduler):
-            result = self.on_loss(
-                grid_transform,
-                target_image,
-                source_image,
-            )
+            result = self.on_loss(grid_transform, target_image, source_image, level)
             loss: Tensor = result["loss"]
             loss.backward()
             with torch.no_grad():
@@ -499,7 +484,7 @@ class DeepaliPairwiseImageTrainer:
         elif not isinstance(grid_transform, CompositeTransform):
             raise TypeError("PairwiseImageRegistrationLoss() 'transform' must be of type CompositeTransform")
         grid_transform = grid_transform.to(self.device)
-        opt, lr_sq = self.on_optimizer(grid_transform)
+        opt, lr_sq = self.on_optimizer(grid_transform, level)
         self.optimizer = opt
         if isinstance(self.max_steps, int):
             max_steps = self.max_steps
@@ -563,7 +548,7 @@ class DeepaliPairwiseImageTrainer:
             self.register_step_hook(print_step_loss_hook_tqdm(level, max_steps))
 
         while num_steps < max_steps and not self.on_converged():
-            value = self.on_step(grid_transform, target_image, source_image, opt, lr_sq, num_steps)
+            value = self.on_step(grid_transform, target_image, source_image, opt, lr_sq, num_steps, level)
             num_steps += 1
             with torch.no_grad():
                 if math.isnan(value):
@@ -632,41 +617,43 @@ class DeepaliPairwiseImageTrainer:
             grid_transform = SequentialTransform(transform)
             grid_transform = self._run_level(grid_transform, target_image, source_image, 0)
         else:
-            ## loop pyramid
-            source_pyramid = self.source_pyramid
-            target_pyramid = self.target_pyramid
-            target_mask = self.target_mask
-            if self.target_mask is not None:
-                target_mask_pyramid = self._pyramid(self.target_mask)
-            assert target_pyramid is not None
-            finest_level = self.finest_level
-            coarsest_level = self.coarsest_level
-            source_grid = source_pyramid[finest_level].grid()
-            finest_grid = target_pyramid[finest_level].grid()
-            coarsest_grid = target_pyramid[coarsest_level].grid()
-            post_transform = get_post_transform(finest_grid, source_grid, self.align)
+            with torch.no_grad():
+                ## loop pyramid
+                source_pyramid = self.source_pyramid
+                target_pyramid = self.target_pyramid
+                target_mask = self.target_mask
+                if self.target_mask is not None:
+                    target_mask_pyramid = self._pyramid(self.target_mask.to(torch.float32))
+                assert target_pyramid is not None
+                finest_level = self.finest_level
+                coarsest_level = self.coarsest_level
+                source_grid = source_pyramid[finest_level].grid()
+                finest_grid = target_pyramid[finest_level].grid()
+                coarsest_grid = target_pyramid[coarsest_level].grid()
+                post_transform = get_post_transform(finest_grid, source_grid, self.align)
 
-            transform_downsample = self.model_args.pop("downsample", 0)
-            transform_grid = coarsest_grid.downsample(transform_downsample)
-            transform = self.on_make_transform(self.transform_name, grid=transform_grid, groups=1, **self.model_args)
-            transform = self._load_initial_transform(transform)
-            grid_transform = SequentialTransform(transform, post_transform)
-            grid_transform = grid_transform.to(device=self.device)
-            ## Perform coarse-to-fine multi-resolution registration
+                transform_downsample = self.model_args.pop("downsample", 0)
+                transform_grid = coarsest_grid.downsample(transform_downsample)
+                transform = self.on_make_transform(self.transform_name, grid=transform_grid, groups=1, **self.model_args)
+                transform = self._load_initial_transform(transform)
+                grid_transform = SequentialTransform(transform, post_transform)
+                grid_transform = grid_transform.to(device=self.device)
+                ## Perform coarse-to-fine multi-resolution registration
 
             for level in range(coarsest_level, finest_level - 1, -1):
-                target_image = target_pyramid[level]
-                source_image = source_pyramid[level]
-                if self.target_mask is not None:
-                    self.target_mask = torch.ceil(target_mask_pyramid[level]).to(dtype=torch.int8)
-                ## Initialize transformation
-                if level != coarsest_level:
-                    start = timer()
-                    transform_grid = target_image.grid().downsample(transform_downsample)
-                    transform.grid_(transform_grid)
-                    if self.verbose > 3:
-                        print(f"Subdivided control point grid in {timer() - start:.3f}s")
-                grid_transform.grid_(target_image.grid())
+                with torch.no_grad():
+                    target_image = target_pyramid[level]
+                    source_image = source_pyramid[level]
+                    if self.target_mask is not None:
+                        self.target_mask = torch.ceil(target_mask_pyramid[level]).to(dtype=torch.int8)
+                    ## Initialize transformation
+                    if level != coarsest_level:
+                        start = timer()
+                        transform_grid = target_image.grid().downsample(transform_downsample)
+                        transform.grid_(transform_grid)
+                        if self.verbose > 3:
+                            print(f"Subdivided control point grid in {timer() - start:.3f}s")
+                    grid_transform.grid_(target_image.grid())
                 self._run_level(grid_transform, target_image, source_image, level)
             if self.verbose > 3:
                 print(f"Registered images in {timer() - start_reg:.3f}s")

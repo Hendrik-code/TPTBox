@@ -33,8 +33,9 @@ from TPTBox.core.compat import zip_strict
 from TPTBox.core.internal.deep_learning_utils import DEVICES, get_device
 from TPTBox.core.nii_poi_abstract import Grid as TPTBox_Grid
 from TPTBox.core.nii_poi_abstract import Has_Grid
-from TPTBox.registration.deepali.deepali_model import General_Registration, PairwiseImageLoss
-from TPTBox.registration.deepali.deepali_trainer import DeepaliPairwiseImageTrainer
+from TPTBox.registration.deepali.deepali_model import General_Registration
+from TPTBox.registration.deepali.deepali_trainer import PairwiseImageLoss
+from TPTBox.registration.ridged_points import Point_Registration
 
 
 def center_of_mass(tensor):
@@ -44,7 +45,7 @@ def center_of_mass(tensor):
 
 
 class Tether(PairwiseImageLoss):
-    def forward(self, source: torch.Tensor, target: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(self, source: torch.Tensor, target: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:  # noqa: ARG002
         com_fixed = center_of_mass(target)
         com_warped = center_of_mass(source)
         l_com = torch.norm(com_fixed - com_warped)
@@ -53,7 +54,7 @@ class Tether(PairwiseImageLoss):
         return l_com  # type: ignore
 
 
-class Rigid_Registration(General_Registration):
+class Rigid_Registration_with_Tether(General_Registration):
     def __init__(
         self,
         fixed_image: Image_Reference,
@@ -63,9 +64,8 @@ class Rigid_Registration(General_Registration):
         gpu=0,
         ddevice: DEVICES = "cuda",
         # foreground_mask
-        mask_foreground=False,
-        foreground_lower_threshold: Optional[int] = None,  # None means min
-        foreground_upper_threshold: Optional[int] = None,  # None means max
+        fixed_mask=None,
+        moving_mask=None,
         # normalize
         normalize_strategy: Optional[Literal["auto", "CT", "MRI"]] = None,
         # Pyramid
@@ -76,35 +76,39 @@ class Rigid_Registration(General_Registration):
         pyramid_min_size=16,
         dims=("x", "y", "z"),
         align=False,
-        transform_name: str = "RigidTransform",  # Names that are defined in deepali.spatial.LINEAR_TRANSFORMS and deepali.spatialNONRIGID_TRANSFORMS. Override on_make_transform for finer controle
+        transform_name: str = "RigidTransform",  # Names that are defined in deepali.spatial.LINEAR_TRANSFORMS and deepali.spatialNONRIGID_TRANSFORMS. Override on_make_transform for finer control
         transform_args: dict | None = None,
         transform_init: PathStr | None = None,  # reload initial flowfield from file
-        optim_name="Adam",  # Optimizer name defined in torch.optim. or override on_optimizer finer controle
+        optim_name="Adam",  # Optimizer name defined in torch.optim. or override on_optimizer finer control
         lr=0.01,  # Learning rate
         optim_args=None,  # args of Optimizer with out lr
         smooth_grad=0.0,
         verbose=0,
-        max_steps: int | Sequence[int] = 250,  # Early stopping.  override on_converged finer controle
+        max_steps: int | Sequence[int] = 250,  # Early stopping.  override on_converged finer control
         max_history: int | None = None,
-        min_value=0.0,  # Early stopping.  override on_converged finer controle
-        min_delta=0.0,  # Early stopping.  override on_converged finer controle
+        min_value=0.0,  # Early stopping.  override on_converged finer control
+        min_delta=0.0,  # Early stopping.  override on_converged finer control
         loss_terms=(ncc_loss, None),
         weights=(1, 0.001),
         patience=100,
+        patience_delta=0.0,
+        desc="RRwT",
     ) -> None:
         self.patience = patience
+        self.patience_delta = patience_delta
         if device is None:
             device = get_device(ddevice, gpu)
         self.best = 1000000000
+        self.best2 = 1000000000
         self.early_stopping = 0
+        self.desc = desc
         super().__init__(
             fixed_image,
             moving_image,
             reference_image,
             device=device,
-            mask_foreground=mask_foreground,
-            foreground_lower_threshold=foreground_lower_threshold,
-            foreground_upper_threshold=foreground_upper_threshold,
+            fixed_mask=fixed_mask,
+            moving_mask=moving_mask,
             normalize_strategy=normalize_strategy,
             pyramid_levels=pyramid_levels,
             finest_level=finest_level,
@@ -135,10 +139,10 @@ class Rigid_Registration(General_Registration):
         target_image: deepaliImage,
         source_image: deepaliImage,
         opt: torch.optim.Optimizer,
-        lr_sq,
-        level,
+        lr_sq,  # noqa: ARG002
+        level,  # noqa: ARG002
         max_steps,
-        sampling: Union[Sampling, str] = Sampling.LINEAR,
+        sampling: Union[Sampling, str] = Sampling.LINEAR,  # noqa: ARG002
     ):
         loss_list = []
         self.loss_values = loss_list
@@ -167,9 +171,7 @@ class Rigid_Registration(General_Registration):
             opt.zero_grad()
             l.backward()
             opt.step()
-            pbar.desc = (
-                f"loss={l_mse.item() * lambda_mse:.5f}, center_of_mass={l_com * lambda_com:.5f}, {self.early_stopping=}, {self.best=}"
-            )
+            pbar.desc = f"{self.desc} loss={l_mse.item() * lambda_mse:.5f}, center_of_mass={l_com * lambda_com:.5f}, {self.early_stopping=}, {self.best=}"
 
     def on_converged(self) -> bool:
         r"""Check convergence criteria."""
@@ -177,14 +179,17 @@ class Rigid_Registration(General_Registration):
         if not values:
             return False
         value = values[-1]
-        if value <= self.best:
+        if value <= self.best - self.patience_delta:
             self.early_stopping = 0
-            from copy import deepcopy
-
-            self.best_transform = deepcopy(self.transform)
             self.best = value
         else:
             self.early_stopping += 1
+
+        if value <= self.best2:
+            from copy import deepcopy
+
+            self.best_transform = deepcopy(self.transform)
+            self.best2 = value
 
         if self.early_stopping <= self.patience:
             return False

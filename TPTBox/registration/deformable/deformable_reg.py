@@ -11,7 +11,7 @@ from typing import Literal, Optional, Union
 import numpy as np
 import torch
 import yaml
-from deepali.core import Axes, PathStr
+from deepali.core import Axes, PathStr  # pip install hf-deepali
 from deepali.core import Grid as Deepali_Grid
 from deepali.core.typing import Device
 from deepali.data import Image as deepaliImage
@@ -58,9 +58,8 @@ class Deformable_Registration(General_Registration):
         gpu=0,
         ddevice: DEVICES = "cuda",
         # foreground_mask
-        mask_foreground=False,
-        foreground_lower_threshold: Optional[int] = None,  # None means min
-        foreground_upper_threshold: Optional[int] = None,  # None means max
+        fixed_mask: Image_Reference | None = None,
+        moving_mask: Image_Reference | None = None,
         # normalize
         normalize_strategy: Optional[
             Literal["auto", "CT", "MRI"]
@@ -113,9 +112,8 @@ class Deformable_Registration(General_Registration):
             device=device,
             gpu=gpu,
             ddevice=ddevice,
-            mask_foreground=mask_foreground,
-            foreground_lower_threshold=foreground_lower_threshold,
-            foreground_upper_threshold=foreground_upper_threshold,
+            fixed_mask=fixed_mask,
+            moving_mask=moving_mask,
             normalize_strategy=normalize_strategy,
             pyramid_levels=pyramid_levels,
             finest_level=finest_level,
