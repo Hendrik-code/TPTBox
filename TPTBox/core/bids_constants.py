@@ -126,6 +126,19 @@ formats = [
     "SPIM",
     "XPC",
     "phot",
+    "TOF",  # Time-of-flight
+    "NerveVIEW",  # https://www.philips.de/healthcare/product/HCNMRB971/3D-NerveVIEW-Klinische-MR-Anwendung
+    "3DDrive",  # https://www.philips.de/healthcare/product/HCNMRB178/3D-DRIVE-MR-Software
+    "DCE",  # dynamic contrast-enhanced () "
+    "s3D",
+    "FFE",
+    "SWI",
+    "CISS",
+    "compare",
+    "recon",
+    "reformat",
+    "subtraction",
+    "RI",  # Raw input
     "stat",
     "snp",
     "log",
@@ -138,6 +151,7 @@ formats = [
     "subvar",
     "logit",
     "localizer",
+    "difference",
 ]
 # https://bids-specification.readthedocs.io/en/stable/appendices/entity-table.html
 formats_relaxed = [*formats, "t2", "t1", "t2c", "t1c", "cta", "mr", "snapshot", "t1dixon", "dwi"]
@@ -158,7 +172,25 @@ formats_relaxed = [*formats, "t2", "t1", "t2c", "t1c", "cta", "mr", "snapshot", 
 # micr (microscopy)
 
 
-file_types = ["nii.gz", "json", "png", "jpg", "tsv", "backup", "ply", "npz", "log", "txt", "stl", "csv", "subvar", "pkl", "xlsx"]
+file_types = [
+    "nii.gz",
+    "json",
+    "png",
+    "jpg",
+    "tsv",
+    "backup",
+    "ply",
+    "npz",
+    "log",
+    "txt",
+    "stl",
+    "csv",
+    "subvar",
+    "pkl",
+    "xlsx",
+    "bvec",
+    "bval",
+]
 # Description see: https://bids-specification.readthedocs.io/en/stable/99-appendices/09-entities.html
 
 # Order of Entities defines order of file naming

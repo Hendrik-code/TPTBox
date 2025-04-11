@@ -1229,11 +1229,7 @@ def np_normalize_to_range(arr: np.ndarray, min_value: float = 0, max_value: floa
     return arr
 
 
-def np_fill_holes_global_with_majority_voting(
-    arr: UINTARRAY,
-    connectivity: int = 3,
-    inplace: bool = False,
-):
+def np_fill_holes_global_with_majority_voting(arr: UINTARRAY, connectivity: int = 3, inplace: bool = False, verbose=False):  # noqa: ARG001
     """Fill holes globaly (across labels) and resolves inter-label conflicts with majority voting of neighbors
 
     Args:
@@ -1275,6 +1271,7 @@ def np_map_labels_based_on_majority_label_mask_overlap(
     label_ref: LABEL_REFERENCE = None,
     dilate_pixel: int = 1,
     inplace: bool = False,
+    no_match_label=0,
 ):
     """Relabels all individual labels from input array to the majority labels of a given label_mask
 
@@ -1302,12 +1299,18 @@ def np_map_labels_based_on_majority_label_mask_overlap(
         if 0 in label_ref:
             label_ref = label_ref[1:]
             count = count[1:]
-        newlabel = label_ref[np.argmax(count)]
+        try:
+            newlabel = label_ref[np.argmax(count)]
+        except ValueError:
+            newlabel = no_match_label
         arr_c[arr_l != 0] = newlabel
     return arr_c
 
 
-def _pad_to_parameters(origin_shape: list[int] | tuple[int, int, int], target_shape: list[int] | tuple[int, int, int]):
+def _pad_to_parameters(
+    origin_shape: list[int] | tuple[int, int, int],
+    target_shape: list[int] | tuple[int, int, int],
+):
     """Returns the parameter to pad the input to the target shape
 
     Args:

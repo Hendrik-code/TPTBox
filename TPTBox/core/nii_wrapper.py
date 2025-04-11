@@ -443,8 +443,6 @@ class NII(NII_Math):
         self.reorient_(value, verbose=False)
 
 
-    def get_num_dims(self):
-        return len(self.shape)
     def split_4D_image_to_3D(self):
         assert self.get_num_dims() == 4,self.get_num_dims()
         arr_4d = self.get_array()
@@ -837,6 +835,9 @@ class NII(NII_Math):
             mapping = to_vox_map
         else:
             mapping = to_vox_map if isinstance(to_vox_map, tuple) else to_nii_optional(to_vox_map, seg=self.seg, default=to_vox_map)
+        if isinstance(mapping,Has_Grid) and mapping.assert_affine(self,raise_error=False,origin_tolerance=0.00000001,error_tolerance=0.00000001,shape_tolerance=0):
+            log.print(f"resample_from_to skipped: {self}",verbose=verbose)
+            return self if inplace else self.copy()
         assert mapping is not None
         log.print(f"resample_from_to: {self} to {mapping}",verbose=verbose)
         if order is None:
@@ -1029,7 +1030,7 @@ class NII(NII_Math):
             import ants
         except Exception:
             log.print_error()
-            log.on_fail("run 'pip install antspyx' to install deepali")
+            log.on_fail("run 'pip install antspyx' to install hf-deepali")
             raise
         return ants.from_nibabel(self.nii)
 
@@ -1330,7 +1331,7 @@ class NII(NII_Math):
         return self.set_array(arr,inplace=inplace)
 
 
-    def map_labels_based_on_majority_label_mask_overlap(self, label_mask: Self, labels: int | list[int] | None = None, dilate_pixel: int = 1, inplace: bool = False) -> Self:
+    def map_labels_based_on_majority_label_mask_overlap(self, label_mask: Self, labels: int | list[int] | None = None, dilate_pixel: int = 1, inplace: bool = False,no_match_label=0) -> Self:
         """Relabels all individual labels from input array to the majority labels of a given label_mask
 
         Args:
@@ -1343,7 +1344,7 @@ class NII(NII_Math):
             NII: Relabeled nifti
         """
         assert self.seg and label_mask.seg, "This only works on segmentations"
-        return self.set_array(np_map_labels_based_on_majority_label_mask_overlap(self.get_seg_array(), label_mask.get_seg_array(), label_ref=labels, dilate_pixel=dilate_pixel, inplace=inplace), inplace=inplace,)
+        return self.set_array(np_map_labels_based_on_majority_label_mask_overlap(self.get_seg_array(), label_mask.get_seg_array(), label_ref=labels, dilate_pixel=dilate_pixel, inplace=inplace,no_match_label=no_match_label), inplace=inplace,)
 
 
     def get_segmentation_difference_to(self, mask_gt: Self, ignore_background_tp: bool = False) -> Self:
@@ -1482,6 +1483,60 @@ class NII(NII_Math):
         inclusion: bool = False
     ):
         return self.truncate_labels_beyond_reference_(idx,not_beyond,fill,axis,inclusion)
+
+    def infect(self: NII, reference_mask: NII, max_iters=100,inplace=False):
+        """
+        Expands labels from self_mask into regions of reference_mask == 1 via breadth-first diffusion.
+
+        Args:
+            self_mask (ndarray): (H, W) or (D, H, W) integer-labeled array.
+            reference_mask (ndarray): Binary array of same shape as self_mask.
+            max_iters (int): Maximum number of propagation steps.
+
+        Returns:
+            ndarray: Updated label mask.
+        """
+        from scipy.ndimage import convolve
+
+        self_mask = self.get_seg_array().copy()
+        ref_mask = np.clip(reference_mask.get_seg_array(), 0, 1)
+
+        ndim = len(self_mask.shape)
+
+        # Define neighborhood kernel
+        if ndim == 2:
+            kernel = np.array([[0, 1, 0], [1, 0, 1], [0, 1, 0]], dtype=np.uint8)
+        elif ndim == 3:
+            kernel = np.zeros((3, 3, 3), dtype=np.uint8)
+            kernel[1, 1, 0] = kernel[1, 1, 2] = 1
+            kernel[1, 0, 1] = kernel[1, 2, 1] = 1
+            kernel[0, 1, 1] = kernel[2, 1, 1] = 1
+        else:
+            raise NotImplementedError("Only 2D or 3D masks are supported.")
+
+        for _ in range(max_iters):
+            unlabeled = (self_mask == 0) & (ref_mask == 1)
+            updated = False
+
+            for label in np_unique(self_mask):
+                if label == 0:
+                    continue  # skip background
+
+                binary_label_mask = (self_mask == label).astype(np.uint8)
+                neighbor_count = convolve(binary_label_mask, kernel, mode="constant", cval=0)
+
+                # Find unlabeled voxels adjacent to current label
+                new_voxels = (neighbor_count > 0) & unlabeled
+
+                if np.any(new_voxels):
+                    self_mask[new_voxels] = label
+                    updated = True
+
+            if not updated:
+                break
+
+        return self.set_array(self_mask,inplace=inplace)
+
     def map_labels(self, label_map:LABEL_MAP , verbose:logging=True, inplace=False):
         """
         Maps labels in the given NIfTI image according to the label_map dictionary.
