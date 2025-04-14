@@ -967,7 +967,7 @@ class BIDS_FILE:
             self.file["json"] = Path(str(nii_file).split(".")[0] + ".json")
         return Grid(**_add_grid_info_to_json(nii_file, self.file["json"])["grid"])
 
-    def get_nii_file(self):
+    def get_nii_file(self) -> Path:  # type: ignore
         for key in _supported_nii_files:
             if key in self.file:
                 return self.file[key]

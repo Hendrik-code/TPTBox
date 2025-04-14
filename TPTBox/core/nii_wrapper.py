@@ -1781,10 +1781,12 @@ class NII(NII_Math):
         return self.set_array(seg_arr,inplace=inplace)
     def extract_label_(self,label:int|Location|Sequence[int]|Sequence[Location], keep_label=False):
         return self.extract_label(label,keep_label,inplace=True)
-    def remove_labels(self,*label:int|Location|Sequence[int]|Sequence[Location], inplace=False, verbose:logging=True):
+    def remove_labels(self,label:int|Location|Sequence[int]|Sequence[Location], inplace=False, verbose:logging=True):
         '''If this NII is a segmentation you can single out one label.'''
         assert label != 0, 'Zero label does not make sens.  This is the background'
         seg_arr = self.get_seg_array()
+        if not isinstance(label,Sequence):
+            label = [label] # type: ignore
         for l in label:
             if isinstance(l, list):
                 for g in l:
@@ -1850,7 +1852,7 @@ def to_nii(img_bids: Image_Reference, seg=False) -> NII:
     elif isinstance(img_bids, Nifti1Image):
         return NII(img_bids, seg)
     else:
-        raise TypeError(img_bids)
+        raise TypeError(type(img_bids))
 
 def to_nii_seg(img: Image_Reference) -> NII:
     return to_nii(img,seg=True)

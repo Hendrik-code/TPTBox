@@ -17,6 +17,7 @@ from scipy.spatial import cKDTree  # type: ignore
 from TPTBox import NII, POI, Image_Reference, Location, calc_poi_from_subreg_vert, to_nii
 from TPTBox.core.compat import zip_strict
 from TPTBox.core.internal.deep_learning_utils import DEVICES, get_device
+from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.registration.ridged_intensity.affine_deepali import Rigid_Registration_with_Tether
 from TPTBox.registration.ridged_points import Point_Registration
 
@@ -155,7 +156,9 @@ class Rigid_Elements_Registration:
         fixed_poi = _load_poi(fixed_poi_file, fixed_vert, fixed_subreg, save_pois)
         moving_poi = _load_poi(moving_poi_file, moving_vert, moving_subreg, save_pois)
         # Resample
-        ref = fixed_vert if reference_image is None else to_nii(reference_image)
+        ref = fixed_vert if reference_image is None else reference_image
+        if not isinstance(ref, Has_Grid):
+            ref = to_nii(reference_image)
 
         # fixed_image.resample_from_to_(ref)
         fixed_vert.resample_from_to_(ref)
