@@ -76,7 +76,7 @@ class Deformable_Registration(General_Registration):
         transform_args: dict | None = None,
         transform_init: PathStr | None = None,  # reload initial flowfield from file
         optim_name="Adam",  # Optimizer name defined in torch.optim. or override on_optimizer finer controle
-        lr=0.001,  # Learning rate
+        lr: float | Sequence[float] = 0.001,  # Learning rate
         optim_args=None,  # args of Optimizer with out lr
         smooth_grad=0.0,
         verbose=0,

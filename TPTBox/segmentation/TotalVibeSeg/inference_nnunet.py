@@ -147,7 +147,7 @@ idx_models = [80, 87, 86, 85]
 
 
 def run_total_seg(
-    img: Path | str | list[Path],
+    img: Path | str | list[Path] | list[NII],
     out_path: Path,
     override=False,
     dataset_id=None,
@@ -210,4 +210,4 @@ def run_total_seg(
         fill_holes=fill_holes,
         crop=crop,
         max_folds=max_folds,
-    )
+    )[0]
