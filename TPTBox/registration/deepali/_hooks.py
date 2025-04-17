@@ -88,7 +88,7 @@ def print_eval_loss_hook(level: int, max_steps: int) -> RegistrationEvalHook:  #
             if isinstance(weight, (list, tuple)):
                 weight = weight[level]
             if not isinstance(weight, str):
-                value *= weight
+                value *= weight  # type: ignore  # noqa: PLW2901
             elif "+" in weight:
                 weight = f"({weight})"
             message += f", {value:>12.05f} [{weight} * {name}]"
@@ -120,7 +120,7 @@ def print_eval_loss_hook_tqdm(level: int, max_steps: int) -> RegistrationEvalHoo
                 weight = weight[level]
 
             if not isinstance(weight, str):
-                value *= weight
+                value *= weight  # type: ignore # noqa: PLW2901
             elif "+" in weight:
                 weight = f"({weight})"
             message += f", {value:>5.05f}[{weight}*{name}]"
