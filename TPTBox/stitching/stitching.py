@@ -98,11 +98,11 @@ def get_max_affine_and_shape(points: np.ndarray, affines, min_spacing=None, dtyp
 
     new_spacing = np.min(np.round(np.stack(spacings), decimals=6), 0)
     if min_spacing is not None and min_spacing != 0:
-        new_spacing = np.array([max(min_spacing, s) for s in new_spacing])
+        new_spacing = np.maximum(min_spacing, new_spacing)
 
     shape: np.ndarray = np.ceil(min_shape / new_spacing)
     print("Choose the following spacing:", new_spacing) if verbose else None
-    print(f"Output shape is {shape}, which utilizes {min_possible_volume / min_volume*100:.1f} % of all voxels.") if verbose else None
+    print(f"Output shape is {shape}, which utilizes {min_possible_volume / min_volume * 100:.1f} % of all voxels.") if verbose else None
     affine = get_ras_affine(min_rotation, new_spacing, origen[0])
     print("The new origin is ", np.round(affine[:3, 3], 2)) if verbose else None
     print("The optimal rotation came from file number ", opt_id, " ", np.round(min_rotation.reshape(-1), 2)) if verbose else None
@@ -340,7 +340,7 @@ def main(  # noqa: C901
     niis: list[nib.nifti1.Nifti1Image] = []
     print("### loading ###") if verbose else None
     for f_name in images:
-        if isinstance(f_name, (Path , str)):
+        if isinstance(f_name, (Path, str)):
             print("Load ", f_name, Path(f_name)) if verbose else None
             # Load Nii
             nii: nib.nifti1.Nifti1Image = nib.load(f_name)  # type: ignore

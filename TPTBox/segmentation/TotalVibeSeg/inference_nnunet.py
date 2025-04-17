@@ -60,8 +60,9 @@ def run_inference_on_file(
 ) -> tuple[Image_Reference, np.ndarray | None]:
     global model_path  # noqa: PLW0603
     if _model_path is not None:
+        _model_path = Path(_model_path)
         model_path = _model_path / "nnUNet_results"
-        assert _model_path.exists(), _model_path
+        assert model_path.exists(), _model_path
     if out_file is not None and Path(out_file).exists() and not override:
         return out_file, None
 
@@ -146,7 +147,7 @@ idx_models = [80, 87, 86, 85]
 
 
 def run_total_seg(
-    img: Path | str | list[Path],
+    img: Path | str | list[Path] | list[NII],
     out_path: Path,
     override=False,
     dataset_id=None,
@@ -209,4 +210,4 @@ def run_total_seg(
         fill_holes=fill_holes,
         crop=crop,
         max_folds=max_folds,
-    )
+    )[0]

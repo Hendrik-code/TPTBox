@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import functools
-import json
 import warnings
 from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
-from enum import Enum
 from pathlib import Path
 from typing import TypeVar, Union
 
@@ -23,19 +21,14 @@ from TPTBox.core.nii_wrapper import NII, Image_Reference, to_nii, to_nii_optiona
 from TPTBox.core.poi_fun import save_load
 from TPTBox.core.poi_fun.poi_abstract import Abstract_POI, POI_Descriptor
 from TPTBox.core.vert_constants import (
-    AFFINE,
     AX_CODES,
     COORDINATE,
-    LABEL_MAX,
-    ORIGIN,
     POI_DICT,
     ROTATION,
     ROUNDING_LVL,
-    SHAPE,
     TRIPLE,
     ZOOMS,
     Abstract_lvl,
-    Any,
     Location,
     Sentinel,
     Vertebra_Instance,
@@ -721,7 +714,7 @@ class POI(Abstract_POI, Has_Grid):
         """
         from TPTBox import POI_Global
 
-        poi_obj = save_load.load_poi(poi)
+        poi_obj: POI = poi if isinstance(poi, (POI, POI_Global)) else save_load.load_poi(poi)  # type: ignore
         if reference is not None:
             if isinstance(poi_obj, POI_Global):
                 poi_obj = poi_obj.resample_from_to(reference)
@@ -734,7 +727,7 @@ class POI(Abstract_POI, Has_Grid):
                     poi_obj.shape = reference.shape
                 if poi_obj.origin is None:
                     poi_obj.origin = reference.origin
-                reference.assert_affine(poi_obj)
+                reference.assert_affine(poi_obj, shape_tolerance=0.001)
         if isinstance(poi_obj, POI_Global) and not allow_global:
             warnings.warn(
                 f"{poi} is a POI with global coordinates, but you loaded it with POI.load(), \n"

@@ -145,7 +145,7 @@ def np_unique(arr: np.ndarray) -> list[int]:
             return [idx for idx, i in enumerate(cc3dstatistics(arr)["voxel_counts"]) if i > 0]
         except Exception:
             pass
-    return np.unique(arr)
+    return list(np.unique(arr))
 
 
 def np_unique_withoutzero(arr: UINTARRAY) -> list[int]:
@@ -597,11 +597,7 @@ def np_find_index_of_k_max_values(arr: np.ndarray, k: int = 2) -> list[int]:
     return list(indices)
 
 
-def np_compute_surface(
-    arr: UINTARRAY,
-    connectivity: int = 3,
-    dilated_surface: bool = False,
-):
+def np_compute_surface(arr: UINTARRAY, connectivity: int = 3, dilated_surface: bool = False):
     """Computes the surface of a binary array based on connectivity and dilation options.
 
     This function identifies the surface voxels of a binary array. If `dilated_surface`
@@ -622,9 +618,9 @@ def np_compute_surface(
     """
     assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
     if dilated_surface:
-        return np_dilate_msk(arr, n_pixel=1, connectivity=connectivity) - arr
+        return np_dilate_msk(arr.copy(), n_pixel=1, connectivity=connectivity) - arr
     else:
-        return arr - np_erode_msk(arr, n_pixel=1, connectivity=connectivity)
+        return arr - np_erode_msk(arr.copy(), n_pixel=1, connectivity=connectivity)
 
 
 def np_point_coordinates(
@@ -1229,11 +1225,7 @@ def np_normalize_to_range(arr: np.ndarray, min_value: float = 0, max_value: floa
     return arr
 
 
-def np_fill_holes_global_with_majority_voting(
-    arr: UINTARRAY,
-    connectivity: int = 3,
-    inplace: bool = False,
-):
+def np_fill_holes_global_with_majority_voting(arr: UINTARRAY, connectivity: int = 3, inplace: bool = False, verbose=False):  # noqa: ARG001
     """Fill holes globaly (across labels) and resolves inter-label conflicts with majority voting of neighbors
 
     Args:
@@ -1275,6 +1267,7 @@ def np_map_labels_based_on_majority_label_mask_overlap(
     label_ref: LABEL_REFERENCE = None,
     dilate_pixel: int = 1,
     inplace: bool = False,
+    no_match_label=0,
 ):
     """Relabels all individual labels from input array to the majority labels of a given label_mask
 
@@ -1302,12 +1295,18 @@ def np_map_labels_based_on_majority_label_mask_overlap(
         if 0 in label_ref:
             label_ref = label_ref[1:]
             count = count[1:]
-        newlabel = label_ref[np.argmax(count)]
+        try:
+            newlabel = label_ref[np.argmax(count)]
+        except ValueError:
+            newlabel = no_match_label
         arr_c[arr_l != 0] = newlabel
     return arr_c
 
 
-def _pad_to_parameters(origin_shape: list[int] | tuple[int, int, int], target_shape: list[int] | tuple[int, int, int]):
+def _pad_to_parameters(
+    origin_shape: list[int] | tuple[int, int, int],
+    target_shape: list[int] | tuple[int, int, int],
+):
     """Returns the parameter to pad the input to the target shape
 
     Args:
@@ -1337,7 +1336,7 @@ def _pad_to_parameters(origin_shape: list[int] | tuple[int, int, int], target_sh
 
 def _to_labels(arr: np.ndarray, label_ref: LABEL_REFERENCE = None) -> Sequence[int]:
     if label_ref is None:
-        label_ref = list(np_unique(arr))
+        label_ref = list(np_unique_withoutzero(arr))
     if not isinstance(label_ref, Sequence):
         label_ref = [label_ref]
     return label_ref
