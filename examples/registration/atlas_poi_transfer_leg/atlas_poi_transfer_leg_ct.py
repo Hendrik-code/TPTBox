@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gzip
 import pickle
+import sys
 from copy import deepcopy
 from enum import Enum
 from math import ceil, floor
@@ -615,7 +616,7 @@ if __name__ == "__main__":
     poi.save(root2 / "test" / "out_points_both2.json")
     reg.save("Register_Point_Atlas.pkl")
     # CUDA_VISIBLE_DEVICES=2 /opt/anaconda3/envs/py3.11/bin/python /DATA/NAS/tools/TPTBox/tmp_poi_w.py
-    exit()
+    sys.exit()
     st = time()
 
     lr = to_nii(root / "bone_lr.nii.gz", True)
@@ -624,7 +625,7 @@ if __name__ == "__main__":
     assert x is not None
     x.save(root / "test" / "left_right_split.nii.gz")
     print(time() - st)
-    exit()
+    sys.exit()
     left = root / "test" / "left.nii.gz"
     right = root / "test" / "right.nii.gz"
 
@@ -653,7 +654,7 @@ if __name__ == "__main__":
     nii.save(root / "test" / "atlas_reg_poi.nii.gz")
     p = poi_out.to_global(itk_coords=True)
     coords_dict = parse_coordinates("010__left.txt")
-    for e, (k2, v) in enumerate(coords_dict.items(), 1):
+    for e, (k2, _) in enumerate(coords_dict.items(), 1):
         k = PATELLA if k2[0] == "P" else 60
         print(k2, p[k, e])
 

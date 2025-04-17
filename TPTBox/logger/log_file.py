@@ -97,7 +97,6 @@ class Logger_Interface(Protocol):
         Returns:
             str: indentantion string
         """
-        global indentation_level  # noqa: PLW0602
         string = ""
         if indentation_level == 0:
             return string
