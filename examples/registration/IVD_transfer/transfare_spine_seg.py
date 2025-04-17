@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import pickle
+import random
 from collections.abc import Sequence
 
 # Step 1
@@ -372,8 +373,6 @@ def register_IVD_to_ct(vert: Image_Reference):
     a[a == 0] = b[a == 0]
     return a
 
-
-import random
 
 j = 0
 if __name__ == "__main__":

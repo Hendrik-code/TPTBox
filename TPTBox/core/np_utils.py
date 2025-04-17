@@ -145,7 +145,7 @@ def np_unique(arr: np.ndarray) -> list[int]:
             return [idx for idx, i in enumerate(cc3dstatistics(arr)["voxel_counts"]) if i > 0]
         except Exception:
             pass
-    return [i for i in np.unique(arr) if i > 0]
+    return list(np.unique(arr))
 
 
 def np_unique_withoutzero(arr: UINTARRAY) -> list[int]:
@@ -1336,7 +1336,7 @@ def _pad_to_parameters(
 
 def _to_labels(arr: np.ndarray, label_ref: LABEL_REFERENCE = None) -> Sequence[int]:
     if label_ref is None:
-        label_ref = list(np_unique(arr))
+        label_ref = list(np_unique_withoutzero(arr))
     if not isinstance(label_ref, Sequence):
         label_ref = [label_ref]
     return label_ref
