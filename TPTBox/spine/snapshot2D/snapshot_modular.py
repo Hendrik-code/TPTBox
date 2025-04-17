@@ -749,7 +749,10 @@ def create_snapshot(  # noqa: C901
             seg = seg.apply_crop_(ex_slice) if seg is not None else None
             ctd = ctd.apply_crop(ex_slice).filter_points_inside_shape() if ctd is not None else None
         img = img.reorient_(to_ax)
-        seg = seg.reorient_(to_ax) if seg is not None else None
+        if seg is not None:
+            seg = seg.reorient_(to_ax)
+            if not seg.assert_affine(img, raise_error=False):
+                seg.resample_from_to_(img)
         assert not isinstance(seg, tuple), "seg is a tuple"
         if ctd is not None:
             if ctd.is_global:
