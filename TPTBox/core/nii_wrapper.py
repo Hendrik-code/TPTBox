@@ -1281,6 +1281,7 @@ class NII(NII_Math):
         """
         assert self.seg, "This only works on segmentations"
         arr = np_filter_connected_components(self.get_seg_array(), largest_k_components=max_count_component,label_ref=labels,connectivity=connectivity,return_original_labels=keep_label,min_volume=min_volume,max_volume=max_volume,removed_to_label=removed_to_label,)
+        assert arr.shape == self.shape, f"Shape mismatch: {arr.shape} != {self.shape}"
         if keep_label and labels is not None:
             if isinstance(labels,int):
                 labels = [labels]
