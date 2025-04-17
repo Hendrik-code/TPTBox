@@ -23,6 +23,8 @@ It can find, filter, search any BIDS_Family and subjects, and has many functiona
 conda create -n 3.10 python=3.10
 conda activate 3.10
 pip install TPTBox
+# Optional dependency Registration
+pip install hf-deepali
 ```
 ### Install via github:
 (you should be in the project folder)
