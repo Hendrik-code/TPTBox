@@ -145,7 +145,7 @@ def np_unique(arr: np.ndarray) -> list[int]:
             return [idx for idx, i in enumerate(cc3dstatistics(arr)["voxel_counts"]) if i > 0]
         except Exception:
             pass
-    return np.unique(arr)
+    return [i for i in np.unique(arr) if i > 0]
 
 
 def np_unique_withoutzero(arr: UINTARRAY) -> list[int]:
@@ -597,11 +597,7 @@ def np_find_index_of_k_max_values(arr: np.ndarray, k: int = 2) -> list[int]:
     return list(indices)
 
 
-def np_compute_surface(
-    arr: UINTARRAY,
-    connectivity: int = 3,
-    dilated_surface: bool = False,
-):
+def np_compute_surface(arr: UINTARRAY, connectivity: int = 3, dilated_surface: bool = False):
     """Computes the surface of a binary array based on connectivity and dilation options.
 
     This function identifies the surface voxels of a binary array. If `dilated_surface`
@@ -622,9 +618,9 @@ def np_compute_surface(
     """
     assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
     if dilated_surface:
-        return np_dilate_msk(arr, n_pixel=1, connectivity=connectivity) - arr
+        return np_dilate_msk(arr.copy(), n_pixel=1, connectivity=connectivity) - arr
     else:
-        return arr - np_erode_msk(arr, n_pixel=1, connectivity=connectivity)
+        return arr - np_erode_msk(arr.copy(), n_pixel=1, connectivity=connectivity)
 
 
 def np_point_coordinates(

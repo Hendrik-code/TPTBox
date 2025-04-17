@@ -89,10 +89,7 @@ class Deformable_Registration(General_Registration):
         auto_run=True,
     ):
         if transform_args is None:
-            transform_args = {
-                "stride": [8, 8, 16],
-                "transpose": False,
-            }
+            transform_args = {"stride": [8, 8, 16], "transpose": False}
         if loss_terms is None:
             loss_terms = {
                 "be": BSplineBending(stride=1),
