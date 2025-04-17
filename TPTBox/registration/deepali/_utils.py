@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import re
 import sys
 from collections.abc import Sequence
@@ -8,7 +10,7 @@ from typing import Literal, Optional, Union
 import torch
 import torch.optim
 from deepali.core import Axes, Grid, PathStr
-from deepali.core import functional as U
+from deepali.core import functional as U  # noqa: N812
 from deepali.data import FlowField, Image
 from deepali.losses import (
     BSplineLoss,

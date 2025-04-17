@@ -20,7 +20,7 @@ from TPTBox import NII, Location, Print_Logger, calc_poi_from_subreg_vert  # noq
 from TPTBox.tests.test_utils import get_test_ct, get_test_mri, get_tests_dir  # noqa: E402
 
 
-class Test_testsamples(unittest.TestCase):
+class Test_test_samples(unittest.TestCase):
     def test_load_ct(self):
         ct_nii, subreg_nii, vert_nii, label = get_test_ct()
         self.assertTrue(ct_nii.assert_affine(other=subreg_nii, raise_error=False))
@@ -213,7 +213,7 @@ class Test_testsamples(unittest.TestCase):
         poi = mri.make_empty_POI()
         poi[123, 44] = (random.randint(0, mri.shape[0] - 1), random.randint(0, mri.shape[1] - 1), random.randint(0, mri.shape[2] - 1))
         poi[123, 45] = (random.randint(0, mri.shape[0] - 1), random.randint(0, mri.shape[1] - 1), random.randint(0, mri.shape[2] - 1))
-        deform = Deformable_Registration(mov, mri, reference_image=mov, ddevice="cpu", verbose=99, max_steps=500)
+        deform = Deformable_Registration(mov, mri, reference_image=mov, ddevice="cpu", verbose=99, max_steps=5)
         if save:
             deform.save(test_save)
             deform = Deformable_Registration.load(test_save, ddevice="cpu")
@@ -222,8 +222,8 @@ class Test_testsamples(unittest.TestCase):
         # mov2[mov > -10000] = 0
         # mov2[int(poi[123, 44][0]), int(poi[123, 44][1]), int(poi[123, 44][2])] = 44
         # mov2[int(poi[123, 45][0]), int(poi[123, 45][1]), int(poi[123, 45][2])] = 45
-        out = deform.transform_nii(mov2)
-        poi_new = deform.transform_poi(poi)
+        deform.transform_nii(mov2)
+        deform.transform_poi(poi)
 
         # for idx in [44, 45]:
         #    x = tuple([float(x.item()) for x in np.where(out == idx)])

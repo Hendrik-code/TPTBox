@@ -100,10 +100,11 @@ class Has_Grid(Grid_Proxy):
         self.origin = origin.tolist()
 
     def _extract_affine(self: Has_Grid, rm_key=(), **args):
+        shape = self.shape_int if self.shape is not None else None
         out = {
             "zoom": self.spacing,
             "origin": self.origin,
-            "shape": self.shape_int,
+            "shape": shape,
             "rotation": self.rotation,
             "orientation": self.orientation,
             **args,
@@ -342,8 +343,8 @@ class Grid(Has_Grid):
             if k == "spacing":
                 k = "zoom"  # noqa: PLW2901
             if k == "rotation":
-                v = np.array(v)
+                v = np.array(v)  # noqa: PLW2901
                 if len(v.shape) == 1:
                     s = int(np.sqrt(v.shape[0]))
-                    v = v.reshape(s, s)
+                    v = v.reshape(s, s)  # noqa: PLW2901
             setattr(self, k, v)

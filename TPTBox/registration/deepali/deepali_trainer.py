@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 import math
 import time
 from collections import OrderedDict, defaultdict
 from collections.abc import Callable, Generator, Sequence
 from copy import copy
+from pathlib import Path
 from timeit import default_timer as timer
 from typing import Literal, Optional, Union
 
@@ -225,7 +228,7 @@ class DeepaliPairwiseImageTrainer:
     #    return clamp_mask(source_seg), clamp_mask(target_seg)
 
     def _read(self, source) -> Image:
-        if isinstance(source, PathStr):
+        if isinstance(source, (str, Path)):
             return Image.read(source, dtype=self._dtype, device=self.device)
         elif hasattr(source, "to_deepali"):
             source = source.to_deepali(dtype=self._dtype, device=self.device)
@@ -348,7 +351,7 @@ class DeepaliPairwiseImageTrainer:
         losses = {}
         # Transform target grid points
         x = target.grid().coords(device=target_data.device).unsqueeze(0)  # grid_points
-        y: Tensor = grid_transform(x, grid=True)
+        y: Tensor = grid_transform(x)
         assert len(self.loss_terms) != 0, "No losses defined"
         ### Sum of pairwise image dissimilarity terms ###
         if self.loss_pairwise_image_terms:
@@ -379,6 +382,8 @@ class DeepaliPairwiseImageTrainer:
                 raise RuntimeError(f"{type(self).__name__}() missing source landmarks")
             if self.target_landmarks is None:
                 raise RuntimeError(f"{type(self).__name__}() missing target landmarks")
+
+            # t = self.transform.points(self.target_landmarks, axes=Axes.GRID, to_axes=Axes.GRID, grid=target.grid(), to_grid=source.grid())
             t = self.transform(self.target_landmarks)
             for name, term in self.loss_ldist_terms.items():
                 losses[name] = term(t, self.source_landmarks)
@@ -564,7 +569,7 @@ class DeepaliPairwiseImageTrainer:
             del disp_field
         return transform
 
-    def register_eval_hook(self, hook: Callable[["DeepaliPairwiseImageTrainer", int, int, RegistrationResult], None]) -> RemovableHandle:
+    def register_eval_hook(self, hook: Callable[[DeepaliPairwiseImageTrainer, int, int, RegistrationResult], None]) -> RemovableHandle:
         r"""Registers a evaluation hook.
 
         The hook will be called every time after the registration loss has been evaluated
@@ -581,7 +586,7 @@ class DeepaliPairwiseImageTrainer:
         self._eval_hooks[handle.id] = hook
         return handle
 
-    def register_step_hook(self, hook: Callable[["DeepaliPairwiseImageTrainer", int, int, float], None]) -> RemovableHandle:
+    def register_step_hook(self, hook: Callable[[DeepaliPairwiseImageTrainer, int, int, float], None]) -> RemovableHandle:
         r"""Registers a gradient step hook.
 
         The hook will be called every time after a gradient step of the optimizer.
@@ -596,6 +601,9 @@ class DeepaliPairwiseImageTrainer:
         self._step_hooks[handle.id] = hook
         return handle
 
+    def on_transform_update(self, transform: SpatialTransform):
+        pass
+
     @time_it
     def run(self):
         start_reg = timer()
@@ -607,6 +615,7 @@ class DeepaliPairwiseImageTrainer:
             transform = self._load_initial_transform(transform)
             transform = transform.to(device=self.device)
             grid_transform = SequentialTransform(transform)
+            self.on_transform_update(grid_transform)
             grid_transform = self._run_level(grid_transform, target_image, source_image, 0)
         else:
             with torch.no_grad():
@@ -630,6 +639,8 @@ class DeepaliPairwiseImageTrainer:
                 transform = self._load_initial_transform(transform)
                 grid_transform = SequentialTransform(transform, post_transform)
                 grid_transform = grid_transform.to(device=self.device)
+                self.on_transform_update(grid_transform)
+
                 ## Perform coarse-to-fine multi-resolution registration
 
             for level in range(coarsest_level, finest_level - 1, -1):
@@ -643,6 +654,7 @@ class DeepaliPairwiseImageTrainer:
                         start = timer()
                         transform_grid = target_image.grid().downsample(transform_downsample)
                         transform.grid_(transform_grid)
+                        self.on_transform_update(grid_transform)
                         if self.verbose > 3:
                             print(f"Subdivided control point grid in {timer() - start:.3f}s")
                     grid_transform.grid_(target_image.grid())

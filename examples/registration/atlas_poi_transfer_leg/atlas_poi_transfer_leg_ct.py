@@ -77,6 +77,7 @@ def generate_atlas_from_txt(
     segmentation_path: str | Path,
     ct_path: str | Path,
     out_folder=Path("/DATA/NAS/datasets_processed/CT_fullbody/dataset-watrinet/atlas"),
+    addendum="",
 ):
     """
     This function generated a standartiesed atlas. Right legs will be mirrored and stored as a "left" leg.
@@ -130,11 +131,11 @@ def generate_atlas_from_txt(
     # Load segmentation
 
     # Prep atlas
-    atlas_path = out_folder / f"atlas{atlas_id:03}.nii.gz"
-    atlas_ct_path = out_folder / f"atlas{atlas_id:03}_ct.nii.gz"
-    atlas_path_v = out_folder / f"atlas{atlas_id:03}_visual.nii.gz"
-    atlas_cms_poi_path = out_folder / f"atlas{atlas_id:03}_cms_poi.json"  # Center of mass
-    atlas_poi_path = out_folder / f"atlas{atlas_id:03}_poi.json"
+    atlas_path = out_folder / f"atlas{atlas_id:03}{addendum}.nii.gz"
+    atlas_ct_path = out_folder / f"atlas{atlas_id:03}{addendum}_ct.nii.gz"
+    atlas_path_v = out_folder / f"atlas{atlas_id:03}{addendum}_visual.nii.gz"
+    atlas_cms_poi_path = out_folder / f"atlas{atlas_id:03}{addendum}_cms_poi.json"  # Center of mass
+    atlas_poi_path = out_folder / f"atlas{atlas_id:03}{addendum}_poi.json"
 
     prep_Atlas(segmentation_path, ct_path, atlas_path, atlas_ct_path, atlas_cms_poi_path, text_file_is_left_leg, flip=True)
 
@@ -218,33 +219,33 @@ PATELLA = 14
 LEGS = [13, PATELLA, 15, 16]
 
 
-def split_left_right_leg(nii: NII, c=2, min_volume=50) -> NII:
-    cc_patella = nii.extract_label(PATELLA).get_connected_components(1)
-    nii = nii.extract_label(LEGS, keep_label=True)
+def split_left_right_leg(seg520: NII, c=2, min_volume=50) -> NII:
+    cc_patella = seg520.extract_label(PATELLA).get_connected_components(1)
+    seg520 = seg520.extract_label(LEGS, keep_label=True)
     m = cc_patella.max()
     if m == 0:
         print("No Leg")
-        return nii * 0
+        return seg520 * 0
     elif m == 1:
         print("Only One Leg")
-        return nii.clamp(0, 1)
-    a = [ceil(c * z) for z in nii.spacing]
-    nii_small: NII = nii[:: a[0], :: a[1], :: a[2]]
+        return seg520.clamp(0, 1)
+    a = [ceil(c * z) for z in seg520.spacing]
+    nii_small: NII = seg520[:: a[0], :: a[1], :: a[2]]
     legs = nii_small.extract_label(LEGS)
     while True:
         legs_cc = legs.filter_connected_components(1, min_volume=min_volume, keep_label=False)
         m = legs_cc.max()
-        if m == 1:
-            raise ValueError("segmentation_to_small")
+        if m == 0:
+            raise ValueError("segmentation_to_small or no segmentation", legs.unique())
         elif m == 1:
             if c == 0:
-                raise ValueError("Bones are touching, can not split them into into two...")
+                raise ValueError("Legs are touching, can not split them into into two...")
             print("reduce c")
-            return split_left_right_leg(nii, floor(c / 2), min_volume=min_volume)
+            return split_left_right_leg(seg520, floor(c / 2), min_volume=min_volume)
         elif m == 2:
             break
         legs = legs.dilate_msk(1)
-    nii_left_right = nii.clamp(0, 1) * legs_cc.resample_from_to(nii).dilate_msk(c)
+    nii_left_right = seg520.clamp(0, 1) * legs_cc.resample_from_to(seg520).dilate_msk(c)
 
     axis_r = nii_left_right.get_axis("R")
     label_positions = {label: np.mean(np.where(nii_left_right == label)[axis_r]) for label in [1, 2]}

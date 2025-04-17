@@ -51,8 +51,11 @@ def _load_config(path):
     return yaml.safe_load(config_text)
 
 
+default_device = torch.device("cuda:0")
+
+
 def _warp_image(
-    source_image: deepaliImage, target_grid: Deepali_Grid, transform: SpatialTransform, mode="linear", device=torch.device("cuda:0")
+    source_image: deepaliImage, target_grid: Deepali_Grid, transform: SpatialTransform, mode="linear", device=default_device
 ) -> torch.Tensor:
     warp_func = TransformImage(target=target_grid, source=target_grid, sampling=mode, padding=source_image.min()).to(device)
     with torch.inference_mode():
@@ -60,7 +63,7 @@ def _warp_image(
     return data
 
 
-def _warp_poi(poi_moving: POI, target_grid: TPTBox_Grid, transform: SpatialTransform, align_corners, device=torch.device("cuda:0")) -> POI:
+def _warp_poi(poi_moving: POI, target_grid: TPTBox_Grid, transform: SpatialTransform, align_corners, device=default_device) -> POI:
     keys: list[tuple[int, int]] = []
     points = []
     for key, key2, (x, y, z) in poi_moving.items():
@@ -103,8 +106,8 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         reference_image: Image_Reference | None = None,
         source_pset=None,
         target_pset=None,
-        source_landmarks=None,
-        target_landmarks=None,
+        source_landmarks: POI | None = None,
+        target_landmarks: POI | None = None,
         # source_seg: Optional[Union[Image, PathStr]] = None,  # Masking the registration source
         # target_seg: Optional[Union[Image, PathStr]] = None,  # Masking the registration target
         device: Union[torch.device, str, int] | None = None,
@@ -125,18 +128,18 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         pyramid_min_size=16,
         dims=("x", "y", "z"),
         align=False,
-        transform_name: str = "SVFFD",  # Names that are defined in deepali.spatial.LINEAR_TRANSFORMS and deepali.spatialNONRIGID_TRANSFORMS. Override on_make_transform for finer controle
+        transform_name: str = "SVFFD",  # Names that are defined in deepali.spatial.LINEAR_TRANSFORMS and deepali.spatialNONRIGID_TRANSFORMS. Override on_make_transform for finer control
         transform_args: dict | None = None,
         transform_init: PathStr | None = None,  # reload initial flowfield from file
-        optim_name="Adam",  # Optimizer name defined in torch.optim. or override on_optimizer finer controle
-        lr=0.01,  # Learning rate
+        optim_name="Adam",  # Optimizer name defined in torch.optim. or override on_optimizer finer control
+        lr: float | list[float] = 0.01,  # Learning rate
         optim_args=None,  # args of Optimizer with out lr
         smooth_grad=0.0,
         verbose=99,
-        max_steps: int | Sequence[int] = 250,  # Early stopping.  override on_converged finer controle
+        max_steps: int | Sequence[int] = 250,  # Early stopping.  override on_converged finer control
         max_history: int | None = None,
-        min_value=0.0,  # Early stopping.  override on_converged finer controle
-        min_delta=0.0,  # Early stopping.  override on_converged finer controle
+        min_value=0.0,  # Early stopping.  override on_converged finer control
+        min_delta=0.0,  # Early stopping.  override on_converged finer control
         loss_terms: list[LOSS | str] | dict[str, LOSS] | dict[str, str] | dict[str, tuple[str, dict]] | None = None,
         weights: list[float] | dict[str, float] | None = None,
         auto_run=True,
@@ -152,11 +155,12 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         else:
             fix = fix.resample_from_to(reference_image)
         ## Resample and save images
-        source = mov.resample_from_to_(reference_image)
+        source = mov  # .resample_from_to_(reference_image)
         ## Load configuration and perform registration
         self.target_grid = fix.to_gird()
         self.input_grid = mov.to_gird()
-
+        self.source_landmarks_poi = source_landmarks
+        self.target_landmarks_poi = target_landmarks
         super().__init__(
             source=source.to_deepali(),
             target=fix.to_deepali(),
@@ -192,6 +196,38 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         )
         if auto_run:
             self.run()
+
+    # def on_transform_update(self, transform: SpatialTransform):
+    #    if self.source_landmarks_poi is not None and self.target_landmarks_poi is not None:
+    #        lm = self.source_landmarks_poi.copy()
+    #        tm = self.target_landmarks_poi.copy()
+    #        for k in lm.keys().copy():
+    #            if k not in tm:
+    #                lm.remove_(k)
+    #        for k in tm.keys().copy():
+    #            if k not in lm:
+    #                tm.remove_(k)
+    #        self.source_landmarks = self.poi_to_deepali(lm, transform)
+    #        self.target_landmarks = self.poi_to_deepali(tm, transform)
+    #        assert self.source_landmarks.shape == self.target_landmarks.shape, (self.source_landmarks.shape, self.target_landmarks.shape)
+
+    # def poi_to_deepali(self, poi: POI, transform: SpatialTransform):
+    #    import torch
+    #    from deepali.core import Axes
+    #    keys: list[tuple[int, int]] = []
+    #    points = []
+    #    for key, key2, (x, y, z) in poi.items(sort=True):
+    #        keys.append((key, key2))
+    #        points.append((x, y, z))
+    #        print(key, key2)
+    #    with torch.inference_mode():
+    #        data = torch.Tensor(points).unsqueeze(0)
+    #        # data = (
+    #        #    poi.to_deepali_grid()
+    #        #    .transform_points(data, axes=Axes.GRID, to_grid=transform.grid(), to_axes=transform.axes(), decimals=None)
+    #        #    .unsqueeze(0)
+    #        # )
+    #    return data.clone()
 
     @torch.no_grad()
     def transform_nii(
