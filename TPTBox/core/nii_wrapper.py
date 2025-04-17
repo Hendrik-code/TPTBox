@@ -1254,13 +1254,14 @@ class NII(NII_Math):
         """
         assert self.seg, "This only works on segmentations"
         arr = np_filter_connected_components(self.get_seg_array(), largest_k_components=max_count_component,label_ref=labels,connectivity=connectivity,return_original_labels=keep_label,min_volume=min_volume,max_volume=max_volume,removed_to_label=removed_to_label,)
-        #if keep_label and labels is not None:
-        #    if isinstance(labels,int):
-        #        labels = [labels]
-        #    old_labels = [i for i in self.unique() if i not in labels]
-        #    if len(old_labels) != 0:
-        #        s = self.extract_label(old_labels,keep_label=True)
-        #        nii[s != 0] = s[s!=0]
+        assert arr.shape == self.shape, f"Shape mismatch: {arr.shape} != {self.shape}"
+        if keep_label and labels is not None:
+            if isinstance(labels,int):
+                labels = [labels]
+            old_labels = [i for i in self.unique() if i not in labels]
+            if len(old_labels) != 0:
+                s = self.extract_label(old_labels,keep_label=True).get_array()
+                arr[s != 0] = s[s!=0]
         #print("filter",nii.unique())
         #assert max_count_component is None or nii.max() <= max_count_component, nii.unique()
         return self.set_array(arr, inplace=inplace)
