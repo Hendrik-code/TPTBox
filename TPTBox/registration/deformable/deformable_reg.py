@@ -1,33 +1,18 @@
 from __future__ import annotations
 
-import json
-import pickle
-
 # pip install hf-deepali
 from collections.abc import Sequence
-from pathlib import Path
 from typing import Literal, Optional, Union
 
 import numpy as np
 import torch
-import yaml
-from deepali.core import Axes, PathStr  # pip install hf-deepali
-from deepali.core import Grid as Deepali_Grid
-from deepali.core.typing import Device
-from deepali.data import Image as deepaliImage
-from deepali.losses import LNCC, MAE, BSplineBending
-from deepali.modules import TransformImage
-from deepali.spatial import SpatialTransform
+from deepali.core import PathStr  # pip install hf-deepali
+from deepali.losses import LNCC, BSplineBending
 from torch import device
-from torch.optim import Adam
 
-from TPTBox import NII, POI, Image_Reference, to_nii
-from TPTBox.core.compat import zip_strict
-from TPTBox.core.internal.deep_learning_utils import DEVICES, get_device
-from TPTBox.core.nii_poi_abstract import Grid as TPTBox_Grid
-from TPTBox.core.nii_poi_abstract import Has_Grid
+from TPTBox import Image_Reference
+from TPTBox.core.internal.deep_learning_utils import DEVICES
 from TPTBox.registration.deepali.deepali_model import LOSS, General_Registration
-from TPTBox.registration.deformable._deepali import deform_reg_pair
 
 cuda = device("cuda")
 

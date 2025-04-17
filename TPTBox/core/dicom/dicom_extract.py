@@ -129,7 +129,7 @@ def _convert_to_nifti(dicom_out_path, nii_path):
         logger.print_error()
         logger.on_fail(Path(nii_path).name)
 
-    except (FunctionTimedOut, ValueError):
+    except ValueError:  # FunctionTimedOut
         logger.print_error()
 
         return False

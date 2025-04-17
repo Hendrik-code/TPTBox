@@ -2,10 +2,10 @@ r"""Hooks for iterative optimization-based registration engine."""
 
 from collections.abc import Callable
 from ctypes import Union
-from typing import TYPE_CHECKING, Dict
+from typing import TYPE_CHECKING
 
-import torch.nn.functional as F
-from deepali.core import functional as U
+import torch.nn.functional as F  # noqa: N812
+from deepali.core import functional as U  # noqa: N812
 from deepali.core.kernels import gaussian1d
 from deepali.spatial import is_linear_transform
 from torch import Tensor
@@ -21,7 +21,7 @@ def noop(reg: "DeepaliPairwiseImageTrainer", *args, **kwargs) -> None:
     r"""Dummy no-op loss evaluation hook."""
 
 
-def normalize_linear_grad(reg: "DeepaliPairwiseImageTrainer", *args, **kwargs) -> None:
+def normalize_linear_grad(reg: "DeepaliPairwiseImageTrainer", *args, **kwargs) -> None:  # noqa: ARG001
     r"""Loss evaluation hook for normalization of linear transformation gradient after backward pass."""
     denom = None
     for group in reg.optimizer.param_groups:
@@ -36,7 +36,7 @@ def normalize_linear_grad(reg: "DeepaliPairwiseImageTrainer", *args, **kwargs) -
             p.grad /= denom
 
 
-def normalize_nonrigid_grad(reg: "DeepaliPairwiseImageTrainer", *args, **kwargs) -> None:
+def normalize_nonrigid_grad(reg: "DeepaliPairwiseImageTrainer", *args, **kwargs) -> None:  # noqa: ARG001
     r"""Loss evaluation hook for normalization of non-rigid transformation gradient after backward pass."""
     for group in reg.optimizer.param_groups:
         for p in (p for p in group["params"] if p.grad is not None):
@@ -65,13 +65,13 @@ def smooth_grad_hook(transform, sigma: float) -> RegistrationEvalHook:
     if is_linear_transform(transform):
         return noop
 
-    def fn(reg: "DeepaliPairwiseImageTrainer", *args, **kwargs):
+    def fn(reg: "DeepaliPairwiseImageTrainer", *args, **kwargs):  # noqa: ARG001
         return _smooth_nonrigid_grad(reg, sigma=sigma)
 
     return fn
 
 
-def print_eval_loss_hook(level: int, max_steps: int) -> RegistrationEvalHook:
+def print_eval_loss_hook(level: int, max_steps: int) -> RegistrationEvalHook:  # noqa: ARG001
     r"""Get callback function for printing loss after each evaluation."""
 
     def fn(_: "DeepaliPairwiseImageTrainer", num_steps: int, num_eval: int, result: "RegistrationResult") -> None:
@@ -82,8 +82,8 @@ def print_eval_loss_hook(level: int, max_steps: int) -> RegistrationEvalHook:
         losses: dict[str, Tensor] = result["losses"]
         for name, value in losses.items():
             if hasattr(value, "mean"):
-                value = value.mean()
-            value = float(value)
+                value = value.mean()  # noqa: PLW2901
+            value = float(value)  # noqa: PLW2901
             weight = weights.get(name, 1.0)
             if isinstance(weight, (list, tuple)):
                 weight = weight[level]
@@ -113,8 +113,8 @@ def print_eval_loss_hook_tqdm(level: int, max_steps: int) -> RegistrationEvalHoo
         losses: dict[str, Tensor] = result["losses"]
         for name, value in losses.items():
             if hasattr(value, "mean"):
-                value = value.mean()
-            value = float(value)
+                value = value.mean()  # noqa: PLW2901
+            value = float(value)  # noqa: PLW2901
             weight = weights.get(name, 1.0)
             if isinstance(weight, (list, tuple)):
                 weight = weight[level]
@@ -133,7 +133,7 @@ def print_eval_loss_hook_tqdm(level: int, max_steps: int) -> RegistrationEvalHoo
     return fn
 
 
-def print_step_loss_hook(level: int, max_steps: int) -> RegistrationStepHook:
+def print_step_loss_hook(level: int, max_steps: int) -> RegistrationStepHook:  # noqa: ARG001
     r"""Get callback function for printing loss after each step."""
 
     def fn(_: "DeepaliPairwiseImageTrainer", num_steps: int, num_eval: int, loss: float) -> None:
@@ -145,7 +145,7 @@ def print_step_loss_hook(level: int, max_steps: int) -> RegistrationStepHook:
     return fn
 
 
-def print_step_loss_hook_tqdm(level: int, max_steps: int) -> RegistrationStepHook:
+def print_step_loss_hook_tqdm(level: int, max_steps: int) -> RegistrationStepHook:  # noqa: ARG001
     r"""Get callback function for printing loss after each step."""
 
     from tqdm import tqdm
