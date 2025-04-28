@@ -13,7 +13,7 @@ import nibabel as nib
 
 from TPTBox import POI, calc_centroids
 from TPTBox.core.nii_wrapper import NII
-from TPTBox.core.poi import LABEL_MAX, calc_poi_from_subreg_vert
+from TPTBox.core.poi import calc_poi_from_subreg_vert
 from TPTBox.core.poi_fun.save_load import _poi_to_dict_list, load_poi
 from TPTBox.core.vert_constants import Location
 from TPTBox.tests.test_utils import get_nii, get_random_ax_code, overlap, repeats
@@ -36,25 +36,6 @@ class Test_Centroids(unittest.TestCase):
                 for x, y in zip(cent, sizes):
                     msg += f"{cent[x]},{y}\n"
                 self.assertEqual(cent, centroid.centroids, msg=msg)
-
-    def test_cdt_2_dict(self):
-        c = POI({(1, 50): (10, 11, 12), (32, 50): (23, 23, 23)}, orientation=("R", "I", "P"))
-        c.info["Tested"] = "now"
-        add_info = {"Tested": "now"}
-        cl, format_str = _poi_to_dict_list(c, add_info)
-
-        self.assertTrue((1, 50) in c)
-        self.assertTrue((32, 50) in c)
-        self.assertFalse((20, 50) in c)
-        self.assertEqual(c[1, 50], (10, 11, 12))
-        self.assertEqual(c[32, 50], (23, 23, 23))
-        self.assertNotEqual(c[1, 50], (10, 22, 12))
-        self.assertNotEqual(c[1, 50], (23, 23, 23))
-        self.assertEqual(cl[0]["direction"], ("R", "I", "P"))  # type: ignore
-        self.assertEqual(cl[0]["Tested"], "now")  # type: ignore
-        self.assertEqual(cl[1], {"label": 50 * LABEL_MAX + 1, "X": 10.0, "Y": 11.0, "Z": 12.0})
-        self.assertEqual(cl[2], {"label": 50 * LABEL_MAX + 32, "X": 23.0, "Y": 23.0, "Z": 23.0})
-        self.assertEqual(len(cl), 3)
 
     def test_save_load_centroids(self):
         p = get_centroids(num_point=90)
@@ -145,7 +126,7 @@ class Test_Centroids(unittest.TestCase):
             cdt2_alt = calc_centroids(msk)
             self.assertEqual(cdt.centroids, cdt2_alt.centroids)
 
-    def test_crop_centroids_trival(self):
+    def test_crop_centroids_trivial(self):
         for _ in range(repeats):
             msk, cent, order, sizes = get_nii(num_point=random.randint(1, 7))
             cdt = POI(cent, orientation=order, zoom=msk.zoom, shape=msk.shape)

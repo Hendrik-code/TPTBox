@@ -118,20 +118,18 @@ class Point_Registration:
 
     def get_resampler(self, seg, c_val, output_space: NII | None = None) -> sitk.ResampleImageFilter:
         resampler: sitk.ResampleImageFilter = sitk.ResampleImageFilter()
-        resampler_seg = sitk.ResampleImageFilter()
         if output_space is None:
-            resampler_seg.SetReferenceImage(self._img_fixed)
+            resampler.SetReferenceImage(self._img_fixed)
         else:
             resampler.SetReferenceImage(nii_to_sitk(output_space))
         if seg:
-            resampler_seg.SetInterpolator(sitk.sitkNearestNeighbor)
+            resampler.SetInterpolator(sitk.sitkNearestNeighbor)
             resampler.SetDefaultPixelValue(0)
         else:
             resampler.SetInterpolator(sitk.sitkBSplineResampler)
-            resampler.SetDefaultPixelValue(c_val)
-        resampler_seg.SetTransform(self._transform)
-        ### Segmentation Resampler
-        return resampler_seg
+            resampler.SetDefaultPixelValue(math.floor(c_val))
+        resampler.SetTransform(self._transform)
+        return resampler
 
     def transform(self, x: NII_or_POI) -> NII_or_POI:
         if isinstance(x, POI):

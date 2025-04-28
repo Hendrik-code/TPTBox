@@ -67,14 +67,15 @@ def user_guard(func: Any) -> Any:
 
 
 @user_guard
-def _download_weights(idx=85, addendum="") -> None:
+def _download_weights(idx=85, addendum="", first=True) -> None:
     weights_dir = get_weights_dir(idx)
     weights_url = WEIGHTS_URL_ + f"{idx:03}{addendum}.zip"
     _download(weights_url, weights_dir, text="pretrained weights")
-    addendum_download(idx)
+    if first:
+        addendum_download(idx)
 
 
-def _download(weights_url, weights_dir, text="") -> None:
+def _download(weights_url, weights_dir, text="", is_zip=True) -> None:
     try:
         # Retrieve file size
         with urllib.request.urlopen(str(weights_url)) as response:
@@ -94,11 +95,11 @@ def _download(weights_url, weights_dir, text="") -> None:
         zip_path = weights_dir.parent / Path(weights_url).name
         # Download the file
         urllib.request.urlretrieve(str(weights_url), zip_path, reporthook=update_progress)
-
-    print(f"Extracting {text}...")
-    with zipfile.ZipFile(zip_path, "r") as zip_ref:
-        zip_ref.extractall(weights_dir)
-    os.remove(zip_path)  # noqa: PTH107
+    if is_zip:
+        print(f"Extracting {text}...")
+        with zipfile.ZipFile(zip_path, "r") as zip_ref:
+            zip_ref.extractall(weights_dir)
+        os.remove(zip_path)  # noqa: PTH107
 
 
 def addendum_download(idx):
@@ -107,7 +108,7 @@ def addendum_download(idx):
     if next_zip.exists():
         with open(next_zip) as f:
             add = json.load(f)
-        [_download_weights(idx, addendum=a) for a in add]
+        [_download_weights(idx, addendum=a, first=False) for a in add]
         next_zip.unlink()
 
 

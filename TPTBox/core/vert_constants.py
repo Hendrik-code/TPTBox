@@ -348,6 +348,8 @@ class Vertebra_Instance(Abstract_lvl):
             return cls(i) in cls.sacrum()
         except KeyError:
             return False
+        except ValueError:
+            return False
 
     @classmethod
     def cervical(cls):
