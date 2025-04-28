@@ -443,8 +443,6 @@ class NII(NII_Math):
         self.reorient_(value, verbose=False)
 
 
-    def get_num_dims(self):
-        return len(self.shape)
     def split_4D_image_to_3D(self):
         assert self.get_num_dims() == 4,self.get_num_dims()
         arr_4d = self.get_array()
@@ -837,6 +835,9 @@ class NII(NII_Math):
             mapping = to_vox_map
         else:
             mapping = to_vox_map if isinstance(to_vox_map, tuple) else to_nii_optional(to_vox_map, seg=self.seg, default=to_vox_map)
+        if isinstance(mapping,Has_Grid) and mapping.assert_affine(self,raise_error=False,origin_tolerance=0.00000001,error_tolerance=0.00000001,shape_tolerance=0):
+            log.print(f"resample_from_to skipped: {self}",verbose=verbose)
+            return self if inplace else self.copy()
         assert mapping is not None
         log.print(f"resample_from_to: {self} to {mapping}",verbose=verbose)
         if order is None:
@@ -1029,7 +1030,7 @@ class NII(NII_Math):
             import ants
         except Exception:
             log.print_error()
-            log.on_fail("run 'pip install antspyx' to install deepali")
+            log.on_fail("run 'pip install antspyx' to install hf-deepali")
             raise
         return ants.from_nibabel(self.nii)
 
@@ -1298,7 +1299,7 @@ class NII(NII_Math):
         out = np_filter_connected_components(msk_i_data, largest_k_components=k, label_ref=labels, connectivity=connectivity, return_original_labels=return_original_labels,min_volume=min_volume,max_volume=max_volume,removed_to_label=removed_to_label)
         return self.set_array(out,inplace=inplace)
 
-    def compute_surface_mask(self, connectivity: int, dilated_surface: bool = False) -> Self:
+    def compute_surface_mask(self, connectivity: int = 3, dilated_surface: bool = False) -> Self:
         """ Removes everything but surface voxels
 
         Args:
@@ -1309,7 +1310,7 @@ class NII(NII_Math):
         return self.set_array(np_compute_surface(self.get_seg_array(), connectivity=connectivity, dilated_surface=dilated_surface))
 
 
-    def compute_surface_points(self, connectivity: int, dilated_surface: bool = False) -> list[tuple[int,int,int]]:
+    def compute_surface_points(self, connectivity: int = 3, dilated_surface: bool = False) -> list[tuple[int,int,int]]:
         assert self.seg, "This only works on segmentations"
         surface = self.compute_surface_mask(connectivity, dilated_surface)
         return np_point_coordinates(surface.get_seg_array()) # type: ignore
@@ -1331,7 +1332,7 @@ class NII(NII_Math):
         return self.set_array(arr,inplace=inplace)
 
 
-    def map_labels_based_on_majority_label_mask_overlap(self, label_mask: Self, labels: int | list[int] | None = None, dilate_pixel: int = 1, inplace: bool = False) -> Self:
+    def map_labels_based_on_majority_label_mask_overlap(self, label_mask: Self, labels: int | list[int] | None = None, dilate_pixel: int = 1, inplace: bool = False,no_match_label=0) -> Self:
         """Relabels all individual labels from input array to the majority labels of a given label_mask
 
         Args:
@@ -1344,7 +1345,7 @@ class NII(NII_Math):
             NII: Relabeled nifti
         """
         assert self.seg and label_mask.seg, "This only works on segmentations"
-        return self.set_array(np_map_labels_based_on_majority_label_mask_overlap(self.get_seg_array(), label_mask.get_seg_array(), label_ref=labels, dilate_pixel=dilate_pixel, inplace=inplace), inplace=inplace,)
+        return self.set_array(np_map_labels_based_on_majority_label_mask_overlap(self.get_seg_array(), label_mask.get_seg_array(), label_ref=labels, dilate_pixel=dilate_pixel, inplace=inplace,no_match_label=no_match_label), inplace=inplace,)
 
 
     def get_segmentation_difference_to(self, mask_gt: Self, ignore_background_tp: bool = False) -> Self:
@@ -1483,6 +1484,129 @@ class NII(NII_Math):
         inclusion: bool = False
     ):
         return self.truncate_labels_beyond_reference_(idx,not_beyond,fill,axis,inclusion)
+
+    def infect_conv(self: NII, reference_mask: NII, max_iters=100,inplace=False):
+        """
+        Expands labels from self_mask into regions of reference_mask == 1 via breadth-first diffusion.
+
+        Args:
+            self_mask (ndarray): (H, W) or (D, H, W) integer-labeled array.
+            reference_mask (ndarray): Binary array of same shape as self_mask.
+            max_iters (int): Maximum number of propagation steps.
+
+        Returns:
+            ndarray: Updated label mask.
+        """
+        from scipy.ndimage import convolve
+        crop = reference_mask.compute_crop(0,1)
+        self.assert_affine(reference_mask)
+        self_mask = self.apply_crop(crop).get_seg_array().copy()
+        ref_mask = np.clip(reference_mask.apply_crop(crop).get_seg_array(), 0, 1)
+
+        ndim = len(self_mask.shape)
+
+        # Define neighborhood kernel
+        if ndim == 2:
+            kernel = np.array([[0, 1, 0],
+                               [1, 0, 1],
+                               [0, 1, 0]], dtype=np.uint8)
+        elif ndim == 3:
+            kernel = np.zeros((3, 3, 3), dtype=np.uint8)
+            kernel[1, 1, 0] = kernel[1, 1, 2] = 1
+            kernel[1, 0, 1] = kernel[1, 2, 1] = 1
+            kernel[0, 1, 1] = kernel[2, 1, 1] = 1
+        else:
+            raise NotImplementedError("Only 2D or 3D masks are supported.")
+        try:
+            from tqdm import tqdm
+            r = tqdm(range(max_iters),desc="infect")
+        except Exception:
+            r = range(max_iters)
+        for _ in r:
+            unlabeled = (self_mask == 0) & (ref_mask == 1)
+            updated = False
+
+            for label in np_unique(self_mask):
+                if label == 0:
+                    continue  # skip background
+
+                binary_label_mask = (self_mask == label).astype(np.uint8)
+                neighbor_count = convolve(binary_label_mask, kernel, mode="constant", cval=0)
+
+                # Find unlabeled voxels adjacent to current label
+                new_voxels = (neighbor_count > 0) & unlabeled
+
+                if np.any(new_voxels):
+                    self_mask[new_voxels] = label
+                    updated = True
+
+            if not updated:
+                break
+        org = self.get_seg_array()
+        org[crop] = self_mask
+        return self.set_array(org,inplace=inplace)
+    def infect(self: NII, reference_mask: NII, inplace=False,verbose=True):
+        """
+        Expands labels from self_mask into regions of reference_mask == 1 via breadth-first diffusion.
+
+        Args:
+            self_mask (ndarray): (H, W) or (D, H, W) integer-labeled array.
+            reference_mask (ndarray): Binary array of same shape as self_mask.
+            max_iters (int): Maximum number of propagation steps.
+
+        Returns:
+            ndarray: Updated label mask.
+        """
+        self.assert_affine(reference_mask)
+        self_mask = self.compute_surface_mask().get_seg_array().copy()
+        self_mask_org = self.get_seg_array().copy()
+        ref_mask = np.clip(reference_mask.get_seg_array(), 0, 1)
+        ref_mask[self_mask_org != 0] = 0
+        searched = np.clip(self_mask,0,1).astype(np.uint8)
+        ndim = len(self_mask.shape)
+
+        # Define neighborhood kernel
+        if ndim == 3:
+            kernel = [(1,0,0),(0,1,0),(0,0,1),(-1,0,0),(0,-1,0),(0,0,-1)]
+        else:
+            raise NotImplementedError("Only 2D or 3D masks are supported.")
+        search = []
+        coords = np.where(self_mask != 0)
+        def _add_idx(x,y,z,v):
+            for x1,y1,z1 in kernel:
+                a = x+x1
+                b = y+y1
+                c = z+z1
+                if a < 0 or b < 0 or c < 0:
+                    continue
+                if a >= self_mask.shape[0] or b >= self_mask.shape[1] or c >= self_mask.shape[2]:
+                    continue
+                #try:
+                if searched[a,b,c] == 0 and ref_mask[a,b,c] == 1:
+                    search.append((a,b,c,v))
+                #except Exception:
+                #    pass
+        def _infect(a,b,c,v):
+            if searched[a,b,c] != 0:
+                return
+            if ref_mask[a,b,c] == 0:
+                return
+            #print(a,b,c)
+            searched[a,b,c] = 1
+            self_mask[a,b,c] = v
+            _add_idx(x,y,z,v)
+
+        from tqdm import tqdm
+        for x,y,z in tqdm(zip(coords[0],coords[1],coords[2]),total=len(coords[0]),disable=not verbose,desc="Collecting Surface"):
+            _add_idx(x,y,z,self_mask[x,y,z])
+        while len(search) != 0:
+            search2 = search
+            search = []
+            for x,y,z,v in tqdm(search2,disable=not verbose,desc="infect"):
+                _infect(x,y,z,v)
+        self_mask[self_mask == 0] = self_mask_org[self_mask == 0]
+        return self.set_array(self_mask,inplace=inplace)
+
     def map_labels(self, label_map:LABEL_MAP , verbose:logging=True, inplace=False):
         """
         Maps labels in the given NIfTI image according to the label_map dictionary.
@@ -1727,10 +1851,12 @@ class NII(NII_Math):
         return self.set_array(seg_arr,inplace=inplace)
     def extract_label_(self,label:int|Location|Sequence[int]|Sequence[Location], keep_label=False):
         return self.extract_label(label,keep_label,inplace=True)
-    def remove_labels(self,*label:int|Location|Sequence[int]|Sequence[Location], inplace=False, verbose:logging=True):
+    def remove_labels(self,label:int|Location|Sequence[int]|Sequence[Location], inplace=False, verbose:logging=True):
         '''If this NII is a segmentation you can single out one label.'''
         assert label != 0, 'Zero label does not make sens.  This is the background'
         seg_arr = self.get_seg_array()
+        if not isinstance(label,Sequence):
+            label = [label] # type: ignore
         for l in label:
             if isinstance(l, list):
                 for g in l:
@@ -1796,7 +1922,7 @@ def to_nii(img_bids: Image_Reference, seg=False) -> NII:
     elif isinstance(img_bids, Nifti1Image):
         return NII(img_bids, seg)
     else:
-        raise TypeError(img_bids)
+        raise TypeError(type(img_bids))
 
 def to_nii_seg(img: Image_Reference) -> NII:
     return to_nii(img,seg=True)

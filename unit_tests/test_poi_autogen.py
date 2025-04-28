@@ -423,7 +423,7 @@ class TestPOI(unittest.TestCase):
     # Test that the 'shift_all_centroid_coordinates' method does not modify the POI object when called with None as the translation vector.
     def test_shift_all_centroid_coordinates_with_none_translation_vector(self):
         # Create a POI object
-        poi = POI()
+        poi = POI(shape=(99, 99, 99))
 
         # Call the shift_all_centroid_coordinates method with None as the translation vector
         result = poi.shift_all_coordinates(None)
