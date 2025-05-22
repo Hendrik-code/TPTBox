@@ -57,12 +57,13 @@ def run_inference_on_file(
     padd: int = 0,
     ddevice: Literal["cpu", "cuda", "mps"] = "cuda",
     _model_path=None,
+    step_size=0.5,
 ) -> tuple[Image_Reference, np.ndarray | None]:
     global model_path  # noqa: PLW0603
     if _model_path is not None:
         _model_path = Path(_model_path)
         model_path = _model_path / "nnUNet_results"
-        assert model_path.exists(), _model_path
+        assert model_path.exists(), model_path
     if out_file is not None and Path(out_file).exists() and not override:
         return out_file, None
 
@@ -78,7 +79,7 @@ def run_inference_on_file(
         nnunet_path = next(next(iter(model_path.glob(f"*{idx:03}*"))).glob("*__nnUNetPlans*"))
     folds = [int(f.name.split("fold_")[-1]) for f in nnunet_path.glob("fold*")]
     if max_folds is not None:
-        folds = folds[:max_folds]
+        folds = max_folds if isinstance(max_folds, list) else folds[:max_folds]
 
     # if idx in _unets:
     #    nnunet = _unets[idx]
@@ -90,6 +91,7 @@ def run_inference_on_file(
         use_folds=tuple(folds) if len(folds) != 5 else None,
         gpu=gpu,
         ddevice=ddevice,
+        step_size=step_size,
     )
 
     #    _unets[idx] = nnunet
@@ -118,6 +120,7 @@ def run_inference_on_file(
     if zoom is not None:
         input_nii = [i.rescale_(zoom, mode=mode) for i in input_nii]
     input_nii = [squash_so_it_fits_in_float16(i) for i in input_nii]
+
     if crop:
         crop = input_nii[0].compute_crop(minimum=20)
         input_nii = [i.apply_crop(crop) for i in input_nii]
@@ -158,8 +161,13 @@ def run_total_seg(
     fill_holes=False,
     crop=False,
     max_folds: int | None = None,
+    _model_path=None,
+    step_size=0.5,
     **_kargs,
 ):
+    global model_path
+    if _model_path is not None:
+        model_path = _model_path
     if dataset_id is None:
         for idx in known_idx:
             download_weights(idx)
@@ -210,4 +218,5 @@ def run_total_seg(
         fill_holes=fill_holes,
         crop=crop,
         max_folds=max_folds,
+        step_size=step_size,
     )[0]
