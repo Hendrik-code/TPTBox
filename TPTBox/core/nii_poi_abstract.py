@@ -56,7 +56,7 @@ class Has_Grid(Grid_Proxy):
     @property
     def shape_int(self):
         assert self.shape is not None, "need shape information"
-        return tuple(np.rint(list(self.shape)).astype(int))
+        return tuple(np.rint(list(self.shape)).astype(int).tolist())
 
     @property
     def spacing(self):
@@ -68,11 +68,11 @@ class Has_Grid(Grid_Proxy):
 
     def __str__(self) -> str:
         try:
-            origin = tuple(np.around(self.origin, decimals=2))
+            origin = tuple(np.around(self.origin, decimals=2).tolist())
         except Exception:
             origin = self.origin
         try:
-            zoom = tuple(np.around(self.zoom, decimals=2))
+            zoom = tuple(np.around(self.zoom, decimals=2).tolist())
         except Exception:
             zoom = self.zoom
 

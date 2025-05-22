@@ -55,15 +55,19 @@ default_device = torch.device("cuda:0")
 
 
 def _warp_image(
-    source_image: deepaliImage, target_grid: Deepali_Grid, transform: SpatialTransform, mode="linear", device=default_device
+    source_image: deepaliImage, target_grid: Deepali_Grid, transform: SpatialTransform, mode="linear", device=default_device, inverse=False
 ) -> torch.Tensor:
+    if inverse:
+        transform = transform.inverse(update_buffers=True)
     warp_func = TransformImage(target=target_grid, source=target_grid, sampling=mode, padding=source_image.min()).to(device)
     with torch.inference_mode():
         data = warp_func(transform.tensor(), source_image.to(device))
     return data
 
 
-def _warp_poi(poi_moving: POI, target_grid: TPTBox_Grid, transform: SpatialTransform, align_corners, device=default_device) -> POI:
+def _warp_poi(
+    poi_moving: POI, target_grid: TPTBox_Grid, transform: SpatialTransform, align_corners, device=default_device, inverse=True
+) -> POI:
     keys: list[tuple[int, int]] = []
     points = []
     for key, key2, (x, y, z) in poi_moving.items():
@@ -74,7 +78,9 @@ def _warp_poi(poi_moving: POI, target_grid: TPTBox_Grid, transform: SpatialTrans
         data = torch.Tensor(points)
         transform.to(device)
         # data2 = data
-        data = transform.inverse(update_buffers=True).points(
+        if inverse:
+            transform = transform.inverse(update_buffers=True)
+        data = transform.points(
             data.to(device),
             axes=Axes.GRID,
             to_axes=Axes.GRID,
@@ -231,7 +237,13 @@ class General_Registration(DeepaliPairwiseImageTrainer):
 
     @torch.no_grad()
     def transform_nii(
-        self, img: NII, gpu: int | None = None, ddevice: DEVICES | None = None, target: Has_Grid | None = None, align_corners=True
+        self,
+        img: NII,
+        gpu: int | None = None,
+        ddevice: DEVICES | None = None,
+        target: Has_Grid | None = None,
+        align_corners=True,
+        inverse=False,
     ) -> NII:
         """
         Apply the computed transformation to a given NII image.
@@ -246,15 +258,17 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         target_grid_nii = self.target_grid if target is None else target
         target_grid = target_grid_nii.to_deepali_grid(align_corners)
         source_image = img.resample_from_to(self.input_grid).to_deepali()
-        data = _warp_image(source_image, target_grid, self.transform, "nearest" if img.seg else "linear", device=device).squeeze()
+        data = _warp_image(
+            source_image, target_grid, self.transform, "nearest" if img.seg else "linear", device=device, inverse=inverse
+        ).squeeze()
         data: torch.Tensor = data.permute(*torch.arange(data.ndim - 1, -1, -1))  # type: ignore
         out = target_grid_nii.make_nii(data.detach().cpu().numpy(), img.seg)
         return out
 
-    def transform_poi(self, poi: POI, gpu: int | None = None, ddevice: DEVICES | None = None, align_corners=True):
+    def transform_poi(self, poi: POI, gpu: int | None = None, ddevice: DEVICES | None = None, align_corners=True, inverse=True):
         device = get_device(ddevice, 0 if gpu is None else gpu) if ddevice is not None else self.device
         source_image = poi.resample_from_to(self.target_grid)
-        data = _warp_poi(source_image, self.target_grid, self.transform, align_corners, device=device)
+        data = _warp_poi(source_image, self.target_grid, self.transform, align_corners, device=device, inverse=inverse)
         return data.resample_from_to(self.target_grid)
 
     def __call__(self, *args, **kwds) -> NII:
