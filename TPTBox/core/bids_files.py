@@ -1394,7 +1394,7 @@ class BIDS_Family:
         try:
             return self.data_dict[item]
         except KeyError as e:
-            raise KeyError(f"BIDS_Family does not contain key {item}, only {self.keys()}") from e
+            raise KeyError(f"BIDS_Family does not contain key '{item}', only {list(self.keys())}; {self.family_id=}") from e
 
     def __setitem__(self, key, value):
         self.data_dict[key] = value

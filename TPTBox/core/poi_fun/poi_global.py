@@ -176,7 +176,7 @@ class POI_Global(Abstract_POI):
             self, out_path, make_parents, additional_info, save_hint=save_hint, resample_reference=resample_reference, verbose=verbose
         )
 
-    def save_mrk(self, filepath: str | Path, color=None):
+    def save_mrk(self, filepath: str | Path, color=None, split_by_region=True, split_by_subregion=False):
         """
         Save the POI data to a .mrk.json file in Slicer Markups format.
         Automatically sets coordinate system based on itk_coords.
@@ -184,16 +184,17 @@ class POI_Global(Abstract_POI):
         Preserves metadata from `info` dictionary.
         """
         if color is None:
-            color = [1.0, 0.0, 0.0]
+            color = self.info.get("color", [1.0, 0.0, 0.0])
         filepath = Path(filepath)
         if not filepath.name.endswith(".mrk.json"):
             filepath = filepath.parent / (filepath.stem + ".mrk.json")
         coordinate_system = "LPS" if self.itk_coords else "RAS"
 
         # Create list of control points
+        from TPTBox import NII
         from TPTBox.mesh3D.mesh_colors import get_color_by_label
 
-        control_points = []
+        list_markups = {}
         for region, subregion, coords in self.centroids.items():
             try:
                 name = self.level_two_info(subregion).name
@@ -203,7 +204,31 @@ class POI_Global(Abstract_POI):
                 name2 = self.level_one_info(region).name
             except Exception:
                 name2 = region
-            control_points.append(
+            key = "P"
+            color2 = color
+            if split_by_region:
+                key += str(region) + "_"
+                color2 = get_color_by_label(region).rgb.tolist()
+            if split_by_subregion:
+                key += str(subregion)
+                color2 = get_color_by_label(region).rgb.tolist()
+            if key not in list_markups:
+                list_markups[key] = {
+                    "type": "Fiducial",
+                    "coordinateSystem": coordinate_system,
+                    "locked": False,
+                    "labelFormat": "%N-%d",
+                    "controlPoints": [],
+                    "display": {
+                        "visibility": True,
+                        "opacity": 1.0,
+                        "color": color2.copy(),
+                        "propertiesLabelVisibility": False,
+                    },
+                    "description": "",  # self.info,
+                }
+
+            list_markups[key]["controlPoints"].append(
                 {
                     "id": f"{region}-{subregion}",
                     "label": f"{region}-{subregion}",
@@ -217,39 +242,12 @@ class POI_Global(Abstract_POI):
                     "positionStatus": "defined",
                 }
             )
-
         mrk_data = {
-            "markups": [
-                {
-                    "type": "Fiducial",
-                    "coordinateSystem": coordinate_system,
-                    "locked": False,
-                    "labelFormat": "%N-%d",
-                    "controlPoints": control_points,
-                    "display": {
-                        "visibility": True,
-                        "opacity": 1.0,
-                        "color": color,
-                        "propertiesLabelVisibility": False,
-                    },
-                    "description": self.info,
-                }
-            ],
+            "markups": list(list_markups.values()),
             "schema": "https://raw.githubusercontent.com/slicer/slicer/master/Modules/Loadable/Markups/Resources/Schema/markups-schema-v1.0.3.json#",
-            "coordinateSystem": coordinate_system,
+            # "coordinateSystem": coordinate_system,
         }
 
         with open(filepath, "w") as f:
             json.dump(mrk_data, f, indent=2)
         log.on_save(f"Saved .mrk.json to {filepath}")
-
-
-if __name__ == "__main__":
-    for p in Path("/DATA/NAS/datasets_processed/CT_fullbody/dataset-watrinet/atlas/").glob("*.json"):
-        p2 = p  # / "poi.json"
-        if "mrk.json" in p.name:
-            continue
-        POI_Global.load(p2).save_mrk(p2)
-    for p in Path("/DATA/NAS/datasets_processed/CT_fullbody/dataset-watrinet/results/").iterdir():
-        p2 = p / "poi.json"
-        POI_Global.load(p2).save_mrk(p2, color=[0, 0, 1])

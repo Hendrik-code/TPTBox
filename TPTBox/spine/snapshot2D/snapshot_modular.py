@@ -688,7 +688,7 @@ class Snapshot_Frame:
     hide_segmentation: bool = False
     hide_centroids: bool = False
     hide_centroid_labels: bool = False
-    poi_labelmap: dict[int, str] = field(default_factory=lambda: v_idx2name)
+    poi_labelmap: dict[int, str] = field(default_factory=lambda: {k: v for k, v in v_idx2name.items() if k < 35})
     force_show_cdt: bool = False  # Shows the centroid computed by a segmentation, if no centroids are provided
     curve_location: Location | None = None  # Location.Vertebra_Corpus
     show_these_subreg_poi: list[int | Location] | None = None

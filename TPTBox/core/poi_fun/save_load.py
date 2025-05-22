@@ -19,6 +19,7 @@ from TPTBox.core.vert_constants import (
     ROTATION,
     ZOOMS,
     Abstract_lvl,
+    Any,
     Location,
     Vertebra_Instance,
     _register_lvl,
@@ -254,7 +255,10 @@ def load_poi(ctd_path: POI_Reference, verbose=True) -> POI | POI_Global:  # noqa
         raise TypeError(f"{type(ctd_path)}\n{ctd_path}")
     ### New Spine_r has a dict instead of a dict list. ###
     if isinstance(dict_list, dict):
-        return _load_form_POI_spine_r2(dict_list)
+        if "markups" in dict_list:
+            return _load_mkr_POI(dict_list)
+        else:
+            return _load_form_POI_spine_r2(dict_list)
     ### format_POI_old has no META header ###
     if "direction" not in dict_list[0] and "vert_label" in dict_list[0]:
         return _load_format_POI_old(dict_list)  # This file if used in the old POI-pipeline and is deprecated
@@ -392,3 +396,108 @@ def _load_POI_centroids(
         for sub_id, t in v.items():
             sub_id = level_two_info._get_id(sub_id, no_raise=True)  # noqa: PLW2901
             centroids[vert_id, sub_id] = tuple(t)
+
+
+def _get_poi_idx_from_text(idx: str, label: str, centroids):
+    has_ids = False
+    if "-" in label:
+        try:
+            a, b = label.split("-")
+            region, subregion = int(a), int(b)
+            has_ids = True
+        except Exception:
+            pass
+        if not has_ids:
+            try:
+                a, b = label.split("-")
+                region, subregion = Any._get_id(a), Any._get_id(b)
+                has_ids = True
+            except Exception:
+                pass
+
+    if "-" in idx:
+        try:
+            a, b = idx.split("-")
+            region, subregion = int(a), int(b)
+            has_ids = True
+        except Exception:
+            pass
+        if not has_ids:
+            try:
+                a, b = idx.split("-")
+                region, subregion = Any._get_id(a), Any._get_id(b)
+                has_ids = True
+            except Exception:
+                pass
+    if not has_ids:
+        try:
+            region, subregion = int(idx), 1
+            has_ids = True
+        except Exception:
+            pass
+    if not has_ids:
+        try:
+            subregion: int = 1
+            region: int = Any._get_id(idx)
+            has_ids = True
+        except Exception:
+            pass
+    if not has_ids:
+        region = 1
+        subregion = 1
+    while (region, subregion) in centroids:
+        subregion += 1
+    return region, subregion
+
+
+def _load_mkr_POI(dict_mkr: dict):
+    centroids = POI_Descriptor()
+
+    if "@schema" not in dict_mkr and "markups-schema-v1.0.3" not in dict_mkr["@schema"]:
+        log.on_warning(
+            "this file is possible incompatible. Tested only with markups-schema-v1.0.3 and not", dict_mkr.get("@schmea", "No Schema")
+        )
+    if "markups" not in dict_mkr:
+        raise ValueError("markups is missing")
+    itk_coords = None
+    if dict_mkr.get("coordinateSystem") in ["LPS", "RAS"]:
+        itk_coords = dict_mkr["coordinateSystem"] == "LPS"
+    for markup in dict_mkr["markups"]:
+        if markup["type"] != "Fiducial":
+            log.on_warning("skip unknown markup type:", markup["type"])
+            continue
+        if markup["coordinateSystem"] not in ["LPS", "RAS"]:
+            log.on_warning("unknown coordinate system:", markup["coordinateSystem"])
+            continue
+        if itk_coords is not None:
+            assert markup["coordinateSystem"] == "LPS" == itk_coords, "multiple rotations not supported"
+        itk_coords = markup["coordinateSystem"] == "LPS"
+        if markup.get("coordinateUnits", "mm") != "mm":
+            log.on_warning("unknown coordinateUnits:", markup["coordinateUnits"])
+            continue
+        if "measurements" in markup and len(markup["measurements"]) != 0:
+            log.on_warning("this loader ignores measurements key", markup["measurements"])
+        if "controlPoints" not in markup:
+            log.on_warning("no controlPoints")
+            continue
+        for e, control_points in enumerate(markup["controlPoints"]):
+            if "position" not in control_points:
+                log.on_warning("controlPoints without position", control_points)
+
+            idx: str = control_points.get("id", str(e))
+
+            label = control_points.get("label", str(e))
+            # description = controlPoints.get("description", str(e))
+            # associatedNodeID = controlPoints.get("associatedNodeID", str(e))
+            position = control_points["position"]
+            # orientation = controlPoints.get("orientation", None)
+            region, subregion = _get_poi_idx_from_text(idx, label, centroids)
+            centroids[region, subregion] = tuple(position)
+    assert itk_coords is not None, "itk_coords not set"
+    from TPTBox import POI_Global
+
+    poi = POI_Global(centroids, itk_coords=itk_coords)
+    if "display" in dict_mkr and "color" in dict_mkr["display"]:
+        # TODO keep all display, locked etc info in the info dict
+        poi.info["color"] = dict_mkr["display"]["color"]
+    return poi
