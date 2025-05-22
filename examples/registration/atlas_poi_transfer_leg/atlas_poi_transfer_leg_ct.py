@@ -21,10 +21,12 @@ from TPTBox.core.poi_fun.poi_abstract import POI_Descriptor
 from TPTBox.core.vert_constants import Full_Body_Instance, Lower_Body
 from TPTBox.logger.log_file import No_Logger
 from TPTBox.registration.deformable.deformable_reg import Deformable_Registration
+from TPTBox.registration.ridged_intensity.affine_deepali import Tether
 
 # from TPTBox.registration.deformable.deformable_reg_old import Deformable_Registration as Deformable_Registration_old
 from TPTBox.registration.ridged_points import Point_Registration
 
+logger = No_Logger()
 ABBREVIATION_TO_ENUM = {
     # Patella
     "PPP": (Full_Body_Instance.patella_right, Lower_Body.PATELLA_PROXIMAL_POLE),
@@ -198,7 +200,10 @@ def parse_coordinates_to_poi(file_path: str | Path, left: bool):
 
 
 default_setting = {
-    "loss": {"config": {"be": {"stride": 1, "name": "BSplineBending"}, "seg": {"name": "MSE"}}, "weights": {"be": 0.0001, "seg": 1}},
+    "loss": {
+        "config": {"be": {"stride": 1, "name": "BSplineBending"}, "seg": {"name": "MSE"}},
+        "weights": {"be": 0.0001, "seg": 1, "tether": 0.001},
+    },
     "model": {"name": "SVFFD", "args": {"stride": [4, 4, 4], "transpose": False}, "init": None},
     "optim": {"name": "Adam", "args": {"lr": 0.001}, "loop": {"max_steps": 1500, "min_delta": 0.00001}},
     "pyramid": {
@@ -258,9 +263,6 @@ def split_left_right_leg(seg520: NII, c=2, min_volume=50) -> NII:
     return nii_left_right
 
 
-logger = No_Logger()
-
-
 def prep_Atlas(
     seg: NII | str | Path,
     ct: NII | str | Path,
@@ -281,13 +283,13 @@ def prep_Atlas(
             axis = atlas.get_axis("R")
             if axis == 0:
                 atlas = atlas.set_array(atlas.get_array()[::-1]).copy()
-                ct = atlas.set_array(ct.get_array()[::-1]).copy()
+                ct = ct.set_array(ct.get_array()[::-1]).copy()
             elif axis == 1:
                 atlas = atlas.set_array(atlas.get_array()[:, ::-1]).copy()
-                ct = atlas.set_array(ct.get_array()[:, ::-1]).copy()
+                ct = ct.set_array(ct.get_array()[:, ::-1]).copy()
             elif axis == 2:
                 atlas = atlas.set_array(atlas.get_array()[:, :, ::-1]).copy()
-                ct = atlas.set_array(ct.get_array()[:, :, ::-1]).copy()
+                ct = ct.set_array(ct.get_array()[:, :, ::-1]).copy()
         atlas = atlas.filter_connected_components(atlas.unique(), max_count_component=max_count_component, keep_label=True, connectivity=1)
         crop = atlas.compute_crop(1, dist=100)
         atlas.apply_crop_(crop).save(out_atlas)
@@ -307,7 +309,9 @@ class Register_Point_Atlas:
         split_leg_path: Path | str | None = None,
         atlas_centroids: Path | str | None = None,
         gpu=0,
+        gaussian_sigma=0,
         ddevice: DEVICES = "cuda",
+        bone_by_bone=False,
     ):
         # TODO Test Save and Load
         # atlas left assumed already filtered
@@ -334,27 +338,54 @@ class Register_Point_Atlas:
         logger.on_text("Register_Point_Atlas_One_Leg left")
         l = split_nii.extract_label(1) * target
         r = split_nii.extract_label(2) * target
-        self.left = Register_Point_Atlas_One_Leg(
-            l,
-            atlas,
-            poi_atlas,
-            same_side=atlas_left,
-            verbose=verbose,
-            setting=setting_1,
-            gpu=gpu,
-            ddevice=ddevice,
-        )
-        logger.on_text("Register_Point_Atlas_One_Leg right")
-        self.right = Register_Point_Atlas_One_Leg(
-            r,
-            atlas,
-            poi_atlas,
-            same_side=not atlas_left,
-            verbose=verbose,
-            setting=setting_1,
-            gpu=gpu,
-            ddevice=ddevice,
-        )
+        if bone_by_bone:
+            self.left = Register_Point_Atlas_bone_by_bone(
+                l,
+                atlas,
+                poi_atlas,
+                same_side=atlas_left,
+                verbose=verbose,
+                setting=setting_1,
+                gpu=gpu,
+                ddevice=ddevice,
+                gaussian_sigma=gaussian_sigma,
+            )
+            logger.on_text("Register_Point_Atlas_One_Leg right")
+            self.right = Register_Point_Atlas_bone_by_bone(
+                r,
+                atlas,
+                poi_atlas,
+                same_side=not atlas_left,
+                verbose=verbose,
+                setting=setting_1,
+                gpu=gpu,
+                ddevice=ddevice,
+                gaussian_sigma=gaussian_sigma,
+            )
+        else:
+            self.left = Register_Point_Atlas_One_Leg(
+                l,
+                atlas,
+                poi_atlas,
+                same_side=atlas_left,
+                verbose=verbose,
+                setting=setting_1,
+                gpu=gpu,
+                ddevice=ddevice,
+                gaussian_sigma=gaussian_sigma,
+            )
+            logger.on_text("Register_Point_Atlas_One_Leg right")
+            self.right = Register_Point_Atlas_One_Leg(
+                r,
+                atlas,
+                poi_atlas,
+                same_side=not atlas_left,
+                verbose=verbose,
+                setting=setting_1,
+                gpu=gpu,
+                ddevice=ddevice,
+                gaussian_sigma=gaussian_sigma,
+            )
 
     def make_poi_from_txt(self, text: Path | str, out: Path | str):
         logger.on_text("make_poi")
@@ -425,6 +456,7 @@ class Register_Point_Atlas_One_Leg:
         setting_patella=default_setting,
         gpu=0,
         ddevice: DEVICES = "cuda",
+        gaussian_sigma=0,
     ):
         # Assumes that you have removed the other leg.
         assert target.seg
@@ -465,6 +497,13 @@ class Register_Point_Atlas_One_Leg:
         target = target.apply_crop(self.crop)
         atlas_reg = atlas_reg.apply_crop(self.crop)
         self.target_grid = target.to_gird()
+        if gaussian_sigma > 0:
+            target.seg = False
+            target.set_dtype_(np.float32)
+            atlas_reg.seg = False
+            atlas_reg.set_dtype_(np.float32)
+            target = target.smooth_gaussian(gaussian_sigma)
+            atlas_reg = atlas_reg.smooth_gaussian(gaussian_sigma)
         self.reg_deform = Deformable_Registration(
             target,
             atlas_reg,
@@ -501,10 +540,6 @@ class Register_Point_Atlas_One_Leg:
             gpu=gpu,
             ddevice=ddevice,
         )
-
-        # self.reg_deform_p = Deformable_Registration_old(
-        #    patella_target, patella_atlas, config=setting_patella, verbose=verbose, gpu=gpu, ddevice=ddevice
-        # )
 
     def get_dump(self):
         return (
@@ -595,26 +630,191 @@ class Register_Point_Atlas_One_Leg:
         return poi_reg_flip
 
 
+class Register_Point_Atlas_bone_by_bone:
+    def __init__(
+        self,
+        target: NII,
+        atlas: NII,
+        poi_cms: POI | None,
+        same_side: bool,
+        verbose=99,
+        setting=default_setting,
+        gpu=0,
+        ddevice: DEVICES = "cuda",
+        gaussian_sigma=0,
+    ):
+        # Assumes that you have removed the other leg.
+        assert target.seg
+        assert atlas.seg
+        target = target.copy()
+        atlas = atlas.copy()
+        self.same_side = same_side
+        self.target_grid_org = target.to_gird()
+        self.atlas_org = atlas.to_gird()
+        if not same_side:
+            axis = target.get_axis("R")
+            if axis == 0:
+                target = target.set_array(target.get_array()[::-1]).copy()
+            elif axis == 1:
+                target = target.set_array(target.get_array()[:, ::-1]).copy()
+            elif axis == 2:
+                target = target.set_array(target.get_array()[:, :, ::-1]).copy()
+            else:
+                raise ValueError(axis)
+        for i in [200, 100000]:
+            t_crop = (target).compute_crop(0, i)  # if the angel is to different we need a larger crop...
+            target_ = target.apply_crop(t_crop)
+            # Point Registration
+            poi_target = calc_centroids(target_, second_stage=40)
+            if poi_cms is None:
+                poi_cms = calc_centroids(atlas, second_stage=40)  # This will be needlessly computed all the time
+            if not poi_cms.assert_affine(atlas, raise_error=False):
+                poi_cms = poi_cms.resample_from_to(atlas)
+            self.reg_point = Point_Registration(poi_target, poi_cms)
+            atlas_reg = self.reg_point.transform_nii(atlas)
+            if not atlas_reg.is_segmentation_in_border():
+                target = target_
+                break
+            print(f"Try point reg again; padding {i=} was to small")
+
+        # Major Bones
+        self.crop = (target + atlas_reg).compute_crop(0, 2)
+        target_ = target.apply_crop(self.crop)
+        atlas_reg_ = atlas_reg.apply_crop(self.crop)
+        self.target_grid = target_.to_gird()
+        self.reg_deform = {}
+        for i in target_.unique():
+            logger.on_log("new Reg with id =", i)
+            target = target_.extract_label(i)
+            atlas_reg = atlas_reg_.extract_label(i)
+            if gaussian_sigma > 0:
+                target.seg = False
+                target.set_dtype_(np.float32)
+                atlas_reg.seg = False
+                atlas_reg.set_dtype_(np.float32)
+                target = target.smooth_gaussian(gaussian_sigma)
+                atlas_reg = atlas_reg.smooth_gaussian(gaussian_sigma)
+
+            self.reg_deform[i] = Deformable_Registration(
+                target,
+                atlas_reg,
+                loss_terms={"be": ("BSplineBending", {"stride": 1}), "loss": "MSE", "tether": Tether()},  # type: ignore
+                weights={
+                    "be": setting["loss"]["weights"]["be"],
+                    "loss": setting["loss"]["weights"]["seg"],
+                    "tether": setting["loss"]["weights"]["tether"],
+                },
+                lr=setting["optim"]["args"]["lr"],
+                max_steps=setting["optim"]["loop"]["max_steps"],
+                min_delta=setting["optim"]["loop"]["min_delta"],
+                pyramid_levels=4,
+                coarsest_level=3,
+                finest_level=0,
+                verbose=verbose,
+                gpu=gpu,
+                ddevice=ddevice,
+            )
+
+    def get_dump(self):
+        raise NotImplementedError()
+
+    def save(self, path: str | Path):
+        with open(path, "wb") as w:
+            pickle.dump(self.get_dump(), w)
+
+    @classmethod
+    def load(cls, path):
+        with open(path, "rb") as w:
+            return cls.load_(pickle.load(w))
+
+    @classmethod
+    def load_(cls, w):
+        raise NotImplementedError()
+
+    def forward_nii(self, nii_atlas: NII):
+        nii_atlas = self.reg_point.transform_nii(nii_atlas)
+        nii_atlas = nii_atlas.apply_crop(self.crop)
+        nii_reg = None
+        for i, deformer in self.reg_deform.items():
+            a = deformer.transform_nii(nii_atlas.extract_label([i, i + 100]))
+            if nii_reg is None:
+                nii_reg = a
+            else:
+                nii_reg[np.logical_and(nii_reg == 0, a == 1)] = i
+        assert nii_reg is not None
+        nii_reg = nii_reg.resample_from_to(self.target_grid_org)
+        if self.same_side:
+            return nii_reg
+        return nii_reg.set_array(nii_reg.get_array()[::-1])
+
+    def forward_txt(self, file_path: str | Path, left: bool):
+        poi_glob = parse_coordinates_to_poi(file_path, left)
+        return self.forward_poi(poi_glob, left)
+
+    def forward_poi(self, poi_atlas: POI_Global | POI, left):
+        poi_atlas = poi_atlas.resample_from_to(self.atlas_org)
+        # Point Reg
+        poi_atlas = self.reg_point.transform_poi(poi_atlas)
+        # Deformable
+        poi_atlas = poi_atlas.apply_crop(self.crop)
+        poi_reg = None
+
+        for i, deformer in self.reg_deform.items():
+            a: POI = deformer.transform_poi(poi_atlas.extract_region(i, i + 100))
+            if poi_reg is None:
+                poi_reg = a
+            else:
+                poi_reg.join_left_(a)
+        assert poi_reg is not None
+        # poi_reg.save(root / "test" / "subreg_reg.json")
+        poi_reg = poi_reg.resample_from_to(self.target_grid_org)
+        poi_reg.level_one_info = Full_Body_Instance
+        poi_reg.level_two_info = Lower_Body
+        if self.same_side:
+            return poi_reg
+        for k1, k2, v in poi_reg.copy().items():
+            k = k1 % 100
+            if left:
+                k += 100
+            poi_reg[k, k2] = v
+        poi_reg_flip = poi_reg.make_empty_POI()
+        for k1, k2, (x, y, z) in poi_reg.copy().items():
+            axis = poi_reg.get_axis("R")
+            if axis == 0:
+                poi_reg_flip[k1, k2] = (poi_reg.shape[0] - 1 - x, y, z)
+            elif axis == 1:
+                poi_reg_flip[k1, k2] = (x, poi_reg.shape[1] - 1 - y, z)
+            elif axis == 2:
+                poi_reg_flip[k1, k2] = (x, y, poi_reg.shape[2] - 1 - z)
+            else:
+                raise ValueError(axis)
+        poi_reg_flip.level_one_info = Full_Body_Instance
+        poi_reg_flip.level_two_info = Lower_Body
+        return poi_reg_flip
+
+
 if __name__ == "__main__":
-    root = Path("/DATA/NAS/datasets_processed/CT_fullbody/dataset-watrinet/source/Dataset001_all/0001/")
-    atlas = root / "test" / "left.nii.gz"
+    root = Path("/DATA/NAS/datasets_processed/CT_fullbody/dataset-watrinet/atlas/")
+    atlas = root / "atlas002.nii.gz"
     root2 = Path("/DATA/NAS/datasets_processed/CT_fullbody/dataset-watrinet/source/Dataset001_all/0000/")
+
     target = to_nii(root2 / "bone.nii.gz", True)
     reg = Register_Point_Atlas(
         target,
         to_nii(atlas, True),
         atlas_left=True,
         split_leg_path=root2 / "test" / "split_leg.nii.gz",
-        atlas_centroids=root / "test" / "atlast_centroids.json",
+        atlas_centroids=root / "atlas002_left_cms_poi.json",
+        bone_by_bone=True,
     )
-    poi_out = reg.make_poi_from_txt("010__left.txt", root2 / "test" / "out_points_both.json")
-    nii = poi_out.resample_from_to(target).make_point_cloud_nii(s=5)[1]
-    nii2 = target.clamp(0, 1) * 100
-    nii[nii == 0] = nii2[nii == 0]
-    nii.save(root2 / "test" / "atlas_reg_poi.nii.gz")
-    poi = POI.load(root2 / "test" / "out_points_both.json")
-    poi.save(root2 / "test" / "out_points_both2.json")
-    reg.save("Register_Point_Atlas.pkl")
+    poi_atlas = POI.load(root / "atlas002_poi.json", target)
+    # nii = poi_out.resample_from_to(target).make_point_cloud_nii(s=5)[1]
+    # nii2 = target.clamp(0, 1) * 100
+    # nii[nii == 0] = nii2[nii == 0]
+    # nii.save(root2 / "test" / "atlas_reg_poi3.nii.gz")
+    poi = reg.make_poi_from_poi(poi_atlas, root2 / "test" / "out_points_both3.json")
+    poi.to_global().save_mrk(root2 / "test" / "out_points_both3.json")
+    # reg.save("Register_Point_Atlas.pkl")
     # CUDA_VISIBLE_DEVICES=2 /opt/anaconda3/envs/py3.11/bin/python /DATA/NAS/tools/TPTBox/tmp_poi_w.py
     sys.exit()
     st = time()
@@ -644,15 +844,15 @@ if __name__ == "__main__":
     default_setting["loss"]["weights"]["be"] *= min(right_nii_target.zoom) / 2.0
     default_setting["optim"]["loop"]["min_delta"] /= min(right_nii_target.zoom) / 2.0
     reg_obj = Register_Point_Atlas_One_Leg(right_nii_target, left_nii_atlas, False)
-    poi_out = reg_obj.forward_txt(file_path="010__left.txt")
+    poi_atlas = reg_obj.forward_txt(file_path="010__left.txt")
     nii_out = reg_obj.forward_nii(left_nii_atlas)
-    poi_out.save(root / "test" / "atlas_reg_poi.json")
+    poi_atlas.save(root / "test" / "atlas_reg_poi.json")
     nii_out.save(root / "test" / "atlas_reg.nii.gz")
-    nii = poi_out.make_point_cloud_nii(s=5)[1]
+    nii = poi_atlas.make_point_cloud_nii(s=5)[1]
     nii2 = right_nii_target.clamp(0, 1) * 100
     nii[nii == 0] = nii2[nii == 0]
     nii.save(root / "test" / "atlas_reg_poi.nii.gz")
-    p = poi_out.to_global(itk_coords=True)
+    p = poi_atlas.to_global(itk_coords=True)
     coords_dict = parse_coordinates("010__left.txt")
     for e, (k2, _) in enumerate(coords_dict.items(), 1):
         k = PATELLA if k2[0] == "P" else 60
