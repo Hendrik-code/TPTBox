@@ -20,32 +20,35 @@ def convert_predicted_logits_to_segmentation_with_correct_shape(
     properties_dict: dict,
     return_probabilities: bool = False,
     num_threads_torch: int = 8,
+    rescale=True,
 ):
     old_threads = torch.get_num_threads()
     torch.set_num_threads(num_threads_torch)
-
-    # resample to original shape
-    current_spacing = (
-        configuration_manager.spacing
-        if len(configuration_manager.spacing) == len(properties_dict["shape_after_cropping_and_before_resampling"])
-        else [properties_dict["spacing"][0], *configuration_manager.spacing]
-    )
-    predicted_logits = configuration_manager.resampling_fn_probabilities(
-        predicted_logits,
-        properties_dict["shape_after_cropping_and_before_resampling"],
-        current_spacing,
-        properties_dict["spacing"],
-    )
+    if rescale:
+        # resample to original shape
+        current_spacing = (
+            configuration_manager.spacing
+            if len(configuration_manager.spacing) == len(properties_dict["shape_after_cropping_and_before_resampling"])
+            else [properties_dict["spacing"][0], *configuration_manager.spacing]
+        )
+        predicted_logits = configuration_manager.resampling_fn_probabilities(
+            predicted_logits,
+            properties_dict["shape_after_cropping_and_before_resampling"],
+            current_spacing,
+            properties_dict["spacing"],
+        )
     # return value of resampling_fn_probabilities can be ndarray or Tensor but that doesnt matter because
     # apply_inference_nonlin will covnert to torch
-    predicted_probabilities = label_manager.apply_inference_nonlin(predicted_logits)
-    del predicted_logits
-    segmentation = label_manager.convert_probabilities_to_segmentation(predicted_probabilities)
-
+    # And this is stupid because convert_probabilities_to_segmentation transforms it back to a numpy...
+    if label_manager.has_regions:
+        # Softmax does not change when we use argmax in the next step
+        predicted_logits = label_manager.apply_inference_nonlin(predicted_logits)
     # segmentation may be torch.Tensor but we continue with numpy
-    if isinstance(segmentation, torch.Tensor):
-        segmentation = segmentation.cpu().numpy()
+    if isinstance(predicted_logits, torch.Tensor):
+        predicted_logits = predicted_logits.cpu().numpy()
 
+    segmentation = label_manager.convert_probabilities_to_segmentation(predicted_logits)
+    del predicted_logits
     # put segmentation in bbox (revert cropping)
     segmentation_reverted_cropping = np.zeros(
         properties_dict["shape_before_cropping"],
