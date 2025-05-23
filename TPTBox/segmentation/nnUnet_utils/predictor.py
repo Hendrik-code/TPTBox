@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import time
 import traceback
 from dataclasses import dataclass, field
 from math import ceil, floor
@@ -19,10 +20,7 @@ from tqdm import tqdm
 
 from TPTBox.core.compat import zip_strict
 from TPTBox.segmentation.nnUnet_utils.data_iterators import PreprocessAdapterFromNpy
-from TPTBox.segmentation.nnUnet_utils.export_prediction import (
-    convert_predicted_logits_to_segmentation_with_correct_shape,
-    export_prediction_from_logits,
-)
+from TPTBox.segmentation.nnUnet_utils.export_prediction import convert_predicted_logits_to_segmentation_with_correct_shape
 from TPTBox.segmentation.nnUnet_utils.get_network_from_plans import get_network_from_plans
 from TPTBox.segmentation.nnUnet_utils.plans_handler import PlansManager
 from TPTBox.segmentation.nnUnet_utils.sliding_window_prediction import compute_gaussian, compute_steps_for_sliding_window
@@ -32,6 +30,12 @@ def get_gpu_memory_MB(device):
     free, total = torch.cuda.mem_get_info(device)
     # print(f"{free=}", f"{total=}")
     return free / 1024**2
+
+
+def get_gpu_util(device):
+    free, total = torch.cuda.mem_get_info(device)
+    # print(f"{free=}", f"{total=}")
+    return 1 - free / total
 
 
 class nnUNetPredictor:
@@ -248,13 +252,12 @@ class nnUNetPredictor:
             self.label_manager,
             dct["data_properites"],
             return_probabilities=save_or_return_probabilities,
-            rescale=rescale,
         )
         print("convert_predicted_logits_to_segmentation_with_correct_shape; Took", time.time() - t, " seconds")
 
         return ret
 
-    def predict_logits_from_preprocessed_data(self, data: torch.Tensor) -> torch.Tensor:
+    def predict_logits_from_preprocessed_data(self, data: torch.Tensor, attempts=10) -> torch.Tensor:
         """
         IMPORTANT! IF YOU ARE RUNNING THE CASCADE, THE SEGMENTATION FROM THE PREVIOUS STAGE MUST ALREADY BE STACKED ON
         TOP OF THE IMAGE AS ONE-HOT REPRESENTATION! SEE PreprocessAdapter ON HOW THIS SHOULD BE DONE!
@@ -305,25 +308,36 @@ class nnUNetPredictor:
 
             # CPU version
             if prediction is None:
-                print("FALL BACK CPU")
-                for idx, params in enumerate(self.list_of_parameters):
-                    network = None
-                    if self.loaded_networks is not None:
-                        network = self.loaded_networks[idx]
-                    # messing with state dict names...
-                    elif not isinstance(self.network, OptimizedModule):
-                        self.network.load_state_dict(params)  # type: ignore
-                    else:
-                        self.network._orig_mod.load_state_dict(params)
+                try:
+                    print("FALL BACK CPU")
+                    for idx, params in enumerate(self.list_of_parameters):
+                        network = None
+                        if self.loaded_networks is not None:
+                            network = self.loaded_networks[idx]
+                        # messing with state dict names...
+                        elif not isinstance(self.network, OptimizedModule):
+                            self.network.load_state_dict(params)  # type: ignore
+                        else:
+                            self.network._orig_mod.load_state_dict(params)
 
-                    if prediction is None:
-                        prediction = self.predict_sliding_window_return_logits(data, network=network).to("cpu")  # type: ignore
-                    else:
-                        new_prediction = self.predict_sliding_window_return_logits(data, network=network).to("cpu")  # type: ignore
-                        prediction += new_prediction
+                        if prediction is None:
+                            prediction = self.predict_sliding_window_return_logits(data, network=network).to("cpu")  # type: ignore
+                        else:
+                            new_prediction = self.predict_sliding_window_return_logits(data, network=network).to("cpu")  # type: ignore
+                            prediction += new_prediction
 
-                if len(self.list_of_parameters) > 1:
-                    prediction /= len(self.list_of_parameters)  # type: ignore
+                    if len(self.list_of_parameters) > 1:
+                        prediction /= len(self.list_of_parameters)  # type: ignore
+                except RuntimeError:
+                    print(f"failed due to insufficient GPU memory. {attempts} attempts remaining.")
+                    print("Error:")
+                    traceback.print_exc()
+                    empty_cache(self.device)
+                    if attempts == 0:
+                        raise
+                    print("Sleep for a minute and try again")
+                    time.sleep(60)
+                    return self.predict_logits_from_preprocessed_data(data, attempts=attempts - 1)
             del data
             print("Prediction done, transferring to CPU if needed")  # if self.verbose else None
             prediction = prediction.to("cpu")  # type: ignore
@@ -439,6 +453,19 @@ class nnUNetPredictor:
 
             # print("pixel", np.prod(shape) / 1000000)
             # print("memory", get_gpu_memory_MB(device), device)
+            if get_gpu_util(device) > 0.7:
+                t = tqdm(range(1200))  # Wait 20 minutes
+                for i in t:
+                    util = get_gpu_util(device)
+                    th = 0.7
+                    if i > 60:
+                        th = 0.8
+                    if i > 180:
+                        th = 0.9
+                    t.desc = f"not enough gpu space {util:.2f} must be under {th:.1f}"
+                    if util < th:
+                        break
+                    time.sleep(1)
 
             def check_mem(shape, max_memory=160000, min_memory=5000, factor=160):
                 memory = get_gpu_memory_MB(device)
