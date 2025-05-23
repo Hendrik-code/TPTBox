@@ -215,9 +215,7 @@ class nnUNetPredictor:
                 self.loaded_networks.append(self.network)
         # print(type(self.loaded_networks[0]))
 
-    def predict_single_npy_array(
-        self, input_image: np.ndarray, image_properties: dict, save_or_return_probabilities: bool = False, rescale=True
-    ):
+    def predict_single_npy_array(self, input_image: np.ndarray, image_properties: dict, save_or_return_probabilities: bool = False):
         """
         image_properties must only have a 'spacing' key!
         """

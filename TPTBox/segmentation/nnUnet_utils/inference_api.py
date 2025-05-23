@@ -141,20 +141,8 @@ def run_inference(
     except Exception:
         print("could not stack images; shapes=", [a.shape for a in img_arrs])
         raise
-    print(input_nii, f"{reorient_PIR=}", orientation, predictor.configuration_manager.spacing)
-
-    # props = {
-    #    "sitk_stuff": {
-    #        # this saves the sitk geometry information. This part is NOT used by nnU-Net!
-    #        "spacing": sitk_nii.GetSpacing(),  # type:ignore
-    #        "origin": sitk_nii.GetOrigin(),  # type:ignore
-    #        "direction": sitk_nii.GetDirection(),  # type:ignore
-    #    },
-    #    "spacing": zoom[::-1],  # PIR
-    # }
-
     props = {"spacing": i.zoom[::-1]}  # PIR
-    out = predictor.predict_single_npy_array(img, props, save_or_return_probabilities=False, rescale=False)
+    out = predictor.predict_single_npy_array(img, props, save_or_return_probabilities=False)
     segmentation: np.ndarray = out  # type: ignore
     softmax_logits = None
     segmentation = np.transpose(segmentation, axes=segmentation.ndim - 1 - np.arange(segmentation.ndim))
