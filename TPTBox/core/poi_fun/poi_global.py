@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.poi_fun.poi_abstract import Abstract_POI, POI_Descriptor
 from TPTBox.core.poi_fun.save_load import FORMAT_GLOBAL, load_poi, save_poi
 from TPTBox.core.vert_constants import Abstract_lvl, logging
+from TPTBox.logger.log_file import log
 
 ###### GLOBAL POI #####
 
@@ -138,7 +140,7 @@ class POI_Global(Abstract_POI):
                 v = (-v[0], -v[1], v[2])  # noqa: PLW2901
             v_out = msk.global_to_local(v)
             if verbose:
-                print(v, "-->", v_out)
+                log.print(v, "-->", v_out)
             out[k1, k2] = tuple(v_out)
 
         return poi.POI(centroids=out, **msk._extract_affine(), info=self.info, format=self.format)
@@ -155,8 +157,8 @@ class POI_Global(Abstract_POI):
     @classmethod
     def load(cls, poi: poi.POI_Reference, itk_coords: bool | None = None) -> Self:
         poi_obj = load_poi(poi)
-        if not isinstance(poi_obj, POI_Global):
-            poi_obj = poi_obj.to_global(itk_coords if itk_coords is not None else False)
+        if not poi_obj.is_global:
+            poi_obj = poi_obj.to_global(itk_coords if itk_coords is not None else False)  # type: ignore
         if itk_coords is not None:
             assert itk_coords == poi_obj.itk_coords, "not implemented swichting to/from itk_coords to nii "
         return poi_obj  # type: ignore
@@ -173,3 +175,79 @@ class POI_Global(Abstract_POI):
         return save_poi(
             self, out_path, make_parents, additional_info, save_hint=save_hint, resample_reference=resample_reference, verbose=verbose
         )
+
+    def save_mrk(self, filepath: str | Path, color=None, split_by_region=True, split_by_subregion=False):
+        """
+        Save the POI data to a .mrk.json file in Slicer Markups format.
+        Automatically sets coordinate system based on itk_coords.
+        Includes level_one_info and level_two_info in the description.
+        Preserves metadata from `info` dictionary.
+        """
+        if color is None:
+            color = self.info.get("color", [1.0, 0.0, 0.0])
+        filepath = Path(filepath)
+        if not filepath.name.endswith(".mrk.json"):
+            filepath = filepath.parent / (filepath.stem + ".mrk.json")
+        coordinate_system = "LPS" if self.itk_coords else "RAS"
+
+        # Create list of control points
+        from TPTBox import NII
+        from TPTBox.mesh3D.mesh_colors import get_color_by_label
+
+        list_markups = {}
+        for region, subregion, coords in self.centroids.items():
+            try:
+                name = self.level_two_info(subregion).name
+            except Exception:
+                name = subregion
+            try:
+                name2 = self.level_one_info(region).name
+            except Exception:
+                name2 = region
+            key = "P"
+            color2 = color
+            if split_by_region:
+                key += str(region) + "_"
+                color2 = get_color_by_label(region).rgb.tolist()
+            if split_by_subregion:
+                key += str(subregion)
+                color2 = get_color_by_label(region).rgb.tolist()
+            if key not in list_markups:
+                list_markups[key] = {
+                    "type": "Fiducial",
+                    "coordinateSystem": coordinate_system,
+                    "locked": False,
+                    "labelFormat": "%N-%d",
+                    "controlPoints": [],
+                    "display": {
+                        "visibility": True,
+                        "opacity": 1.0,
+                        "color": color2.copy(),
+                        "propertiesLabelVisibility": False,
+                    },
+                    "description": "",  # self.info,
+                }
+
+            list_markups[key]["controlPoints"].append(
+                {
+                    "id": f"{region}-{subregion}",
+                    "label": f"{region}-{subregion}",
+                    "description": name,
+                    "associatedNodeID": name2,
+                    "position": list(coords),
+                    "orientation": [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+                    "selected": False,
+                    "locked": False,
+                    "visibility": True,
+                    "positionStatus": "defined",
+                }
+            )
+        mrk_data = {
+            "markups": list(list_markups.values()),
+            "schema": "https://raw.githubusercontent.com/slicer/slicer/master/Modules/Loadable/Markups/Resources/Schema/markups-schema-v1.0.3.json#",
+            # "coordinateSystem": coordinate_system,
+        }
+
+        with open(filepath, "w") as f:
+            json.dump(mrk_data, f, indent=2)
+        log.on_save(f"Saved .mrk.json to {filepath}")
