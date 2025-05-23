@@ -500,3 +500,6 @@ def _set_indent(indent_change: int | bool):
     else:
         indentation_level = indent_change
     return indentation_level
+
+
+log = No_Logger()
