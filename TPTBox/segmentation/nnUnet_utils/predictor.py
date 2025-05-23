@@ -562,11 +562,11 @@ class nnUNetPredictor:
             pbar.update(1)
             work_on = data[sl][None]
             work_on = work_on.to(self.device, non_blocking=False)
-            prediction = self._internal_maybe_mirror_and_predict(work_on, network=network)[0]
+            prediction = self._internal_maybe_mirror_and_predict(work_on, network=network)[0].to(results_device)
             if prediction.shape[0] != predicted_logits.shape[0]:
                 prediction.squeeze_(0)
-            predicted_logits[sl] += (prediction * gaussian if self.use_gaussian else prediction).to(results_device)
-            n_predictions[sl[1:]] += gaussian.to(results_device) if self.use_gaussian else 1
+            predicted_logits[sl] += prediction * gaussian if self.use_gaussian else prediction
+            n_predictions[sl[1:]] += gaussian if self.use_gaussian else 1
         return predicted_logits, n_predictions
 
 

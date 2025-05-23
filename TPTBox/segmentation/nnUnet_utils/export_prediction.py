@@ -40,15 +40,16 @@ def convert_predicted_logits_to_segmentation_with_correct_shape(
     # return value of resampling_fn_probabilities can be ndarray or Tensor but that doesnt matter because
     # apply_inference_nonlin will covnert to torch
     # And this is stupid because convert_probabilities_to_segmentation transforms it back to a numpy...
-    if label_manager.has_regions:
+    if label_manager.has_regions or return_probabilities:
         # Softmax does not change when we use argmax in the next step
         predicted_logits = label_manager.apply_inference_nonlin(predicted_logits)
     # segmentation may be torch.Tensor but we continue with numpy
     if isinstance(predicted_logits, torch.Tensor):
         predicted_logits = predicted_logits.cpu().numpy()
 
-    segmentation = label_manager.convert_probabilities_to_segmentation(predicted_logits)
-    del predicted_logits
+    segmentation = label_manager.convert_probabilities_to_segmentation(np.ascontiguousarray(predicted_logits))
+    if not return_probabilities:
+        del predicted_logits
     # put segmentation in bbox (revert cropping)
     segmentation_reverted_cropping = np.zeros(
         properties_dict["shape_before_cropping"],
@@ -63,6 +64,7 @@ def convert_predicted_logits_to_segmentation_with_correct_shape(
     if return_probabilities:
         # revert cropping
         try:
+            predicted_probabilities = predicted_logits  # noqa: F821
             predicted_probabilities = label_manager.revert_cropping_on_probabilities(  # type: ignore
                 predicted_probabilities,
                 properties_dict["bbox_used_for_cropping"],

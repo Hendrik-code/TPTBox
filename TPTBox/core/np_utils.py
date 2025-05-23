@@ -180,7 +180,7 @@ def np_unique_withoutzero(arr: UINTARRAY) -> list[int]:
     return [i for i in np_unique(arr) if i != 0]
 
 
-def np_center_of_mass(arr: UINTARRAY) -> dict[int, COORDINATE]:
+def np_center_of_mass(arr: UINTARRAY) -> dict[int, np.ndarray]:
     """Calculates center of mass, mapping label in array to a coordinate (float) (exluding zero)
 
     Args:
@@ -678,7 +678,7 @@ def np_connected_components(
         verbose: If true, will print out if the array does not have any CC
 
     Returns:
-        arr_cc: UINTARRAY, N: int
+        arr_cc: UINTARRAY, N: number of cc
     """
     assert np.min(arr) == 0, f"min value of mask not zero, got {np.min(arr)}"
     assert np.max(arr) >= 0, f"wrong normalization, max value is not >= 0, got {np_unique(arr)}"
