@@ -1758,7 +1758,7 @@ class NII(NII_Math):
                 return self._arr
             else:
                 return self._arr.astype(dtype, copy=False)
-    def __array_wrap__(self, array,context, return_scalar):
+    def __array_wrap__(self, array,context=None, return_scalar=False):
         assert not return_scalar,context
         if array.shape != self.shape:
             raise SyntaxError(f"Function call induce a shape change of nii image. Before {self.shape} after {array.shape}. {context}")
