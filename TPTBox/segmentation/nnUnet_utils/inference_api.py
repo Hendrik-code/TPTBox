@@ -144,7 +144,7 @@ def run_inference(
     props = {
         "spacing": i.zoom[::-1],  # PIR
     }
-    out = predictor.predict_single_npy_array(img, props, logits=False, rescale=False)
+    out = predictor.predict_single_npy_array(img, props, save_or_return_probabilities=False, rescale=False)
     segmentation: np.ndarray = out  # type: ignore
     softmax_logits = None
     segmentation = np.transpose(segmentation.astype(np.uint8), axes=segmentation.ndim - 1 - np.arange(segmentation.ndim))

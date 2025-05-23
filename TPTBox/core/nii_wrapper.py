@@ -423,8 +423,6 @@ class NII(NII_Math):
         z = tuple(np.round(self.affine[:3,3],7))
         assert len(z) == 3
         return z # type: ignore
-
-
     @origin.setter
     def origin(self,x:tuple[float, float, float]):
         self._unpack()

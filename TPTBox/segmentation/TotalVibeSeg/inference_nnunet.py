@@ -165,7 +165,7 @@ def run_total_seg(
     step_size=0.5,
     **_kargs,
 ):
-    global model_path
+    global model_path  # noqa: PLW0603
     if _model_path is not None:
         model_path = _model_path
     if dataset_id is None:
