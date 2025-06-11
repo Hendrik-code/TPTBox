@@ -978,6 +978,23 @@ class NII(NII_Math):
             self.set_dtype_(self_dtype)
         log.print(f"Shifted from range {mi, ma} to range {self.min(), self.max()}", verbose=verbose)
 
+    def get_histogram(self, bins=256, hrange=None, density=False, c_val:float|None=None):
+        """Returns the histogram of the image array.
+
+        Args:
+            bins (int, optional): Number of bins for the histogram. Defaults to 256.
+            range (tuple, optional): Range of values to consider for the histogram. Defaults to None.
+            density (bool, optional): If True, the result is the probability density function at the bin, normalized such that the integral over the range is 1. Defaults to False.
+            c_val (float|None, optional): The value below which all values are set to c_val. Defaults to None.
+
+        Returns:
+            tuple: A tuple containing the histogram values and the bin edges.
+        """
+        arr = self.get_array()
+        if c_val is not None:
+            arr[arr <= c_val] = c_val
+        return np.histogram(arr, bins=bins, range=hrange, density=density)
+
     def match_histograms(self, reference:Image_Reference,c_val = 0,inplace=False):
         assert not self.seg
         ref_nii = to_nii(reference)

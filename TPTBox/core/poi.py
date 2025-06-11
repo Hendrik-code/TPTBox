@@ -314,6 +314,7 @@ class POI(Abstract_POI, Has_Grid):
         """
         origin: COORDINATE = None  # type: ignore
         shape = None  # type: ignore
+        o_shift = tuple(o if o.start is not None else slice(0, None) for o in o_shift)
         try:
 
             def shift(x, y, z):
