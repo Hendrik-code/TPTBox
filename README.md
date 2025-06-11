@@ -1,3 +1,8 @@
+<h1 align="center">
+<img src="https://github.com/Hendrik-code/TPTBox/blob/logo/TPTBox/images/logo.svg" width="300">
+</h1><br>
+
+
 [![PyPI version tptbox](https://badge.fury.io/py/tptbox.svg)](https://pypi.python.org/pypi/tptbox/)
 [![Python Versions](https://img.shields.io/pypi/pyversions/tptbox)](https://pypi.org/project/tptbox/)
 [![Stable Version](https://img.shields.io/pypi/v/tptbox?label=stable)](https://pypi.python.org/pypi/tptbox/)
