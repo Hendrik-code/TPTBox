@@ -192,11 +192,12 @@ def snapshot(
     subreg_msk: Image_Reference = None,
     out_path: str | Path | list[str | Path] | list[Path] | None = None,
     mode="MINMAX",
+    crop=False,
 ):
     if isinstance(ref, BIDS_FILE):
         mode = "CT" if ref.bids_format == "ct" else "MRI"
 
-    return mri_snapshot(ref, vert_msk, subreg_ctd, subreg_msk, out_path, mode)  # type: ignore
+    return mri_snapshot(ref, vert_msk, subreg_ctd, subreg_msk, out_path, mode, crop=crop)  # type: ignore
 
 
 def mri_snapshot(
@@ -206,6 +207,7 @@ def mri_snapshot(
     subreg_msk: Image_Reference = None,
     out_path: str | Path | list[str | Path] | list[Path] | None = None,
     mode="MRI",
+    crop=False,
 ):
     frames = [
         Snapshot_Frame(
@@ -216,7 +218,7 @@ def mri_snapshot(
             sagittal=True,
             coronal=True,
             axial=False,
-            crop_msk=False,
+            crop_msk=crop,
             hide_segmentation=True,
         ),
         Snapshot_Frame(
@@ -227,7 +229,7 @@ def mri_snapshot(
             sagittal=True,
             coronal=True,
             axial=False,
-            crop_msk=False,
+            crop_msk=crop,
         ),
     ]
     if subreg_msk is not None:
@@ -240,7 +242,7 @@ def mri_snapshot(
                 sagittal=True,
                 coronal=True,
                 axial=False,
-                crop_msk=False,
+                crop_msk=crop,
             )
         )
     if out_path is None:

@@ -57,16 +57,6 @@ def read_config(idx) -> dict[str, float]:
         return {"dataset_release": 0.0}
 
 
-def user_guard(func: Any) -> Any:
-    """Check for user defined environment variables. We do NOT want to change user directories"""
-    if env_name in os.environ:
-        logger.info("User defined environment variables detected, skip directory operations.")
-        return
-    else:
-        return func
-
-
-@user_guard
 def _download_weights(idx=85, addendum="", first=True) -> None:
     weights_dir = get_weights_dir(idx)
     weights_url = WEIGHTS_URL_ + f"{idx:03}{addendum}.zip"

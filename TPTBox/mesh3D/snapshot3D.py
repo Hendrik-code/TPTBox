@@ -128,6 +128,7 @@ def make_sub_snapshot_parallel(
     smoothing=20,
     resolution=2,
     cpus=10,
+    width_factor=1.0,
 ):
     ress = []
     with Pool(cpus) as p:  # type: ignore
@@ -141,6 +142,7 @@ def make_sub_snapshot_parallel(
                     "ids_list": ids_list,
                     "smoothing": smoothing,
                     "resolution": resolution,
+                    "width_factor": width_factor,
                 },
             )
             ress.append(res)

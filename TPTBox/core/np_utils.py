@@ -74,6 +74,22 @@ def np_extract_label(
 
 
 def cc3dstatistics(arr: UINTARRAY, use_crop: bool = True) -> dict:
+    """
+    Computes connected component statistics for a labeled array using connected components 3D (cc3d).
+
+    Args:
+        arr (UINTARRAY): A 3D array of unsigned integers or booleans where each connected component
+                         is labeled with a unique integer. Typically output from a labeling function.
+        use_crop (bool): If True, the function attempts to crop the input array around non-zero regions
+                         to improve performance and focus statistics on the area of interest. Defaults to True.
+
+    Returns:
+        dict: A dictionary containing statistics of the connected components, such as their sizes,
+              bounding boxes, and possibly centroids, depending on implementation of `_cc3dstats`.
+
+    Raises:
+        AssertionError: If the input array is not of an unsigned integer or boolean dtype.
+    """
     assert np.issubdtype(arr.dtype, np.unsignedinteger) or np.issubdtype(arr.dtype, np.bool_), (
         f"cc3dstatistics expects uint type, got {arr.dtype}"
     )
@@ -164,7 +180,7 @@ def np_unique_withoutzero(arr: UINTARRAY) -> list[int]:
     return [i for i in np_unique(arr) if i != 0]
 
 
-def np_center_of_mass(arr: UINTARRAY) -> dict[int, COORDINATE]:
+def np_center_of_mass(arr: UINTARRAY) -> dict[int, np.ndarray]:
     """Calculates center of mass, mapping label in array to a coordinate (float) (exluding zero)
 
     Args:
@@ -662,7 +678,7 @@ def np_connected_components(
         verbose: If true, will print out if the array does not have any CC
 
     Returns:
-        arr_cc: UINTARRAY, N: int
+        arr_cc: UINTARRAY, N: number of cc
     """
     assert np.min(arr) == 0, f"min value of mask not zero, got {np.min(arr)}"
     assert np.max(arr) >= 0, f"wrong normalization, max value is not >= 0, got {np_unique(arr)}"
@@ -757,7 +773,7 @@ def np_filter_connected_components(
 
     arr2 = arr.copy()
     labels: Sequence[int] = _to_labels(arr, label_ref)
-    arr2[np.isin(arr, labels, invert=True)] = 0  # type:ignore
+    arr2[np.isin(arr2, labels, invert=True)] = 0  # type:ignore
 
     labels_out, n = _connected_components(arr2, connectivity=connectivity, return_N=True)
     if largest_k_components is None:
@@ -831,7 +847,7 @@ def np_translate_to_center_of_array(image: np.ndarray) -> np.ndarray:
 
 
 def np_translate_arr(arr: np.ndarray, translation_vector: tuple[int, int] | tuple[int, int, int]) -> np.ndarray:
-    """Translates nonzero values of an input array according to a 2D or 3D translation vector. Values that would be shifted beyond the boundary are removed!
+    """Translates values of an input array according to a 2D or 3D translation vector. Values that would be shifted beyond the boundary are removed!
 
     Args:
         arr: input array
