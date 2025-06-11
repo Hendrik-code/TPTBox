@@ -314,6 +314,7 @@ class POI(Abstract_POI, Has_Grid):
         """
         origin: COORDINATE = None  # type: ignore
         shape = None  # type: ignore
+        o_shift = tuple(o if o.start is not None else slice(0, None) for o in o_shift)
         try:
 
             def shift(x, y, z):
@@ -1066,7 +1067,7 @@ def calc_centroids_from_two_masks(
     org_shape = subreg_msk.shape
     # crop to mask to speed up the segmentation
     crop = vert_msk.compute_crop()
-    crop = subreg_msk.compute_crop(maximum_size=crop)
+    # crop = subreg_msk.compute_crop(maximum_size=crop)
     # crop = (slice(0, subreg_msk.shape[0]), slice(0, subreg_msk.shape[1]), slice(0, subreg_msk.shape[2]))
 
     vert_msk = vert_msk.apply_crop(crop)
