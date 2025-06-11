@@ -341,7 +341,7 @@ def np_dilate_msk(
             data = out.copy()
             data[i != data] = 0
             if use_crop:
-                lcrop = np_bbox_binary(data, px_dist=2, raise_error=False)
+                lcrop = np_bbox_binary(data, px_dist=2 + n_pixel, raise_error=False)
                 data = data[lcrop]
             msk_ibe_data = _binary_dilation(data, struct=struct)
 
