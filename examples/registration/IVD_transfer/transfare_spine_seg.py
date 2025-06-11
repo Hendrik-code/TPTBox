@@ -105,14 +105,15 @@ class Register_Segmentations:
         self.crop = (target + atlas_reg).compute_crop(0, 20)
         target = target.apply_crop(self.crop)
         atlas_reg = atlas_reg.apply_crop(self.crop)
-        target.seg = False
         if gaussian_sigma > 0:
+            target.seg = False
             target.set_dtype_(np.float32)
             atlas_reg.seg = False
             atlas_reg.set_dtype_(np.float32)
-            self.target_grid = target.to_gird()
             target = target.smooth_gaussian(gaussian_sigma)
             atlas_reg = atlas_reg.smooth_gaussian(gaussian_sigma)
+        self.target_grid = target.to_gird()
+
         self.reg_deform = Deformable_Registration(
             target,
             atlas_reg,

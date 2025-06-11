@@ -201,9 +201,11 @@ def save_json(json_ob, file, check_exist=False):
     """
 
     def convert(obj):
-        if isinstance(obj, np.int64):
+        if isinstance(obj, np.integer):
             return int(obj)
-        raise TypeError
+        if isinstance(obj, np.floating):
+            return float(obj)
+        raise TypeError(type(obj))
 
     if check_exist and test_name_conflict(json_ob, file):
         raise FileExistsError(file)

@@ -437,6 +437,16 @@ class NII(NII_Math):
         rotation = rotation_zoom / zoom
         return rotation
 
+    @property
+    def direction(self) -> list:
+        direction_matrix = self.rotation
+        direction_flat = direction_matrix.flatten().tolist()
+        return direction_flat
+    @property
+    def direction_itk(self) -> list:
+        a = np.array(self.direction)
+        a[:len(a)//3*2]*=-1
+        return a.tolist()
 
     @orientation.setter
     def orientation(self, value: AX_CODES):
@@ -488,7 +498,7 @@ class NII(NII_Math):
         return self._arr.copy()
     def numpy(self, *_args):
         return self.get_array()
-    def set_array(self,arr:np.ndarray|Self, inplace=False,verbose:logging=False)-> Self:  # noqa: ARG002
+    def set_array(self,arr:np.ndarray|Self, inplace=False,verbose:logging=False,seg=None)-> Self:  # noqa: ARG002
         """Creates a NII where the array is replaces with the input array.
 
         Note: This function works "Out-of-place" by default, like all other methods.
@@ -500,6 +510,7 @@ class NII(NII_Math):
         Returns:
             self
         """
+
         if hasattr(arr,"get_array"):
             arr = arr.get_array() # type: ignore
         if arr.dtype == bool:
@@ -520,10 +531,12 @@ class NII(NII_Math):
         #if all(a is None for a in self.header.get_slope_inter()):
         #    nii.header.set_slope_inter(1,self.get_c_val()) # type: ignore
         if inplace:
+            if seg is not None:
+                self.seg = seg
             self.nii = nii
             return self
         else:
-            return self.copy(nii) # type: ignore
+            return self.copy(nii,seg=seg) # type: ignore
 
     def set_array_(self,arr:np.ndarray,verbose:logging=True):
         return self.set_array(arr,inplace=True,verbose=verbose)
@@ -1666,10 +1679,10 @@ class NII(NII_Math):
     def map_labels_(self, label_map: LABEL_MAP, verbose:logging=True):
         return self.map_labels(label_map,verbose=verbose,inplace=True)
 
-    def copy(self, nib:Nifti1Image|_unpacked_nii|None = None):
+    def copy(self, nib:Nifti1Image|_unpacked_nii|None = None,seg=None):
         if nib is None:
             nib = (self.get_array().copy(), self.affine.copy(), self.header.copy())
-        return NII(nib,seg=self.seg,c_val = self.c_val,info = self.info)
+        return NII(nib,seg=self.seg if seg is None else seg,c_val = self.c_val,info = self.info)
 
     def clone(self):
         return self.copy()
@@ -1763,9 +1776,10 @@ class NII(NII_Math):
                 return self._arr
             else:
                 return self._arr.astype(dtype, copy=False)
-    def __array_wrap__(self, array):
+    def __array_wrap__(self, array,context=None, return_scalar=False):
+        assert not return_scalar,context
         if array.shape != self.shape:
-            raise SyntaxError(f"Function call induce a shape change of nii image. Before {self.shape} after {array.shape}.")
+            raise SyntaxError(f"Function call induce a shape change of nii image. Before {self.shape} after {array.shape}. {context}")
         return self.set_array(array)
     def __getitem__(self, key)-> Any:
         if isinstance(key,Sequence):

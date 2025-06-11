@@ -18,7 +18,70 @@ from TPTBox.core import np_utils  # noqa: E402
 from TPTBox.tests.test_utils import get_nii, repeats  # noqa: E402
 
 
+def make_test_array_repeating(shape=(4, 4), labels=(0, 1, 2, 3)) -> np.ndarray:
+    """Creates a test array with a repeating pattern of the given labels."""
+    size = np.prod(shape)
+    label_pattern = np.resize(np.array(labels), size)
+    return label_pattern.reshape(shape)
+
+
+def make_labeled_3d_array() -> np.ndarray:
+    """
+    Create a small 3D array with labeled connected components.
+    Components:
+    - One block of 1s
+    - One isolated voxel of 2
+    """
+    arr = np.zeros((5, 5, 5), dtype=np.uint8)
+    arr[1:3, 1:3, 1:3] = 1  # a small cube
+    arr[4, 4, 4] = 2  # single voxel
+    return arr
+
+
 class Test_np_utils(unittest.TestCase):
+    def test_np_extract_label(self):
+        arr = make_test_array_repeating()
+        print(make_test_array_repeating())
+        arr_copy = arr.copy()
+
+        # Test extracting single label
+        out = np_utils.np_extract_label(arr, label=2, to_label=99, inplace=False)
+        assert np.all(arr == arr_copy), "Original array should not be modified when inplace=False"
+        assert np.all((out == 99) == (arr == 2)), "Only positions with label 2 should be 99"
+        assert np.all((out == 0) == (arr != 2)), "All other positions should be 0"
+
+        # Test extracting zero label
+        out_zero = np_utils.np_extract_label(arr, label=0, to_label=42, inplace=False)
+        assert np.all((out_zero == 42) == (arr == 0)), "Label 0 should be correctly extracted"
+
+        # Test multiple labels
+        out_multi = np_utils.np_extract_label(arr, label=[1, 3], to_label=7, inplace=False)
+        mask = np.isin(arr, [1, 3])
+        assert np.all((out_multi == 7) == mask), "Labels 1 and 3 should be set to 7"
+
+        # Test inplace modification
+        arr_inplace = make_test_array_repeating()
+        result = np_utils.np_extract_label(arr_inplace, label=1, to_label=5, inplace=True)
+        assert result is arr_inplace, "Should return the same array if inplace=True"
+        assert np.all((arr_inplace == 5) == (arr_copy == 1)), "Inplace modification should match label positions"
+
+    def test_np_volume(self):
+        arr = make_test_array_repeating().astype(np.uint16)
+        arr_c = arr.copy()
+        unique, counts = np.unique(arr, return_counts=True)
+        expected = dict(zip(unique, counts))
+
+        # Test without zero
+        expected_no_zero = {k: v for k, v in expected.items() if k != 0}
+        result = np_utils.np_volume(arr, include_zero=False)
+        assert np.all(arr_c == arr), "arr changed"
+        assert result == expected_no_zero, "Should exclude label 0 when include_zero=False"
+
+        # Test with zero
+        result_with_zero = np_utils.np_volume(arr, include_zero=True)
+        assert np.all(arr_c == arr), "arr changed"
+        assert result_with_zero == expected, "Should include label 0 when include_zero=True"
+
     def test_dice(self):
         for value in range(repeats):
             dims = random.randint(2, 3)
@@ -28,7 +91,7 @@ class Test_np_utils(unittest.TestCase):
             dice = np_utils.np_dice(arr, arr, label=value, binary_compare=binary_compare)
             self.assertEqual(dice, 1.0)
 
-    def test_erodedilate(self):
+    def test_erode_dilate(self):
         for value in range(repeats):
             nii, points, orientation, sizes = get_nii()
             arr = nii.get_seg_array()
