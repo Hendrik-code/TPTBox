@@ -58,6 +58,10 @@ def run_inference_on_file(
     ddevice: Literal["cpu", "cuda", "mps"] = "cuda",
     _model_path=None,
     step_size=0.5,
+    memory_base=5000,  # Base memory in MB, default is 5GB
+    memory_factor=160,  # prod(shape)*memory_factor / 1000, 160 ~> 30 GB
+    memory_max=160000,  # in MB, default is 160GB
+    wait_till_gpu_percent_is_free=0.1,
 ) -> tuple[Image_Reference, np.ndarray | None]:
     global model_path  # noqa: PLW0603
     if _model_path is not None:
@@ -67,10 +71,7 @@ def run_inference_on_file(
     if out_file is not None and Path(out_file).exists() and not override:
         return out_file, None
 
-    from TPTBox.segmentation.nnUnet_utils.inference_api import (
-        load_inf_model,
-        run_inference,
-    )
+    from TPTBox.segmentation.nnUnet_utils.inference_api import load_inf_model, run_inference
 
     download_weights(idx, model_path)
     try:
@@ -92,6 +93,10 @@ def run_inference_on_file(
         gpu=gpu,
         ddevice=ddevice,
         step_size=step_size,
+        memory_base=memory_base,
+        memory_factor=memory_factor,
+        memory_max=memory_max,
+        wait_till_gpu_percent_is_free=wait_till_gpu_percent_is_free,
     )
 
     #    _unets[idx] = nnunet
@@ -221,4 +226,5 @@ def run_total_seg(
         crop=crop,
         max_folds=max_folds,
         step_size=step_size,
+        **_kargs,
     )[0]
