@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import nibabel as nib
 import nibabel.orientations as nio
 import numpy as np
+from scipy.spatial.transform import Rotation
 from typing_extensions import Self
 
 from TPTBox.core.np_utils import np_count_nonzero
@@ -112,6 +113,54 @@ class Has_Grid(Grid_Proxy):
         for k in rm_key:
             out.pop(k)
         return out
+
+    def change_affine(self, translation=None, rotation_degrees=None, scaling=None, degrees=True, inplace=False):
+        """
+        Apply a transformation (translation, rotation, scaling) to the affine matrix.
+
+        Parameters:
+            translation: (n,) array-like in mm
+            rotation_degrees: (n,) array-like (pitch, yaw, roll) in degrees
+            scaling: (n,) array-like scaling factors along x, y, z
+        """
+        warnings.warn("change_affine is untested", stacklevel=2)
+        n = self.affine.shape[0]
+        transform = np.eye(n)
+
+        # Scaling
+        if scaling is not None:
+            assert len(scaling) == n - 1, f"Scaling must be a {n - 1}-element array-like."
+            S = np.diag([*list(scaling), 1])
+            transform = S @ transform
+
+        # Rotation
+        if rotation_degrees is not None:
+            assert len(rotation_degrees) == n - 1, f"Rotation must be a {n - 1}-element array-like."
+            rot = Rotation.from_euler("xyz", rotation_degrees, degrees=degrees).as_matrix()
+            R_mat = np.eye(n)
+            R_mat[: n - 1, : n - 1] = rot
+            transform = R_mat @ transform
+
+        # Translation
+        if translation is not None:
+            T = np.eye(n)
+            T[: n - 1, n - 1] = translation
+            transform = T @ transform
+        if not inplace:
+            self = self.copy()  # noqa: PLW0642
+        # Update the affine
+        self.affine = transform @ self.affine
+        return self
+
+    def change_affine_(self, translation=None, rotation_degrees=None, scaling=None, degrees=True):
+        return self.change_affine(
+            translation=translation, rotation_degrees=rotation_degrees, scaling=scaling, degrees=degrees, inplace=True
+        )
+
+    def copy(self) -> Self:
+        raise NotImplementedError(
+            "The copy method must be implemented in the subclass. It should return a new instance of the same type with the same attributes."
+        )
 
     def assert_affine(
         self,
