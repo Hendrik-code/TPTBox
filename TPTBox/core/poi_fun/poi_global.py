@@ -244,7 +244,7 @@ class POI_Global(Abstract_POI):
             )
         mrk_data = {
             "markups": list(list_markups.values()),
-            "schema": "https://raw.githubusercontent.com/slicer/slicer/master/Modules/Loadable/Markups/Resources/Schema/markups-schema-v1.0.3.json#",
+            "@schema": "https://raw.githubusercontent.com/slicer/slicer/master/Modules/Loadable/Markups/Resources/Schema/markups-schema-v1.0.3.json#",
             # "coordinateSystem": coordinate_system,
         }
 

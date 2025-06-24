@@ -190,7 +190,9 @@ class NII(NII_Math):
             raise ImportError("The `pynrrd` package is required but not installed. Install it with `pip install pynrrd`.") from None
         _nrrd = nrrd.read(path)
         data = _nrrd[0]
+
         header = dict(_nrrd[1])
+        print(data.shape, header)
         #print(header)
         # Example print out: OrderedDict([
         # ('type', 'short'), ('dimension', 3), ('space', 'left-posterior-superior'),
@@ -211,7 +213,13 @@ class NII(NII_Math):
             #space_directions = space_directions[~np.isnan(space_directions).any(axis=1)] #Filter NAN
             n = header['dimension']
             #print(data.shape)
-
+            if space_directions.shape != (n, n):
+                space_directions = space_directions[~np.isnan(space_directions).all(axis=1)]
+                m = len(space_directions[0])
+                if m != n:
+                    n=m
+                    data = data.sum(axis=0)
+                    space_directions = space_directions.T
             if space_directions.shape != (n, n):
                 raise ValueError(f"Expected 'space directions' to be a nxn matrix. n = {n} is not {space_directions.shape}",space_directions)
             if space_origin.shape != (n,):
@@ -235,6 +243,8 @@ class NII(NII_Math):
 
         except KeyError as e:
             raise KeyError(f"Missing expected header field: {e}") from None
+        if len(data.shape) != n:
+            raise ValueError(f"{len(data.shape)=} diffrent from n = ", n)
         ref_orientation = header.get("ref_orientation")
         for i in ["ref_orientation","dimension","space directions","space origin""space","type","endian"]:
             header.pop(i, None)
@@ -355,7 +365,10 @@ class NII(NII_Math):
                 # is there a dimesion with size 1?
                 arr = arr.squeeze()
                 # TODO try to get back to a saveabel state, if this did not work
-
+            if arr.dtype == np.uint64:#throws error
+                arr = arr.astype(np.uint32)
+            if arr.dtype == np.int64:#throws error
+                arr = arr.astype(np.int32)
             self._arr = arr
             self._aff = aff
             self._checked_dtype = True
