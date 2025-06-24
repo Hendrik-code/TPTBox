@@ -739,7 +739,10 @@ def create_snapshot(  # noqa: C901
         seg = to_nii_optional(frame.segmentation, seg=True)  # can be None
         ctd = copy.deepcopy(to_cdt(frame.centroids))
         if (crop or frame.crop_msk) and seg is not None:  # crop to segmentation
-            ex_slice = seg.compute_crop()
+            try:
+                ex_slice = seg.compute_crop()
+            except ValueError:
+                ex_slice = None
             img = img.copy().apply_crop_(ex_slice)
             seg = seg.copy().apply_crop_(ex_slice)
             ctd = ctd.apply_crop(ex_slice).filter_points_inside_shape() if ctd is not None else None

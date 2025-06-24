@@ -181,11 +181,11 @@ class Has_Grid(Grid_Proxy):
                 found_errors.append(f"rotation mismatch {self.rotation}, {rotation}") if not rotation_match else None
         if zoom is not None and (not ignore_missing_values or self.zoom is not None):
             if self.zoom is None:
-                found_errors.append(f"zoom mismatch {self.zoom}, {zoom}")
+                found_errors.append(f"spacing mismatch {self.zoom}, {zoom}")
             else:
                 zms_diff = (self.zoom[i] - zoom[i] for i in range(3))
                 zms_match = np.all([abs(a) <= error_tolerance for a in zms_diff])
-                found_errors.append(f"zoom mismatch {self.zoom}, {zoom}") if not zms_match else None
+                found_errors.append(f"spacing mismatch {self.zoom}, {zoom}") if not zms_match else None
         if orientation is not None and (not ignore_missing_values or self.affine is not None):
             if self.orientation is None:
                 found_errors.append(f"orientation mismatch {self.orientation}, {orientation}")
@@ -256,7 +256,14 @@ class Has_Grid(Grid_Proxy):
         from TPTBox import POI
 
         p = {} if points is None else points
-        return POI(p, orientation=self.orientation, zoom=self.zoom, shape=self.shape, rotation=self.rotation, origin=self.origin)
+        return POI(
+            p,
+            orientation=self.orientation,
+            zoom=self.zoom,
+            shape=self.shape,
+            rotation=self.rotation,
+            origin=self.origin,
+        )
 
     def make_empty_POI(self, points: dict | None = None):
         from TPTBox import POI
@@ -267,7 +274,15 @@ class Has_Grid(Grid_Proxy):
             args["level_one_info"] = self.level_one_info
             args["level_two_info"] = self.level_two_info
 
-        return POI(p, orientation=self.orientation, zoom=self.zoom, shape=self.shape, rotation=self.rotation, origin=self.origin, **args)
+        return POI(
+            p,
+            orientation=self.orientation,
+            zoom=self.zoom,
+            shape=self.shape,
+            rotation=self.rotation,
+            origin=self.origin,
+            **args,
+        )
 
     def make_empty_nii(self, seg=False, _arr=None):
         from TPTBox import NII
