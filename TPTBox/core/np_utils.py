@@ -90,7 +90,7 @@ def cc3dstatistics(arr: UINTARRAY, use_crop: bool = True) -> dict:
     Raises:
         AssertionError: If the input array is not of an unsigned integer or boolean dtype.
     """
-    assert np.issubdtype(arr.dtype, np.unsignedinteger) or np.issubdtype(arr.dtype, np.bool_), (
+    assert np.issubdtype(arr.dtype, np.unsignedinteger) or np.issubdtype(arr.dtype, np.int32) or np.issubdtype(arr.dtype, np.bool_), (
         f"cc3dstatistics expects uint type, got {arr.dtype}"
     )
     try:
@@ -180,7 +180,7 @@ def np_unique_withoutzero(arr: UINTARRAY) -> list[int]:
     return [i for i in np_unique(arr) if i != 0]
 
 
-def np_center_of_mass(arr: UINTARRAY) -> dict[int, np.ndarray]:
+def np_center_of_mass(arr: UINTARRAY) -> dict[int, COORDINATE]:
     """Calculates center of mass, mapping label in array to a coordinate (float) (exluding zero)
 
     Args:
@@ -792,11 +792,15 @@ def np_filter_connected_components(
     for preserve_label in preserve:
         cc_out[labels_out == preserve_label] = i
         i += 1
-    if removed_to_label != 0:
-        arr[np.logical_and(labels_out != 0, arr == 0)] = removed_to_label
+
     if return_original_labels:
         arr *= cc_out > 0  # to get original labels
+        if removed_to_label != 0:
+            arr[np.logical_and(labels_out != 0, arr == 0)] = removed_to_label
         return arr
+    if removed_to_label != 0:
+        arr[np.logical_and(labels_out != 0, arr == 0)] = removed_to_label
+
     return cc_out
 
 
@@ -956,8 +960,20 @@ def np_smooth_gaussian_labelwise(
     dilate_connectivity: int = 3,
     smooth_background: bool = True,
 ) -> UINTARRAY:
-    """Smoothes labels in a segmentation mask array
+    """Smoothes selected labels in a segmentation mask using Gaussian filtering,
+    while keeping other labels unaffected.
 
+    Internal Description:
+        1. Ensures label(s) to be smoothed are present in the segmentation.
+        2. Optionally dilates specified labels prior to smoothing (if `dilate_prior > 0`).
+        3. Iterates over each label:
+            - Creates a binary mask for that label.
+            - Applies Gaussian smoothing only if the label is in `label_to_smooth`.
+            - Optionally applies a weight from `label_weights`.
+        4. Adds background as a separate smoothed or fixed mask depending on `smooth_background`.
+        5. Stacks all label probability-like maps and computes a new segmentation by taking the
+           `argmax` over the stacked array, i.e., the label with the highest value wins per voxel.
+        6. Replaces the indices in the argmax map with the original label values to preserve semantics.
 
     Args:
         arr (UINTARRAY): Input Segmentation Mask Array
