@@ -5,3 +5,14 @@ try:
 
 except Exception:
     pass
+try:
+    from .deepali.spine_rigid_elements_reg import Rigid_Elements_Registration
+
+except Exception:
+    pass
+
+try:
+    from .deepali.deepali_model import General_Registration
+
+except Exception:
+    pass

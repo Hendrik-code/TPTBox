@@ -687,12 +687,10 @@ class Abstract_POI:
 
         assert self.is_global == target_point.is_global
         if not keep_zoom and not self.is_global:
-            self = self.rescale((1, 1, 1), verbose=False)  # type: ignore  # noqa: PLW0642
+            self = self.to_global()  # type: ignore  # noqa: PLW0642
+            target_point = target_point.to_global()
         if not self.is_global:
-            if target_point.zoom != self.zoom or target_point.shape != self.zoom:
-                target_point = target_point.resample_from_to(self)  # type: ignore
-            else:
-                target_point.assert_affine(self)
+            target_point.assert_affine(self)
 
         distances = {}
         for region, subregion, (x, y, z) in target_point.intersect(self).items():
@@ -703,15 +701,59 @@ class Abstract_POI:
             distances[(region, subregion)] = float(distance)
         return distances
 
-    def calculate_distances_poi_two_locations(self, a: Abstract_lvl | int, b: Abstract_lvl | int, keep_zoom=False) -> dict[int, float]:
-        if isinstance(a, Enum):
-            a = a.value
-        if isinstance(b, Enum):
-            b = b.value
-        p1 = self.extract_subregion(a)
-        p2 = self.extract_subregion(b).map_labels(label_map_subregion={b: a})
-        out = p2.calculate_distances_poi(p1, keep_zoom=keep_zoom)
-        return {a: c for (a, _), c in out.items()}
+    def calculate_distances_poi_any_2_any(self, target_point: Self, keep_zoom=False) -> dict[tuple[int, int], dict[tuple[int, int], float]]:
+        """Calculate the distances between all points and each centroid in local spacing of the first POI."""
+
+        if not keep_zoom:
+            self = self.to_global()  # type: ignore  # noqa: PLW0642
+            target_point = target_point.to_global()
+        else:
+            target_point.assert_affine(self)
+
+        distances: dict[tuple[int, int], dict[tuple[int, int], float]] = {}
+        for region2, subregion2, c in self.items():
+            distances[(region2, subregion2)] = {}
+            for region, subregion, (x, y, z) in target_point.items():
+                distance = ((c[0] - x) ** 2 + (c[1] - y) ** 2 + (c[2] - z) ** 2) ** 0.5
+                distances[(region2, subregion2)][(region, subregion)] = float(distance)
+        return distances
+
+    def calculate_distances_poi_across_regions(
+        self,
+        target_point: Self,
+    ) -> dict[tuple[int, int], dict[tuple[int, int], float]]:
+        """Calculate the distances between all points and each centroid in local spacing of the first POI.
+
+        Args:
+            target_point (Tuple[float, float, float]): The target point represented as a tuple of x, y, and z coordinates.
+
+        Returns:
+            Dict[Tuple[int, int], float]: A dictionary containing the distances between the target point and each centroid.
+            The keys are tuples of two integers representing the region and subregion labels of the centroids,
+            and the values are the distances (in millimeters) between the target point and each centroid.
+        """
+        from warnings import warn
+
+        warn("calculate_distances_poi_across_regions is depredated", stacklevel=3)
+        assert self.is_global == target_point.is_global
+        if not self.is_global:
+            if target_point.zoom != self.zoom or target_point.shape != self.shape:
+                target_point = target_point.resample_from_to(self)  # type: ignore
+            else:
+                target_point.assert_affine(self)
+
+        distances2target = {}
+        for region, subregion, (x, y, z) in target_point.items():
+            distances = {}
+            for r2, s2, (x2, y2, z2) in self.items():
+                if subregion != s2:
+                    continue
+                distance_vector = np.array([x, y, z]) - np.array([x2, y2, z2])
+                distance_vector = np.multiply(distance_vector, self.zoom)
+                distance = np.linalg.norm(distance_vector)
+                distances[(r2, subregion)] = float(distance)
+            distances2target[(region, subregion)] = distances
+        return distances2target
 
     def join_left(self, pois: Self, inplace=False, _right_join=False) -> Self:
         """

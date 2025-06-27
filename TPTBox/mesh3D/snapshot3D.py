@@ -103,7 +103,7 @@ def make_snapshot3D(
     window_size = (width * len(ids_list), nii.shape[1])
     with Xvfb():
         scene = window.Scene()
-        show_m = window.ShowManager(scene, size=window_size, reset_camera=False)
+        show_m = window.ShowManager(scene=scene, size=window_size, reset_camera=False)
         show_m.initialize()
         for i, ids in enumerate(ids_list):
             x = width * i
@@ -120,7 +120,7 @@ def make_snapshot3D(
     return out_img
 
 
-def make_sub_snapshot_parallel(
+def make_snapshot3D_parallel(
     imgs: list[Path],
     output_paths: list[Image_Reference],
     orientation: VIEW | list[VIEW] = "A",
@@ -128,6 +128,7 @@ def make_sub_snapshot_parallel(
     smoothing=20,
     resolution=2,
     cpus=10,
+    width_factor=1.0,
 ):
     ress = []
     with Pool(cpus) as p:  # type: ignore
@@ -141,6 +142,7 @@ def make_sub_snapshot_parallel(
                     "ids_list": ids_list,
                     "smoothing": smoothing,
                     "resolution": resolution,
+                    "width_factor": width_factor,
                 },
             )
             ress.append(res)
@@ -148,6 +150,9 @@ def make_sub_snapshot_parallel(
             res.get()
         p.close()
         p.join()
+
+
+make_sub_snapshot_parallel = make_snapshot3D_parallel
 
 
 def _plot_sub_seg(scene: window.Scene, nii: NII, x, y, smoothing, orientation: VIEW):

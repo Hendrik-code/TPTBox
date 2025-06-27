@@ -7,7 +7,7 @@ if __name__ == "__main__":
     from scipy.ndimage import center_of_mass
 
     from TPTBox.core.nii_wrapper import NII
-    from TPTBox.core.np_utils import _to_labels, np_count_nonzero, np_volume
+    from TPTBox.core.np_utils import _to_labels, np_bbox_binary, np_count_nonzero, np_volume
     from TPTBox.tests.speedtests.speedtest import speed_test
     from TPTBox.tests.test_utils import get_nii
 
@@ -26,10 +26,18 @@ if __name__ == "__main__":
     def np_count(arr: np.ndarray):
         return sum(np_volume(arr).values())
 
+    def np_countgreater(arr: np.ndarray):
+        return (arr > 0).sum()
+
+    def np_countcrop(arr: np.ndarray):
+        crop = np_bbox_binary(arr)
+        arrc = arr[crop]
+        return np.count_nonzero(arrc)
+
     speed_test(
         repeats=50,
         get_input_func=get_nii_array,
-        functions=[np_naive_count, np_count],
+        functions=[np_naive_count, np_count, np_countgreater, np_countcrop],
         assert_equal_function=lambda x, y: x == y,  # noqa: ARG005
         # np.all([x[i] == y[i] for i in range(len(x))])
     )

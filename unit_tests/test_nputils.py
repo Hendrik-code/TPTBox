@@ -18,7 +18,70 @@ from TPTBox.core import np_utils  # noqa: E402
 from TPTBox.tests.test_utils import get_nii, repeats  # noqa: E402
 
 
-class Test_bids_file(unittest.TestCase):
+def make_test_array_repeating(shape=(4, 4), labels=(0, 1, 2, 3)) -> np.ndarray:
+    """Creates a test array with a repeating pattern of the given labels."""
+    size = np.prod(shape)
+    label_pattern = np.resize(np.array(labels), size)
+    return label_pattern.reshape(shape)
+
+
+def make_labeled_3d_array() -> np.ndarray:
+    """
+    Create a small 3D array with labeled connected components.
+    Components:
+    - One block of 1s
+    - One isolated voxel of 2
+    """
+    arr = np.zeros((5, 5, 5), dtype=np.uint8)
+    arr[1:3, 1:3, 1:3] = 1  # a small cube
+    arr[4, 4, 4] = 2  # single voxel
+    return arr
+
+
+class Test_np_utils(unittest.TestCase):
+    def test_np_extract_label(self):
+        arr = make_test_array_repeating()
+        print(make_test_array_repeating())
+        arr_copy = arr.copy()
+
+        # Test extracting single label
+        out = np_utils.np_extract_label(arr, label=2, to_label=99, inplace=False)
+        assert np.all(arr == arr_copy), "Original array should not be modified when inplace=False"
+        assert np.all((out == 99) == (arr == 2)), "Only positions with label 2 should be 99"
+        assert np.all((out == 0) == (arr != 2)), "All other positions should be 0"
+
+        # Test extracting zero label
+        out_zero = np_utils.np_extract_label(arr, label=0, to_label=42, inplace=False)
+        assert np.all((out_zero == 42) == (arr == 0)), "Label 0 should be correctly extracted"
+
+        # Test multiple labels
+        out_multi = np_utils.np_extract_label(arr, label=[1, 3], to_label=7, inplace=False)
+        mask = np.isin(arr, [1, 3])
+        assert np.all((out_multi == 7) == mask), "Labels 1 and 3 should be set to 7"
+
+        # Test inplace modification
+        arr_inplace = make_test_array_repeating()
+        result = np_utils.np_extract_label(arr_inplace, label=1, to_label=5, inplace=True)
+        assert result is arr_inplace, "Should return the same array if inplace=True"
+        assert np.all((arr_inplace == 5) == (arr_copy == 1)), "Inplace modification should match label positions"
+
+    def test_np_volume(self):
+        arr = make_test_array_repeating().astype(np.uint16)
+        arr_c = arr.copy()
+        unique, counts = np.unique(arr, return_counts=True)
+        expected = dict(zip(unique, counts))
+
+        # Test without zero
+        expected_no_zero = {k: v for k, v in expected.items() if k != 0}
+        result = np_utils.np_volume(arr, include_zero=False)
+        assert np.all(arr_c == arr), "arr changed"
+        assert result == expected_no_zero, "Should exclude label 0 when include_zero=False"
+
+        # Test with zero
+        result_with_zero = np_utils.np_volume(arr, include_zero=True)
+        assert np.all(arr_c == arr), "arr changed"
+        assert result_with_zero == expected, "Should include label 0 when include_zero=True"
+
     def test_dice(self):
         for value in range(repeats):
             dims = random.randint(2, 3)
@@ -28,7 +91,7 @@ class Test_bids_file(unittest.TestCase):
             dice = np_utils.np_dice(arr, arr, label=value, binary_compare=binary_compare)
             self.assertEqual(dice, 1.0)
 
-    def test_erodedilate(self):
+    def test_erode_dilate(self):
         for value in range(repeats):
             nii, points, orientation, sizes = get_nii()
             arr = nii.get_seg_array()
@@ -183,16 +246,30 @@ class Test_bids_file(unittest.TestCase):
                     int(c) + random.randint(-sizes[p1 - 1][idx] // 2, sizes[p1 - 1][idx] // 2) for idx, c in enumerate(com)
                 )
                 arr[int(rand_point_in_cube[0])][int(rand_point_in_cube[1])][int(rand_point_in_cube[2])] = 0
-                filled = np_utils.np_fill_holes(arr)
+                filled = np_utils.np_fill_holes(arr, use_crop=False)
                 volume_filled = np_utils.np_volume(filled)
                 self.assertTrue(volume[p1] == volume_filled[p1])
 
     def test_connected_components(self):
         for _value in range(repeats):
+            num_points = 3
+            nii, points, orientation, sizes = get_nii(min_size=3, num_point=num_points)
+            arr = nii.get_seg_array()
+            volume = np_utils.np_volume(arr)
+            subreg_cc, subreg_cc_n = np_utils.np_connected_components(arr)
+            cc_volume = np_utils.np_volume(subreg_cc)
+            self.assertTrue(subreg_cc_n == len(np_utils.np_unique_withoutzero(subreg_cc)))
+            # for this test, this is also true
+            self.assertTrue(subreg_cc_n == len(np_utils.np_unique_withoutzero(arr)))
+            for label in range(1, num_points + 1):
+                self.assertTrue(volume[label], cc_volume[label])  # type: ignore
+
+    def test_connected_components_per_label(self):
+        for _value in range(repeats):
             nii, points, orientation, sizes = get_nii(min_size=3)
             arr = nii.get_seg_array()
             volume = np_utils.np_volume(arr)
-            subreg_cc, subreg_cc_n = np_utils.np_connected_components(arr, verbose=np.random.random() < 0.5)
+            subreg_cc = np_utils.np_connected_components_per_label(arr)
             for label in [1, 2, 3]:
                 volume_cc = np_utils.np_volume(subreg_cc[label])
                 self.assertTrue(volume[label], np.sum(volume_cc.values()))  # type: ignore
@@ -200,14 +277,13 @@ class Test_bids_file(unittest.TestCase):
                 # see if get center of masses match with stats centroids
                 coms = np_utils.np_get_connected_components_center_of_mass(arr, label)
                 n_coms = len(np_utils.np_unique_withoutzero(subreg_cc[label]))
-                print(n_coms)
-                print(subreg_cc_n)
-                self.assertTrue(n_coms == subreg_cc_n[label])
+                coms_compare = np_utils.np_center_of_mass(subreg_cc[label])
                 if n_coms == 1:
-                    first_centroid = np_utils.np_center_of_mass(subreg_cc[label])[1]
+                    print(coms)
+                    print(coms_compare)
                     self.assertTrue(
-                        abs(coms[0][0] - first_centroid[0]) <= 0.00001,
-                        msg=f"{coms[0][0]}, {first_centroid[0]}",
+                        np.array_equal(coms[0], next(iter(coms_compare.values()))),
+                        msg=f"{coms[0][0]}, {coms_compare}",
                     )
 
     def test_get_largest_k_connected_components(self):
@@ -217,21 +293,21 @@ class Test_bids_file(unittest.TestCase):
         a[1:4, 1:4] = 1
 
         # k less than N
-        a_cc = np_utils.np_get_largest_k_connected_components(a, k=2, return_original_labels=False)
+        a_cc = np_utils.np_filter_connected_components(a, largest_k_components=2, return_original_labels=False)
         a_volume = np_utils.np_volume(a_cc)
         print(a_volume)
         self.assertTrue(len(a_volume) == 2)
         self.assertTrue(a_volume[1] > a_volume[2])
 
         # k == N
-        a_cc = np_utils.np_get_largest_k_connected_components(a, k=3, return_original_labels=False)
+        a_cc = np_utils.np_filter_connected_components(a, largest_k_components=3, return_original_labels=False)
         a_volume = np_utils.np_volume(a_cc)
         print(a_volume)
         self.assertTrue(len(a_volume) == 3)
         self.assertTrue(a_volume[1] > a_volume[2] > a_volume[3])
 
         # k > N
-        a_cc = np_utils.np_get_largest_k_connected_components(a, k=20, return_original_labels=False)
+        a_cc = np_utils.np_filter_connected_components(a, largest_k_components=20, return_original_labels=False)
         a_volume = np_utils.np_volume(a_cc)
         print(a_volume)
         self.assertTrue(len(a_volume) == 3)
@@ -246,7 +322,7 @@ class Test_bids_file(unittest.TestCase):
 
         # Check that the holes are filled correctly
         expected_result = np.array([[0, 0, 0, 0, 0], [0, 1, 1, 1, 0], [0, 1, 1, 1, 0], [0, 1, 1, 1, 0], [0, 0, 0, 0, 0]])
-        assert np.array_equal(arr, expected_result), (arr, expected_result)
+        self.assertTrue(np.array_equal(arr, expected_result), (arr, expected_result))
 
     def test_np_center_of_bbox_binary(self):
         arr = np.array([[[0, 0], [0, 0]], [[1, 0], [0, 1]]], dtype=np.uint8)
@@ -284,7 +360,7 @@ class Test_bids_file(unittest.TestCase):
         expected[3, 7] = 0
         expected[7, 3] = 0
         expected[7, 7] = 0
-        assert np.array_equal(smoothed, expected), (smoothed[5], expected[5])
+        self.assertTrue(np.array_equal(smoothed, expected), (smoothed[5], expected[5]))
 
     def test_smooth_msk2(self):
         # Create a test NII object with a segmentation mask
@@ -315,7 +391,7 @@ class Test_bids_file(unittest.TestCase):
         expected[5, 2] = 1
         expected[8, 5] = 1
         expected[5, 8] = 1
-        assert np.array_equal(smoothed, expected), (smoothed[5], expected[5])
+        self.assertTrue(np.array_equal(smoothed, expected), (smoothed[5], expected[5]))
 
     def test_np_binary_fill_holes_and_set_inter_labels_based_on_majority(self):
         # Create a test NII object with a segmentation mask
@@ -345,7 +421,7 @@ class Test_bids_file(unittest.TestCase):
         expected = data.copy()
         expected[2, 2] = 1
         expected[3, 3] = 2
-        assert np.array_equal(filled, expected), (filled[5], expected[5])
+        self.assertTrue(np.array_equal(filled, expected))
 
 
 if __name__ == "__main__":

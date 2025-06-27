@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import sys
 import warnings
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import nibabel as nib
@@ -30,9 +29,6 @@ from .vert_constants import (
 )
 
 if TYPE_CHECKING:
-    from deepali.core import Grid as deepali_Grid
-
-    from TPTBox import NII, POI
 
     class Grid_Proxy:
         affine: AFFINE
@@ -60,7 +56,7 @@ class Has_Grid(Grid_Proxy):
     @property
     def shape_int(self):
         assert self.shape is not None, "need shape information"
-        return tuple(np.rint(list(self.shape)).astype(int))
+        return tuple(np.rint(list(self.shape)).astype(int).tolist())
 
     @property
     def spacing(self):
@@ -72,10 +68,15 @@ class Has_Grid(Grid_Proxy):
 
     def __str__(self) -> str:
         try:
-            origin = {tuple(np.around(self.origin, decimals=2))}
+            origin = tuple(np.around(self.origin, decimals=2).tolist())
         except Exception:
             origin = self.origin
-        return f"shape={self.shape},spacing={tuple(np.around(self.zoom, decimals=2))}, origin={origin}, ori={self.orientation}"  # type: ignore
+        try:
+            zoom = tuple(np.around(self.zoom, decimals=2).tolist())
+        except Exception:
+            zoom = self.zoom
+
+        return f"shape={self.shape_int},spacing={zoom}, origin={origin}, ori={self.orientation}"  # type: ignore
 
     @property
     def affine(self):
@@ -99,10 +100,11 @@ class Has_Grid(Grid_Proxy):
         self.origin = origin.tolist()
 
     def _extract_affine(self: Has_Grid, rm_key=(), **args):
+        shape = self.shape_int if self.shape is not None else None
         out = {
             "zoom": self.spacing,
             "origin": self.origin,
-            "shape": self.shape,
+            "shape": shape,
             "rotation": self.rotation,
             "orientation": self.orientation,
             **args,
@@ -179,11 +181,11 @@ class Has_Grid(Grid_Proxy):
                 found_errors.append(f"rotation mismatch {self.rotation}, {rotation}") if not rotation_match else None
         if zoom is not None and (not ignore_missing_values or self.zoom is not None):
             if self.zoom is None:
-                found_errors.append(f"zoom mismatch {self.zoom}, {zoom}")
+                found_errors.append(f"spacing mismatch {self.zoom}, {zoom}")
             else:
                 zms_diff = (self.zoom[i] - zoom[i] for i in range(3))
                 zms_match = np.all([abs(a) <= error_tolerance for a in zms_diff])
-                found_errors.append(f"zoom mismatch {self.zoom}, {zoom}") if not zms_match else None
+                found_errors.append(f"spacing mismatch {self.zoom}, {zoom}") if not zms_match else None
         if orientation is not None and (not ignore_missing_values or self.affine is not None):
             if self.orientation is None:
                 found_errors.append(f"orientation mismatch {self.orientation}, {orientation}")
@@ -201,7 +203,7 @@ class Has_Grid(Grid_Proxy):
             if self.shape is None:
                 found_errors.append(f"shape mismatch {self.shape}, {shape}")
             else:
-                shape_diff = (float(self.shape[i]) - float(shape[i]) for i in range(3))
+                shape_diff = (float(self.shape_int[i]) - float(shape[i]) for i in range(3))
                 shape_match = np.all([abs(a) <= shape_tolerance for a in shape_diff])
                 found_errors.append(f"shape mismatch {self.shape}, {shape}") if not shape_match else None
 
@@ -215,7 +217,7 @@ class Has_Grid(Grid_Proxy):
 
         return not has_errors
 
-    def get_plane(self, res_threshold: float | None = None) -> str:
+    def get_plane(self, res_threshold: float | None = 1) -> str:
         """Determines the orientation plane of the NIfTI image along the x, y, or z-axis.
 
         Returns:
@@ -233,7 +235,6 @@ class Has_Grid(Grid_Proxy):
         axc = np.array(nio.aff2axcodes(self.affine))
         zoom = self.zoom if res_threshold is None else tuple(max(i, res_threshold) for i in self.zoom)
         zms = np.around(zoom, 1)
-
         ix_max = np.array(zms == np.amax(zms))
         num_max = np_count_nonzero(ix_max)
         if num_max == 2:
@@ -255,7 +256,14 @@ class Has_Grid(Grid_Proxy):
         from TPTBox import POI
 
         p = {} if points is None else points
-        return POI(p, orientation=self.orientation, zoom=self.zoom, shape=self.shape, rotation=self.rotation, origin=self.origin)
+        return POI(
+            p,
+            orientation=self.orientation,
+            zoom=self.zoom,
+            shape=self.shape,
+            rotation=self.rotation,
+            origin=self.origin,
+        )
 
     def make_empty_POI(self, points: dict | None = None):
         from TPTBox import POI
@@ -266,7 +274,15 @@ class Has_Grid(Grid_Proxy):
             args["level_one_info"] = self.level_one_info
             args["level_two_info"] = self.level_two_info
 
-        return POI(p, orientation=self.orientation, zoom=self.zoom, shape=self.shape, rotation=self.rotation, origin=self.origin, **args)
+        return POI(
+            p,
+            orientation=self.orientation,
+            zoom=self.zoom,
+            shape=self.shape,
+            rotation=self.rotation,
+            origin=self.origin,
+            **args,
+        )
 
     def make_empty_nii(self, seg=False, _arr=None):
         from TPTBox import NII
@@ -331,6 +347,9 @@ class Has_Grid(Grid_Proxy):
         grid = grid.align_corners_(align_corners)
         return grid
 
+    def get_num_dims(self):
+        return len(self.shape)
+
 
 class Grid(Has_Grid):
     def __init__(self, **qargs) -> None:
@@ -338,4 +357,9 @@ class Grid(Has_Grid):
         for k, v in qargs.items():
             if k == "spacing":
                 k = "zoom"  # noqa: PLW2901
+            if k == "rotation":
+                v = np.array(v)  # noqa: PLW2901
+                if len(v.shape) == 1:
+                    s = int(np.sqrt(v.shape[0]))
+                    v = v.reshape(s, s)  # noqa: PLW2901
             setattr(self, k, v)
