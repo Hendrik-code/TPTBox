@@ -166,7 +166,9 @@ def sag_cor_curve_projection(
 
     ctd_list.sort()
     if curve_location == Location.Vertebra_Corpus:
-        l = [v for k1, k2, v in ctd_list.items() if k2 in (0, 50, 40)]
+        s = ctd_list.keys_subregion()
+        ids = 50 if 50 in s else (40 if 40 in s else 0)
+        l = [v for k1, k2, v in ctd_list.items() if k2 == ids]
     else:
         l = [v for k1, k2, v in ctd_list.items() if k2 == curve_location.value]
 
@@ -390,7 +392,7 @@ def curve_projection_axial_fallback(img_data, x_ctd, heights: list[float] | None
 
 
 def make_isotropic2d(arr2d: np.ndarray, zms2d, msk=False) -> np.ndarray:
-    if arr2d.dtype in (np.float64, np.float16, np.float32):
+    if np.issubdtype(arr2d.dtype, np.floating):
         arr2d = arr2d.astype(int)
     xs = list(range(arr2d.shape[0]))
     ys = list(range(arr2d.shape[1]))
@@ -405,8 +407,8 @@ def make_isotropic2d(arr2d: np.ndarray, zms2d, msk=False) -> np.ndarray:
     pts = np.vstack([xx.ravel(), yy.ravel()]).T
     try:
         lt = interpolator(pts)
-    except Exception:
-        raise ValueError(f"Needs to be casted into a other type: arr2d {arr2d.dtype}")  # noqa: B904
+    except Exception as e:
+        raise ValueError(f"Needs to be casted into a other type: arr2d {arr2d.dtype}") from e  # noqa: B904
     img = np.reshape(lt, new_shp, order="F")
     return img
 
@@ -611,12 +613,8 @@ def make_2d_slice(
                 ctd_list=ctd_reo,
                 axial_heights=axial_heights,
             )
-
-    # elif visualization_type == visualization_type.Mean_Intensity:
-    #    plane_dict = {"S": "ax", "I": "ax", "L": "sag", "R": "sag", "A": "cor", "P": "cor"}
-    #    idx_view = {plane_dict[s]: i for i, s in enumerate(to_ax)}
-    else:
-        raise NotImplementedError(visualization_type)
+        else:
+            raise NotImplementedError(visualization_type)
 
     if rescale_to_iso:
         if sag.ndim == 2:
@@ -690,7 +688,7 @@ class Snapshot_Frame:
     hide_segmentation: bool = False
     hide_centroids: bool = False
     hide_centroid_labels: bool = False
-    poi_labelmap: dict[int, str] = field(default_factory=lambda: v_idx2name)
+    poi_labelmap: dict[int, str] = field(default_factory=lambda: {k: v for k, v in v_idx2name.items() if k < 35})
     force_show_cdt: bool = False  # Shows the centroid computed by a segmentation, if no centroids are provided
     curve_location: Location | None = None  # Location.Vertebra_Corpus
     show_these_subreg_poi: list[int | Location] | None = None
@@ -699,7 +697,7 @@ class Snapshot_Frame:
 def to_cdt(ctd_bids: POI_Reference | None) -> POI | None:
     if ctd_bids is None:
         return None
-    ctd = POI.load(ctd_bids)
+    ctd = POI.load(ctd_bids, allow_global=True)
     if len(ctd) > 0:  # handle case if empty centroid file given
         return ctd
     print("[!][snp] To few centroids", ctd)
@@ -741,7 +739,10 @@ def create_snapshot(  # noqa: C901
         seg = to_nii_optional(frame.segmentation, seg=True)  # can be None
         ctd = copy.deepcopy(to_cdt(frame.centroids))
         if (crop or frame.crop_msk) and seg is not None:  # crop to segmentation
-            ex_slice = seg.compute_crop()
+            try:
+                ex_slice = seg.compute_crop()
+            except ValueError:
+                ex_slice = None
             img = img.copy().apply_crop_(ex_slice)
             seg = seg.copy().apply_crop_(ex_slice)
             ctd = ctd.apply_crop(ex_slice).filter_points_inside_shape() if ctd is not None else None
@@ -751,9 +752,16 @@ def create_snapshot(  # noqa: C901
             seg = seg.apply_crop_(ex_slice) if seg is not None else None
             ctd = ctd.apply_crop(ex_slice).filter_points_inside_shape() if ctd is not None else None
         img = img.reorient_(to_ax)
-        seg = seg.reorient_(to_ax) if seg is not None else None
+        if seg is not None:
+            seg = seg.reorient_(to_ax)
+            if not seg.assert_affine(img, raise_error=False):
+                seg.resample_from_to_(img)
         assert not isinstance(seg, tuple), "seg is a tuple"
         if ctd is not None:
+            if ctd.is_global:
+                ctd = ctd.resample_from_to(img)
+            if ctd.shape is None:
+                POI.load(ctd, img)
             ctd = ctd.reorient(img.orientation) if ctd.shape is not None else ctd.reorient_centroids_to(img)
             if ctd.zoom not in (img.zoom, None):
                 ctd.rescale_(img.zoom)

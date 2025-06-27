@@ -16,8 +16,8 @@ def injection_function(seg_nii: NII):
 def run_spineps_single(
     file_path: str | Path | BIDS_FILE,
     dataset=None,
-    model_semantic="t2w",
-    model_instance="instance",
+    model_semantic: str | Path = "t2w",
+    model_instance: str | Path = "instance",
     model_labeling: str | None = "t2w_labeling",
     derivative_name="derivative",
     override_semantic=False,
@@ -33,13 +33,14 @@ def run_spineps_single(
     from spineps import get_instance_model, get_semantic_model, process_img_nii
     from spineps.get_models import get_actual_model
 
+    label = {}
     try:
         from spineps.get_models import get_labeling_model
 
-        label = {"model_labeling": get_labeling_model(model_labeling, use_cpu=use_cpu)}
-
+        if model_labeling is not None:
+            label = {"model_labeling": get_labeling_model(model_labeling, use_cpu=use_cpu)}
     except Exception:
-        label = {}  # TODO remove when spineps has officially adopted labeling
+        pass  # TODO remove when spineps has officially adopted labeling
 
     if not isinstance(file_path, BIDS_FILE):
         file_path = Path(file_path)
@@ -181,7 +182,7 @@ def _run_spineps_vert(
     use_cpu=False,
 ):
     from spineps import get_instance_model, phase_postprocess_combined, predict_instance_mask
-    from spineps.get_models import get_actual_model, modelid2folder_instance
+    from spineps.get_models import get_actual_model
 
     if isinstance(model_instance, Path):
         model_instance = get_actual_model(model_instance, use_cpu=use_cpu)
