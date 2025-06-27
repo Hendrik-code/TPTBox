@@ -208,10 +208,10 @@ class POI_Global(Abstract_POI):
             color2 = color
             if split_by_region:
                 key += str(region) + "_"
-                color2 = get_color_by_label(region).rgb.tolist()
+                color2 = [a / 255.0 for a in get_color_by_label(region).rgb.tolist()]
             if split_by_subregion:
                 key += str(subregion)
-                color2 = get_color_by_label(region).rgb.tolist()
+                color2 = [a / 255.0 for a in get_color_by_label(subregion).rgb.tolist()]
             if key not in list_markups:
                 list_markups[key] = {
                     "type": "Fiducial",
@@ -222,7 +222,9 @@ class POI_Global(Abstract_POI):
                     "display": {
                         "visibility": True,
                         "opacity": 1.0,
+                        "activeColor": color2.copy(),
                         "color": color2.copy(),
+                        "selectedColor": color2.copy(),
                         "propertiesLabelVisibility": False,
                     },
                     "description": "",  # self.info,
