@@ -338,6 +338,7 @@ def ct_mri_snapshot(
     vert_msk_ct: Image_Reference | None = None,
     subreg_ctd_ct: POI_Reference | None = None,
     out_path=None,
+    return_frames=False,
 ):
     frames = [
         Snapshot_Frame(
@@ -361,6 +362,8 @@ def ct_mri_snapshot(
             crop_msk=False,
         ),
     ]
+    if return_frames:
+        return frames
     if out_path is None:
         assert isinstance(mrt_ref, BIDS_FILE)
         out_path = mrt_ref.get_changed_path(file_type="png", bids_format="snp", info={"desc": "vert-ct-mri"})

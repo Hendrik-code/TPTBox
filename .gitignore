@@ -166,5 +166,4 @@ tutorials/dataset-PixelPandemonium/*
 *.html
 _*.py
 dicom_select
-
 examples

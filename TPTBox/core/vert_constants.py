@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import typing
 from collections.abc import Sequence
 from enum import Enum
 from typing import TYPE_CHECKING, Literal, NoReturn, Union
@@ -230,6 +229,7 @@ class Full_Body_Instance(Abstract_lvl):
     subcutaneous_fat = 57
     muscle_other = 58
     inner_fat = 59
+    ignore = 60
 
 
 class Lower_Body(Abstract_lvl):
@@ -357,7 +357,21 @@ class Vertebra_Instance(Abstract_lvl):
 
     @classmethod
     def thoracic(cls):
-        return (cls.T1, cls.T2, cls.T3, cls.T4, cls.T5, cls.T6, cls.T7, cls.T8, cls.T9, cls.T10, cls.T11, cls.T12, cls.T13)
+        return (
+            cls.T1,
+            cls.T2,
+            cls.T3,
+            cls.T4,
+            cls.T5,
+            cls.T6,
+            cls.T7,
+            cls.T8,
+            cls.T9,
+            cls.T10,
+            cls.T11,
+            cls.T12,
+            cls.T13,
+        )
 
     @classmethod
     def lumbar(cls):
