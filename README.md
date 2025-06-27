@@ -1,3 +1,8 @@
+<h1 align="center">
+<img src="https://github.com/Hendrik-code/TPTBox/blob/main/TPTBox/images/logo.svg" width="300">
+</h1><br>
+
+
 [![PyPI version tptbox](https://badge.fury.io/py/tptbox.svg)](https://pypi.python.org/pypi/tptbox/)
 [![Python Versions](https://img.shields.io/pypi/pyversions/tptbox)](https://pypi.org/project/tptbox/)
 [![Stable Version](https://img.shields.io/pypi/v/tptbox?label=stable)](https://pypi.python.org/pypi/tptbox/)
@@ -5,9 +10,8 @@
 [![codecov](https://codecov.io/gh/Hendrik-code/TPTBox/graph/badge.svg?token=A7FWUKO9Y4)](https://codecov.io/gh/Hendrik-code/TPTBox)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-# Torso Processing ToolBox (TPTBox)
 
-This is a multi-functional package to handle any sort of bids-conform dataset (CT, MRI, ...)
+The Torso Processing ToolBox (TPTBox) is a multi-functional package to handle any sort of bids-conform dataset (CT, MRI, ...)
 It can find, filter, search any BIDS_Family and subjects, and has many functionalities, among them:
 - Easily loop over datasets, and the required files
 - Read, Write Niftys, centroid jsons, ...

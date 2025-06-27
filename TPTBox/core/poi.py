@@ -314,6 +314,7 @@ class POI(Abstract_POI, Has_Grid):
         """
         origin: COORDINATE = None  # type: ignore
         shape = None  # type: ignore
+        o_shift = tuple(o if o.start is not None else slice(0, None) for o in o_shift)
         try:
 
             def shift(x, y, z):
@@ -900,6 +901,7 @@ def calc_poi_from_subreg_vert(
     # use_vertebra_special_action=True,
     _vert_ids=None,
     _print_phases=False,
+    _orientation_version=0,
 ) -> POI:
     """
     Calculates the POIs of a subregion within a vertebral mask. This function is spine opinionated, the general implementation is "calc_poi_from_two_masks".
@@ -1034,6 +1036,7 @@ def calc_poi_from_subreg_vert(
             subreg_msk,
             _vert_ids=_vert_ids,
             log=log,
+            _orientation_version=_orientation_version,
         )
     extend_to.apply_crop_reverse(crop, org_shape, inplace=True)
     return extend_to
@@ -1066,7 +1069,7 @@ def calc_centroids_from_two_masks(
     org_shape = subreg_msk.shape
     # crop to mask to speed up the segmentation
     crop = vert_msk.compute_crop()
-    crop = subreg_msk.compute_crop(maximum_size=crop)
+    # crop = subreg_msk.compute_crop(maximum_size=crop)
     # crop = (slice(0, subreg_msk.shape[0]), slice(0, subreg_msk.shape[1]), slice(0, subreg_msk.shape[2]))
 
     vert_msk = vert_msk.apply_crop(crop)
@@ -1168,7 +1171,7 @@ def calc_centroids(
         if not inplace:
             extend_to = extend_to.copy()
         ctd_list = extend_to.centroids
-        extend_to.assert_affine(msk_nii, shape_tolerance=0.5, origin_tolerance=0.5)
+        extend_to.assert_affine(msk_nii, shape_tolerance=1, origin_tolerance=1)
     for i in msk_nii.unique():
         msk_temp = np.zeros(msk_data.shape, dtype=bool)
         msk_temp[msk_data == i] = True

@@ -32,6 +32,8 @@ class Deformable_Registration(General_Registration):
         self,
         fixed_image: Image_Reference,
         moving_image: Image_Reference,
+        fixed_seg: Image_Reference | None = None,
+        moving_seg: Image_Reference | None = None,
         reference_image: Image_Reference | None = None,
         source_pset=None,
         target_pset=None,
@@ -68,9 +70,9 @@ class Deformable_Registration(General_Registration):
         max_steps: int | Sequence[int] = 1000,  # Early stopping.  override on_converged finer controle
         max_history: int | None = None,
         min_value=0.0,  # Early stopping.  override on_converged finer controle
-        min_delta=-0.0001,  # Early stopping.  override on_converged finer controle
+        min_delta: float | Sequence[float] = -0.0001,  # Early stopping.  override on_converged finer controle
         loss_terms: list[LOSS | str] | dict[str, LOSS] | dict[str, str] | dict[str, tuple[str, dict]] | None = None,
-        weights: list[float] | dict[str, float] | None = None,
+        weights: list[float] | dict[str, float | list[float]] | None = None,
         auto_run=True,
     ):
         if transform_args is None:
@@ -81,11 +83,13 @@ class Deformable_Registration(General_Registration):
                 "lncc": LNCC(),
             }
         if weights is None:
-            weights = {"be": 0.001, "seg": 1}
+            weights = {"be": 0.001, "lncc": 1}
 
         super().__init__(
             fixed_image=fixed_image,
             moving_image=moving_image,
+            fixed_seg=fixed_seg,
+            moving_seg=moving_seg,
             reference_image=reference_image,
             source_pset=source_pset,
             target_pset=target_pset,
