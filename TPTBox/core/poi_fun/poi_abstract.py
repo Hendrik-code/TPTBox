@@ -39,6 +39,10 @@ MAPPING = Union[
 DIMENSIONS = 3
 
 
+def _flatten(vert_label):
+    return [item for sublist in vert_label for item in (sublist if isinstance(sublist, list) else [sublist])]  # type: ignore
+
+
 class _Abstract_POI_Definition:
     def __init__(
         self,
@@ -225,6 +229,7 @@ class POI_Descriptor(AbstractSet, MutableMapping):
             raise
 
     def str_to_int_list(self, *keys: int | str, subregion=False):
+        keys = _flatten(keys)
         out: list[int] = []
         for k in keys:
             if isinstance(k, str):
@@ -582,6 +587,8 @@ class Abstract_POI:
         return obj
 
     def extract_subregion(self, *location: Abstract_lvl | int, inplace=False):
+        location = _flatten(location)
+
         location_values = tuple(l if isinstance(l, int) else l.value for l in location)
         extracted_centroids = POI_Descriptor()
         for x1, x2, y in self.centroids.items():
@@ -604,7 +611,9 @@ class Abstract_POI:
     def extract_vert_(self, *vert_label: int):
         return self.extract_vert(*vert_label, inplace=True)
 
-    def extract_region(self, *vert_label: int, inplace=False):
+    def extract_region(self, *vert_label: int | list[int], inplace=False):
+        # flatten list
+        vert_label = _flatten(vert_label)
         vert_labels = tuple(vert_label)
         extracted_centroids = POI_Descriptor()
         for x1, x2, y in self.centroids.items():

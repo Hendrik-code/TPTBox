@@ -259,7 +259,9 @@ class NII(NII_Math):
             raise ImportError("The `pynrrd` package is required but not installed. Install it with `pip install pynrrd`.") from None
         _nrrd = nrrd.read(path)
         data = _nrrd[0]
+
         header = dict(_nrrd[1])
+        print(data.shape, header)
         #print(header)
         # Example print out: OrderedDict([
         # ('type', 'short'), ('dimension', 3), ('space', 'left-posterior-superior'),
@@ -280,7 +282,13 @@ class NII(NII_Math):
             #space_directions = space_directions[~np.isnan(space_directions).any(axis=1)] #Filter NAN
             n = header['dimension']
             #print(data.shape)
-
+            if space_directions.shape != (n, n):
+                space_directions = space_directions[~np.isnan(space_directions).all(axis=1)]
+                m = len(space_directions[0])
+                if m != n:
+                    n=m
+                    data = data.sum(axis=0)
+                    space_directions = space_directions.T
             if space_directions.shape != (n, n):
                 raise ValueError(f"Expected 'space directions' to be a nxn matrix. n = {n} is not {space_directions.shape}",space_directions)
             if space_origin.shape != (n,):
@@ -304,6 +312,8 @@ class NII(NII_Math):
 
         except KeyError as e:
             raise KeyError(f"Missing expected header field: {e}") from None
+        if len(data.shape) != n:
+            raise ValueError(f"{len(data.shape)=} diffrent from n = ", n)
         ref_orientation = header.get("ref_orientation")
         for i in ["ref_orientation","dimension","space directions","space origin""space","type","endian"]:
             header.pop(i, None)
@@ -407,7 +417,10 @@ class NII(NII_Math):
                 # is there a dimesion with size 1?
                 arr = arr.squeeze()
                 # TODO try to get back to a saveabel state, if this did not work
-
+            if arr.dtype == np.uint64:#throws error
+                arr = arr.astype(np.uint32)
+            if arr.dtype == np.int64:#throws error
+                arr = arr.astype(np.int32)
             self._arr = arr
             self._aff = aff
             self._checked_dtype = True
@@ -822,7 +835,7 @@ class NII(NII_Math):
             transform[i, 3] = -before  if before is not None else 0
 
         while len(padd) < len(self.shape):
-            padd = tuple(padd) + ((0,0),)
+            padd = (*tuple(padd), (0, 0))
         affine = self.affine.dot(transform)
         args = {}
         if mode == "constant":
@@ -1044,6 +1057,23 @@ class NII(NII_Math):
             self *= max_value / max_value2
             self.set_dtype_(self_dtype)
         log.print(f"Shifted from range {mi, ma} to range {self.min(), self.max()}", verbose=verbose)
+
+    def get_histogram(self, bins=256, hrange=None, density=False, c_val:float|None=None):
+        """Returns the histogram of the image array.
+
+        Args:
+            bins (int, optional): Number of bins for the histogram. Defaults to 256.
+            range (tuple, optional): Range of values to consider for the histogram. Defaults to None.
+            density (bool, optional): If True, the result is the probability density function at the bin, normalized such that the integral over the range is 1. Defaults to False.
+            c_val (float|None, optional): The value below which all values are set to c_val. Defaults to None.
+
+        Returns:
+            tuple: A tuple containing the histogram values and the bin edges.
+        """
+        arr = self.get_array()
+        if c_val is not None:
+            arr[arr <= c_val] = c_val
+        return np.histogram(arr, bins=bins, range=hrange, density=density)
 
     def match_histograms(self, reference:Image_Reference,c_val = 0,inplace=False):
         assert not self.seg
@@ -1348,6 +1378,7 @@ class NII(NII_Math):
         """
         assert self.seg, "This only works on segmentations"
         arr = np_filter_connected_components(self.get_seg_array(), largest_k_components=max_count_component,label_ref=labels,connectivity=connectivity,return_original_labels=keep_label,min_volume=min_volume,max_volume=max_volume,removed_to_label=removed_to_label,)
+        assert arr.shape == self.shape, f"Shape mismatch: {arr.shape} != {self.shape}"
         if keep_label and labels is not None:
             if isinstance(labels,int):
                 labels = [labels]

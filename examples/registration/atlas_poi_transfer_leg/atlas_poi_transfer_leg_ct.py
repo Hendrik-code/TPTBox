@@ -12,9 +12,12 @@ from pathlib import Path
 from time import time
 
 import numpy as np
+from deepali.core import Axes, PathStr
+from deepali.core import Grid as Deepali_Grid
 
 from TPTBox import POI, POI_Global, calc_centroids, to_nii
 from TPTBox.core.internal.deep_learning_utils import DEVICES
+from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.nii_wrapper import NII
 from TPTBox.core.poi import POI
 from TPTBox.core.poi_fun.poi_abstract import POI_Descriptor
@@ -199,6 +202,46 @@ def parse_coordinates_to_poi(file_path: str | Path, left: bool):
     return POI_Global(global_points, itk_coords=True, level_one_info=Full_Body_Instance, level_two_info=Lower_Body)
 
 
+def parse_poi_to_coordinates(poi: POI_Global, output_path: str | Path, left_side: bool | None = None):
+    poi = poi.to_global()
+    left_side = ("LEFT" if "LEFT" in str(output_path).upper() else "RIGHT") if left_side is None else "LEFT" if left_side else "RIGHT"
+    output_path = Path(output_path)
+
+    lines = []
+    lines.append("Points Export\n")
+    lines.append(f"Side: {left_side.upper()}\n\n")
+    ENUM_TO_ABBREVIATION = {k[1].value: v for v, k in ABBREVIATION_TO_ENUM.items()}
+    bone_structure = {"Femur proximal": [], "Femur distal": [], "Tibia proximal": [], "Tibia distal": [], "Patella": []}
+
+    for _, k, coords in poi.items():
+        abbrev = ENUM_TO_ABBREVIATION[k]
+        x, y, z = coords
+        coord_str = f"{abbrev}: ({x}, {y}, {z})"
+        # Assign to bone section heuristically (adjust as needed for your enums)
+        if abbrev in ["TGT", "FHC", "FNC", "FAAP"]:
+            bone_structure["Femur proximal"].append(coord_str)
+        elif abbrev in ["FLCD", "FMCD", "FLCP", "FMCP", "FNP", "FADP", "TGPP", "TGCP", "FMCPC", "FLCPC", "TRMP", "TRLP"]:
+            bone_structure["Femur distal"].append(coord_str)
+        elif abbrev in ["TLCL", "TMCM", "TKC", "TLCA", "TLCP", "TMCA", "TMCP", "TTP", "TAAP", "TMIT", "TLIT"]:
+            bone_structure["Tibia proximal"].append(coord_str)
+        elif abbrev in ["FLM", "TMM", "TAC", "TADP"]:
+            bone_structure["Tibia distal"].append(coord_str)
+        elif abbrev in ["PPP", "PDP", "PMP", "PLP", "PRPP", "PRDP", "PRHP"]:
+            bone_structure["Patella"].append(coord_str)
+        else:
+            raise ValueError(f"Unknown abbreviation '{abbrev}'")
+
+    # Write structured output
+    for section, coords in bone_structure.items():
+        if coords:
+            lines.append(f"{section}:\n")
+            lines.extend([line + "\n" for line in coords])
+            lines.append("\n")
+    output_path.parent.mkdir(exist_ok=True, parents=True)
+    with open(output_path, "w") as f:
+        f.writelines(lines)
+
+
 default_setting = {
     "loss": {
         "config": {"be": {"stride": 1, "name": "BSplineBending"}, "seg": {"name": "MSE"}},
@@ -221,8 +264,8 @@ setting_1 = default_setting
 # reduce lr if optimization platos
 # increase min_delta when it stops to early
 
-PATELLA = 14
-LEGS = [13, PATELLA, 15, 16]
+PATELLA = [14, 114]
+LEGS = [13, 113, *PATELLA, 115, 15, 116, 16]
 
 
 def split_left_right_leg(seg520: NII, c=2, min_volume=50) -> NII:
@@ -452,13 +495,32 @@ class Register_Point_Atlas_One_Leg:
         poi_cms: POI | None,
         same_side: bool,
         verbose=99,
-        setting=default_setting,
-        setting_patella=default_setting,
+        # setting=default_setting,
+        # setting_patella=default_setting,
         gpu=0,
         ddevice: DEVICES = "cuda",
         gaussian_sigma=0,
+        loss_terms=None,  # type: ignore
+        weights=None,
+        weights_patella=None,
+        lr=0.001,
+        lr_patella=0.001,
+        max_steps=1500,
+        min_delta=0.00001,
+        pyramid_levels=4,
+        coarsest_level=3,
+        finest_level=0,
+        satellite_structure=PATELLA,
+        **args,
     ):
+        self.satellite_structure = satellite_structure
         # Assumes that you have removed the other leg.
+        if weights is None:
+            weights = {"be": 0.0001, "seg": 1}
+        if weights_patella is None:
+            weights_patella = {"be": 0.0001, "seg": 1}
+        if loss_terms is None:
+            loss_terms = {"be": ("BSplineBending", {"stride": 1}), "seg": "MSE"}
         assert target.seg
         assert atlas.seg
         target = target.copy()
@@ -478,6 +540,7 @@ class Register_Point_Atlas_One_Leg:
                 raise ValueError(axis)
         for i in [200, 100000]:
             t_crop = (target).compute_crop(0, i)  # if the angel is to different we need a larger crop...
+            self.t_crop = t_crop
             target_ = target.apply_crop(t_crop)
             # Point Registration
             poi_target = calc_centroids(target_, second_stage=40)
@@ -504,38 +567,45 @@ class Register_Point_Atlas_One_Leg:
             atlas_reg.set_dtype_(np.float32)
             target = target.smooth_gaussian(gaussian_sigma)
             atlas_reg = atlas_reg.smooth_gaussian(gaussian_sigma)
+
         self.reg_deform = Deformable_Registration(
-            target,
-            atlas_reg,
-            loss_terms={"be": ("BSplineBending", {"stride": 1}), "seg": "MSE"},  # type: ignore
-            weights={"be": setting["loss"]["weights"]["be"], "seg": setting["loss"]["weights"]["seg"]},
-            lr=setting["optim"]["args"]["lr"],
-            max_steps=setting["optim"]["loop"]["max_steps"],
-            min_delta=setting["optim"]["loop"]["min_delta"],
-            pyramid_levels=4,
-            coarsest_level=3,
-            finest_level=0,
+            target.remove_labels(satellite_structure),
+            atlas_reg.remove_labels(satellite_structure),
+            loss_terms=loss_terms,  # type: ignore
+            weights=weights,
+            lr=lr,
+            max_steps=max_steps,
+            min_delta=min_delta,
+            pyramid_levels=pyramid_levels,
+            coarsest_level=coarsest_level,
+            finest_level=finest_level,
             verbose=verbose,
+            **args,
         )
+        if len(self.satellite_structure) == 0:
+            self.crop_patella = None
+            self.reg_deform_p = None
+            return
         # self.reg_deform = Deformable_Registration_old(target, atlas_reg, config=setting, verbose=verbose, gpu=gpu, ddevice=ddevice)
         atlas_reg = self.reg_deform.transform_nii(atlas_reg)
         # Patella
-        patella_atlas = atlas_reg.extract_label(PATELLA)
-        patella_target = target.extract_label(PATELLA)
-        self.crop_patella = (patella_target + patella_atlas).compute_crop(0, 2)
+        patella_atlas = atlas_reg.extract_label(satellite_structure)
+        patella_target = target.extract_label(satellite_structure)
+
+        self.crop_patella = (patella_target + patella_atlas).compute_crop(0, 20)
         patella_atlas.apply_crop_(self.crop_patella)
         patella_target.apply_crop_(self.crop_patella)
         self.reg_deform_p = Deformable_Registration(
             patella_target,
             atlas_reg,
-            loss_terms={"be": ("BSplineBending", {"stride": 1}), "seg": "MSE"},  # type: ignore
-            weights={"be": setting_patella["loss"]["weights"]["be"], "seg": setting_patella["loss"]["weights"]["seg"]},
-            lr=setting_patella["optim"]["args"]["lr"],
-            max_steps=setting_patella["optim"]["loop"]["max_steps"],
-            min_delta=setting_patella["optim"]["loop"]["min_delta"],
-            pyramid_levels=4,
-            coarsest_level=3,
-            finest_level=0,
+            loss_terms=loss_terms,
+            weights=weights_patella,
+            lr=lr_patella,
+            max_steps=max_steps,
+            min_delta=min_delta,
+            pyramid_levels=pyramid_levels,
+            coarsest_level=coarsest_level,
+            finest_level=finest_level,
             verbose=verbose,
             gpu=gpu,
             ddevice=ddevice,
@@ -546,8 +616,16 @@ class Register_Point_Atlas_One_Leg:
             1,  # version
             (self.reg_point.get_dump()),
             (self.reg_deform.get_dump()),
-            (self.reg_deform_p.get_dump()),
-            (self.same_side, self.atlas_org, self.target_grid_org, self.target_grid, self.crop, self.crop_patella),
+            (self.reg_deform_p.get_dump() if self.reg_deform_p is not None else None),
+            (
+                self.same_side,
+                self.atlas_org,
+                self.target_grid_org,
+                self.target_grid,
+                self.crop,
+                self.crop_patella,
+                self.satellite_structure,
+            ),
         )
 
     def save(self, path: str | Path):
@@ -561,12 +639,13 @@ class Register_Point_Atlas_One_Leg:
 
     @classmethod
     def load_(cls, w):
-        (version, t0, t1, t2, x) = w
+        (version, t0, t1, t2, x, satellite_structure) = w
         assert version == 1, f"Version mismatch {version=}"
         self = cls.__new__(cls)
         self.reg_point = Point_Registration.load_(t0)
         self.reg_deform = Deformable_Registration.load_(t1)
         self.reg_deform_p = Deformable_Registration.load_(t2)
+        self.satellite_structure = satellite_structure
         self.same_side, self.atlas_org, self.target_grid_org, self.target_grid, self.crop, self.crop_patella = x
         return self
 
@@ -574,36 +653,46 @@ class Register_Point_Atlas_One_Leg:
         nii_atlas = self.reg_point.transform_nii(nii_atlas)
         nii_atlas = nii_atlas.apply_crop(self.crop)
         nii_reg = self.reg_deform.transform_nii(nii_atlas)
-        patella_atlas = nii_reg.extract_label(PATELLA)
-        nii_reg[patella_atlas == 1] = 0
-        patella_atlas.apply_crop_(self.crop_patella)
-        patella_atlas_reg = self.reg_deform_p.transform_nii(patella_atlas)
-        patella_atlas_reg.resample_from_to_(nii_reg)
-        nii_reg[patella_atlas_reg != 0] = PATELLA
-        nii_reg = nii_reg.resample_from_to(self.target_grid_org)
+        if self.crop_patella is not None and self.reg_deform_p is not None:
+            # Patella
+            patella_atlas = nii_reg.extract_label(*self.satellite_structure)
+            nii_reg.remove_labels_(self.satellite_structure)
+            patella_atlas_reg = self.reg_deform_p.transform_nii(patella_atlas)
+            patella_atlas_reg.resample_from_to_(nii_reg, mode="constant")
+            nii_reg[patella_atlas_reg != 0] = patella_atlas_reg[patella_atlas_reg != 0]
+        out = nii_reg.resample_from_to(self.target_grid_org)
+
         if self.same_side:
-            return nii_reg
-        return nii_reg.set_array(nii_reg.get_array()[::-1])
+            return out
+        axis = out.get_axis("R")
+        if axis == 0:
+            target = out.set_array(out.get_array()[::-1]).copy()
+        elif axis == 1:
+            target = out.set_array(out.get_array()[:, ::-1]).copy()
+        elif axis == 2:
+            target = out.set_array(out.get_array()[:, :, ::-1]).copy()
+        else:
+            raise ValueError(axis)
+        return target
 
     def forward_txt(self, file_path: str | Path, left: bool):
         poi_glob = parse_coordinates_to_poi(file_path, left)
         return self.forward_poi(poi_glob, left)
 
-    def forward_poi(self, poi_atlas: POI_Global | POI, left):
+    def forward_poi(self, poi_atlas: POI_Global | POI):
         poi_atlas = poi_atlas.resample_from_to(self.atlas_org)
+
         # Point Reg
         poi_atlas = self.reg_point.transform_poi(poi_atlas)
         # Deformable
         poi_atlas = poi_atlas.apply_crop(self.crop)
         poi_reg = self.reg_deform.transform_poi(poi_atlas)
-        # Patella
-        poi_patella = poi_reg.apply_crop(self.crop_patella).extract_region(
-            Full_Body_Instance.patella_left.value, Full_Body_Instance.patella_right.value
-        )
-        patella_poi_reg = self.reg_deform_p.transform_poi(poi_patella)
-        for k1, k2, v in patella_poi_reg.resample_from_to(poi_reg).items():
-            poi_reg[k1, k2] = v
-        # poi_reg.save(root / "test" / "subreg_reg.json")
+        if self.crop_patella is not None and self.reg_deform_p is not None:
+            # Patella
+            poi_patella = poi_reg.apply_crop(self.crop_patella).extract_region(*self.satellite_structure)
+            patella_poi_reg = self.reg_deform_p.transform_poi(poi_patella)
+            for k1, k2, v in patella_poi_reg.resample_from_to(poi_reg).items():
+                poi_reg[k1, k2] = v
         poi_reg = poi_reg.resample_from_to(self.target_grid_org)
         poi_reg.level_one_info = Full_Body_Instance
         poi_reg.level_two_info = Lower_Body
@@ -611,8 +700,8 @@ class Register_Point_Atlas_One_Leg:
             return poi_reg
         for k1, k2, v in poi_reg.copy().items():
             k = k1 % 100
-            if left:
-                k += 100
+            # if left:
+            #    k += 100
             poi_reg[k, k2] = v
         poi_reg_flip = poi_reg.make_empty_POI()
         for k1, k2, (x, y, z) in poi_reg.copy().items():
@@ -628,6 +717,48 @@ class Register_Point_Atlas_One_Leg:
         poi_reg_flip.level_one_info = Full_Body_Instance
         poi_reg_flip.level_two_info = Lower_Body
         return poi_reg_flip
+
+    def invert_points(
+        self, points, axes: Axes, grid: Deepali_Grid | Has_Grid, to_axes: Axes = Axes.CUBE, to_grid: Deepali_Grid | Has_Grid | None = None
+    ):
+        raise NotImplementedError("This method is not tested and might not work as expected.")
+        import torch
+
+        reg_deform = self.reg_deform.inverse()
+        # invert reg_deform
+        points = reg_deform.transform_points(points, axes=axes, to_axes=Axes.GRID, grid=grid, to_grid=self.target_grid)
+        # invert self.crop
+        shift = torch.tensor([x.start for x in self.crop]).unsqueeze(0).to(points.device)
+        points = points + shift
+        # invert reg_point
+        out = []
+        for x, y, z in points:
+            o = self.reg_point.transform_cord_inverse((x, y, z))  # type: ignore
+            out.append(o)
+        out = torch.tensor(out)
+        # invert self.t_crop
+        shift = torch.tensor([x.start for x in self.t_crop]).unsqueeze(0)
+        points = points + shift
+        # flip if needed
+        if not self.same_side:
+            grid = self.target_grid_org
+            axis = grid.get_axis("R")
+            if axis == 0:
+                out[:, 0] = grid.shape[0] - 1 - out[:, 0]
+            elif axis == 1:
+                out[:, 1] = grid.shape[1] - 1 - out[:, 1]
+            elif axis == 2:
+                out[:, 2] = grid.shape[2] - 1 - out[:, 2]
+            else:
+                raise ValueError(axis)
+        # transform to axes and grid
+        if to_grid is not None or to_axes != Axes.CUBE:
+            if to_grid is None:
+                to_grid = self.target_grid_org
+            if isinstance(to_grid, Has_Grid):
+                to_grid = to_grid.to_deepali_grid()
+            out = to_grid.transform_points(out, axes.CUBE, to_axes=to_axes, to_grid=to_grid)
+        return out
 
 
 class Register_Point_Atlas_bone_by_bone:
@@ -855,7 +986,7 @@ if __name__ == "__main__":
     p = poi_atlas.to_global(itk_coords=True)
     coords_dict = parse_coordinates("010__left.txt")
     for e, (k2, _) in enumerate(coords_dict.items(), 1):
-        k = PATELLA if k2[0] == "P" else 60
+        k = PATELLA[0] if k2[0] == "P" else 60
         print(k2, p[k, e])
 
     print(time() - st)
