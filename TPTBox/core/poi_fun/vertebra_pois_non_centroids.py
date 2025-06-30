@@ -244,6 +244,7 @@ def compute_non_centroid_pois(  # noqa: C901
     subreg: NII,
     _vert_ids: Sequence[int] | None = None,
     log: Logger_Interface = _log,
+    _orientation_version=0,
 ):
     if _vert_ids is None:
         _vert_ids = vert.unique()
@@ -257,7 +258,9 @@ def compute_non_centroid_pois(  # noqa: C901
         ### Calc vertebra direction; We always need them, so we just compute them. ###
         sub_regions = poi.keys_subregion()
         if any(a.value not in sub_regions for a in vert_directions):
-            poi, _ = calc_orientation_of_vertebra_PIR(poi, vert, subreg, do_fill_back=False, save_normals_in_info=False)
+            poi, _ = calc_orientation_of_vertebra_PIR(
+                poi, vert, subreg, do_fill_back=False, save_normals_in_info=False, _orientation_version=_orientation_version
+            )
             [locations.remove(i) for i in vert_directions if i in locations]
 
     locations = [pois_computed_by_side_effect.get(l.value, l) for l in locations]
