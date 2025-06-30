@@ -87,6 +87,7 @@ _dtype_max = {
     "int16": 32768,
     "uint16": 65536,
     "int32": 2147483647,
+    "uint32": 4294967294,
 }  # uint32 not supported by nifty
 _dtype_u = {"uint8", "uint16"}
 _dtype_non_u = {"int8", "int16"}
@@ -153,7 +154,13 @@ warnings.formatwarning = formatwarning_tb
 
 N = TypeVar("N", bound="NII")
 Image_Reference = Union[bids_files.BIDS_FILE, Nifti1Image, Path, str, N]
-Interpolateable_Image_Reference = Union[bids_files.BIDS_FILE, tuple[Nifti1Image, bool], tuple[Path, bool], tuple[str, bool], N]
+Interpolateable_Image_Reference = Union[
+    bids_files.BIDS_FILE,
+    tuple[Nifti1Image, bool],
+    tuple[Path, bool],
+    tuple[str, bool],
+    N,
+]
 
 Proxy = tuple[tuple[int, int, int], np.ndarray]
 suppress_dtype_change_printout_in_set_array = False

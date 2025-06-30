@@ -686,7 +686,7 @@ class BIDS_FILE:
         from_info=False,
         auto_add_run_id=False,
         additional_folder: str | None = None,
-        dataset_path: str | None = None,
+        dataset_path: str | Path | None = None,
         make_parent=False,
         no_sorting_mode: bool = False,
         non_strict_mode: bool = False,
