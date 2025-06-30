@@ -109,7 +109,14 @@ class nnUNetPredictor:
             trainer.output_folder_base = model_training_output_dir
             trainer.update_fold(0)
             trainer.initialize(False)
-            all_best_model_files = [join(model_training_output_dir, f"fold_{i}", "model_final_checkpoint.model") for i in use_folds]
+            all_best_model_files = [
+                join(
+                    model_training_output_dir,
+                    f"fold_{i}",
+                    "model_final_checkpoint.model",
+                )
+                for i in use_folds
+            ]
             print("using the following model files: ", all_best_model_files)
             all_params = [torch.load(i, map_location=torch.device("cpu"))["state_dict"] for i in all_best_model_files]
             plans = trainer.plans
@@ -491,7 +498,7 @@ class nnUNetPredictor:
                 return (np.prod(shape) / 1000000 * factor) + min_memory // 2 < max(min(memory, max_memory), min_memory)
 
             with tqdm(total=len(slicers), disable=not self.allow_tqdm) as pbar:
-                if not check_mem(shape):
+                if not check_mem(shape) or "nnUNetPlans_2d" not in self.configuration_manager.configuration.get("data_identifier", "3D"):
                     pbar.desc = "splitting in to chunks"
                     pbar.update(0)
                     splits = [1 for _ in shape]
@@ -506,9 +513,20 @@ class nnUNetPredictor:
                         shape_split = [ceil(s / sp) for s, sp in zip(shape, splits)]
                         # print(shape, patch_size, splits, s, np.prod(shape) / 1000000)
                         if check_mem(shape_split):
-                            return self._run_prediction_splits(
-                                data, network, global_shape=shape, splits=splits, slicers=slicers, pbar=pbar
-                            )[(slice(None), *slicer_revert_padding[1:])]
+                            try:
+                                return self._run_prediction_splits(
+                                    data,
+                                    network,
+                                    global_shape=shape,
+                                    splits=splits,
+                                    slicers=slicers,
+                                    pbar=pbar,
+                                )[(slice(None), *slicer_revert_padding[1:])]
+                            except AttributeError as e:
+                                print("_run_prediction_splits failed; fallback to non splits")
+                                print(e)
+                                break
+
                 predicted_logits, n_predictions = self._run_sub(data, network, device, slicers, pbar)
                 pbar.desc = "finish"
                 pbar.update(0)
@@ -518,7 +536,15 @@ class nnUNetPredictor:
                 empty_cache(self.device)
                 return predicted_logits[(slice(None), *slicer_revert_padding[1:])]
 
-    def _run_prediction_splits(self, data, network, global_shape, splits: list[int], slicers: list[tuple[slice, ...]], pbar: tqdm):
+    def _run_prediction_splits(
+        self,
+        data,
+        network,
+        global_shape,
+        splits: list[int],
+        slicers: list[tuple[slice, ...]],
+        pbar: tqdm,
+    ):
         widths = [ceil(s / sp) for s, sp in zip(global_shape, splits)]
         inter_mediate_slice: list[intermediate_slice] = []
         pbar.desc = "split in to GPU chunks"
@@ -663,12 +689,18 @@ class intermediate_slice:
         self.slicers.append(s)
 
     def get_intermediate(self):
-        return (slice(None), *tuple(slice(mi, ma) for mi, ma in zip(self.min_s, self.max_s)))  # type: ignore
+        return (
+            slice(None),
+            *tuple(slice(mi, ma) for mi, ma in zip(self.min_s, self.max_s)),
+        )  # type: ignore
 
     def get_slices(self):
         assert self.min_s is not None
         for s in self.slicers:
-            yield (slice(None), *tuple(slice(a.start - o, a.stop - o if a.stop is not None else None) for a, o in zip(s[1:], self.min_s)))
+            yield (
+                slice(None),
+                *tuple(slice(a.start - o, a.stop - o if a.stop is not None else None) for a, o in zip(s[1:], self.min_s)),
+            )
 
 
 def empty_cache(device: torch.device):
