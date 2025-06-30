@@ -540,7 +540,6 @@ class DeepaliPairwiseImageTrainer:
             max_steps = self.max_steps[level]
         else:
             max_steps = self.max_steps[-1]
-
         return self.run_level(
             grid_transform, target_image, source_image, target_image_seg, source_image_seg, opt, lr_sq, level, max_steps, sampling
         )

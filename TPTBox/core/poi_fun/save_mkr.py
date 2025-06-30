@@ -1,6 +1,6 @@
 import json
+import random
 from pathlib import Path
-from random import random
 
 ###### GLOBAL POI #####
 from typing import TYPE_CHECKING, Any, Literal, Optional, TypedDict
@@ -83,18 +83,18 @@ class Markup(TypedDict, total=False):
     controlPoints: list[ControlPoint]
 
     # Optional (ROI/Plane)
-    roiType: Optional[str]
-    insideOut: Optional[bool]
-    planeType: Optional[str]
-    sizeMode: Optional[str]
-    autoScalingSizeFactor: Optional[float]
-    center: Optional[list[float]]
-    normal: Optional[list[float]]
-    size: Optional[list[float]]
-    planeBounds: Optional[list[float]]
-    objectToBase: Optional[list[float]]
-    baseToNode: Optional[list[float]]
-    orientation: Optional[list[float]]
+    roiType: str | None
+    insideOut: bool | None
+    planeType: str | None
+    sizeMode: str | None
+    autoScalingSizeFactor: float | None
+    center: list[float] | None
+    normal: list[float] | None
+    size: list[float] | None
+    planeBounds: list[float] | None
+    objectToBase: list[float] | None
+    baseToNode: list[float] | None
+    orientation: list[float] | None
     display: MKR_Display
     measurements: Any
 
@@ -161,12 +161,12 @@ def _get_markup_color(definition: MKR_DEFINITION, region, subregion, split_by_re
         if split_by_subregion:
             color = get_color_by_label(subregion + 10) if subregion == 83 else get_color_by_label(subregion).rgb
     if color is None:
-        color = (RGB_Color.init_list([random.randint(20, 245), random.randint(20, 245), random.randint(20, 245)]),)
-    if isinstance(color, RGB_Color):
-        color = (get_color_by_label(region).rgb / 255.0).tolist()
+        color = RGB_Color.init_list([random.randint(20, 245), random.randint(20, 245), random.randint(20, 245)])
+    if isinstance(color, RGB_Color):  # or str(type(color)) == "RGB_Color":
+        color = (color.rgb / 255.0).tolist()
     if isinstance(color, np.ndarray):
         color = color.tolist()
-    assert isinstance(color, list)
+    assert isinstance(color, list), (color, type(color))
     if max(color) > 2:
         color = [float(c) / 255.0 for c in color]
     return color

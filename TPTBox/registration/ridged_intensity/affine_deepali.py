@@ -45,13 +45,51 @@ def center_of_mass(tensor):
 
 
 class Tether(PairwiseImageLoss):
+    def __init__(self, delta=10, uniq=False, remember=True, remember_c=10, max_v=1, *args, **kwargs) -> None:
+        self.delta = delta
+        self.uniq = uniq
+        self.remember = remember
+        self.remember_c = remember_c
+        self.count = 0
+        self.max_v = max_v
+        super().__init__(*args, **kwargs)
+
     def forward(self, source: torch.Tensor, target: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:  # noqa: ARG002
-        com_fixed = center_of_mass(target)
-        com_warped = center_of_mass(source)
-        l_com = torch.norm(com_fixed - com_warped)
-        if l_com < 10:
-            l_com = source.sum() * 0
-        return l_com  # type: ignore
+        if self.count != 0:
+            self.count -= 1
+            return torch.zeros(1, device=source.device)
+        if self.uniq:
+            loss = torch.zeros(1, device=source.device)
+            k = 0
+            target = (target * self.max_v).round(decimals=-1)
+            source = (source * self.max_v).round(decimals=-1)
+            u = torch.unique(target)
+            for i in u:
+                if i == 0:
+                    continue
+                com_fixed = center_of_mass(target == i)
+                com_warped = center_of_mass(source == i)
+                l_com = torch.norm(com_fixed - com_warped)
+                l_com = torch.nan_to_num(l_com, nan=0)
+                # print(l_com)
+                if l_com > self.delta:
+                    loss += l_com
+                    k += 1
+            # print(loss / k, k, len(u))
+            if k == 0:
+                if self.remember:
+                    self.count = 10
+                return loss
+            return loss / k
+        else:
+            com_fixed = center_of_mass(target)
+            com_warped = center_of_mass(source)
+            l_com = torch.norm(com_fixed - com_warped)
+            if l_com < self.delta:
+                l_com = torch.zeros(1, device=source.device)
+                if self.remember:
+                    self.count = 10
+            return l_com  # type: ignore
 
 
 class Rigid_Registration_with_Tether(General_Registration):
@@ -67,12 +105,12 @@ class Rigid_Registration_with_Tether(General_Registration):
         fixed_mask=None,
         moving_mask=None,
         # normalize
-        normalize_strategy: Optional[Literal["auto", "CT", "MRI"]] = None,
+        normalize_strategy: Literal["auto", "CT", "MRI"] | None = None,
         # Pyramid
-        pyramid_levels: Optional[int] = None,  # 1/None = no pyramid; int: number of stacks, tuple from to (0 is finest)
+        pyramid_levels: int | None = None,  # 1/None = no pyramid; int: number of stacks, tuple from to (0 is finest)
         finest_level: int = 0,
-        coarsest_level: Optional[int] = None,
-        pyramid_finest_spacing: Optional[Sequence[int] | torch.Tensor] = None,
+        coarsest_level: int | None = None,
+        pyramid_finest_spacing: Sequence[int] | torch.Tensor | None = None,
         pyramid_min_size=16,
         dims=("x", "y", "z"),
         align=False,
