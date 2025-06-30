@@ -13,6 +13,7 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.colors import ListedColormap, Normalize
 from matplotlib.patches import Circle, FancyArrow
+from matplotlib.patheffects import withStroke
 from scipy import ndimage
 from scipy.interpolate import RegularGridInterpolator, interp1d
 from scipy.signal import savgol_filter
@@ -427,6 +428,14 @@ def make_isotropic2dpluscolor(arr3d, zms2d, msk=False):
     return img
 
 
+def get_contrasting_stroke_color(rgb):
+    # Convert RGBA to RGB if necessary
+    if len(rgb) == 4:
+        rgb = rgb[:3]
+    luminance = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]
+    return "gray" if luminance < 0.3 else "black"
+
+
 def create_figure(dpi, planes: list, has_title=True):
     fig_h = round(2 * planes[0].shape[0] / dpi, 2) + (0.5 if has_title else 0)
     plane_w = [p.shape[1] for p in planes]
@@ -461,11 +470,32 @@ def plot_sag_centroids(
     if show_these_subreg_poi is not None:
         ctd2 = ctd.extract_subregion(*show_these_subreg_poi)
     for k1, k2, v in ctd2.items():
+        color = cmap((k1 - 1) % LABEL_MAX % cmap.N)
+        backgroundcolor = get_contrasting_stroke_color(color)
         # print(k, v, (v[1] * zms[1], v[0] * zms[0]), zms)
         try:
-            axs.add_patch(Circle((v[1] * zms[1], v[0] * zms[0]), 2, color=cmap((k1 - 1) % LABEL_MAX % cmap.N)))
+            circle = Circle(
+                (v[1] * zms[1], v[0] * zms[0]),
+                3,
+                edgecolor=backgroundcolor,
+                facecolor=color,
+                linewidth=0.5,
+            )
+            axs.add_patch(circle)
             if not hide_centroid_labels and k2 == curve_location.value and k1 in poi_labelmap:
-                axs.text(4, v[0] * zms[0], poi_labelmap[k1], fontdict={"color": cmap(k1 - 1), "weight": "bold"})
+                axs.text(
+                    4,
+                    v[0] * zms[0],
+                    poi_labelmap[k1],
+                    fontdict={
+                        "color": color,
+                        "weight": "bold",
+                        "fontsize": 18,
+                    },
+                    # bbox=dict(boxstyle="square,pad=0.2", facecolor="gray", edgecolor="none"),
+                    path_effects=[withStroke(linewidth=3.0, foreground=backgroundcolor)],
+                    zorder=2,
+                )
         except Exception as e:
             print(e)
     if "line_segments_sag" in ctd.info:
@@ -478,6 +508,7 @@ def plot_sag_centroids(
             axs.add_patch(FancyArrow(v[1] * zms[1], v[0] * zms[0], c, d, color=cmap(color - 1 % LABEL_MAX % cmap.N)))
     if "text_sag" in ctd.info:
         for color, x in ctd.info["text_sag"]:
+            backgroundcolor = get_contrasting_stroke_color(color)
             if not isinstance(color, int) and len(color) == 2:
                 color, curve_location = color  # noqa: PLW2901
             if isinstance(x, str) or len(x) == 1:
@@ -489,7 +520,19 @@ def plot_sag_centroids(
             elif len(x) == 2:
                 (text, a) = x
                 b = zms[0] * ctd[color, curve_location][0]
-            axs.text(a, b, text, fontdict={"color": cmap(color - 1), "weight": "bold"})
+            axs.text(
+                a,
+                b,
+                text,
+                fontdict={
+                    "color": color,
+                    "weight": "bold",
+                    "fontsize": 18,
+                },
+                # bbox=dict(boxstyle="square,pad=0.2", facecolor="gray", edgecolor="none"),
+                path_effects=[withStroke(linewidth=3.0, foreground=backgroundcolor)],
+                zorder=2,
+            )
 
 
 def plot_cor_centroids(
@@ -508,16 +551,31 @@ def plot_cor_centroids(
 
     # requires v_dict = dictionary of mask labels
     for k1, k2, v in ctd2.items():
+        color = cmap((k1 - 1) % LABEL_MAX % cmap.N)
+        backgroundcolor = get_contrasting_stroke_color(color)
         try:
-            axs.add_patch(
-                Circle(
-                    (v[2] * zms[2], v[0] * zms[0]),
-                    2,
-                    color=cmap((k1 - 1) % LABEL_MAX % cmap.N),
-                )
+            circle = Circle(
+                (v[2] * zms[2], v[0] * zms[0]),
+                3,
+                edgecolor=backgroundcolor,
+                facecolor=color,
+                linewidth=0.5,
             )
+            axs.add_patch(circle)
             if not hide_centroid_labels and k2 == curve_location.value and k1 in poi_labelmap:
-                axs.text(4, v[0] * zms[0], poi_labelmap[k1], fontdict={"color": cmap(k1 - 1), "weight": "bold"})
+                axs.text(
+                    4,
+                    v[0] * zms[0],
+                    poi_labelmap[k1],
+                    fontdict={
+                        "color": color,
+                        "weight": "bold",
+                        "fontsize": 18,
+                    },
+                    # bbox=dict(boxstyle="square,pad=0.2", facecolor="gray", edgecolor="none"),
+                    path_effects=[withStroke(linewidth=3.0, foreground=backgroundcolor)],
+                    zorder=2,
+                )
         except Exception:
             pass
     if "line_segments_cor" in ctd.info:
@@ -529,6 +587,7 @@ def plot_cor_centroids(
             axs.add_patch(FancyArrow(v[2] * zms[2], v[0] * zms[0], c, d, color=cmap(color - 1 % LABEL_MAX % cmap.N)))
     if "text_cor" in ctd.info:
         for color, x in ctd.info["text_cor"]:
+            backgroundcolor = get_contrasting_stroke_color(color)
             if isinstance(color, Sequence) and len(color) == 2:
                 color, curve_location = color  # noqa: PLW2901
             if isinstance(x, str) or len(x) == 1:
@@ -540,7 +599,19 @@ def plot_cor_centroids(
             elif len(x) == 2:
                 (text, a) = x
                 b = zms[0] * ctd[color, curve_location][0]
-            axs.text(a, b, text, fontdict={"color": cmap(color - 1), "weight": "bold"})
+            axs.text(
+                a,
+                b,
+                text,
+                fontdict={
+                    "color": color,
+                    "weight": "bold",
+                    "fontsize": 18,
+                },
+                # bbox=dict(boxstyle="square,pad=0.2", facecolor="gray", edgecolor="none"),
+                path_effects=[withStroke(linewidth=3.0, foreground=backgroundcolor)],
+                zorder=2,
+            )
 
 
 def make_2d_slice(

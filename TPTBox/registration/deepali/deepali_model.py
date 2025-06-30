@@ -6,16 +6,39 @@ import pickle
 import time
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Literal, Optional, Union
+from typing import Literal, Optional, Self, Union
 
 import torch
 import torch.optim
 import yaml
-from deepali.core import Axes, PathStr
+from deepali.core import Axes, PaddingMode, PathStr, Sampling
 from deepali.core import Grid as Deepali_Grid
+from deepali.core import functional as U  # noqa: N812
+from deepali.data import FlowField, Image
 from deepali.data import Image as deepaliImage
-from deepali.modules import TransformImage
-from deepali.spatial import SpatialTransform
+from deepali.losses import (
+    BSplineLoss,
+    DisplacementLoss,
+    LandmarkPointDistance,
+    PairwiseImageLoss,
+    ParamsLoss,
+    PointSetDistance,
+    RegistrationResult,
+)
+from deepali.modules import SampleImage, TransformImage
+from deepali.spatial import (
+    BSplineTransform,
+    CompositeTransform,
+    NonRigidTransform,
+    SequentialTransform,
+    SpatialTransform,
+    new_spatial_transform,
+)
+from torch import Tensor
+from torch.nn import Module
+from torch.optim import Optimizer
+from torch.optim.lr_scheduler import LRScheduler
+from torch.utils.hooks import RemovableHandle
 
 from TPTBox import NII, POI, Image_Reference, to_nii
 from TPTBox.core.compat import zip_strict
@@ -75,6 +98,7 @@ def _warp_poi(
         points.append((x, y, z))
         print(key, key2, (x, y, z))
     with torch.inference_mode():
+        assert len(points) != 0  # Ensure points is not empty
         data = torch.Tensor(points)
         transform.to(device)
         # data2 = data
@@ -94,6 +118,36 @@ def _warp_poi(
     return out_poi
 
 
+def _warp_points(
+    points,
+    axes: Axes,
+    to_axes: Axes,
+    grid: Deepali_Grid,
+    to_grid: Deepali_Grid,
+    transform: SpatialTransform,
+    device=default_device,
+    inverse=True,
+) -> torch.Tensor:
+    """
+    Warp points using a spatial transform.
+    Args:
+        points (list): List of points to warp: (b,n) b points with n coordinates.
+        transform (SpatialTransform): Spatial transform to apply.
+        align_corners (bool): Whether to align corners during warping.
+        device (torch.device, optional): Device to perform computation on. Defaults to default_device.
+        inverse (bool, optional): Whether to apply the inverse transform. Defaults to True.
+    """
+    with torch.inference_mode():
+        data = torch.Tensor(points)
+        transform.to(device)
+        # data2 = data
+        if inverse:
+            transform = transform.inverse(update_buffers=True)
+        data = transform.points(data.to(device), axes=axes, to_axes=to_axes, grid=grid, to_grid=to_grid)
+
+    return data.cpu()
+
+
 class General_Registration(DeepaliPairwiseImageTrainer):
     """
     A class for performing deformable registration between a fixed and moving image.
@@ -109,6 +163,8 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         self,
         fixed_image: Image_Reference,
         moving_image: Image_Reference,
+        fixed_seg: Image_Reference | None = None,
+        moving_seg: Image_Reference | None = None,
         reference_image: Image_Reference | None = None,
         source_pset=None,
         target_pset=None,
@@ -138,16 +194,16 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         transform_args: dict | None = None,
         transform_init: PathStr | None = None,  # reload initial flowfield from file
         optim_name="Adam",  # Optimizer name defined in torch.optim. or override on_optimizer finer control
-        lr: float | list[float] = 0.01,  # Learning rate
+        lr: float | Sequence[float] = 0.01,  # Learning rate
         optim_args=None,  # args of Optimizer with out lr
         smooth_grad=0.0,
         verbose=99,
         max_steps: int | Sequence[int] = 250,  # Early stopping.  override on_converged finer control
         max_history: int | None = None,
         min_value=0.0,  # Early stopping.  override on_converged finer control
-        min_delta=0.0,  # Early stopping.  override on_converged finer control
+        min_delta: float | Sequence[float] = 0.0,  # Early stopping.  override on_converged finer control
         loss_terms: list[LOSS | str] | dict[str, LOSS] | dict[str, str] | dict[str, tuple[str, dict]] | None = None,
-        weights: list[float] | dict[str, float] | None = None,
+        weights: list[float] | dict[str, float | list[float]] | None = None,
         auto_run=True,
     ) -> None:
         if device is None:
@@ -167,9 +223,12 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         self.input_grid = mov.to_gird()
         self.source_landmarks_poi = source_landmarks
         self.target_landmarks_poi = target_landmarks
+        self._is_inverted = False
         super().__init__(
             source=source.to_deepali(),
             target=fix.to_deepali(),
+            source_seg=to_nii(fixed_seg, True).to_deepali() if fixed_seg is not None else None,
+            target_seg=to_nii(moving_seg, True).to_deepali() if moving_seg is not None else None,
             source_pset=source_pset,
             target_pset=target_pset,
             source_landmarks=source_landmarks,
@@ -234,6 +293,19 @@ class General_Registration(DeepaliPairwiseImageTrainer):
     #        #    .unsqueeze(0)
     #        # )
     #    return data.clone()
+    def inverse(self) -> Self:
+        """
+        Invert the registration transformation.
+
+        Returns:
+            Self: The instance with the inverted transformation.
+        """
+        self._is_inverted = not self._is_inverted
+        from copy import copy
+
+        out = copy(self)
+        out._is_inverted = not self._is_inverted
+        return out
 
     @torch.no_grad()
     def transform_nii(
@@ -254,6 +326,8 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         Returns:
             NII: The transformed image as an NII object.
         """
+        if self._is_inverted:
+            inverse = not inverse
         device = get_device(ddevice, 0 if gpu is None else gpu) if ddevice is not None else self.device
         target_grid_nii = self.target_grid if target is None else target
         target_grid = target_grid_nii.to_deepali_grid(align_corners)
@@ -266,10 +340,45 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         return out
 
     def transform_poi(self, poi: POI, gpu: int | None = None, ddevice: DEVICES | None = None, align_corners=True, inverse=True):
+        if self._is_inverted:
+            inverse = not inverse
         device = get_device(ddevice, 0 if gpu is None else gpu) if ddevice is not None else self.device
         source_image = poi.resample_from_to(self.target_grid)
         data = _warp_poi(source_image, self.target_grid, self.transform, align_corners, device=device, inverse=inverse)
         return data.resample_from_to(self.target_grid)
+
+    def transform_points(
+        self,
+        points,
+        axes: Axes,
+        to_axes: Axes,
+        grid: Deepali_Grid | Has_Grid,
+        to_grid: Deepali_Grid | Has_Grid,
+        gpu: int | None = None,
+        ddevice: DEVICES | None = None,
+        inverse=True,
+    ):
+        """
+        Transform a set of points using the registered transformation.
+        Args:
+            points (list): List of points to warp: (b,n) b points with n coordinates.
+            axes (Axes): Axes of the input points.
+            to_axes (Axes): Axes of the output points.
+            grid (Deepali_Grid | Has_Grid): The grid to which the points belong.
+            to_grid (Deepali_Grid | Has_Grid): The target grid for the transformed points.
+            gpu (int, optional): GPU index to use. Defaults to None.
+            ddevice (DEVICES, optional): Device type. Defaults to "cuda".
+            inverse (bool, optional): Whether to apply the inverse transformation. Defaults to True.
+        """
+
+        if self._is_inverted:
+            inverse = not inverse
+        if isinstance(grid, Has_Grid):
+            grid = grid.to_deepali_grid()
+        if isinstance(to_grid, Has_Grid):
+            to_grid = to_grid.to_deepali_grid()
+        device = get_device(ddevice, 0 if gpu is None else gpu) if ddevice is not None else self.device
+        return _warp_points(points, axes, to_axes, grid, to_grid, transform=self.transform, device=device, inverse=True)
 
     def __call__(self, *args, **kwds) -> NII:
         """
@@ -285,7 +394,7 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         return self.transform_nii(*args, **kwds)
 
     def get_dump(self):
-        return (self.transform, self.target_grid, self.input_grid)
+        return (self.transform, self.target_grid, self.input_grid, self._is_inverted)
 
     def save(self, path: str | Path):
         with open(path, "wb") as w:
@@ -297,11 +406,12 @@ class General_Registration(DeepaliPairwiseImageTrainer):
             return cls.load_(pickle.load(w), gpu, ddevice)
 
     @classmethod
-    def load_(cls, w, gpu=0, ddevice: DEVICES = "cuda"):
-        transform, grid, mov = w
+    def load_(cls, w, gpu=0, ddevice: DEVICES = "cuda") -> Self:
+        transform, grid, mov, _is_inverted = w
         self = cls.__new__(cls)
         self.transform = transform
         self.target_grid = grid
         self.input_grid = mov
+        self._is_inverted = _is_inverted
         self.device = get_device(ddevice, gpu)
         return self

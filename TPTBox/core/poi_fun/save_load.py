@@ -453,7 +453,7 @@ def _get_poi_idx_from_text(idx: str, label: str, centroids):
 def _load_mkr_POI(dict_mkr: dict):
     centroids = POI_Descriptor()
 
-    if "@schema" not in dict_mkr and "markups-schema-v1.0.3" not in dict_mkr["@schema"]:
+    if "@schema" not in dict_mkr or "markups-schema-v1.0.3" not in dict_mkr["@schema"]:
         log.on_warning(
             "this file is possible incompatible. Tested only with markups-schema-v1.0.3 and not", dict_mkr.get("@schmea", "No Schema")
         )
@@ -470,7 +470,7 @@ def _load_mkr_POI(dict_mkr: dict):
             log.on_warning("unknown coordinate system:", markup["coordinateSystem"])
             continue
         if itk_coords is not None:
-            assert markup["coordinateSystem"] == "LPS" == itk_coords, "multiple rotations not supported"
+            assert (markup["coordinateSystem"] == "LPS") == itk_coords, "multiple rotations not supported"
         itk_coords = markup["coordinateSystem"] == "LPS"
         if markup.get("coordinateUnits", "mm") != "mm":
             log.on_warning("unknown coordinateUnits:", markup["coordinateUnits"])
