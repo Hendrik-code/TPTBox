@@ -20,7 +20,6 @@ from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.nii_wrapper import NII, Image_Reference, to_nii, to_nii_optional
 from TPTBox.core.poi_fun import save_load
 from TPTBox.core.poi_fun.poi_abstract import Abstract_POI, POI_Descriptor
-from TPTBox.core.poi_fun.vertebra_pois_non_centroids import add_prerequisites, compute_non_centroid_pois
 from TPTBox.core.vert_constants import (
     AX_CODES,
     COORDINATE,
@@ -950,6 +949,8 @@ def calc_poi_from_subreg_vert(
 
     if _vert_ids is None:
         _vert_ids = vert_msk.unique()
+
+    from TPTBox.core.poi_fun.vertebra_pois_non_centroids import add_prerequisites, compute_non_centroid_pois  # noqa: PLC0415
 
     subreg_id = add_prerequisites(_int2loc(subreg_id if isinstance(subreg_id, Sequence) else [subreg_id]))  # type: ignore
 
