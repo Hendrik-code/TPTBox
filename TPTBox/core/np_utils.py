@@ -17,7 +17,12 @@ from cc3d import statistics as _cc3dstats
 from cc3d import voxel_connectivity_graph as _voxel_connectivity_graph
 from fill_voids import fill as _fill
 from numpy.typing import NDArray
-from scipy.ndimage import binary_erosion, center_of_mass, gaussian_filter, generate_binary_structure
+from scipy.ndimage import (
+    binary_erosion,
+    center_of_mass,
+    gaussian_filter,
+    generate_binary_structure,
+)
 from skimage.measure import euler_number as _euler_number
 from skimage.measure import label as _label
 
@@ -51,7 +56,11 @@ def np_extract_label(
         return arr == label
 
     if to_label == 0:
-        warnings.warn("np_extract_label: to_label is zero, this can have unforeseen consequences!", UserWarning, stacklevel=4)
+        warnings.warn(
+            "np_extract_label: to_label is zero, this can have unforeseen consequences!",
+            UserWarning,
+            stacklevel=4,
+        )
     if not inplace:
         arr = arr.copy()
 
@@ -288,16 +297,18 @@ def np_dice(seg: np.ndarray, gt: np.ndarray, binary_compare: bool = False, label
         float: dice value
     """
     assert seg.shape == gt.shape, f"shape mismatch, got {seg.shape}, and {gt.shape}"
-    if binary_compare:
-        seg = seg.copy()
-        seg[seg != 0] = 1
-        gt = gt.copy()
-        gt[gt != 0] = 1
-        label = 1
 
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", r"invalid value encountered in double_scalars")
-        dice = float(np.sum(seg[gt == label]) * 2.0 / (np.sum(seg) + np.sum(gt)))
+        if binary_compare:
+            seg_l = seg != 0
+            gt_l = gt != 0
+        else:
+            seg_l = seg == label  # predicted mask for this label
+            gt_l = gt == label  # ground-truth mask for this label
+        intersect = np.logical_and(seg_l, gt_l).sum()
+        denom = seg_l.sum() + gt_l.sum()
+        dice = (2.0 * intersect) / (denom)
     if np.isnan(dice):
         return 1.0
     return dice

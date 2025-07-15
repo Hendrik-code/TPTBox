@@ -7,7 +7,7 @@ from collections.abc import Callable, Generator, Sequence
 from copy import copy
 from pathlib import Path
 from timeit import default_timer as timer
-from typing import Literal, Optional, Union
+from typing import Literal, Union
 
 import torch
 import torch.optim
@@ -203,8 +203,8 @@ class DeepaliPairwiseImageTrainer:
 
         # generate mask
 
-        self.source_mask = self._read(source_mask).type(torch.int8) if source_mask is not None else None
-        self.target_mask = self._read(target_mask).type(torch.int8) if target_mask is not None else None
+        self.source_mask = self._read(source_mask, torch.int8) if source_mask is not None else None
+        self.target_mask = self._read(target_mask, torch.int8) if target_mask is not None else None
         # normalize
         self.source, self.target = self.on_normalize(self.source, self.target)
         # Pyramid
@@ -213,8 +213,52 @@ class DeepaliPairwiseImageTrainer:
             self.source, self.target, pyramid_levels, finest_level, coarsest_level, dims, pyramid_finest_spacing, pyramid_min_size
         )
         if source_seg is not None or target_seg is not None:
-            self.source_seg = self._read(source_seg)
-            self.target_seg = self._read(target_seg)
+            with torch.no_grad():
+                self.source_seg_org = self._read(source_seg, torch.long, "cpu")
+                self.target_seg_org = self._read(target_seg, torch.long, "cpu")
+                # Get unique labels from both source and target
+                u = torch.unique(self.target_seg_org.tensor())
+                u = u.detach().cpu()
+                u = [a for a in u if a != 0]
+                # Build a mapping from original label -> index (starting from 1)
+                mapping = {int(label.item()): idx for idx, label in enumerate(u, 1)}
+
+                # Remap the segmentation labels according to mapping
+                source_remapped = self.source_seg_org.tensor().clone()
+                target_remapped = self.target_seg_org.tensor().clone()
+                for orig_label, new_label in mapping.items():
+                    source_remapped[self.source_seg_org.tensor() == orig_label] = new_label
+                    target_remapped[self.target_seg_org.tensor() == orig_label] = new_label
+
+                # Convert to one-hot if needed (optional)
+                num_classes = len(mapping) + 1  # Add 1 for background or assume no 0
+                print(f"Found {num_classes=}, {source_remapped.unique()}, {target_remapped.unique()}")
+                one_hot_source = (
+                    (torch.nn.functional.one_hot(source_remapped.long(), num_classes).to(self._dtype).to(self.device))
+                    .permute(0, 4, 1, 2, 3)
+                    .squeeze(0)
+                )
+                one_hot_target = (
+                    (torch.nn.functional.one_hot(target_remapped.long(), num_classes).to(self._dtype).to(self.device))
+                    .permute(0, 4, 1, 2, 3)
+                    .squeeze(0)
+                )
+                print(f"{one_hot_target.shape=}", one_hot_target.device)
+
+                # Wrap in Image object again
+                self.source_seg = Image(
+                    one_hot_source.detach(),
+                    self.source_seg_org.grid(),
+                    dtype=self._dtype,
+                    device=self.device,
+                )
+                self.target_seg = Image(
+                    one_hot_target.detach(),
+                    self.target_seg_org.grid(),
+                    dtype=self._dtype,
+                    device=self.device,
+                )
+            print("make_pyramid seg", self.source_seg.dtype, self.source_seg.device)
             self.source_pyramid_seg, self.target_pyramid_seg = self.make_pyramid(
                 self.source_seg,
                 self.target_seg,
@@ -225,6 +269,7 @@ class DeepaliPairwiseImageTrainer:
                 pyramid_finest_spacing,
                 pyramid_min_size,
             )
+            print("make_pyramid seg end", self.source_seg.dtype)
         else:
             self.source_seg = None
             self.target_seg = None
@@ -245,13 +290,17 @@ class DeepaliPairwiseImageTrainer:
     # def on_normalize_seg(self, source_seg: Optional[Image], target_seg: Optional[Image]):
     #    return clamp_mask(source_seg), clamp_mask(target_seg)
 
-    def _read(self, source) -> Image:
+    def _read(self, source, dtype=None, device=None) -> Image:
+        if dtype is None:
+            dtype = self._dtype
+        if device is None:
+            device = self.device
         if isinstance(source, (str, Path)):
-            return Image.read(source, dtype=self._dtype, device=self.device)
+            return Image.read(source, dtype=dtype, device=device)
         elif hasattr(source, "to_deepali"):
-            source = source.to_deepali(dtype=self._dtype, device=self.device)
+            source = source.to_deepali(dtype=dtype, device=device)
         else:
-            source = source.to(dtype=self._dtype, device=self.device)
+            source = source.to(dtype=dtype, device=device)
         return source
 
     def _pyramid(self, target_image: Image):
@@ -337,7 +386,11 @@ class DeepaliPairwiseImageTrainer:
 
     def _loss_terms_of_type(self, loss_type: type) -> dict[str, Module]:
         r"""Get dictionary of loss terms of a specific type."""
-        return {name: module for name, module in self.loss_terms.items() if isinstance(module, loss_type)}  # type: ignore
+        return {
+            name: module
+            for name, module in self.loss_terms.items()
+            if isinstance(module, loss_type) and not (name in ["Dice", "DCE"] or module.__class__.__name__ in ["Dice", "DCE"])
+        }  # type: ignore
 
     def _transforms_of_type(self, transform_type: type[SpatialTransform]) -> list[SpatialTransform]:
         r"""Get list of spatial transformations of a specific type."""
@@ -401,7 +454,7 @@ class DeepaliPairwiseImageTrainer:
             result["mask"] = mask
         if self.loss_pairwise_image_terms2:
             assert source_image_seg is not None, "Source image segmentation is required"
-            moved_data = self._sample_image(y, source_image_seg.tensor())
+            moved_data: torch.Tensor = self._sample_image(y, source_image_seg.tensor())
             target_data_seg = target_image_seg.tensor()
             if self.source_mask is not None and self.target_mask is not None:
                 # TODO this is from the reference implantation but is need way to much GPU...
@@ -410,7 +463,9 @@ class DeepaliPairwiseImageTrainer:
             else:
                 mask = None
             for name, term in self.loss_pairwise_image_terms2.items():
-                losses[name] = term(moved_data, target_data_seg, mask=mask)
+                losses[name] = term(  # DICE
+                    moved_data.unsqueeze(0), target_data_seg.unsqueeze(0), mask=mask
+                )
             result["source"] = moved_data
             result["target"] = target_data
             result["mask"] = mask
@@ -541,17 +596,32 @@ class DeepaliPairwiseImageTrainer:
         else:
             max_steps = self.max_steps[-1]
         return self.run_level(
-            grid_transform, target_image, source_image, target_image_seg, source_image_seg, opt, lr_sq, level, max_steps, sampling
+            grid_transform,
+            target_image,
+            source_image,
+            target_image_seg,
+            source_image_seg,
+            opt,
+            lr_sq,
+            level,
+            max_steps,
+            sampling,
         )
 
     def on_split_losses(self):
         misc_excl = set()
         self.loss_terms = {a: l.to(self.device) for a, l in self.loss_terms.items()}
-        from deepali.losses import Dice
+        from TPTBox.registration.ridged_intensity.affine_deepali import (  # noqa: PLC0415
+            PairwiseSegImageLoss,
+        )
 
-        self.loss_pairwise_image_terms2 = {name: module for name, module in self.loss_terms.items() if isinstance(module, Dice)}
+        self.loss_pairwise_image_terms2 = self._loss_terms_of_type(PairwiseSegImageLoss)
+        for name, module in self.loss_terms.items():
+            if name in ["Dice", "DCE"] or module.__class__.__name__ in ["Dice", "DCE"]:
+                self.loss_pairwise_image_terms2[name] = module
         misc_excl |= set(self.loss_pairwise_image_terms2.keys())
         self.loss_pairwise_image_terms = self._loss_terms_of_type(PairwiseImageLoss)
+
         misc_excl |= set(self.loss_pairwise_image_terms.keys())
         dist_terms = self._loss_terms_of_type(PointSetDistance)
         misc_excl |= set(dist_terms.keys())
@@ -566,7 +636,32 @@ class DeepaliPairwiseImageTrainer:
         misc_excl |= set(self.loss_params_terms.keys())
         self.loss_misc_terms = {k: v for k, v in self.loss_terms.items() if k not in misc_excl}
 
-    def on_run_start(self, grid_transform, target_image, source_image, target_image_seg, source_image_seg, opt, lr_sq, num_steps, level):
+    def on_run_start(
+        self,
+        grid_transform,
+        target_image,
+        source_image,
+        target_image_seg,
+        source_image_seg,
+        opt,
+        lr_sq,
+        num_steps,
+        level,
+    ):
+        pass
+
+    def on_run_end(
+        self,
+        grid_transform,
+        target_image,
+        source_image,
+        target_image_seg,
+        source_image_seg,
+        opt,
+        lr_sq,
+        num_steps,
+        level,
+    ):
         pass
 
     def run_level(
@@ -588,7 +683,11 @@ class DeepaliPairwiseImageTrainer:
         source_grid = source_image.grid()
         self.transform = grid_transform
         self._sample_image = SampleImage(
-            target=target_grid, source=source_grid, sampling=sampling, padding=PaddingMode.ZEROS, align_centers=False
+            target=target_grid,
+            source=source_grid,
+            sampling=sampling,
+            padding=PaddingMode.ZEROS,
+            align_centers=False,
         ).to(self.device)
         grad_sigma = self.smooth_grad
         self.loss_values = []
@@ -604,10 +703,28 @@ class DeepaliPairwiseImageTrainer:
             self.register_eval_hook(print_eval_loss_hook_tqdm(level, max_steps))
         elif self.verbose > 1:
             self.register_step_hook(print_step_loss_hook_tqdm(level, max_steps))
-        self.on_run_start(grid_transform, target_image, source_image, target_image_seg, source_image_seg, opt, lr_sq, num_steps, level)
+        self.on_run_start(
+            grid_transform,
+            target_image,
+            source_image,
+            target_image_seg,
+            source_image_seg,
+            opt,
+            lr_sq,
+            num_steps,
+            level,
+        )
         while num_steps < max_steps and not self.on_converged(level):
             value = self.on_step(
-                grid_transform, target_image, source_image, target_image_seg, source_image_seg, opt, lr_sq, num_steps, level
+                grid_transform,
+                target_image,
+                source_image,
+                target_image_seg,
+                source_image_seg,
+                opt,
+                lr_sq,
+                num_steps,
+                level,
             )
             num_steps += 1
             with torch.no_grad():
@@ -621,6 +738,17 @@ class DeepaliPairwiseImageTrainer:
 
         self._eval_hooks = _eval_hooks
         self._step_hooks = _step_hooks
+        self.on_run_end(
+            grid_transform,
+            target_image,
+            source_image,
+            target_image_seg,
+            source_image_seg,
+            opt,
+            lr_sq,
+            num_steps,
+            level,
+        )
 
     def _load_initial_transform(self, transform: SpatialTransform):
         if self.model_init:
@@ -632,7 +760,10 @@ class DeepaliPairwiseImageTrainer:
             del disp_field
         return transform
 
-    def register_eval_hook(self, hook: Callable[[DeepaliPairwiseImageTrainer, int, int, RegistrationResult], None]) -> RemovableHandle:
+    def register_eval_hook(
+        self,
+        hook: Callable[[DeepaliPairwiseImageTrainer, int, int, RegistrationResult], None],
+    ) -> RemovableHandle:
         r"""Registers a evaluation hook.
 
         The hook will be called every time after the registration loss has been evaluated
@@ -679,7 +810,14 @@ class DeepaliPairwiseImageTrainer:
             transform = transform.to(device=self.device)
             grid_transform = SequentialTransform(transform)
             self.on_transform_update(grid_transform)
-            grid_transform = self._run_level(grid_transform, target_image, source_image, self.target_seg, self.source_seg, 0)
+            grid_transform = self._run_level(
+                grid_transform,
+                target_image,
+                source_image,
+                self.target_seg,
+                self.source_seg,
+                0,
+            )
         else:
             with torch.no_grad():
                 ## loop pyramid
@@ -698,7 +836,12 @@ class DeepaliPairwiseImageTrainer:
 
                 transform_downsample = self.model_args.pop("downsample", 0)
                 transform_grid = coarsest_grid.downsample(transform_downsample)
-                transform = self.on_make_transform(self.transform_name, grid=transform_grid, groups=1, **self.model_args)
+                transform = self.on_make_transform(
+                    self.transform_name,
+                    grid=transform_grid,
+                    groups=1,
+                    **self.model_args,
+                )
                 transform = self._load_initial_transform(transform)
                 grid_transform = SequentialTransform(transform, post_transform)
                 grid_transform = grid_transform.to(device=self.device)
@@ -723,7 +866,14 @@ class DeepaliPairwiseImageTrainer:
                         if self.verbose > 3:
                             print(f"Subdivided control point grid in {timer() - start:.3f}s")
                     grid_transform.grid_(target_image.grid())
-                self._run_level(grid_transform, target_image, source_image, target_image_seg, source_image_seg, level)
+                self._run_level(
+                    grid_transform,
+                    target_image,
+                    source_image,
+                    target_image_seg,
+                    source_image_seg,
+                    level,
+                )
             if self.verbose > 3:
                 print(f"Registered images in {timer() - start_reg:.3f}s")
             if self.verbose > 0:
