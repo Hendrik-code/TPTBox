@@ -176,6 +176,7 @@ formats_relaxed = [*formats, "t2", "t1", "t2c", "t1c", "cta", "mr", "snapshot", 
 file_types = [
     "nii.gz",
     "json",
+    "mrk.json",
     "png",
     "jpg",
     "tsv",

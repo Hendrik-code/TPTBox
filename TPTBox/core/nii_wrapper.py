@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import traceback
 import warnings
 import zlib
@@ -229,6 +230,10 @@ class NII(NII_Math):
         self.__min = None
         self.info = info if info is not None else {}
         self.set_description(desc)
+        if seg:
+            self._unpack()
+            if isinstance(self.dtype,np.floating):
+                self.set_dtype_("smallest_uint")
 
 
     @classmethod
@@ -2010,10 +2015,18 @@ class NII(NII_Math):
         out = np_unique_withoutzero(self.get_seg_array())
         log.print(out,verbose=verbose)
         return out
+    def voxel_volume(self):
 
-    def volumes(self, include_zero: bool = False) -> dict[int, int]:
+        product = math.prod(self.spacing)
+        return product
+
+    def volumes(self, include_zero: bool = False, in_mm3=False) -> dict[int, float]|dict[int, int]:
         '''Returns a dict stating how many pixels are present for each label'''
-        return np_volume(self.get_seg_array(), include_zero=include_zero)
+        dic =  np_volume(self.get_seg_array(), include_zero=include_zero)
+        if in_mm3:
+            voxel_size = self.voxel_volume()
+            dic = {k:v*voxel_size for k,v in dic.items()}
+        return dic
     def translate_arr(
         self,
         translation_vector: tuple[int, int, int] | dict[str,int]| dict[DIRECTIONS,int],
