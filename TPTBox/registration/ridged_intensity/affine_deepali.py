@@ -98,7 +98,7 @@ class Tether_Seg(PairwiseSegImageLoss):
         l_com = torch.norm(com_fixed - com_warped, dim=-1) / w  # (B, C)
 
         # Zero out channels with small displacement (<10) or NaNs
-        # l_com = torch.where(l_com < self.delta, torch.zeros_like(l_com), l_com)
+        l_com = torch.where(l_com < self.delta, torch.zeros_like(l_com), l_com)
         l_com = torch.nan_to_num(l_com, nan=0.0)
 
         return l_com.mean()  # type: ignore
