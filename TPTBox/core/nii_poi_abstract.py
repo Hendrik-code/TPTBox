@@ -114,7 +114,14 @@ class Has_Grid(Grid_Proxy):
             out.pop(k)
         return out
 
-    def change_affine(self, translation=None, rotation_degrees=None, scaling=None, degrees=True, inplace=False):
+    def change_affine(
+        self,
+        translation=None,
+        rotation_degrees=None,
+        scaling=None,
+        degrees=True,
+        inplace=False,
+    ):
         """
         Apply a transformation (translation, rotation, scaling) to the affine matrix.
 
@@ -154,7 +161,11 @@ class Has_Grid(Grid_Proxy):
 
     def change_affine_(self, translation=None, rotation_degrees=None, scaling=None, degrees=True):
         return self.change_affine(
-            translation=translation, rotation_degrees=rotation_degrees, scaling=scaling, degrees=degrees, inplace=True
+            translation=translation,
+            rotation_degrees=rotation_degrees,
+            scaling=scaling,
+            degrees=degrees,
+            inplace=True,
         )
 
     def copy(self) -> Self:
@@ -396,6 +407,30 @@ class Has_Grid(Grid_Proxy):
         grid = grid.align_corners_(align_corners)
         return grid
 
+    @classmethod
+    def from_deepali_grid(cls, grid):
+        try:
+            from deepali.core import Grid as dp_Grid
+        except Exception:
+            log.print_error()
+            log.on_fail("run 'pip install hf-deepali' to install deepali")
+            raise
+        grid_: dp_Grid = grid
+        size = grid_.size()
+        spacing = grid_.spacing().cpu().numpy()
+        origin = grid_.origin().cpu().numpy()
+        direction = grid_.direction().cpu().numpy()
+        # Convert to ITK LPS convention
+        origin[:2] *= -1
+        direction[:2] *= -1
+        # Replace small values and -0 by 0
+        epsilon = sys.float_info.epsilon
+        origin[np.abs(origin) < epsilon] = 0
+        direction[np.abs(direction) < epsilon] = 0
+        grid = Grid(shape=size, origin=origin, spacing=spacing, rotation=direction)  # type: ignore
+
+        return grid
+
     def get_num_dims(self):
         return len(self.shape)
 
@@ -406,9 +441,14 @@ class Grid(Has_Grid):
         for k, v in qargs.items():
             if k == "spacing":
                 k = "zoom"  # noqa: PLW2901
+            if k == "direction":
+                k = "rotation"  # noqa: PLW2901
             if k == "rotation":
                 v = np.array(v)  # noqa: PLW2901
                 if len(v.shape) == 1:
                     s = int(np.sqrt(v.shape[0]))
                     v = v.reshape(s, s)  # noqa: PLW2901
             setattr(self, k, v)
+
+        ort = nio.io_orientation(self.affine)
+        self.orientation = nio.ornt2axcodes(ort)  # type: ignore

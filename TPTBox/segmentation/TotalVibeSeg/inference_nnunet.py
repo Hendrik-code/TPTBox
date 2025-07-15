@@ -62,6 +62,7 @@ def run_inference_on_file(
     memory_factor=160,  # prod(shape)*memory_factor / 1000, 160 ~> 30 GB
     memory_max=160000,  # in MB, default is 160GB
     wait_till_gpu_percent_is_free=0.1,
+    verbose=True,
 ) -> tuple[Image_Reference, np.ndarray | None]:
     global model_path  # noqa: PLW0603
     if _model_path is not None:
@@ -71,7 +72,7 @@ def run_inference_on_file(
     if out_file is not None and Path(out_file).exists() and not override:
         return out_file, None
 
-    from TPTBox.segmentation.nnUnet_utils.inference_api import load_inf_model, run_inference
+    from TPTBox.segmentation.nnUnet_utils.inference_api import load_inf_model, run_inference  # noqa: PLC0415
 
     download_weights(idx, model_path)
     try:
@@ -85,7 +86,7 @@ def run_inference_on_file(
     # if idx in _unets:
     #    nnunet = _unets[idx]
     # else:
-
+    print("load model", nnunet_path.name, "; folds", folds) if verbose else None
     nnunet = load_inf_model(
         nnunet_path,
         allow_non_final=True,
@@ -122,10 +123,13 @@ def run_inference_on_file(
         nnunet_path,
     )
     if orientation is not None:
+        print("orientation", orientation) if verbose else None
         input_nii = [i.reorient(orientation) for i in input_nii]
 
     if zoom is not None:
+        print("rescale", zoom) if verbose else None
         input_nii = [i.rescale_(zoom, mode=mode) for i in input_nii]
+    print("squash to float16") if verbose else None
     input_nii = [squash_so_it_fits_in_float16(i) for i in input_nii]
 
     if crop:
@@ -173,6 +177,10 @@ def run_total_seg(
     **_kargs,
 ):
     global model_path  # noqa: PLW0603
+    if out_path.exists() and not override:
+        logger.print(out_path, "already exists. SKIP!", Log_Type.OK)
+        return out_path
+
     if _model_path is not None:
         model_path = _model_path
     if dataset_id is None:
@@ -192,9 +200,6 @@ def run_total_seg(
             return
     else:
         download_weights(dataset_id)
-    if out_path.exists() and not override:
-        logger.print(out_path, "already exists. SKIP!", Log_Type.OK)
-        return out_path
     selected_gpu = gpu
     if gpu is None:
         gpu = "auto"  # type: ignore

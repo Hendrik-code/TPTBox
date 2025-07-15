@@ -9,6 +9,8 @@ from skimage.metrics import peak_signal_noise_ratio as psnr
 from skimage.metrics import structural_similarity as ssim
 from typing_extensions import Self
 
+from TPTBox.core.np_utils import np_dice
+
 from .nii_poi_abstract import Has_Grid
 
 # fmt: off
@@ -22,6 +24,8 @@ if TYPE_CHECKING:
         def get_array(self) -> np.ndarray:
             ...
         def set_array(self,arr:np.ndarray,inplace=False,verbose=True)->Self:
+            ...
+        def get_seg_array(self) -> np.ndarray:
             ...
         @property
         def shape(self) -> tuple[int, int, int]:
@@ -37,6 +41,8 @@ if TYPE_CHECKING:
         def affine(self) -> np.ndarray:
             ...
         def get_c_val(self)->int:
+            ...
+        def unique()->list[int]:
             ...
     C = Union[NII, Number, np.ndarray]
 else:
@@ -208,7 +214,18 @@ class NII_Math(NII_Proxy,Has_Grid):
         img_2[img_2<=0] = 0
         ssim_value = psnr(img_1, img_2,data_range=img_1.max() - img_1.min())
         return ssim_value
-
+    def dice(self,nii: NII_Proxy,bar=True)->dict[int,float]:
+        out:dict[int,float] = {}
+        gt = self.get_seg_array()
+        pred = nii.get_seg_array()
+        s = set(self.unique()+nii.unique())
+        if bar:
+            from tqdm import tqdm
+            s = tqdm(s,desc="dice")
+        for lbl in s:
+            out[lbl] = np_dice(pred,gt,label=lbl)
+            #print(out[lbl])
+        return out
 
     def betti_numbers(self: NII,verbose=False) -> dict[int, tuple[int, int, int]]: # type: ignore
         """

@@ -11,34 +11,13 @@ from typing import Literal, Optional, Self, Union
 import torch
 import torch.optim
 import yaml
-from deepali.core import Axes, PaddingMode, PathStr, Sampling
+from deepali.core import Axes, PathStr
 from deepali.core import Grid as Deepali_Grid
-from deepali.core import functional as U  # noqa: N812
-from deepali.data import FlowField, Image
 from deepali.data import Image as deepaliImage
-from deepali.losses import (
-    BSplineLoss,
-    DisplacementLoss,
-    LandmarkPointDistance,
-    PairwiseImageLoss,
-    ParamsLoss,
-    PointSetDistance,
-    RegistrationResult,
-)
-from deepali.modules import SampleImage, TransformImage
+from deepali.modules import TransformImage
 from deepali.spatial import (
-    BSplineTransform,
-    CompositeTransform,
-    NonRigidTransform,
-    SequentialTransform,
     SpatialTransform,
-    new_spatial_transform,
 )
-from torch import Tensor
-from torch.nn import Module
-from torch.optim import Optimizer
-from torch.optim.lr_scheduler import LRScheduler
-from torch.utils.hooks import RemovableHandle
 
 from TPTBox import NII, POI, Image_Reference, to_nii
 from TPTBox.core.compat import zip_strict
@@ -78,18 +57,33 @@ default_device = torch.device("cuda:0")
 
 
 def _warp_image(
-    source_image: deepaliImage, target_grid: Deepali_Grid, transform: SpatialTransform, mode="linear", device=default_device, inverse=False
+    source_image: deepaliImage,
+    target_grid: Deepali_Grid,
+    transform: SpatialTransform,
+    mode="linear",
+    device=default_device,
+    inverse=False,
 ) -> torch.Tensor:
     if inverse:
         transform = transform.inverse(update_buffers=True)
-    warp_func = TransformImage(target=target_grid, source=target_grid, sampling=mode, padding=source_image.min()).to(device)
+    warp_func = TransformImage(
+        target=target_grid,
+        source=target_grid,
+        sampling=mode,
+        padding=source_image.min(),
+    ).to(device)
     with torch.inference_mode():
         data = warp_func(transform.tensor(), source_image.to(device))
     return data
 
 
 def _warp_poi(
-    poi_moving: POI, target_grid: TPTBox_Grid, transform: SpatialTransform, align_corners, device=default_device, inverse=True
+    poi_moving: POI,
+    target_grid: TPTBox_Grid,
+    transform: SpatialTransform,
+    align_corners,
+    device=default_device,
+    inverse=True,
 ) -> POI:
     keys: list[tuple[int, int]] = []
     points = []
@@ -179,14 +173,13 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         fixed_mask: Image_Reference | None = None,
         moving_mask: Image_Reference | None = None,
         # normalize
-        normalize_strategy: Optional[
-            Literal["auto", "CT", "MRI"]
-        ] = "auto",  # Override on_normalize for finer normalization schema or normalize before and set to None. auto: [min,max] -> [0,1]; None: Do noting
+        normalize_strategy: Literal["auto", "CT", "MRI"]
+        | None = "auto",  # Override on_normalize for finer normalization schema or normalize before and set to None. auto: [min,max] -> [0,1]; None: Do noting
         # Pyramid
-        pyramid_levels: Optional[int] = None,  # 1/None = no pyramid; int: number of stacks, tuple from to (0 is finest)
+        pyramid_levels: int | None = None,  # 1/None = no pyramid; int: number of stacks, tuple from to (0 is finest)
         finest_level: int = 0,
-        coarsest_level: Optional[int] = None,
-        pyramid_finest_spacing: Optional[Sequence[int] | torch.Tensor] = None,
+        coarsest_level: int | None = None,
+        pyramid_finest_spacing: Sequence[int] | torch.Tensor | None = None,
         pyramid_min_size=16,
         dims=("x", "y", "z"),
         align=False,
@@ -216,6 +209,8 @@ class General_Registration(DeepaliPairwiseImageTrainer):
             reference_image = fix
         else:
             fix = fix.resample_from_to(reference_image)
+            if fixed_seg is not None:
+                fixed_seg = to_nii(fixed_seg, True).resample_from_to(reference_image)
         ## Resample and save images
         source = mov  # .resample_from_to_(reference_image)
         ## Load configuration and perform registration
@@ -224,11 +219,12 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         self.source_landmarks_poi = source_landmarks
         self.target_landmarks_poi = target_landmarks
         self._is_inverted = False
+
         super().__init__(
             source=source.to_deepali(),
             target=fix.to_deepali(),
-            source_seg=to_nii(fixed_seg, True).to_deepali() if fixed_seg is not None else None,
-            target_seg=to_nii(moving_seg, True).to_deepali() if moving_seg is not None else None,
+            source_seg=to_nii(moving_seg, True).to_deepali() if fixed_seg is not None else None,
+            target_seg=to_nii(fixed_seg, True).to_deepali() if moving_seg is not None else None,
             source_pset=source_pset,
             target_pset=target_pset,
             source_landmarks=source_landmarks,
@@ -307,6 +303,77 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         out._is_inverted = not self._is_inverted
         return out
 
+    # def on_run_end(
+    #    self,
+    #    grid_transform,
+    #    target_image: deepaliImage,
+    #    source_image: deepaliImage,
+    #    target_image_seg: deepaliImage,
+    #    source_image_seg: deepaliImage,
+    #    opt,
+    #    lr_sq,
+    #    num_steps,
+    #    level,
+    # ):
+    #    import numpy as np
+    #
+    #    arr_target = (
+    #        target_image.tensor()
+    #        .squeeze()
+    #        .permute(2, 1, 0)
+    #        .detach()
+    #        .cpu()
+    #        .float()
+    #        .numpy()
+    #    )
+    #    grid = NII.from_deepali_grid(target_image.grid())
+    #    nii_target = grid.make_nii(arr_target, False)
+    #    nii_target.save(
+    #        f"/DATA/NAS/datasets_processed/CT_spine/dataset-myelom/target_img{level}.nii.gz"
+    #    )
+    #    arr_source = (
+    #        source_image.tensor()
+    #        .squeeze()
+    #        .permute(2, 1, 0)
+    #        .detach()
+    #        .cpu()
+    #        .float()
+    #        .numpy()
+    #    )
+    #    nii_source = grid.make_nii(arr_source, False)
+    #    nii_source.save(
+    #        f"/DATA/NAS/datasets_processed/CT_spine/dataset-myelom/source_img{level}.nii.gz"
+    #    )
+    #    arr = source_image_seg.tensor().permute(0, 3, 2, 1).detach().cpu().numpy()
+    #
+    #    arr_new_source_seg = np.zeros(arr.shape[-3:])
+    #    print(arr_new_source_seg.shape)
+    #    print(arr.shape)
+    #    for i in range(arr.shape[0]):
+    #        arr_new_source_seg[arr[i] >= 0.5] = i
+    #    nii_source = grid.make_nii(arr_new_source_seg.astype(np.uint16), True)
+    #    nii_source.save(
+    #        f"/DATA/NAS/datasets_processed/CT_spine/dataset-myelom/source{level}.nii.gz"
+    #    )
+    #    arr_target_seg = target_image_seg.tensor().permute(0, 3, 2, 1).detach().cpu().numpy()
+    #
+    #    arr_new_target_seg = np.zeros(arr_target_seg.shape[-3:])
+    #    for i in range(arr_target_seg.shape[0]):
+    #        arr_new_target_seg[arr_target_seg[i] >= 0.5] = i
+    #    nii_target_seg = grid.make_nii(arr_new_target_seg.astype(np.uint16), True)
+    #    nii_target_seg.save(
+    #        f"/DATA/NAS/datasets_processed/CT_spine/dataset-myelom/target{level}.nii.gz"
+    #    )
+    #    out = self.transform_nii(nii_target_seg)
+    #    out.save(
+    #        f"/DATA/NAS/datasets_processed/CT_spine/dataset-myelom/moved{level}.nii.gz"
+    #    )
+    #    dice = out.resample_from_to(nii_source).dice(nii_source)
+    #    from TPTBox import Print_Logger
+    #
+    #    Print_Logger().on_debug(np.mean(list(dice.values())), dice)
+    #    # exit()
+
     @torch.no_grad()
     def transform_nii(
         self,
@@ -331,20 +398,39 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         device = get_device(ddevice, 0 if gpu is None else gpu) if ddevice is not None else self.device
         target_grid_nii = self.target_grid if target is None else target
         target_grid = target_grid_nii.to_deepali_grid(align_corners)
-        source_image = img.resample_from_to(self.input_grid).to_deepali()
+        source_image = img.resample_from_to(self.input_grid, mode="constant").to_deepali()
         data = _warp_image(
-            source_image, target_grid, self.transform, "nearest" if img.seg else "linear", device=device, inverse=inverse
+            source_image,
+            target_grid,
+            self.transform,
+            "nearest" if img.seg else "linear",
+            device=device,
+            inverse=inverse,
         ).squeeze()
         data: torch.Tensor = data.permute(*torch.arange(data.ndim - 1, -1, -1))  # type: ignore
         out = target_grid_nii.make_nii(data.detach().cpu().numpy(), img.seg)
         return out
 
-    def transform_poi(self, poi: POI, gpu: int | None = None, ddevice: DEVICES | None = None, align_corners=True, inverse=True):
+    def transform_poi(
+        self,
+        poi: POI,
+        gpu: int | None = None,
+        ddevice: DEVICES | None = None,
+        align_corners=True,
+        inverse=True,
+    ):
         if self._is_inverted:
             inverse = not inverse
         device = get_device(ddevice, 0 if gpu is None else gpu) if ddevice is not None else self.device
         source_image = poi.resample_from_to(self.target_grid)
-        data = _warp_poi(source_image, self.target_grid, self.transform, align_corners, device=device, inverse=inverse)
+        data = _warp_poi(
+            source_image,
+            self.target_grid,
+            self.transform,
+            align_corners,
+            device=device,
+            inverse=inverse,
+        )
         return data.resample_from_to(self.target_grid)
 
     def transform_points(
@@ -378,7 +464,16 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         if isinstance(to_grid, Has_Grid):
             to_grid = to_grid.to_deepali_grid()
         device = get_device(ddevice, 0 if gpu is None else gpu) if ddevice is not None else self.device
-        return _warp_points(points, axes, to_axes, grid, to_grid, transform=self.transform, device=device, inverse=True)
+        return _warp_points(
+            points,
+            axes,
+            to_axes,
+            grid,
+            to_grid,
+            transform=self.transform,
+            device=device,
+            inverse=True,
+        )
 
     def __call__(self, *args, **kwds) -> NII:
         """

@@ -48,14 +48,13 @@ class Deformable_Registration(General_Registration):
         fixed_mask: Image_Reference | None = None,
         moving_mask: Image_Reference | None = None,
         # normalize
-        normalize_strategy: Optional[
-            Literal["auto", "CT", "MRI"]
-        ] = "auto",  # Override on_normalize for finer normalization schema or normalize before and set to None. auto: [min,max] -> [0,1]; None: Do noting
+        normalize_strategy: Literal["auto", "CT", "MRI"]
+        | None = "auto",  # Override on_normalize for finer normalization schema or normalize before and set to None. auto: [min,max] -> [0,1]; None: Do noting
         # Pyramid
-        pyramid_levels: Optional[int] = 3,  # 1/None = no pyramid; int: number of stacks, tuple from to (0 is finest)
+        pyramid_levels: int | None = 3,  # 1/None = no pyramid; int: number of stacks, tuple from to (0 is finest)
         finest_level: int = 0,
-        coarsest_level: Optional[int] = None,
-        pyramid_finest_spacing: Optional[Sequence[int] | torch.Tensor] = None,
+        coarsest_level: int | None = None,
+        pyramid_finest_spacing: Sequence[int] | torch.Tensor | None = None,
         pyramid_min_size=16,
         dims=("x", "y", "z"),
         align=False,
@@ -84,7 +83,6 @@ class Deformable_Registration(General_Registration):
             }
         if weights is None:
             weights = {"be": 0.001, "lncc": 1}
-
         super().__init__(
             fixed_image=fixed_image,
             moving_image=moving_image,
