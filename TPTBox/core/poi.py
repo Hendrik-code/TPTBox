@@ -20,6 +20,7 @@ from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.nii_wrapper import NII, Image_Reference, to_nii, to_nii_optional
 from TPTBox.core.poi_fun import save_load
 from TPTBox.core.poi_fun.poi_abstract import Abstract_POI, POI_Descriptor
+from TPTBox.core.poi_fun.vertebra_pois_non_centroids import add_prerequisites, compute_non_centroid_pois
 from TPTBox.core.vert_constants import (
     AX_CODES,
     COORDINATE,
@@ -40,7 +41,13 @@ from TPTBox.logger import Log_Type
 
 ### CURRENT TYPE DEFINITIONS
 C = TypeVar("C", bound="POI")
-POI_Reference = Union[bids_files.BIDS_FILE, Path, str, tuple[Image_Reference, Image_Reference, Sequence[int]], C]
+POI_Reference = Union[
+    bids_files.BIDS_FILE,
+    Path,
+    str,
+    tuple[Image_Reference, Image_Reference, Sequence[int]],
+    C,
+]
 
 
 @dataclass
@@ -944,8 +951,6 @@ def calc_poi_from_subreg_vert(
     if _vert_ids is None:
         _vert_ids = vert_msk.unique()
 
-    from TPTBox.core.poi_fun.vertebra_pois_non_centroids import add_prerequisites, compute_non_centroid_pois
-
     subreg_id = add_prerequisites(_int2loc(subreg_id if isinstance(subreg_id, Sequence) else [subreg_id]))  # type: ignore
 
     log.print("Calc centroids from subregion id", subreg_id, vert_msk.shape, verbose=verbose)
@@ -1130,6 +1135,8 @@ def calc_centroids(
     second_stage: int | Abstract_lvl = 50,
     extend_to: POI | None = None,
     inplace: bool = False,
+    bar=False,
+    _crop=True,
 ) -> POI:
     """
     Calculates the centroid coordinates of each region in the given mask image.
@@ -1172,14 +1179,30 @@ def calc_centroids(
             extend_to = extend_to.copy()
         ctd_list = extend_to.centroids
         extend_to.assert_affine(msk_nii, shape_tolerance=1, origin_tolerance=1)
-    for i in msk_nii.unique():
-        msk_temp = np.zeros(msk_data.shape, dtype=bool)
-        msk_temp[msk_data == i] = True
-        ctr_mass: Sequence[float] = center_of_mass(msk_temp)  # type: ignore
-        if second_stage == -1:
-            ctd_list[first_stage, int(i)] = tuple(round(x, decimals) for x in ctr_mass)
+    u = msk_nii.unique()
+    if bar:
+        from tqdm import tqdm
+
+        u = tqdm(u)
+    for i in u:
+        if _crop:
+            # TODO test implementation and remove old
+            m = msk_nii.extract_label(i)
+            crop = m.compute_crop()
+            m2: NII = m[crop]
+            ctr_mass: Sequence[float] = center_of_mass(m2.get_seg_array())  # type: ignore
+            out_coord = tuple(round(x + crop.start, decimals) for x, crop in zip(ctr_mass, crop))
         else:
-            ctd_list[int(i), second_stage] = tuple(round(x, decimals) for x in ctr_mass)
+            # OLD
+            msk_temp = np.zeros(msk_data.shape, dtype=bool)
+            msk_temp[msk_data == i] = True
+            ctr_mass: Sequence[float] = center_of_mass(msk_temp)  # type: ignore
+            out_coord = tuple(round(x, decimals) for x in ctr_mass)
+
+        if second_stage == -1:
+            ctd_list[first_stage, int(i)] = out_coord
+        else:
+            ctd_list[int(i), second_stage] = out_coord
     return POI(ctd_list, **msk_nii._extract_affine(), **args)
 
 
