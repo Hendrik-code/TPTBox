@@ -1,16 +1,10 @@
 from __future__ import annotations
 
-import json
-from collections.abc import Sequence
 from copy import deepcopy
 from pathlib import Path
-from random import random
 
 ###### GLOBAL POI #####
-from typing import Literal, TypedDict
-
-import numpy as np
-from typing_extensions import NotRequired, Self
+from typing_extensions import Self
 
 from TPTBox.core import poi
 from TPTBox.core.nii_poi_abstract import Has_Grid
@@ -19,7 +13,6 @@ from TPTBox.core.poi_fun.poi_abstract import Abstract_POI, POI_Descriptor
 from TPTBox.core.poi_fun.save_load import FORMAT_GLOBAL, load_poi, save_poi
 from TPTBox.core.vert_constants import Abstract_lvl, logging
 from TPTBox.logger.log_file import log
-from TPTBox.mesh3D.mesh_colors import RGB_Color, get_color_by_label
 
 
 class POI_Global(Abstract_POI):
@@ -117,6 +110,9 @@ class POI_Global(Abstract_POI):
     def to_global(self):
         return self
 
+    def to_local(self, msk: Has_Grid):
+        return self.resample_from_to(msk)
+
     def resample_from_to(self, msk: Has_Grid):
         return self.to_other(msk)
 
@@ -186,13 +182,13 @@ class POI_Global(Abstract_POI):
         self: Self,
         filepath: str | Path,
         color=None,
-        split_by_region=True,
+        split_by_region=False,
         split_by_subregion=False,
         add_points: bool = True,
         add_lines: list[save_mkr.MKR_Lines] | None = None,
         display: save_mkr.MKR_Display | dict = None,  # type: ignore
         pointLabelsVisibility=False,
-        glyphScale=1.0,
+        glyphScale=5.0,
     ):
         save_mkr._save_mrk(
             poi=self,
@@ -206,85 +202,3 @@ class POI_Global(Abstract_POI):
             pointLabelsVisibility=pointLabelsVisibility,
             glyphScale=glyphScale,
         )
-        # """
-        # Save the POI data to a .mrk.json file in Slicer Markups format.
-        # Automatically sets coordinate system based on itk_coords.
-        # Includes level_one_info and level_two_info in the description.
-        # Preserves metadata from `info` dictionary.
-        # """
-        # if color is None:
-        #    color = self.info.get("color", [1.0, 0.0, 0.0])
-        # filepath = Path(filepath)
-        # if not filepath.name.endswith(".mrk.json"):
-        #    filepath = filepath.parent / (filepath.stem + ".mrk.json")
-        # coordinate_system = "LPS" if self.itk_coords else "RAS"
-        #
-        ## Create list of control points
-        #
-        # list_markups = {}
-        # for region, subregion, coords in self.centroids.items():
-        #    try:
-        #        name = self.level_two_info(subregion).name
-        #    except Exception:
-        #        name = subregion
-        #    try:
-        #        name2 = self.level_one_info(region).name
-        #    except Exception:
-        #        name2 = region
-        #    key = "P"
-        #    color2 = color
-        #    # get_color_by_label(region).rgb / 255.0).tolist()
-        #    if split_by_region:
-        #        key += str(region) + "_"
-        #        color2 = (get_color_by_label(region).rgb / 255.0).tolist()
-        #    if split_by_subregion:
-        #        key += str(subregion)
-        #        if subregion == 83:
-        #            color2 = (get_color_by_label(subregion + 10).rgb / 255.0).tolist()
-        #        else:
-        #            color2 = (get_color_by_label(subregion).rgb / 255.0).tolist()
-        #    if key not in list_markups:
-        #        list_markups[key] = {
-        #            "type": "Fiducial",
-        #            "coordinateSystem": coordinate_system,
-        #            "coordinateUnits": "mm",
-        #            "fixedNumberOfControlPoints": False,
-        #            "locked": False,
-        #            "labelFormat": "%N-%d",
-        #            "controlPoints": [],
-        #            "measurements": [],
-        #            "display": {
-        #                "visibility": True,
-        #                "opacity": 1.0,
-        #                "propertiesLabelVisibility": False,
-        #                "color": color2.copy(),
-        #                "selectedColor": color2.copy(),
-        #                "activeColor": color2.copy(),
-        #                "pointLabelsVisibility": pointLabelsVisibility,
-        #            },
-        #            # "description": "",  # self.info,
-        #        }
-        #    list_markups[key]["controlPoints"].append(
-        #        {
-        #            "id": f"{region}-{subregion}",
-        #            "label": f"{region}-{subregion}",
-        #            "description": name,
-        #            "associatedNodeID": name2,
-        #            "position": list(coords),
-        #            "orientation": [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
-        #            "selected": False,
-        #            "locked": False,
-        #            "visibility": True,
-        #            "positionStatus": "defined",
-        #        }
-        #    )
-        #
-        # mrk_data = {
-        #    "@schema": "https://raw.githubusercontent.com/slicer/slicer/master/Modules/Loadable/Markups/Resources/Schema/markups-schema-v1.0.3.json#",
-        #    "markups": list(list_markups.values()),
-        #    # "coordinateSystem": coordinate_system,
-        # }
-        #
-        # with open(filepath, "w") as f:
-        #    json.dump(mrk_data, f, indent=2)
-        # log.on_save(f"Saved .mrk.json to {filepath}")

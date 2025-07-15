@@ -3,7 +3,6 @@ from __future__ import annotations
 import math
 import pickle
 import warnings
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeVar
 
@@ -11,7 +10,6 @@ import numpy as np
 import SimpleITK as sitk  # noqa: N813
 
 from TPTBox import (
-    AX_CODES,
     NII,
     POI,
     Has_Grid,
@@ -79,7 +77,7 @@ class Point_Registration:
         log.print(f_keys, verbose=verbose)
         log.print(poi_fixed.orientation, verbose=verbose)
 
-        if len(inter) <= 2:
+        if len(inter) < 2:
             log.print("[!] To few points, skip registration", Log_Type.FAIL)
             raise ValueError("[!] To few points, skip registration", inter)
         img_movig = poi_moving.make_empty_nii()
@@ -88,7 +86,13 @@ class Point_Registration:
         if leave_worst_percent_out != 0.0:
             poi_fixed = poi_fixed.intersect(poi_moving)
             init_transform, error_reg, error_natural, delta_after = _compute_versor(
-                inter, poi_fixed, representative_f_sitk, poi_moving, representative_m_sitk, verbose=False, log=log
+                inter,
+                poi_fixed,
+                representative_f_sitk,
+                poi_moving,
+                representative_m_sitk,
+                verbose=False,
+                log=log,
             )
             delta_after = sorted(delta_after.items(), key=lambda x: -x[1])
             out_str = f"Did not use the following keys for registaiton (worst {leave_worst_percent_out * 100} %) "
@@ -104,7 +108,13 @@ class Point_Registration:
         # limit to only shared labels
         inter = [x for x in f_keys if x in m_keys]
         init_transform, error_reg, error_natural, _ = _compute_versor(
-            inter, poi_fixed, representative_f_sitk, poi_moving, representative_m_sitk, verbose=verbose, log=log
+            inter,
+            poi_fixed,
+            representative_f_sitk,
+            poi_moving,
+            representative_m_sitk,
+            verbose=verbose,
+            log=log,
         )
         self._transform: sitk.VersorRigid3DTransform = init_transform
 
@@ -172,7 +182,11 @@ class Point_Registration:
         return np.array(ctr_b)
 
     def transform_nii(
-        self, moving_img_nii: NII, allow_only_same_grid_as_moving=True, output_space: NII | None = None, c_val: float | None = None
+        self,
+        moving_img_nii: NII,
+        allow_only_same_grid_as_moving=True,
+        output_space: NII | None = None,
+        c_val: float | None = None,
     ):
         if allow_only_same_grid_as_moving:
             text = "input image must be in the same space as moving.  If you sure that this input is in same space as the moving image you can turn of 'only_allow_grid_as_moving'"
@@ -305,7 +319,11 @@ def ridged_points_from_subreg_vert(
     semantic_nii = to_nii(subreg, True).copy()
     target_poi = (
         calc_poi_from_subreg_vert(
-            instance_nii, semantic_nii, subreg_id=subreg_id, buffer_file=poi_target_buffer, save_buffer_file=save_buffer_file
+            instance_nii,
+            semantic_nii,
+            subreg_id=subreg_id,
+            buffer_file=poi_target_buffer,
+            save_buffer_file=save_buffer_file,
         )
         .copy()
         .extract_subregion_(*subreg_id)
@@ -327,7 +345,7 @@ def _compute_versor(
     verbose=False,
     log: Logger_Interface = No_Logger(),  # noqa: B008
 ):
-    assert len(inter) > 2, f"To few points: {inter}"
+    assert len(inter) >= 2, f"To few points: {inter}"
     # find shared points
     move_l = []
     fix_l = []
@@ -344,7 +362,11 @@ def _compute_versor(
     moving_image_points_flat = [c for p in move_l for c in p if not math.isnan(c)]
     fixed_image_points_flat = [c for p in fix_l for c in p if not math.isnan(c)]
     init_transform = sitk.VersorRigid3DTransform(
-        sitk.LandmarkBasedTransformInitializer(sitk.VersorRigid3DTransform(), fixed_image_points_flat, moving_image_points_flat)
+        sitk.LandmarkBasedTransformInitializer(
+            sitk.VersorRigid3DTransform(),
+            fixed_image_points_flat,
+            moving_image_points_flat,
+        )
     )
 
     x_old = fix_l[0]
@@ -379,14 +401,25 @@ def _compute_versor(
             y_ = f"{y[0]:7.1f},{y[1]:7.1f},{y[2]:7.1f}"
             y2_ = f"{y2[0]:7.1f},{y2[1]:7.1f},{y2[2]:7.1f}"
             d_ = f"{dif[0]:7.1f},{dif[1]:7.1f},{dif[2]:7.1f}"
-            log.print(f"{(k1, k2)!s: <7}|{x_: <23}|{y2_: <23}|{y_: <23}|{d_: <23}|{dist!s: <5}|{dist2!s: <5}|", verbose=verbose)
+            log.print(
+                f"{(k1, k2)!s: <7}|{x_: <23}|{y2_: <23}|{y_: <23}|{d_: <23}|{dist!s: <5}|{dist2!s: <5}|",
+                verbose=verbose,
+            )
 
         x_old = x
         y_old = y
         k_old = k1
     error_reg /= max(err_count, 1)
     error_natural /= max(err_count_n, 1)
-    log.print(f"Error avg registration error-vector length: {error_reg: 7.3f}", Log_Type.STAGE, verbose=verbose)
-    log.print(f"Error avg point-distances: {error_natural: 7.3f}", Log_Type.STAGE, verbose=verbose)
+    log.print(
+        f"Error avg registration error-vector length: {error_reg: 7.3f}",
+        Log_Type.STAGE,
+        verbose=verbose,
+    )
+    log.print(
+        f"Error avg point-distances: {error_natural: 7.3f}",
+        Log_Type.STAGE,
+        verbose=verbose,
+    )
 
     return init_transform, error_reg, error_natural, delta_after
