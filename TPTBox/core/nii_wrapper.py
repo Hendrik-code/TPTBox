@@ -880,7 +880,7 @@ class NII(NII_Math):
         return self.reorient(axcodes_to=axcodes_to, verbose=verbose, inplace=inplace)
     def reorient_same_as_(self, img_as: Nifti1Image | Self, verbose:logging=False) -> Self:
         return self.reorient_same_as(img_as=img_as,verbose=verbose,inplace=True)
-    def rescale(self, voxel_spacing:float|tuple[float,...]=(1, 1, 1), c_val:float|None=None, verbose:logging=False, inplace=False,mode:MODES='nearest',order: int |None = None,align_corners:bool=False):
+    def rescale(self, voxel_spacing:float|tuple[float,...]=(1, 1, 1), c_val:float|None=None, verbose:logging=False, inplace=False,mode:MODES='nearest',order: int |None = None,align_corners:bool=False,atol=0.001):
         """
         Rescales the NIfTI image to a new voxel spacing.
 
@@ -895,6 +895,7 @@ class NII(NII_Math):
             mode (str, optional): One of the supported modes by scipy.ndimage.interpolation (e.g., "constant", "nearest",
                 "reflect", "wrap"). See the documentation for more details. Defaults to "constant".
             align_corners (bool|default): If True or not set and seg==True. Aline corners for scaling. This prevents segmentation mask to shift in a direction.
+            atol: absolute tolerance for skipping if already close in voxel_spacing
         Returns:
             NII: A new NII object with the resampled image data.
         """
@@ -916,7 +917,7 @@ class NII(NII_Math):
             order = 0 if self.seg else 3
         #print(aff.shape,shp,zms,voxel_spacing)
         voxel_spacing = tuple([v if v != -1 else z for v,z in zip_strict(voxel_spacing,zms)])
-        if voxel_spacing == self.zoom:
+        if np.isclose(voxel_spacing, self.zoom,atol=atol).all():
             log.print(f"Image already resampled to voxel size {self.zoom}",verbose=verbose)
             return self.copy() if inplace else self
 
