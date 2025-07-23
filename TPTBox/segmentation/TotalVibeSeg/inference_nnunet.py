@@ -79,7 +79,7 @@ def run_inference_on_file(
         nnunet_path = next(next(iter(model_path.glob(f"*{idx:03}*"))).glob("*__nnUNet*ResEnc*"))
     except StopIteration:
         nnunet_path = next(next(iter(model_path.glob(f"*{idx:03}*"))).glob("*__nnUNetPlans*"))
-    folds = [int(f.name.split("fold_")[-1]) for f in nnunet_path.glob("fold*")]
+    folds = sorted([int(f.name.split("fold_")[-1]) for f in nnunet_path.glob("fold*")])
     if max_folds is not None:
         folds = max_folds if isinstance(max_folds, list) else folds[:max_folds]
 
@@ -87,6 +87,10 @@ def run_inference_on_file(
     #    nnunet = _unets[idx]
     # else:
     print("load model", nnunet_path.name, "; folds", folds) if verbose else None
+    with open(Path(nnunet_path, "plans.json")) as f:
+        plans_info = json.load(f)
+    with open(Path(nnunet_path, "dataset.json")) as f:
+        ds_info = json.load(f)
     nnunet = load_inf_model(
         nnunet_path,
         allow_non_final=True,
@@ -101,10 +105,6 @@ def run_inference_on_file(
     )
 
     #    _unets[idx] = nnunet
-    with open(Path(nnunet_path, "plans.json")) as f:
-        plans_info = json.load(f)
-    with open(Path(nnunet_path, "dataset.json")) as f:
-        ds_info = json.load(f)
     if "orientation" in ds_info:
         orientation = ds_info["orientation"]
     zoom = None
