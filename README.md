@@ -87,6 +87,8 @@ nii.shape #shape
 ```
 ### Stitching
 Python function and script for arbitrary image stitching. [See Details](TPTBox/stitching/)
+
+![Example of a stitching](TPTBox/stitching/stitching.jpg)
 ### Spineps and Points of Interests (POI) integration
 
 ![Example of two lumbar vertebrae. The left example is derived from 1 mm isotropic CT, the right from sagittal MRI with a resolution of 3.3 mm in the left–right direction. Top row: Subregion of the vertebra used for analysis. Middle row: Extreme points. Bottom row: Corpus edge and ligamentum flavum points.](TPTBox/images/poi_preview.png)
