@@ -111,6 +111,8 @@ class POI_Descriptor(AbstractSet, MutableMapping):
         self.definition = definition
         self._len: int | None = None
 
+    __hash__ = None  # explicitly mark as unhashable
+
     def __set_name__(self, owner, name):
         self._name = "_" + name
 

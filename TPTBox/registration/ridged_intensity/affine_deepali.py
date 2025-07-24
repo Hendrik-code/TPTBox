@@ -4,6 +4,7 @@ from abc import ABCMeta, abstractmethod
 
 # pip install hf-deepali
 from collections.abc import Sequence
+from copy import deepcopy
 from typing import Literal, Union
 
 import torch
@@ -46,7 +47,7 @@ class Tether_single(PairwiseImageLoss):
         self,
         source: torch.Tensor,
         target: torch.Tensor,
-        mask: torch.Tensor | None = None,
+        mask: torch.Tensor | None = None,  # noqa: ARG002
     ) -> torch.Tensor:  # noqa: ARG002
         com_fixed = center_of_mass(target)
         com_warped = center_of_mass(source)
@@ -89,7 +90,7 @@ class Tether_Seg(PairwiseSegImageLoss):
         self,
         source: torch.Tensor,  # shape: (B, C, X, Y, Z)
         target: torch.Tensor,  # shape: (B, C, X, Y, Z)
-        mask: torch.Tensor | None = None,
+        mask: torch.Tensor | None = None,  # noqa: ARG002
     ) -> torch.Tensor:
         w = max(target.shape[2:])
         com_fixed = center_of_mass_cc(target)  # (B, C, 3)
@@ -127,7 +128,7 @@ class Tether(PairwiseImageLoss):
         self,
         source: torch.Tensor,
         target: torch.Tensor,
-        mask: torch.Tensor | None = None,
+        mask: torch.Tensor | None = None,  # noqa: ARG002
     ) -> torch.Tensor:  # noqa: ARG002
         if self.count != 0:
             self.count -= 1
@@ -173,7 +174,7 @@ def subsample_coords(coords: torch.Tensor, k: int) -> torch.Tensor:
     otherwise return `coords` unchanged.
 
     Uses sampling *without* replacement (`torch.randperm`), so every
-    coordinate appears at most once.  Works entirely on‑device.
+    coordinate appears at most once.  Works entirely on-device.
     """
     n = coords.size(0)
     if n <= k:
@@ -198,17 +199,17 @@ class DISTANCE_to_TARGET(PairwiseImageLoss):
         self,
         source: torch.Tensor,
         target: torch.Tensor,
-        mask: torch.Tensor | None = None,
+        mask: torch.Tensor | None = None,  # noqa: ARG002
     ) -> torch.Tensor:
         """
-        Chamfer‑style distance loss for mis‑labelled voxels.
+        Chamfer-style distance loss for mis-labelled voxels.
 
         Parameters
         ----------
         source : (D, H, W)[, …]  torch.Tensor
             Model prediction in label form (one channel per voxel).
         target : (D, H, W)[, …]  torch.Tensor
-            Ground‑truth labels.
+            Ground-truth labels.
         max_v  : float, default 1
             Same scale factor you use elsewhere to map the continuous range [0, 1]
             back to integer labels. Set to 1 if `source` and `target` are already
@@ -235,7 +236,7 @@ class DISTANCE_to_TARGET(PairwiseImageLoss):
         per_class_losses = []
 
         for c in classes:
-            wrong_mask = (src == c) & (tgt != c)  # voxels we predicted as c but shouldn’t
+            wrong_mask = (src == c) & (tgt != c)  # voxels we predicted as c but shouldn't
             if not wrong_mask.any():
                 continue  # no penalty if we never made that error
             res_gt = self.res_gt
@@ -258,7 +259,7 @@ class DISTANCE_to_TARGET(PairwiseImageLoss):
             per_class_losses.append(min_dists.mean())
 
         if not per_class_losses:
-            # Nothing to penalise – perfect overlap
+            # Nothing to penalise - perfect overlap
             return torch.zeros(1, device=device)
 
         # Average over foreground classes
@@ -279,7 +280,7 @@ class LABEL_LOSS(PairwiseImageLoss):
         self,
         source: torch.Tensor,
         target: torch.Tensor,
-        mask: torch.Tensor | None = None,
+        mask: torch.Tensor | None = None,  # noqa: ARG002
     ) -> torch.Tensor:  # noqa: ARG002
         loss = torch.zeros(1, device=source.device)
         target = (target * self.max_v).round(decimals=0)
@@ -429,8 +430,6 @@ class Rigid_Registration_with_Tether(General_Registration):
             self.early_stopping += 1
 
         if value <= self.best2:
-            from copy import deepcopy
-
             self.best_transform = deepcopy(self.transform)
             self.best2 = value
 
