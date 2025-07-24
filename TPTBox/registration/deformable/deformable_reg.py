@@ -73,9 +73,10 @@ class Deformable_Registration(General_Registration):
         loss_terms: list[LOSS | str] | dict[str, LOSS] | dict[str, str] | dict[str, tuple[str, dict]] | None = None,
         weights: list[float] | dict[str, float | list[float]] | None = None,
         auto_run=True,
+        stride=8,
     ):
         if transform_args is None:
-            transform_args = {"stride": [8, 8, 16], "transpose": False}
+            transform_args = {"stride": [stride, stride, stride], "transpose": False}
         if loss_terms is None:
             loss_terms = {
                 "be": BSplineBending(stride=1),

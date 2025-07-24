@@ -1795,17 +1795,18 @@ class NII(NII_Math):
     def save(self,file:str|Path,make_parents=True,verbose:logging=True, dtype = None):
         if make_parents:
             Path(file).parent.mkdir(exist_ok=True,parents=True)
-        arr = self.get_array()
+
+
+
+        arr = self.get_array() if not self.seg else self.get_seg_array()
+        if isinstance(arr,np.floating) and self.seg:
+            self.set_dtype_("smallest_uint")
+            arr = self.get_array() if not self.seg else self.get_seg_array()
+
+
         out = Nifti1Image(arr, self.affine,self.header)#,dtype=arr.dtype)
         if dtype is not None:
             out.set_data_dtype(dtype)
-        elif self.seg:
-            if arr.max()<256:
-                out.set_data_dtype(np.uint8)
-            elif arr.max()<65536:
-                out.set_data_dtype(np.uint16)
-            else:
-                out.set_data_dtype(np.int32)
         if out.header["qform_code"] == 0: #NIFTI_XFORM_UNKNOWN Will cause an error for some rounding of the affine in ITKSnap ...
             # 1 means Scanner coordinate system
             # 2 means align (to something) coordinate system
