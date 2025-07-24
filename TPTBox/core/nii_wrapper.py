@@ -273,7 +273,7 @@ class NII(NII_Math):
         data = _nrrd[0]
 
         header = dict(_nrrd[1])
-        print(data.shape, header)
+        #print(data.shape, header)
         #print(header)
         # Example print out: OrderedDict([
         # ('type', 'short'), ('dimension', 3), ('space', 'left-posterior-superior'),
@@ -1796,8 +1796,6 @@ class NII(NII_Math):
     def save(self,file:str|Path,make_parents=True,verbose:logging=True, dtype = None):
         if make_parents:
             Path(file).parent.mkdir(exist_ok=True,parents=True)
-
-
 
         arr = self.get_array() if not self.seg else self.get_seg_array()
         if isinstance(arr,np.floating) and self.seg:
