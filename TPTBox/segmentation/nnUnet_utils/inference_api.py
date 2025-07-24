@@ -32,6 +32,10 @@ def load_inf_model(
     use_gaussian=True,
     verbose: bool = False,
     gpu=None,
+    memory_base=5000,  # Base memory in MB, default is 5GB
+    memory_factor=160,  # prod(shape)*memory_factor / 1000, 160 ~> 30 GB
+    memory_max=160000,  # in MB, default is 160GB
+    wait_till_gpu_percent_is_free=0.3
 ) -> nnUNetPredictor:
     """Loads the Nako-Segmentor Model Predictor
 
@@ -41,6 +45,9 @@ def load_inf_model(
         "the prediction. Default: 0.5. Cannot be larger than 1.
         ddevice (str, optional): The device the inference should run with. Available options are 'cuda' "
         "(GPU), 'cpu' (CPU) and 'mps' (Apple M1/M2). Do NOT use this to set which GPU ID!. Defaults to "cuda".
+        memory_base (int, optional): Base memory in MB for the model. Default is 5000 MB (5GB).
+        memory_factor (int, optional): Memory factor for the model. Default is 160, which is ~30GB for a 512x512x512 image.
+        memory_max (int, optional): Maximum memory in MB for the model. Default is 160000 MB (160GB).
 
     Returns:
         predictor: Loaded model predictor object
@@ -77,6 +84,10 @@ def load_inf_model(
         verbose=verbose,
         verbose_preprocessing=False,
         cuda_id=0 if gpu is None else gpu,
+        memory_base=memory_base,
+        memory_factor=memory_factor,
+        memory_max=memory_max,
+        wait_till_gpu_percent_is_free=wait_till_gpu_percent_is_free
     )
     check_name = "checkpoint_final.pth"  # if not allow_non_final else "checkpoint_best.pth"
     try:

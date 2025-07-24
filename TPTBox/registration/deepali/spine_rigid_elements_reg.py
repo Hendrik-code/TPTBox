@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 # pip install hf-deepali
 import pickle
 from collections.abc import Sequence
@@ -20,6 +22,17 @@ from TPTBox.core.internal.deep_learning_utils import DEVICES, get_device
 from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.registration.ridged_intensity.affine_deepali import Rigid_Registration_with_Tether
 from TPTBox.registration.ridged_points import Point_Registration
+
+
+def not_exist_or_is_younger_than(path: Path | str, other_path: Path | str | None):
+    path = Path(path)
+    if not path.exists():
+        return True
+    if other_path is None:
+        return True
+    fileCreation = os.path.getmtime(path)
+    fileCreation_ref = os.path.getmtime(other_path)
+    return fileCreation < fileCreation_ref
 
 
 def _load_poi(fixed_poi_file, vert: NII, subreg: NII, save_pois):
@@ -73,10 +86,10 @@ class Rigid_Elements_Registration:
         gpu=0,
         ddevice: DEVICES = "cuda",
         # Pyramid
-        pyramid_levels: Optional[int] = None,  # 1/None = no pyramid; int: number of stacks, tuple from to (0 is finest)
+        pyramid_levels: int | None = None,  # 1/None = no pyramid; int: number of stacks, tuple from to (0 is finest)
         finest_level: int = 0,
-        coarsest_level: Optional[int] = None,
-        pyramid_finest_spacing: Optional[Sequence[int] | torch.Tensor] = None,
+        coarsest_level: int | None = None,
+        pyramid_finest_spacing: Sequence[int] | torch.Tensor | None = None,
         pyramid_min_size=16,
         dims=("x", "y", "z"),
         align=False,
@@ -90,6 +103,7 @@ class Rigid_Elements_Registration:
         patience=100,
         patience_delta=0.00001,
         my=1.5,
+        orientation=None,
     ) -> None:
         self.my = my
         if weights is None:
@@ -97,6 +111,7 @@ class Rigid_Elements_Registration:
         if device is None:
             device = get_device(ddevice, gpu)
         self.device: torch.device = device  # type: ignore
+        self.orientation = orientation
         self._resample_and_preReg(
             fixed_image,
             fixed_vert,
@@ -109,6 +124,7 @@ class Rigid_Elements_Registration:
             reference_image,
             crop_to_FOV,
             save_pois,
+            orientation,
         )
 
         self._run_rigid_reg(
@@ -144,6 +160,7 @@ class Rigid_Elements_Registration:
         reference_image: Image_Reference | None,
         crop_to_FOV: bool,
         save_pois: bool,
+        orientation,
     ):
         # Load
         # fixed_image = to_nii(fixed_image_)
@@ -158,7 +175,28 @@ class Rigid_Elements_Registration:
         # Resample
         ref = fixed_vert if reference_image is None else reference_image
         if not isinstance(ref, Has_Grid):
-            ref = to_nii(reference_image)
+            ref = to_nii(ref)
+        if orientation is not None:
+            ref.reorient_(orientation)  # type: ignore
+            fixed_vert.reorient_(orientation)
+            fixed_subreg.reorient_(orientation)
+            moving_image.reorient_(orientation)
+            moving_vert.reorient_(orientation)
+            moving_subreg.reorient_(orientation)
+            fixed_poi.reorient_(orientation)
+            moving_poi.reorient_(orientation)
+
+        if not fixed_vert.assert_affine(fixed_subreg, raise_error=False):
+            fixed_subreg.resample_from_to_(fixed_vert)
+        if not fixed_vert.assert_affine(fixed_poi, raise_error=False):
+            fixed_poi = fixed_poi.resample_from_to(fixed_vert)
+
+        if not moving_image.assert_affine(moving_vert, raise_error=False):
+            moving_vert.resample_from_to_(moving_image)
+        if not moving_image.assert_affine(moving_subreg, raise_error=False):
+            moving_subreg.resample_from_to_(moving_image)
+        if not moving_image.assert_affine(moving_poi, raise_error=False):
+            moving_poi = moving_poi.resample_from_to(moving_image)
 
         # fixed_image.resample_from_to_(ref)
         fixed_vert.resample_from_to_(ref)
@@ -198,10 +236,10 @@ class Rigid_Elements_Registration:
 
     def _run_rigid_reg(
         self,
-        pyramid_levels: Optional[int] = None,  # 1/None = no pyramid; int: number of stacks, tuple from to (0 is finest)
+        pyramid_levels: int | None = None,  # 1/None = no pyramid; int: number of stacks, tuple from to (0 is finest)
         finest_level: int = 0,
-        coarsest_level: Optional[int] = None,
-        pyramid_finest_spacing: Optional[Sequence[int] | torch.Tensor] = None,
+        coarsest_level: int | None = None,
+        pyramid_finest_spacing: Sequence[int] | torch.Tensor | None = None,
         pyramid_min_size=16,
         dims=("x", "y", "z"),
         align=False,
@@ -226,7 +264,13 @@ class Rigid_Elements_Registration:
         for idx in ids_fixed:
             if idx not in ids_moving:
                 continue
+            if idx >= 100:
+                continue
             # subreg_ct[subreg_ct == 20] = 49
+            try:
+                name = Vertebra_Instance(idx).name
+            except Exception:
+                name = str(idx)
             reg = Rigid_Registration_with_Tether(
                 self.fixed_vert.extract_label(idx) * self.fixed_subreg,
                 self.moving_vert.extract_label(idx) * self.moving_subreg,
@@ -246,8 +290,9 @@ class Rigid_Elements_Registration:
                 weights=weights,
                 patience=patience,
                 patience_delta=patience_delta,
-                desc=Vertebra_Instance(idx).name,
+                desc=name,
             )
+
             self._rigid_registrations.append(reg)
             self._ids.append(idx)
 
@@ -329,7 +374,8 @@ class Rigid_Elements_Registration:
         self, img: NII, gpu: int | None = None, ddevice: DEVICES | None = None, align_corners=True, padding=PaddingMode.ZEROS
     ) -> NII:
         device = get_device(ddevice, 0 if gpu is None else gpu) if ddevice is not None else self.device
-
+        if self.orientation:
+            img = img.reorient(self.orientation)
         img_point_reg = self.point_reg.transform_nii(img)
         if self.crop is not None:
             img_point_reg.apply_crop_(self.crop)

@@ -14,7 +14,7 @@ from TPTBox.core.vert_constants import Full_Body_Instance, Lower_Body
 text_file_is_left_leg = True
 file_text = "/DATA/NAS/tools/TPTBox/examples/atlas_poi_transfer_leg/010__left.txt"
 segmentation_path = "/DATA/NAS/datasets_processed/CT_fullbody/dataset-watrinet/source/Dataset001_all/0001/bone.nii.gz"
-out_folder = Path("/DATA/NAS/datasets_processed/CT_fullbody/dataset-watrinet/atlas")
+out_folder = Path("/DATA/NAS/datasets_processed/CT_fullbody/dataset-watrinet/atlas2")
 atlas_id = 1
 ##########################################
 # Load segmentation
