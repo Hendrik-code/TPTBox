@@ -120,6 +120,15 @@ class POI(Abstract_POI, Has_Grid):
     _zoom: ZOOMS = field(init=False, default=(1, 1, 1), repr=False, compare=False)
     _vert_orientation_pir = {}  # Elusive; will not be saved; will not be copied. For Buffering results  # noqa: RUF012
 
+    def _set_inplace(self, poi: Self):
+        self.orientation = poi.orientation
+        self.centroids = poi.centroids
+        self.zoom = poi.zoom
+        self.shape = poi.shape
+        self.origin = poi.origin
+        self.rotation = poi.rotation
+        return self
+
     @property
     def is_global(self):
         return False
@@ -564,6 +573,9 @@ class POI(Abstract_POI, Has_Grid):
 
     def resample_from_to(self, ref: Has_Grid):
         return self.to_global().to_other(ref)
+
+    def resample_from_to_(self, ref: Has_Grid):
+        return self._set_inplace(self.resample_from_to_(ref))
 
     def save(
         self,

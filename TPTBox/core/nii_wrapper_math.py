@@ -246,7 +246,7 @@ class NII_Math(NII_Proxy,Has_Grid):
         Betti Numbers:
         - B0 (b0): Number of connected components.
         - B1 (b1): Number of holes.
-        - B2 (b2): Number of fully engulfed empty spaces.f
+        - B2 (b2): Number of fully engulfed empty spaces.
 
         The np_betti_number function uses Euler characteristic numbers to calculate these Betti numbers. The result is
         a dictionary where each voxel label is associated with its corresponding Betti numbers.
