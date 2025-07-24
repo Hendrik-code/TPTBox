@@ -121,9 +121,9 @@ def make_snapshot3D(
 
 
 def make_snapshot3D_parallel(
-    imgs: list[Path],
+    imgs: list[Path | str],
     output_paths: list[Image_Reference],
-    orientation: VIEW | list[VIEW] = "A",
+    view: VIEW | list[VIEW] = "A",
     ids_list: list[Sequence[int]] | None = None,
     smoothing=20,
     resolution: float = 2,
@@ -141,7 +141,7 @@ def make_snapshot3D_parallel(
                 kwds={
                     "output_path": out_path,
                     "img": img,
-                    "view": orientation,
+                    "view": view,
                     "ids_list": ids_list,
                     "smoothing": smoothing,
                     "resolution": resolution,
