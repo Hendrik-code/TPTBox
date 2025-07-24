@@ -8,12 +8,11 @@ import time
 import traceback
 from dataclasses import dataclass, field
 from math import ceil, floor
-from pathlib import Path
 
 import numpy as np
 import torch
 from acvl_utils.cropping_and_padding.padding import pad_nd_image
-from batchgenerators.utilities.file_and_folder_operations import join, load_json, load_pickle
+from batchgenerators.utilities.file_and_folder_operations import join, load_json
 from nnunetv2.utilities.label_handling.label_handling import determine_num_input_channels
 from torch._dynamo import OptimizedModule
 from tqdm import tqdm
@@ -50,6 +49,10 @@ class nnUNetPredictor:
         verbose: bool = False,
         verbose_preprocessing: bool = False,
         allow_tqdm: bool = True,
+        memory_base=5000,  # Base memory in MB, default is 5GB
+        memory_factor=160,  # prod(shape)*memory_factor / 1000, 160 ~> 30 GB
+        memory_max: int = 160000,  # in MB, default is 160GB
+        wait_till_gpu_percent_is_free=0.3,
     ):
         self.verbose = verbose
         self.verbose_preprocessing = verbose_preprocessing
@@ -76,6 +79,10 @@ class nnUNetPredictor:
             perform_everything_on_gpu = False
         self.device = device
         self.perform_everything_on_gpu = perform_everything_on_gpu
+        self.memory_base = memory_base
+        self.memory_factor = memory_factor
+        self.memory_max = memory_max
+        self.wait_till_gpu_percent_is_free = wait_till_gpu_percent_is_free
 
     def initialize_from_trained_model_folder(
         self,
@@ -102,7 +109,14 @@ class nnUNetPredictor:
             trainer.output_folder_base = model_training_output_dir
             trainer.update_fold(0)
             trainer.initialize(False)
-            all_best_model_files = [join(model_training_output_dir, f"fold_{i}", "model_final_checkpoint.model") for i in use_folds]
+            all_best_model_files = [
+                join(
+                    model_training_output_dir,
+                    f"fold_{i}",
+                    "model_final_checkpoint.model",
+                )
+                for i in use_folds
+            ]
             print("using the following model files: ", all_best_model_files)
             all_params = [torch.load(i, map_location=torch.device("cpu"))["state_dict"] for i in all_best_model_files]
             plans = trainer.plans
@@ -303,6 +317,11 @@ class nnUNetPredictor:
                 traceback.print_exc()
                 prediction = None
                 self.perform_everything_on_gpu = False
+                empty_cache(self.device)
+                if attempts == 0:
+                    raise
+
+                return self.predict_logits_from_preprocessed_data(data, attempts=attempts - 1)
 
             # CPU version
             if prediction is None:
@@ -328,8 +347,8 @@ class nnUNetPredictor:
                         prediction /= len(self.list_of_parameters)  # type: ignore
                 except RuntimeError:
                     print(f"failed due to insufficient GPU memory. {attempts} attempts remaining.")
-                    print("Error:")
-                    traceback.print_exc()
+                    # print("Error:")
+                    # traceback.print_exc()
                     empty_cache(self.device)
                     if attempts == 0:
                         raise
@@ -430,7 +449,10 @@ class nnUNetPredictor:
         # If the device_type is 'mps' then it will complain that mps is not implemented, even if enabled=False
         # is set. Why. (this is why we don't make use of enabled=False)
         # So autocast will only be active if we have a cuda device.
-        with torch.no_grad(), torch.autocast(self.device.type, enabled=True) if self.device.type == "cuda" else dummy_context():
+        with (
+            torch.no_grad(),
+            torch.autocast(self.device.type, enabled=True) if self.device.type == "cuda" else dummy_context(),
+        ):
             assert len(input_image.shape) == 4, "input_image must be a 4D np.ndarray or torch.Tensor (c, x, y, z)"
             if self.verbose:
                 print(f"Input shape: {input_image.shape}")
@@ -451,27 +473,32 @@ class nnUNetPredictor:
 
             # print("pixel", np.prod(shape) / 1000000)
             # print("memory", get_gpu_memory_MB(device), device)
-            if get_gpu_util(device) > 0.7:
-                t = tqdm(range(1200))  # Wait 20 minutes
+            if get_gpu_util(device) > 1 - self.wait_till_gpu_percent_is_free:
+                t = tqdm(range(2400))  # Wait 40 minutes
                 for i in t:
                     util = get_gpu_util(device)
-                    th = 0.7
+                    th = 1 - self.wait_till_gpu_percent_is_free
                     if i > 60:
-                        th = 0.8
+                        th = 1 - self.wait_till_gpu_percent_is_free / 4 * 3
                     if i > 180:
-                        th = 0.9
-                    t.desc = f"not enough gpu space {util:.2f} must be under {th:.1f}"
+                        th = 1 - self.wait_till_gpu_percent_is_free / 2
+                    if i > 1200:
+                        th = 1 - self.wait_till_gpu_percent_is_free / 4
+                    t.desc = f"not enough gpu space in precent {util:.2f} must be under {th:.1f}"
                     if util < th:
                         break
                     time.sleep(1)
 
-            def check_mem(shape, max_memory=160000, min_memory=5000, factor=160):
+            def check_mem(shape):
                 memory = get_gpu_memory_MB(device)
+                max_memory = self.memory_max
+                min_memory = self.memory_base
+                factor = self.memory_factor
                 # print(shape, "usage", np.prod(shape) / 1000000 * factor, max(min(memory, max_memory), min_memory))
                 return (np.prod(shape) / 1000000 * factor) + min_memory // 2 < max(min(memory, max_memory), min_memory)
 
             with tqdm(total=len(slicers), disable=not self.allow_tqdm) as pbar:
-                if not check_mem(shape):
+                if not check_mem(shape) or "nnUNetPlans_2d" not in self.configuration_manager.configuration.get("data_identifier", "3D"):
                     pbar.desc = "splitting in to chunks"
                     pbar.update(0)
                     splits = [1 for _ in shape]
@@ -486,9 +513,20 @@ class nnUNetPredictor:
                         shape_split = [ceil(s / sp) for s, sp in zip(shape, splits)]
                         # print(shape, patch_size, splits, s, np.prod(shape) / 1000000)
                         if check_mem(shape_split):
-                            return self._run_prediction_splits(
-                                data, network, global_shape=shape, splits=splits, slicers=slicers, pbar=pbar
-                            )[(slice(None), *slicer_revert_padding[1:])]
+                            try:
+                                return self._run_prediction_splits(
+                                    data,
+                                    network,
+                                    global_shape=shape,
+                                    splits=splits,
+                                    slicers=slicers,
+                                    pbar=pbar,
+                                )[(slice(None), *slicer_revert_padding[1:])]
+                            except AttributeError as e:
+                                print("_run_prediction_splits failed; fallback to non splits")
+                                print(e)
+                                break
+
                 predicted_logits, n_predictions = self._run_sub(data, network, device, slicers, pbar)
                 pbar.desc = "finish"
                 pbar.update(0)
@@ -498,7 +536,15 @@ class nnUNetPredictor:
                 empty_cache(self.device)
                 return predicted_logits[(slice(None), *slicer_revert_padding[1:])]
 
-    def _run_prediction_splits(self, data, network, global_shape, splits: list[int], slicers: list[tuple[slice, ...]], pbar: tqdm):
+    def _run_prediction_splits(
+        self,
+        data,
+        network,
+        global_shape,
+        splits: list[int],
+        slicers: list[tuple[slice, ...]],
+        pbar: tqdm,
+    ):
         widths = [ceil(s / sp) for s, sp in zip(global_shape, splits)]
         inter_mediate_slice: list[intermediate_slice] = []
         pbar.desc = "split in to GPU chunks"
@@ -519,15 +565,16 @@ class nnUNetPredictor:
                 raise ValueError(s)
         # print(inter_mediate_slice)
         predicted_logits, n_predictions, _, _ = self._allocate(data, "cpu", pbar)
-        for i in inter_mediate_slice:
+        for e, i in enumerate(inter_mediate_slice, 1):
             slices = i.get_intermediate()
             sub_data = data[slices]
-            logits, n_pred = self._run_sub(sub_data, network, self.device, i.get_slices(), pbar)
+            logits, n_pred = self._run_sub(
+                sub_data, network, self.device, i.get_slices(), pbar, addendum=f"chunks={e}/{len(inter_mediate_slice)}"
+            )
             pbar.desc = "save back chunk to cpu"
             pbar.update(0)
             logits = logits.cpu()
             n_pred = n_pred.cpu()
-            empty_cache(self.device)
             predicted_logits[slices] += logits
             n_predictions[slices[1:]] += n_pred
             del logits
@@ -557,6 +604,9 @@ class nnUNetPredictor:
                     device=results_device,
                 )
         except RuntimeError as e:
+            n_predictions = None
+            gaussian = 1
+            predicted_logits = 1
             print("allocate FALL BACK CPU")  # raise
             empty_cache(self.device)
             print(e)
@@ -575,24 +625,38 @@ class nnUNetPredictor:
                     value_scaling_factor=1000,
                     device=results_device,
                 )
-        finally:
-            empty_cache(self.device)
+        # finally:
+        #    empty_cache(self.device)
         return predicted_logits, n_predictions, gaussian, results_device
 
-    def _run_sub(self, data: torch.Tensor, network, results_device, slicers, pbar: tqdm):
-        data = data.to(self.device)  # type: ignore
-        predicted_logits, n_predictions, gaussian, results_device = self._allocate(data, results_device, pbar)
-        pbar.desc = "running prediction"
-        for sl in slicers:
-            pbar.update(1)
-            work_on = data[sl][None]
-            work_on = work_on.to(self.device, non_blocking=False)
-            prediction = self._internal_maybe_mirror_and_predict(work_on, network=network)[0].to(results_device)
-            if prediction.shape[0] != predicted_logits.shape[0]:
-                prediction.squeeze_(0)
-            predicted_logits[sl] += prediction * gaussian if self.use_gaussian else prediction
-            n_predictions[sl[1:]] += gaussian if self.use_gaussian else 1
-        return predicted_logits, n_predictions
+    def _run_sub(self, data: torch.Tensor, network, results_device, slicers, pbar: tqdm, addendum=""):
+        try:
+            data = data.to(self.device)  # type: ignore
+            predicted_logits, n_predictions, gaussian, results_device = self._allocate(data, results_device, pbar)
+            pbar.desc = f"running prediction {addendum}"
+            prediction = None
+            work_on = None
+            for sl in slicers:
+                pbar.update(1)
+                work_on = data[sl][None]
+                work_on = work_on.to(self.device, non_blocking=False)
+                prediction = self._internal_maybe_mirror_and_predict(work_on, network=network)[0].to(results_device)
+                if prediction.shape[0] != predicted_logits.shape[0]:
+                    prediction.squeeze_(0)
+                predicted_logits[sl] += prediction * gaussian if self.use_gaussian else prediction
+                n_predictions[sl[1:]] += gaussian if self.use_gaussian else 1
+            return predicted_logits, n_predictions  # noqa: TRY300
+        except RuntimeError:
+            del predicted_logits
+            del n_predictions
+            del gaussian
+            del work_on
+            del prediction
+            empty_cache(self.device)
+            empty_cache(results_device)
+            self.memory_base += 1000
+            self.memory_factor += 10
+            raise
 
 
 @dataclass
@@ -625,12 +689,18 @@ class intermediate_slice:
         self.slicers.append(s)
 
     def get_intermediate(self):
-        return (slice(None), *tuple(slice(mi, ma) for mi, ma in zip(self.min_s, self.max_s)))  # type: ignore
+        return (
+            slice(None),
+            *tuple(slice(mi, ma) for mi, ma in zip(self.min_s, self.max_s)),
+        )  # type: ignore
 
     def get_slices(self):
         assert self.min_s is not None
         for s in self.slicers:
-            yield (slice(None), *tuple(slice(a.start - o, a.stop - o if a.stop is not None else None) for a, o in zip(s[1:], self.min_s)))
+            yield (
+                slice(None),
+                *tuple(slice(a.start - o, a.stop - o if a.stop is not None else None) for a, o in zip(s[1:], self.min_s)),
+            )
 
 
 def empty_cache(device: torch.device):

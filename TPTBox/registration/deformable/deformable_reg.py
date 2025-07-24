@@ -32,6 +32,8 @@ class Deformable_Registration(General_Registration):
         self,
         fixed_image: Image_Reference,
         moving_image: Image_Reference,
+        fixed_seg: Image_Reference | None = None,
+        moving_seg: Image_Reference | None = None,
         reference_image: Image_Reference | None = None,
         source_pset=None,
         target_pset=None,
@@ -46,14 +48,13 @@ class Deformable_Registration(General_Registration):
         fixed_mask: Image_Reference | None = None,
         moving_mask: Image_Reference | None = None,
         # normalize
-        normalize_strategy: Optional[
-            Literal["auto", "CT", "MRI"]
-        ] = "auto",  # Override on_normalize for finer normalization schema or normalize before and set to None. auto: [min,max] -> [0,1]; None: Do noting
+        normalize_strategy: Literal["auto", "CT", "MRI"]
+        | None = "auto",  # Override on_normalize for finer normalization schema or normalize before and set to None. auto: [min,max] -> [0,1]; None: Do noting
         # Pyramid
-        pyramid_levels: Optional[int] = 3,  # 1/None = no pyramid; int: number of stacks, tuple from to (0 is finest)
+        pyramid_levels: int | None = 3,  # 1/None = no pyramid; int: number of stacks, tuple from to (0 is finest)
         finest_level: int = 0,
-        coarsest_level: Optional[int] = None,
-        pyramid_finest_spacing: Optional[Sequence[int] | torch.Tensor] = None,
+        coarsest_level: int | None = None,
+        pyramid_finest_spacing: Sequence[int] | torch.Tensor | None = None,
         pyramid_min_size=16,
         dims=("x", "y", "z"),
         align=False,
@@ -68,24 +69,26 @@ class Deformable_Registration(General_Registration):
         max_steps: int | Sequence[int] = 1000,  # Early stopping.  override on_converged finer controle
         max_history: int | None = None,
         min_value=0.0,  # Early stopping.  override on_converged finer controle
-        min_delta=-0.0001,  # Early stopping.  override on_converged finer controle
+        min_delta: float | Sequence[float] = -0.0001,  # Early stopping.  override on_converged finer controle
         loss_terms: list[LOSS | str] | dict[str, LOSS] | dict[str, str] | dict[str, tuple[str, dict]] | None = None,
-        weights: list[float] | dict[str, float] | None = None,
+        weights: list[float] | dict[str, float | list[float]] | None = None,
         auto_run=True,
+        stride=8,
     ):
         if transform_args is None:
-            transform_args = {"stride": [8, 8, 16], "transpose": False}
+            transform_args = {"stride": [stride, stride, stride], "transpose": False}
         if loss_terms is None:
             loss_terms = {
                 "be": BSplineBending(stride=1),
                 "lncc": LNCC(),
             }
         if weights is None:
-            weights = {"be": 0.001, "seg": 1}
-
+            weights = {"be": 0.001, "lncc": 1}
         super().__init__(
             fixed_image=fixed_image,
             moving_image=moving_image,
+            fixed_seg=fixed_seg,
+            moving_seg=moving_seg,
             reference_image=reference_image,
             source_pset=source_pset,
             target_pset=target_pset,

@@ -17,7 +17,12 @@ from cc3d import statistics as _cc3dstats
 from cc3d import voxel_connectivity_graph as _voxel_connectivity_graph
 from fill_voids import fill as _fill
 from numpy.typing import NDArray
-from scipy.ndimage import binary_erosion, center_of_mass, gaussian_filter, generate_binary_structure
+from scipy.ndimage import (
+    binary_erosion,
+    center_of_mass,
+    gaussian_filter,
+    generate_binary_structure,
+)
 from skimage.measure import euler_number as _euler_number
 from skimage.measure import label as _label
 
@@ -51,7 +56,11 @@ def np_extract_label(
         return arr == label
 
     if to_label == 0:
-        warnings.warn("np_extract_label: to_label is zero, this can have unforeseen consequences!", UserWarning, stacklevel=4)
+        warnings.warn(
+            "np_extract_label: to_label is zero, this can have unforeseen consequences!",
+            UserWarning,
+            stacklevel=4,
+        )
     if not inplace:
         arr = arr.copy()
 
@@ -90,7 +99,7 @@ def cc3dstatistics(arr: UINTARRAY, use_crop: bool = True) -> dict:
     Raises:
         AssertionError: If the input array is not of an unsigned integer or boolean dtype.
     """
-    assert np.issubdtype(arr.dtype, np.unsignedinteger) or np.issubdtype(arr.dtype, np.bool_), (
+    assert np.issubdtype(arr.dtype, np.unsignedinteger) or np.issubdtype(arr.dtype, np.int32) or np.issubdtype(arr.dtype, np.bool_), (
         f"cc3dstatistics expects uint type, got {arr.dtype}"
     )
     try:
@@ -180,7 +189,7 @@ def np_unique_withoutzero(arr: UINTARRAY) -> list[int]:
     return [i for i in np_unique(arr) if i != 0]
 
 
-def np_center_of_mass(arr: UINTARRAY) -> dict[int, np.ndarray]:
+def np_center_of_mass(arr: UINTARRAY) -> dict[int, COORDINATE]:
     """Calculates center of mass, mapping label in array to a coordinate (float) (exluding zero)
 
     Args:
@@ -288,16 +297,18 @@ def np_dice(seg: np.ndarray, gt: np.ndarray, binary_compare: bool = False, label
         float: dice value
     """
     assert seg.shape == gt.shape, f"shape mismatch, got {seg.shape}, and {gt.shape}"
-    if binary_compare:
-        seg = seg.copy()
-        seg[seg != 0] = 1
-        gt = gt.copy()
-        gt[gt != 0] = 1
-        label = 1
 
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", r"invalid value encountered in double_scalars")
-        dice = float(np.sum(seg[gt == label]) * 2.0 / (np.sum(seg) + np.sum(gt)))
+        if binary_compare:
+            seg_l = seg != 0
+            gt_l = gt != 0
+        else:
+            seg_l = seg == label  # predicted mask for this label
+            gt_l = gt == label  # ground-truth mask for this label
+        intersect = np.logical_and(seg_l, gt_l).sum()
+        denom = seg_l.sum() + gt_l.sum()
+        dice = (2.0 * intersect) / (denom)
     if np.isnan(dice):
         return 1.0
     return dice
@@ -792,11 +803,15 @@ def np_filter_connected_components(
     for preserve_label in preserve:
         cc_out[labels_out == preserve_label] = i
         i += 1
-    if removed_to_label != 0:
-        arr[np.logical_and(labels_out != 0, arr == 0)] = removed_to_label
+
     if return_original_labels:
         arr *= cc_out > 0  # to get original labels
+        if removed_to_label != 0:
+            arr[np.logical_and(labels_out != 0, arr == 0)] = removed_to_label
         return arr
+    if removed_to_label != 0:
+        arr[np.logical_and(labels_out != 0, arr == 0)] = removed_to_label
+
     return cc_out
 
 
@@ -956,8 +971,20 @@ def np_smooth_gaussian_labelwise(
     dilate_connectivity: int = 3,
     smooth_background: bool = True,
 ) -> UINTARRAY:
-    """Smoothes labels in a segmentation mask array
+    """Smoothes selected labels in a segmentation mask using Gaussian filtering,
+    while keeping other labels unaffected.
 
+    Internal Description:
+        1. Ensures label(s) to be smoothed are present in the segmentation.
+        2. Optionally dilates specified labels prior to smoothing (if `dilate_prior > 0`).
+        3. Iterates over each label:
+            - Creates a binary mask for that label.
+            - Applies Gaussian smoothing only if the label is in `label_to_smooth`.
+            - Optionally applies a weight from `label_weights`.
+        4. Adds background as a separate smoothed or fixed mask depending on `smooth_background`.
+        5. Stacks all label probability-like maps and computes a new segmentation by taking the
+           `argmax` over the stacked array, i.e., the label with the highest value wins per voxel.
+        6. Replaces the indices in the argmax map with the original label values to preserve semantics.
 
     Args:
         arr (UINTARRAY): Input Segmentation Mask Array
