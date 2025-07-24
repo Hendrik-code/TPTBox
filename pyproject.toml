@@ -156,6 +156,7 @@ ignore = [
     "N806",
     "B905", # strict= in zip
     "UP007", # Union and "|" python 3.9
+    "PLC0415", # import-outside-top-level
 ]
 
 # Allow fix for all enabled rules (when `--fix`) is provided.
