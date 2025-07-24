@@ -161,6 +161,8 @@ class POI(Abstract_POI, Has_Grid):
     def clone(self, **qargs):
         return self.copy(**qargs)
 
+    __hash__ = None  # type: ignore # explicitly mark as unhashable
+
     def copy(
         self,
         centroids: POI_DICT | POI_Descriptor | None = None,

@@ -42,14 +42,16 @@ if TYPE_CHECKING:
             ...
         def get_c_val(self)->int:
             ...
-        def unique()->list[int]:
+        def unique(self)->list[int]:
             ...
     C = Union[NII, Number, np.ndarray]
 else:
     class NII_Proxy:
         pass
     C = Union[Self,Number,np.ndarray]
+
 class NII_Math(NII_Proxy,Has_Grid):
+    __hash__ = None  # type: ignore # explicitly mark as unhashable
     def _binary_opt(self, other:C, opt,inplace = False)-> Self:
         if isinstance(other,NII_Math):
             other = other.get_array()
@@ -244,7 +246,7 @@ class NII_Math(NII_Proxy,Has_Grid):
         Betti Numbers:
         - B0 (b0): Number of connected components.
         - B1 (b1): Number of holes.
-        - B2 (b2): Number of fully engulfed empty spaces.
+        - B2 (b2): Number of fully engulfed empty spaces.f
 
         The np_betti_number function uses Euler characteristic numbers to calculate these Betti numbers. The result is
         a dictionary where each voxel label is associated with its corresponding Betti numbers.
