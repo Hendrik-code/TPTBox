@@ -192,6 +192,7 @@ file_types = [
     "xlsx",
     "bvec",
     "bval",
+    "html",
 ]
 # Description see: https://bids-specification.readthedocs.io/en/stable/99-appendices/09-entities.html
 
