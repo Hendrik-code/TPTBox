@@ -101,7 +101,7 @@ class DeepaliPairwiseImageTrainer:
         smooth_grad=0.0,
         verbose=0,
         max_steps: int | Sequence[int] = 250,  # Early stopping.  override on_converged finer control
-        max_history: int | None = None,
+        max_history: int | None = 100,  # Used for on_converged. look at the last n sample to compute the convergence
         min_value=0.0,  # Early stopping.  override on_converged finer control
         min_delta: float | Sequence[float] = 0.0,  # Early stopping.  override on_converged finer control
         loss_terms: list[LOSS | str] | dict[str, LOSS] | dict[str, str] | dict[str, tuple[str, dict]] | None = None,
@@ -222,7 +222,16 @@ class DeepaliPairwiseImageTrainer:
                 u = [a for a in u if a != 0]
                 # Build a mapping from original label -> index (starting from 1)
                 mapping = {int(label.item()): idx for idx, label in enumerate(u, 1)}
+                num_classes = len(mapping) + 1  # Add 1 for background or assume no 0
 
+                u2 = torch.unique(self.source_seg_org.tensor())
+                u2 = u2.detach().cpu()
+                u2 = [a for a in u2 if a != 0]
+                for idx in u2:
+                    idx = int(idx.item())  # noqa: PLW2901
+                    if idx not in mapping:
+                        print("Warning no matching idx found:", idx)
+                        mapping[idx] = 0
                 # Remap the segmentation labels according to mapping
                 source_remapped = self.source_seg_org.tensor().clone()
                 target_remapped = self.target_seg_org.tensor().clone()
@@ -231,8 +240,7 @@ class DeepaliPairwiseImageTrainer:
                     target_remapped[self.target_seg_org.tensor() == orig_label] = new_label
 
                 # Convert to one-hot if needed (optional)
-                num_classes = len(mapping) + 1  # Add 1 for background or assume no 0
-                print(f"Found {num_classes=}, {source_remapped.unique()}, {target_remapped.unique()}")
+                print(f"Found {num_classes=}, {source_remapped.unique()}, {target_remapped.unique()}; internal mapping: {mapping}")
                 one_hot_source = (
                     (torch.nn.functional.one_hot(source_remapped.long(), num_classes).to(self._dtype).to(self.device))
                     .permute(0, 4, 1, 2, 3)

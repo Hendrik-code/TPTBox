@@ -41,7 +41,7 @@ class Register_Multi_Seg:
         weights=None,
         lr=0.01,
         max_steps=1500,
-        min_delta=1e-06,
+        min_delta: float | list[float] = 1e-06,
         pyramid_levels=4,
         coarsest_level=3,
         finest_level=0,
@@ -116,10 +116,10 @@ class Register_Multi_Seg:
         target = target.apply_crop(t_crop)
         if atlas.is_segmentation_in_border():
             atlas = atlas.apply_pad(((1, 1), (1, 1), (1, 1)))
-        for i in range(10):  # 1000,
+        for i in range(2):  # 1000,
             if i != 0:
-                target = target.apply_pad(((25, 25), (25, 25), (25, 25)))
-                crop += 50
+                target = target.apply_pad(((50, 50), (50, 50), (50, 50)))
+                crop += 75
             t_crop = (target).compute_crop(0, crop)  # if the angel is to different we need a larger crop...
             target_ = target.apply_crop(t_crop)
             # Point Registration
