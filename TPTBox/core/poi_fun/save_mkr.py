@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import json
 import random
 from pathlib import Path
 
 ###### GLOBAL POI #####
-from typing import TYPE_CHECKING, Any, Literal, Optional, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, Optional, TypedDict, Union
 
 import numpy as np
 from typing_extensions import NotRequired
@@ -107,7 +109,7 @@ class MeasurementVolumeMarkup(Markup, total=False):
     boundingBox: list[float]
 
 
-MKR_DEFINITION = MKR_Lines | dict
+MKR_DEFINITION = Union[MKR_Lines, dict]
 
 
 def _get_display_dict(
@@ -226,7 +228,7 @@ def _make_default_markup(
 
 def _get_markup_lines(
     definition: MKR_Lines,
-    poi: "POI_Global",
+    poi: POI_Global,
     coordinate_system: Literal["LPS", "RAS"],
     split_by_region=False,
     split_by_subregion=False,
@@ -235,7 +237,6 @@ def _get_markup_lines(
     if display is None:
         display = {}
     key_points = definition.get("key_points")
-
     region, subregion = key_points[0]
     color = _get_markup_color(definition, region, subregion, split_by_region, split_by_subregion)
     display = _get_display_dict(display | definition.get("display", {}), selectedColor=color)
@@ -251,7 +252,7 @@ def _get_markup_lines(
     return _make_default_markup("Line", definition.get("name"), coordinate_system, controlPoints=controlPoints, display=display)
 
 
-def get_desc(self: "POI_Global", region, subregion):
+def get_desc(self: POI_Global, region, subregion):
     try:
         name = self.level_two_info(subregion).name
     except Exception:
@@ -263,8 +264,18 @@ def get_desc(self: "POI_Global", region, subregion):
     return name, name2
 
 
+def _get_key(region, subregion, split_by_region, split_by_subregion):
+    key = "P"
+    if split_by_region:
+        key += str(region) + "_"
+    if split_by_subregion:
+        key += str(subregion)
+
+    return key
+
+
 def _save_mrk(
-    poi: "POI_Global",
+    poi: POI_Global,
     filepath: str | Path,
     color=None,
     split_by_region=True,
@@ -301,11 +312,7 @@ def _save_mrk(
     if add_points:
         # Create list of control points
         for region, subregion, coords in poi.centroids.items():
-            key = "P"
-            if split_by_region:
-                key += str(region) + "_"
-            if split_by_subregion:
-                key += str(subregion)
+            key = _get_key(region, subregion, split_by_region, split_by_subregion)
             name, name2 = get_desc(poi, region, subregion)
             if key not in list_markups:
                 list_markups[key] = _make_default_markup(
@@ -325,7 +332,7 @@ def _save_mrk(
                 _get_control_point({}, coords, f"{region}-{subregion}", f"{region}-{subregion}", name, name2)
             )
     markups = list(list_markups.values())
-    # Lines
+
     [markups.append(_get_markup_lines(line, poi, coordinate_system, split_by_region, split_by_subregion, display)) for line in add_lines]
     mrk_data = {
         "@schema": "https://raw.githubusercontent.com/slicer/slicer/master/Modules/Loadable/Markups/Resources/Schema/markups-schema-v1.0.3.json#",

@@ -714,7 +714,7 @@ class NII(NII_Math):
         return self.reorient(axcodes_to=axcodes_to, verbose=verbose,inplace=True)
 
 
-    def compute_crop(self,minimum: float=0, dist: float = 0, use_mm=False, other_crop:tuple[slice,...]|None=None, maximum_size:tuple[slice,...]|int|tuple[int,...]|None=None,)->tuple[slice,slice,slice]:
+    def compute_crop(self,minimum: float=0, dist: float = 0, use_mm=False, other_crop:tuple[slice,...]|None=None, maximum_size:tuple[slice,...]|int|tuple[int,...]|None=None, raise_error=True)->tuple[slice,slice,slice]:
         """
         Computes the minimum slice that removes unused space from the image and returns the corresponding slice tuple along with the origin shift required for centroids.
 
@@ -723,6 +723,7 @@ class NII(NII_Math):
             dist (int): The amount of padding to be added to the cropped image. Default value is 0.
             use_mm: dist will be mm instead of number of voxels
             other_crop (tuple[slice,...], optional): A tuple of slice objects representing the slice of an other image to be combined with the current slice. Default value is None.
+            raise_error: if crop is empty a "ValueError: bbox_nd: img is empty, cannot calculate a bbox" is produced. When False return None instead.
 
         Returns:
             ex_slice: A tuple of slice objects that need to be applied to crop the image.
@@ -738,7 +739,7 @@ class NII(NII_Math):
         d = np.around(dist / np.asarray(self.zoom)).astype(int) if use_mm else (int(dist),int(dist),int(dist))
         array = self.get_array() #+ minimum
 
-        ex_slice = list(np_bbox_binary(array > minimum, px_dist=d))
+        ex_slice = list(np_bbox_binary(array > minimum, px_dist=d,raise_error=raise_error))
 
         if other_crop is not None:
             assert all((a.step is None) for a in other_crop), 'Only None slice is supported for combining x'
@@ -1127,6 +1128,7 @@ class NII(NII_Math):
         dilate_connectivity: int = 1,
         smooth_background: bool = True,
         inplace: bool = False,
+        verbose:logging=False,
     ):
         """Smoothes the segmentation mask by applying a gaussian filter label-wise and then using argmax to derive the smoothed segmentation labels again.
 
@@ -1145,6 +1147,7 @@ class NII(NII_Math):
             NII: The smoothed NII object.
         """
         assert self.seg, "You cannot use this on a non-segmentation NII"
+        log.print("smooth_gaussian_labelwise",verbose=verbose)
         smoothed = np_smooth_gaussian_labelwise(self.get_seg_array(), label_to_smooth=label_to_smooth, sigma=sigma, radius=radius, truncate=truncate, boundary_mode=boundary_mode, dilate_prior=dilate_prior, dilate_connectivity=dilate_connectivity,smooth_background=smooth_background,)
         return self.set_array(smoothed,inplace,verbose=False)
 
@@ -1363,7 +1366,7 @@ class NII(NII_Math):
         """
         return self.set_array(np_calc_boundary_mask(self.get_array(),threshold),inplace=inplace,verbose=False)
 
-    def get_connected_components(self, labels: int |list[int]=1, connectivity: int = 3, include_zero: bool=False,inplace=False) -> Self:  # noqa: ARG002
+    def get_connected_components(self, labels: int |list[int]|None=None, connectivity: int = 3, include_zero: bool=False,inplace=False) -> Self:  # noqa: ARG002
         assert self.seg, "This only works on segmentations"
         out, _ = np_connected_components(self.get_seg_array(), label_ref=labels, connectivity=connectivity, include_zero=include_zero)
         return self.set_array(out,inplace=inplace)
@@ -1681,7 +1684,8 @@ class NII(NII_Math):
         org = self.get_seg_array()
         org[crop] = self_mask
         return self.set_array(org,inplace=inplace)
-    def infect(self: NII, reference_mask: NII, inplace=False,verbose=True):
+
+    def infect(self: NII, reference_mask: NII, inplace=False,verbose=True,axis:int|str|None=None):
         """
         Expands labels from self_mask into regions of reference_mask == 1 via breadth-first diffusion.
 
@@ -1699,13 +1703,22 @@ class NII(NII_Math):
         ref_mask = np.clip(reference_mask.get_seg_array(), 0, 1)
         ref_mask[self_mask_org != 0] = 0
         searched = np.clip(self_mask,0,1).astype(np.uint8)
-        ndim = len(self_mask.shape)
 
         # Define neighborhood kernel
-        if ndim == 3:
+        if axis is None:
             kernel = [(1,0,0),(0,1,0),(0,0,1),(-1,0,0),(0,-1,0),(0,0,-1)]
         else:
-            raise NotImplementedError("Only 2D or 3D masks are supported.")
+            if isinstance(axis,str):
+                axis = self.get_axis(axis)
+            if axis == 0:
+                kernel = [(0,1,0),(0,0,1),(0,-1,0),(0,0,-1)]
+            elif axis == 1:
+                kernel = [(1,0,0),(0,0,1),(-1,0,0),(0,0,-1)]
+            elif axis == 2:
+                kernel = [(1,0,0),(0,1,0),(-1,0,0),(0,-1,0)]
+            else:
+                raise NotImplementedError(axis)
+
         search = []
         coords = np.where(self_mask != 0)
         def _add_idx(x,y,z,v):
