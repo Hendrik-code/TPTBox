@@ -148,8 +148,12 @@ class Full_Body_Instance(Abstract_lvl):
     scapula_left = 103
     humerus_right = 4
     humerus_left = 104
-    hand_rest_right = 5
-    hand_rest_left = 105
+    hand_right = 5
+    hand_left = 105
+    radius_right = 60
+    radius_left = 160
+    ulna_right = 61
+    ulna_left = 161
     sternum = 6
     costal_cartilage = 7
     rib_right = 8
@@ -229,7 +233,87 @@ class Full_Body_Instance(Abstract_lvl):
     subcutaneous_fat = 57
     muscle_other = 58
     inner_fat = 59
-    ignore = 60
+    ignore = 63
+
+    @classmethod
+    def get_totalVibeSegMapping(cls):
+        return {
+            1: Full_Body_Instance.spleen.value,  # spleen
+            2: Full_Body_Instance.kidney_right.value,  # kidney_right
+            3: Full_Body_Instance.kidney_left.value,  # kidney_left
+            4: Full_Body_Instance.gallbladder.value,  # gallbladder
+            5: Full_Body_Instance.liver.value,  # liver
+            6: Full_Body_Instance.stomach.value,  # stomach
+            7: Full_Body_Instance.pancreas.value,  # pancreas
+            8: Full_Body_Instance.adrenal_gland_right.value,  # adrenal_gland_right
+            9: Full_Body_Instance.adrenal_gland_left.value,  # adrenal_gland_left
+            10: Full_Body_Instance.lung_left.value,  # lung_upper_lobe_left
+            11: Full_Body_Instance.lung_left.value,  # lung_lower_lobe_left
+            12: Full_Body_Instance.lung_right.value,  # lung_upper_lobe_right
+            13: Full_Body_Instance.lung_right.value,  # lung_middle_lobe_right
+            14: Full_Body_Instance.lung_right.value,  # lung_lower_lobe_right
+            15: Full_Body_Instance.esophagus.value,  # esophagus
+            16: Full_Body_Instance.trachea.value,  # trachea
+            17: Full_Body_Instance.thyroid_gland_right.value,  # thyroid_gland
+            18: Full_Body_Instance.intestine.value,  # intestine
+            19: Full_Body_Instance.doudenum.value,  # duodenum
+            20: Full_Body_Instance.rib_right.value,  # unused
+            21: Full_Body_Instance.urinary_bladder.value,  # urinary_bladder
+            22: Full_Body_Instance.prostate.value,  # prostate
+            23: Full_Body_Instance.sacrum.value,  # sacrum
+            24: Full_Body_Instance.heart.value,  # heart
+            25: Full_Body_Instance.aorta.value,  # aorta
+            26: Full_Body_Instance.pulmonary_vein.value,  # pulmonary_vein
+            27: Full_Body_Instance.brachiocephalic_trunk.value,  # brachiocephalic_trunk
+            28: Full_Body_Instance.subclavian_artery_right.value,  # subclavian_artery_right
+            29: Full_Body_Instance.subclavian_artery_left.value,  # subclavian_artery_left
+            30: Full_Body_Instance.common_carotid_artery_right.value,  # common_carotid_artery_right
+            31: Full_Body_Instance.common_carotid_artery_left.value,  # common_carotid_artery_left
+            32: Full_Body_Instance.brachiocephalic_vein_left.value,  # brachiocephalic_vein_left
+            33: Full_Body_Instance.brachiocephalic_vein_right.value,  # brachiocephalic_vein_right
+            34: Full_Body_Instance.atrial_appendage_left.value,  # atrial_appendage_left
+            35: Full_Body_Instance.superior_vena_cava.value,  # superior_vena_cava
+            36: Full_Body_Instance.inferior_vena_cava.value,  # inferior_vena_cava
+            37: Full_Body_Instance.portal_vein_and_splenic_vein.value,  # portal_vein_and_splenic_vein
+            38: Full_Body_Instance.iliac_artery_left.value,  # iliac_artery_left
+            39: Full_Body_Instance.iliac_artery_right.value,  # iliac_artery_right
+            40: Full_Body_Instance.iliac_vena_left.value,  # iliac_vena_left
+            41: Full_Body_Instance.iliac_vena_right.value,  # iliac_vena_right
+            42: Full_Body_Instance.humerus_left.value,  # humerus_left
+            43: Full_Body_Instance.humerus_right.value,  # humerus_right
+            44: Full_Body_Instance.scapula_left.value,  # scapula_left
+            45: Full_Body_Instance.scapula_right.value,  # scapula_right
+            46: Full_Body_Instance.clavicula_left.value,  # clavicula_left
+            47: Full_Body_Instance.clavicula_right.value,  # clavicula_right
+            48: Full_Body_Instance.femur_left.value,  # femur_left
+            49: Full_Body_Instance.femur_right.value,  # femur_right
+            50: Full_Body_Instance.hip_left.value,  # hip_left
+            51: Full_Body_Instance.hip_right.value,  # hip_right
+            52: Full_Body_Instance.channel.value,  # spinal_cord
+            53: Full_Body_Instance.gluteus_maximus_left.value,  # gluteus_maximus_left
+            54: Full_Body_Instance.gluteus_maximus_right.value,  # gluteus_maximus_right
+            55: Full_Body_Instance.gluteus_medius_left.value,  #  gluteus_medius_left
+            56: Full_Body_Instance.gluteus_medius_right.value,  #  gluteus_medius_right
+            57: Full_Body_Instance.gluteus_minimus_left.value,  # gluteus_minimus_left
+            58: Full_Body_Instance.gluteus_minimus_right.value,  # gluteus_minimus_right
+            59: Full_Body_Instance.autochthon_left.value,  # autochthon_left
+            60: Full_Body_Instance.autochthon_right.value,  # autochthon_right
+            61: Full_Body_Instance.iliopsoas_left.value,  # iliopsoas_left
+            62: Full_Body_Instance.iliopsoas_right.value,  # iliopsoas_right
+            63: Full_Body_Instance.sternum.value,  # sternum
+            64: Full_Body_Instance.costal_cartilage.value,  # costal_cartilages
+            65: Full_Body_Instance.subcutaneous_fat.value,  # subcutaneous_fat
+            66: Full_Body_Instance.muscle_other.value,  # muscle
+            67: Full_Body_Instance.inner_fat.value,  # inner_fat
+            68: Full_Body_Instance.ivd.value,  # IVD
+            69: Full_Body_Instance.vert_body.value,  # vertebra_body
+            70: Full_Body_Instance.vert_post.value,  # vertebra_posterior_elements
+            71: Full_Body_Instance.channel.value,  # spinal_channel
+            72: Full_Body_Instance.ignore.value,  # bone_other
+            73: 0,
+            77: 0,  # Negative
+            100: Full_Body_Instance.ignore.value,
+        }
 
 
 class Lower_Body(Abstract_lvl):
