@@ -13,6 +13,27 @@ def injection_function(seg_nii: NII):
     return seg_nii
 
 
+def get_outpaths_spineps_single(
+    file_path: str | Path | BIDS_FILE,
+    dataset=None,
+    derivative_name="derivative",
+    ignore_bids_filter=True,
+):
+    from spineps.seg_run import output_paths_from_input
+
+    if not isinstance(file_path, BIDS_FILE):
+        file_path = Path(file_path)
+        file_path = BIDS_FILE(file_path, file_path.parent if dataset is None else dataset)
+    output_paths = output_paths_from_input(
+        file_path,
+        derivative_name,
+        None,
+        input_format=file_path.format,
+        non_strict_mode=ignore_bids_filter,
+    )
+    return output_paths
+
+
 def run_spineps_single(
     file_path: str | Path | BIDS_FILE,
     dataset=None,
@@ -181,7 +202,11 @@ def _run_spineps_vert(
     verbose=True,
     use_cpu=False,
 ):
-    from spineps import get_instance_model, phase_postprocess_combined, predict_instance_mask
+    from spineps import (
+        get_instance_model,
+        phase_postprocess_combined,
+        predict_instance_mask,
+    )
     from spineps.get_models import get_actual_model
 
     if isinstance(model_instance, Path):
