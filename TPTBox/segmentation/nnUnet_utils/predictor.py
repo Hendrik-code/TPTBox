@@ -567,6 +567,8 @@ class nnUNetPredictor:
         predicted_logits, n_predictions, _, _ = self._allocate(data, "cpu", pbar)
         for e, i in enumerate(inter_mediate_slice, 1):
             slices = i.get_intermediate()
+            if slices is None:
+                continue
             sub_data = data[slices]
             logits, n_pred = self._run_sub(
                 sub_data, network, self.device, i.get_slices(), pbar, addendum=f"chunks={e}/{len(inter_mediate_slice)}"
@@ -689,6 +691,8 @@ class intermediate_slice:
         self.slicers.append(s)
 
     def get_intermediate(self):
+        if self.min_s is None or self.max_s is None:
+            return None
         return (
             slice(None),
             *tuple(slice(mi, ma) for mi, ma in zip(self.min_s, self.max_s)),
