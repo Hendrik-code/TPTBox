@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import pickle
 from pathlib import Path
 
@@ -32,8 +34,8 @@ class Register_Multi_Seg:
         self,
         target: NII,
         atlas: NII,
-        poi_cms: POI | None,
-        same_side: bool,
+        poi_cms: POI | None = None,
+        same_side: bool = True,
         verbose=99,
         gpu=0,
         ddevice: DEVICES = "cuda",
@@ -47,6 +49,8 @@ class Register_Multi_Seg:
         finest_level=0,
         cms_ids: list | None = None,
         poi_target_cms: POI | None = None,
+        max_history=100,
+        change_after_point_reg=lambda x, y: (x, y),
         **args,
     ):
         """
@@ -142,10 +146,11 @@ class Register_Multi_Seg:
                 target = target_
                 break
         target = target_
-        self.crop = (target + atlas_reg).compute_crop(0, 5)
+        self.crop = (target + atlas_reg).compute_crop(0, 10)
         target = target.apply_crop(self.crop)
         atlas_reg = atlas_reg.apply_crop(self.crop)
         self.target_grid = target.to_gird()
+        target, atlas_reg = change_after_point_reg(target, atlas_reg)
         self.reg_deform = Deformable_Registration(
             target,
             atlas_reg,
@@ -162,6 +167,7 @@ class Register_Multi_Seg:
             verbose=verbose,
             gpu=gpu,
             ddevice=ddevice,
+            max_history=max_history,
             **args,
         )
 
@@ -220,7 +226,7 @@ class Register_Multi_Seg:
         self = cls.__new__(cls)
         self.reg_point = Point_Registration.load_(t0)
         self.reg_deform = Deformable_Registration.load_(t1)
-        self.same_side, self.atlas_org, self.target_grid_org, self.target_grid, self.crop = x
+        (self.same_side, self.atlas_org, self.target_grid_org, self.target_grid, self.crop) = x
         return self
 
     def forward_nii(self, nii_atlas: NII):
