@@ -86,11 +86,20 @@ def run_inference_on_file(
     # if idx in _unets:
     #    nnunet = _unets[idx]
     # else:
-    print("load model", nnunet_path.name, "; folds", folds) if verbose else None
+    print("load model", nnunet_path, "; folds", folds) if verbose else None
     with open(Path(nnunet_path, "plans.json")) as f:
         plans_info = json.load(f)
     with open(Path(nnunet_path, "dataset.json")) as f:
         ds_info = json.load(f)
+    inference_config = Path(nnunet_path, "inference_config.json")
+    if inference_config.exists():
+        with open() as f:
+            ds_info2 = json.load(f)
+            if "model_expected_orientation" in ds_info2:
+                ds_info["orientation"] = ds_info2["model_expected_orientation"]
+            if "resolution_range" in ds_info2:
+                ds_info["spacing"] = ds_info2["resolution_range"]
+
     nnunet = load_inf_model(
         nnunet_path,
         allow_non_final=True,
@@ -107,13 +116,30 @@ def run_inference_on_file(
     #    _unets[idx] = nnunet
     if "orientation" in ds_info:
         orientation = ds_info["orientation"]
+
     zoom = None
+    orientation_ref = None
     og_nii = input_nii[0].copy()
 
     try:
+        zoom_old = ds_info.get("spacing")
         zoom = plans_info["configurations"]["3d_fullres"]["spacing"]
         order = plans_info["transpose_backward"]
+        # order2 = plans_info["transpose_forward"]
         zoom = [zoom[order[0]], zoom[order[1]], zoom[order[2]]][::-1]
+        orientation_ref = ("P", "I", "R")
+        orientation_ref = [
+            orientation_ref[order[0]],
+            orientation_ref[order[1]],
+            orientation_ref[order[2]],
+        ]  # [::-1]
+
+        # zoom_old = zoom_old[::-1]
+        if zoom is None:
+            pass
+
+        else:
+            zoom = [float(z) for z in zoom]
     except Exception:
         pass
     assert len(ds_info["channel_names"]) == len(input_nii), (
@@ -123,12 +149,13 @@ def run_inference_on_file(
         nnunet_path,
     )
     if orientation is not None:
-        print("orientation", orientation) if verbose else None
+        print("orientation", orientation, f"{orientation_ref=}") if verbose else None
         input_nii = [i.reorient(orientation) for i in input_nii]
 
     if zoom is not None:
-        print("rescale", zoom) if verbose else None
+        print("rescale", zoom, f"{zoom_old=}, {order=}") if verbose else None
         input_nii = [i.rescale_(zoom, mode=mode) for i in input_nii]
+        print(input_nii)
     print("squash to float16") if verbose else None
     input_nii = [squash_so_it_fits_in_float16(i) for i in input_nii]
 
