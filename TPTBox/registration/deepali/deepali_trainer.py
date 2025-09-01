@@ -197,6 +197,32 @@ class DeepaliPairwiseImageTrainer:
         self.min_delta = min_delta if not isinstance(min_delta, (Sequence)) else min_delta[::-1]
         self.verbose = verbose
         self.loss_terms, self.weights = parse_loss(loss_terms, weights)
+
+        self.pyramid_levels = pyramid_levels
+        self.finest_level = finest_level
+        self.coarsest_level = coarsest_level
+        self.dims = dims
+        self.pyramid_finest_spacing = pyramid_finest_spacing
+        self.pyramid_min_size = pyramid_min_size
+        self._load_all(source, target, source_seg, target_seg, source_mask, target_mask)
+
+        self.source_pset = source_pset
+        self.target_pset = target_pset
+        self.source_landmarks = source_landmarks
+        self.target_landmarks = target_landmarks
+        self.smooth_grad = smooth_grad
+        self._eval_hooks = OrderedDict()
+        self._step_hooks = OrderedDict()
+
+    def _load_all(
+        self,
+        source,
+        target,
+        source_seg,
+        target_seg,
+        source_mask=None,
+        target_mask=None,
+    ):
         # reading images
         self.source = self._read(source)
         self.target = self._read(target)
@@ -208,9 +234,15 @@ class DeepaliPairwiseImageTrainer:
         # normalize
         self.source, self.target = self.on_normalize(self.source, self.target)
         # Pyramid
-
         self.source_pyramid, self.target_pyramid = self.make_pyramid(
-            self.source, self.target, pyramid_levels, finest_level, coarsest_level, dims, pyramid_finest_spacing, pyramid_min_size
+            self.source,
+            self.target,
+            self.pyramid_levels,
+            self.finest_level,
+            self.coarsest_level,
+            self.dims,
+            self.pyramid_finest_spacing,
+            self.pyramid_min_size,
         )
         if source_seg is not None or target_seg is not None:
             with torch.no_grad():
@@ -270,12 +302,12 @@ class DeepaliPairwiseImageTrainer:
             self.source_pyramid_seg, self.target_pyramid_seg = self.make_pyramid(
                 self.source_seg,
                 self.target_seg,
-                pyramid_levels,
-                finest_level,
-                coarsest_level,
-                dims,
-                pyramid_finest_spacing,
-                pyramid_min_size,
+                self.pyramid_levels,
+                self.finest_level,
+                self.coarsest_level,
+                self.dims,
+                self.pyramid_finest_spacing,
+                self.pyramid_min_size,
             )
             print("make_pyramid seg end", self.source_seg.dtype)
         else:
@@ -283,14 +315,6 @@ class DeepaliPairwiseImageTrainer:
             self.target_seg = None
             self.source_pyramid_seg = None
             self.target_pyramid_seg = None
-
-        self.source_pset = source_pset
-        self.target_pset = target_pset
-        self.source_landmarks = source_landmarks
-        self.target_landmarks = target_landmarks
-        self.smooth_grad = smooth_grad
-        self._eval_hooks = OrderedDict()
-        self._step_hooks = OrderedDict()
 
     def on_normalize(self, source: Image, target: Image):
         return normalize_img(source, self.normalize_strategy), normalize_img(target, self.normalize_strategy)
