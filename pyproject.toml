@@ -29,6 +29,7 @@ tqdm = "*"
 joblib = "*"
 scikit-learn = "*"
 antspyx = "0.4.2"
+#hf-deepali = "*"
 
 [tool.poetry.dev-dependencies]
 pytest = ">=8.1.1"
@@ -37,6 +38,7 @@ pre-commit = "*"
 pyvista = "^0.43.2"
 coverage = ">=7.0.1"
 pytest-mock = "^3.6.0"
+
 
 
 [build-system]
@@ -151,8 +153,10 @@ ignore = [
     "N802",    # function name lowercase
     "F811",
     "N803",
-    "B905", # strict= in zip 
+    "N806",
+    "B905", # strict= in zip
     "UP007", # Union and "|" python 3.9
+    "PLC0415", # import-outside-top-level
 ]
 
 # Allow fix for all enabled rules (when `--fix`) is provided.

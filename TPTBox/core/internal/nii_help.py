@@ -105,7 +105,7 @@ def _resample_from_to(
     else:
         assert to_img.affine is not None
         assert to_img.zoom is not None
-        to_shape: SHAPE = to_img.shape
+        to_shape: SHAPE = to_img.shape_int
         to_affine: AFFINE = to_img.affine
         zoom_to = np.array(to_img.zoom)
     from_n_dim = len(from_img.shape)

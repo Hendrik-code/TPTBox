@@ -14,14 +14,15 @@ from typing_extensions import Self
 
 from TPTBox.core import vert_constants
 from TPTBox.core.nii_poi_abstract import Has_Grid
-from TPTBox.core.vert_constants import COORDINATE, POI_DICT, Abstract_lvl, Location, Vertebra_Instance, log, log_file, logging
+from TPTBox.core.vert_constants import COORDINATE, POI_DICT, Abstract_lvl, Any, Location, Vertebra_Instance, log, log_file, logging
 
 POI_ID = Union[
     tuple[int, int],
     slice,
-    tuple[Location, Location],
-    tuple[Location, int],
-    tuple[int, Location],
+    tuple[Union[Abstract_lvl, int], Union[Abstract_lvl, int]],
+    tuple[Abstract_lvl, Abstract_lvl],
+    tuple[Abstract_lvl, int],
+    tuple[int, Abstract_lvl],
     tuple[Vertebra_Instance, Location],
     tuple[Vertebra_Instance, int],
 ]
@@ -32,10 +33,14 @@ MAPPING = Union[
     dict[int, Union[int, None]],
     dict[int, None],
     dict[Union[int, str], Union[int, str, None]],
-    None
+    None,
 ]
 
 DIMENSIONS = 3
+
+
+def _flatten(vert_label):
+    return [item for sublist in vert_label for item in (sublist if isinstance(sublist, list) else [sublist])]  # type: ignore
 
 
 class _Abstract_POI_Definition:
@@ -105,6 +110,8 @@ class POI_Descriptor(AbstractSet, MutableMapping):
         self.pois = default
         self.definition = definition
         self._len: int | None = None
+
+    __hash__ = None  # explicitly mark as unhashable
 
     def __set_name__(self, owner, name):
         self._name = "_" + name
@@ -224,6 +231,7 @@ class POI_Descriptor(AbstractSet, MutableMapping):
             raise
 
     def str_to_int_list(self, *keys: int | str, subregion=False):
+        keys = _flatten(keys)
         out: list[int] = []
         for k in keys:
             if isinstance(k, str):
@@ -291,18 +299,17 @@ class POI_Descriptor(AbstractSet, MutableMapping):
 
 
 @dataclass
-class Abstract_POI(Has_Grid):
+class Abstract_POI:
     _centroids: POI_Descriptor = field(default_factory=lambda: POI_Descriptor(), repr=False)
     centroids: POI_Descriptor = field(repr=False, hash=False, compare=False, default=None)  # type: ignore
     format: int | None = field(default=None, repr=False, compare=False)
-    level_one_info: type[Abstract_lvl] = Vertebra_Instance  # Must be Enum and must has order_dict
-    level_two_info: type[Abstract_lvl] = Location
+    level_one_info: type[Abstract_lvl] = Any
+    level_two_info: type[Abstract_lvl] = Any
     info: dict = field(default_factory=dict, compare=False, init=True)  # additional info (key,value pairs)
 
     def __post_init__(self):
         if not isinstance(self._centroids, POI_Descriptor):
             self._centroids = POI_Descriptor.normalize_input_data(self._centroids)
-
 
     @property
     def centroids(self) -> POI_Descriptor:
@@ -329,14 +336,12 @@ class Abstract_POI(Has_Grid):
         return self.copy(ctd)
 
     @property
-    def is_global(self) -> bool:
-        ...
+    def is_global(self) -> bool: ...
 
     def clone(self, **qargs):
         return self.copy(**qargs)
 
-    def copy(self, centroids: POI_Descriptor | None = None, **qargs) -> Self:
-        ...
+    def copy(self, centroids: POI_Descriptor | None = None, **qargs) -> Self: ...
 
     def map_labels(
         self,
@@ -442,7 +447,7 @@ class Abstract_POI(Has_Grid):
         self,
         smoothness: int = 10,
         samples_per_poi=20,
-        location: int | Location = Location.Vertebra_Corpus,
+        location: int | Abstract_lvl = Location.Vertebra_Corpus,
         vertebra=False,
     ) -> tuple[np.ndarray, np.ndarray]:
         """
@@ -461,7 +466,7 @@ class Abstract_POI(Has_Grid):
                 - spline_1st_derivative: A 2D NumPy array representing the first derivative of the spline curve.
                 shape: first dimension to select a cord, second dimension to select all X/Y/Z
         """
-        if isinstance(location, Location):
+        if isinstance(location, Abstract_lvl):
             location = location.value
         if location not in self.keys_subregion() and not isinstance(location, Sequence):
             raise ValueError(f"The location {location} is not computed in this POI class")
@@ -567,7 +572,7 @@ class Abstract_POI(Has_Grid):
 
         obj: Self = self.copy() if inplace is False else self
         for loc in label:
-            if isinstance(loc, Location):
+            if isinstance(loc, Abstract_lvl):
                 loc = loc.value  # noqa: PLW2901
             obj.centroids.pop(loc, None)
         return obj
@@ -578,12 +583,14 @@ class Abstract_POI(Has_Grid):
     def remove(self, *label: tuple[int, int], inplace=False):
         obj: Self = self.copy() if inplace is False else self
         for loc in label:
-            if isinstance(loc, Location):
+            if isinstance(loc, Abstract_lvl):
                 loc = loc.value  # noqa: PLW2901
             obj.centroids.pop(loc, None)
         return obj
 
-    def extract_subregion(self, *location: Location | int, inplace=False):
+    def extract_subregion(self, *location: Abstract_lvl | int, inplace=False):
+        location = _flatten(location)
+
         location_values = tuple(l if isinstance(l, int) else l.value for l in location)
         extracted_centroids = POI_Descriptor()
         for x1, x2, y in self.centroids.items():
@@ -594,7 +601,7 @@ class Abstract_POI(Has_Grid):
             return self
         return self.copy(centroids=extracted_centroids)
 
-    def extract_subregion_(self, *location: Location | int):
+    def extract_subregion_(self, *location: Abstract_lvl | int):
         return self.extract_subregion(*location, inplace=True)
 
     def extract_vert(self, *vert_label: int, inplace=False):
@@ -606,7 +613,9 @@ class Abstract_POI(Has_Grid):
     def extract_vert_(self, *vert_label: int):
         return self.extract_vert(*vert_label, inplace=True)
 
-    def extract_region(self, *vert_label: int, inplace=False):
+    def extract_region(self, *vert_label: int | list[int], inplace=False):
+        # flatten list
+        vert_label = _flatten(vert_label)
         vert_labels = tuple(vert_label)
         extracted_centroids = POI_Descriptor()
         for x1, x2, y in self.centroids.items():
@@ -689,12 +698,10 @@ class Abstract_POI(Has_Grid):
 
         assert self.is_global == target_point.is_global
         if not keep_zoom and not self.is_global:
-            self = self.rescale((1, 1, 1), verbose=False)  # type: ignore  # noqa: PLW0642
+            self = self.to_global()  # type: ignore  # noqa: PLW0642
+            target_point = target_point.to_global()
         if not self.is_global:
-            if target_point.zoom != self.zoom or target_point.shape != self.zoom:
-                target_point = target_point.resample_from_to(self)  # type: ignore
-            else:
-                target_point.assert_affine(self)
+            target_point.assert_affine(self)
 
         distances = {}
         for region, subregion, (x, y, z) in target_point.intersect(self).items():
@@ -705,15 +712,59 @@ class Abstract_POI(Has_Grid):
             distances[(region, subregion)] = float(distance)
         return distances
 
-    def calculate_distances_poi_two_locations(self, a: Location | int, b: Location | int, keep_zoom=False) -> dict[int, float]:
-        if isinstance(a, Enum):
-            a = a.value
-        if isinstance(b, Enum):
-            b = b.value
-        p1 = self.extract_subregion(a)
-        p2 = self.extract_subregion(b).map_labels(label_map_subregion={b: a})
-        out = p2.calculate_distances_poi(p1, keep_zoom=keep_zoom)
-        return {a: c for (a, _), c in out.items()}
+    def calculate_distances_poi_any_2_any(self, target_point: Self, keep_zoom=False) -> dict[tuple[int, int], dict[tuple[int, int], float]]:
+        """Calculate the distances between all points and each centroid in local spacing of the first POI."""
+
+        if not keep_zoom:
+            self = self.to_global()  # type: ignore  # noqa: PLW0642
+            target_point = target_point.to_global()
+        else:
+            target_point.assert_affine(self)
+
+        distances: dict[tuple[int, int], dict[tuple[int, int], float]] = {}
+        for region2, subregion2, c in self.items():
+            distances[(region2, subregion2)] = {}
+            for region, subregion, (x, y, z) in target_point.items():
+                distance = ((c[0] - x) ** 2 + (c[1] - y) ** 2 + (c[2] - z) ** 2) ** 0.5
+                distances[(region2, subregion2)][(region, subregion)] = float(distance)
+        return distances
+
+    def calculate_distances_poi_across_regions(
+        self,
+        target_point: Self,
+    ) -> dict[tuple[int, int], dict[tuple[int, int], float]]:
+        """Calculate the distances between all points and each centroid in local spacing of the first POI.
+
+        Args:
+            target_point (Tuple[float, float, float]): The target point represented as a tuple of x, y, and z coordinates.
+
+        Returns:
+            Dict[Tuple[int, int], float]: A dictionary containing the distances between the target point and each centroid.
+            The keys are tuples of two integers representing the region and subregion labels of the centroids,
+            and the values are the distances (in millimeters) between the target point and each centroid.
+        """
+        from warnings import warn
+
+        warn("calculate_distances_poi_across_regions is depredated", stacklevel=3)
+        assert self.is_global == target_point.is_global
+        if not self.is_global:
+            if target_point.zoom != self.zoom or target_point.shape != self.shape:
+                target_point = target_point.resample_from_to(self)  # type: ignore
+            else:
+                target_point.assert_affine(self)
+
+        distances2target = {}
+        for region, subregion, (x, y, z) in target_point.items():
+            distances = {}
+            for r2, s2, (x2, y2, z2) in self.items():
+                if subregion != s2:
+                    continue
+                distance_vector = np.array([x, y, z]) - np.array([x2, y2, z2])
+                distance_vector = np.multiply(distance_vector, self.zoom)
+                distance = np.linalg.norm(distance_vector)
+                distances[(r2, subregion)] = float(distance)
+            distances2target[(region, subregion)] = distances
+        return distances2target
 
     def join_left(self, pois: Self, inplace=False, _right_join=False) -> Self:
         """

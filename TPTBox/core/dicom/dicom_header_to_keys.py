@@ -11,12 +11,13 @@ import pydicom
 from dicom2nifti import common
 
 from TPTBox.core.bids_constants import formats
-from TPTBox.core.nii_wrapper import NII
+from TPTBox.core.nii_wrapper import NII, to_nii
 
 dixon_mapping = {
     "f": "fat",
     "w": "water",
     "in": "inphase",
+    "ip": "inphase",
     "opp": "outphase",
     "opp1": "eco0-opp1",
     "pip1": "eco1-pip1",
@@ -28,9 +29,16 @@ dixon_mapping = {
     "eff": "r2s",
     "wp": "water-fraction",
     "in-phase": "inphase",
+    "in_phase": "inphase",
     "out-phase": "outphase",
-    "phase": "inphase",
+    "out_phase": "outphase",
+    # "phase": "inphase",
     "wa": "water",
+    "imaginary": "imag",
+    "real": "real",
+    "phase": "phase",
+    "mag": "mag",
+    "sub": "subtraction",
 }
 dixon_mapping = {**dixon_mapping, **{v: v for v in dixon_mapping.values()}}
 map_series_description_to_file_format_default = {
@@ -41,6 +49,7 @@ map_series_description_to_file_format_default = {
     ".*scout": "localizer",
     "localizer": "localizer",
     ".*pilot.*": "localizer",
+    "posdisp.*": "localizer",
     **{f".* {re.escape(k.lower())} .*": k for k in formats},
     ".*flair.*": "flair",
     ".*stir.*": "STIR",
@@ -51,16 +60,39 @@ map_series_description_to_file_format_default = {
     ".* fir .*": "IR",  # fast inversion recovery
     ".*irfse.*": "IR",  # fast inversion recovery
     "ir_.*": "IR",  # inversion recovery
-    ".*mp?ra?ge?.*": "MPRAGE",
+    ".*mp?ra?ge?.*": "MPR",
     ".*mip.*": "MIP",
     "b0map": "b0map",
     ".*t2.*": "T2w",
     ".*t1.*": "T1w",
     ".*dixon.*": "dixon",
+    ".*tof.*": "TOF",
+    ".*adc.*": "DWI",
+    ".*diff.*": "difference",
+    ".*fl2d.*": "FLASH",
+    ".*fl3d.*": "FLASH",
+    ".*nerveview.*": ".*NerveVIEW.*",
+    ".*drive.*": "3DDrive",
+    ".*fa.*": "DTI",
+    ".*sub.*": "subtraction",
+    ".*dynamik.*": "DCE",
+    ".*mdix.*": "dixon",
+    ".*s3d.*": "s3D",
+    ".*flip37.*": "s3D",
+    ".*trak.*": "PWI",
+    ".*trance.*": "PWI",
     # others
+    ".*beschriftung.*": "localizer",
+    ".*plan.*": "localizer",
+    ".*localizer.*": "localizer",
     "3-plane loc": "localizer",
     "screen save": "localizer",
     "MobiView .*": "localizer",
+    ".*vs.*": "compare",
+    ".*com.*": "compare",
+    ".*reformat.*": "reformat",
+    ".*recon.*": "recon",
+    ".*source.*ri.*": "RI",
     **{f".*{re.escape(k.lower())}.*": k for k in formats},
     re.escape("?") + "*": "mr",
     ".*": "mr",
@@ -113,13 +145,16 @@ def get_plane_dicom(dicoms: list[pydicom.FileDataset] | NII, hires_threshold=0.8
 
 def extract_keys_from_json(  # noqa: C901
     simp_json: dict,
-    dcm_data_l: list[pydicom.FileDataset],
+    dcm_data_l: list[pydicom.FileDataset] | NII | Path,
     session=False,
     parts=None,
     map_series_description_to_file_format=None,
     override_subject_name: Callable[[dict, Path], str] | None = None,
     chunk: int | str | None = None,
+    keys: dict[str, str | None] | None = None,
 ):
+    if keys is None:
+        keys = {}
     if map_series_description_to_file_format is None:
         map_series_description_to_file_format = {}
     if parts is None:
@@ -127,10 +162,9 @@ def extract_keys_from_json(  # noqa: C901
 
     def _get(key, default=None):
         if key not in simp_json:
-            return default
-        return str(simp_json[key]).replace("_", "-").replace(" ", "-")
+            return keys.get(key, default)
+        return str(simp_json[key]).replace("_", "-").replace(" ", "-").replace(".", "-")
 
-    keys: dict[str, str | None] = {}
     """Extract keys from JSON based on study and series descriptions."""
     #### NAKO FIXED ####
     if "StudyDescription" in simp_json and "nako" in _get("StudyDescription", "").lower():
@@ -162,14 +196,17 @@ def extract_keys_from_json(  # noqa: C901
     # GENERAL
     else:
         if override_subject_name is not None:
-            keys["sub"] = override_subject_name(simp_json, Path(str(dcm_data_l[0].filename)))
+            keys["sub"] = override_subject_name(
+                simp_json,
+                Path(str(dcm_data_l[0].filename)) if not isinstance(dcm_data_l, (str, Path, NII)) else dcm_data_l,  # type: ignore
+            )
         else:
             keys["sub"] = _get("PatientID")
             if keys["sub"] is None:
                 keys["sub"] = _get("StudyInstanceUID")
             if keys["sub"] is None:
                 keys["sub"] = (
-                    _get("PatientSex", "X")
+                    _get("PatientSex", "X")  # type: ignore
                     + "-"
                     + _get("PatientAge", "")
                     + "-"
@@ -180,18 +217,37 @@ def extract_keys_from_json(  # noqa: C901
                     + _get("PatientWeight", "")
                 )
         if session:
-            keys["ses"] = _get("StudyDate")
-        keys["acq"] = get_plane_dicom(dcm_data_l, 0.8)
+            keys["ses"] = _get("StudyDate", keys.get("ses"))
+        if isinstance(dcm_data_l, (str, Path, NII)):
+            keys["acq"] = to_nii(dcm_data_l).get_plane(1)
+        else:
+            keys["acq"] = get_plane_dicom(dcm_data_l, 1)
         keys["part"] = dixon_mapping.get(_get("ProtocolName", "NO-PART").split("_")[-1], None)
+
         sequ = _get("SeriesNumber", None)
-        if sequ is not None:
+        if sequ is None:
+            sequ = str(re.sub(r"[^0-9a-zA-Z]", "", str(simp_json.get("SeriesDescription", "")))).lower()
+        if sequ != "":
             keys["sequ"] = sequ
         if len(parts) != 0:
             keys["part"] = "-".join(parts).replace("_", "-")
         if chunk is not None:
             keys["chunk"] = str(chunk)
+        image_type = simp_json.get("ImageType", [])
+        dx = [dixon_mapping[k.lower()] for k in image_type if k.lower() in dixon_mapping]
+        if len(dx) != 0:
+            keys["part"] = dx[0]
+        # contrast agent
+        # n Tag “ContrastAgent” oder “ContrastBolusTotalDose”, wenn
+        ce = _get("ContrastAgent", _get("ContrastBolusIngredient"))
+        if ce is not None:
+            keys["ce"] = ce
+        elif _get("ContrastBolusTotalDose") is not None or _get("ContrastBolusVolume") is not None:
+            keys["ce"] = "ContrastAgent"
         # GET MRI FORMAT
         series_description = _get("SeriesDescription", "mr").lower()
+        modality = _get("Modality", "mr").lower()
+
         mri_format = None
         ##################### Understand sequence by given times ####################
         # try:
@@ -208,18 +264,30 @@ def extract_keys_from_json(  # noqa: C901
         #    pass
         #################### Understand sequence by series_description ####################
         found = False
-        for key, mri_format_new in map_series_description_to_file_format.items():
-            regex = re.compile(key)
-            if re.match(regex, series_description):
-                mri_format = mri_format_new
-                break
-        if not found:
-            for key, mri_format_new in map_series_description_to_file_format_default.items():
+        if modality == "ct":
+            mri_format = "ct"
+        else:
+            for key, mri_format_new in map_series_description_to_file_format.items():
                 regex = re.compile(key)
                 if re.match(regex, series_description):
                     mri_format = mri_format_new
                     break
-        if mri_format is None:
-            mri_format = "mr"
+            if not found:
+                for key, mri_format_new in map_series_description_to_file_format_default.items():
+                    regex = re.compile(key)
+                    if re.match(regex, series_description):
+                        mri_format = mri_format_new
+                        break
+            if mri_format is None:
+                mri_format = "mr"
+        if mri_format == "T1w":
+            if "sub" in series_description.lower() and keys.get("part") is None:
+                keys["part"] = "subtraction"
+            if (
+                " km " in series_description.lower() or series_description.startswith("km") or series_description.endswith("km")
+            ) and keys.get("ce") is None:
+                keys["ce"] = "ContrastAgent"
+            # ".*sub.*t1.*": "subtraktion",
+        # "subtraktion.*t1.*": "subtraktion",
 
         return mri_format, keys

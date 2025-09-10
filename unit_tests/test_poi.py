@@ -14,16 +14,8 @@ import numpy as np
 
 from TPTBox.core.compat import zip_strict
 from TPTBox.core.nii_wrapper import NII
-from TPTBox.core.poi import (
-    LABEL_MAX,
-    POI,
-    Location,
-    _poi_to_dict_list,
-    calc_centroids,
-    calc_centroids_from_two_masks,
-    calc_poi_from_subreg_vert,
-    load_poi,
-)
+from TPTBox.core.poi import POI, calc_centroids, calc_poi_from_subreg_vert
+from TPTBox.core.poi_fun.save_load import _poi_to_dict_list, load_poi
 from TPTBox.tests.test_utils import extract_affine, get_poi, get_random_ax_code, overlap, repeats, sqr1d
 
 
@@ -119,27 +111,6 @@ class Test_POI(unittest.TestCase):
                     msg += f"{x} - {cent[x]},{y}\n"
                 self.assertEqual(cent, poi.centroids.pois, msg=msg)
                 self.assert_affine(poi, msk)
-
-    def test_cdt_2_dict(self):
-        c = POI({1: {99: (10, 11, 12)}, 32: {50: (23, 23, 23)}}, orientation=("R", "I", "P"))
-        c.info["Tested"] = "now"
-        add_info = {"Tested": "now"}
-        cl, format_str = _poi_to_dict_list(c, add_info)
-
-        self.assertTrue((1, 99) in c, msg=c)
-        self.assertTrue((32, 50) in c)
-        self.assertFalse((1, 50) in c)
-        self.assertFalse((32, 99) in c)
-        self.assertFalse((23, 23) in c)
-        self.assertEqual(c[1, 99], (10, 11, 12))
-        self.assertEqual(c[32, 50], (23, 23, 23))
-        self.assertNotEqual(c[1, 99], (10, 22, 12))
-        self.assertNotEqual(c[1, 99], (23, 23, 23))
-        self.assertEqual(cl[0]["direction"], ("R", "I", "P"))  # type: ignore
-        self.assertEqual(cl[0]["Tested"], "now")  # type: ignore
-        self.assertEqual(cl[1], {"label": LABEL_MAX * 99 + 1, "X": 10.0, "Y": 11.0, "Z": 12.0})
-        self.assertEqual(cl[2], {"label": LABEL_MAX * 50 + 32, "X": 23.0, "Y": 23.0, "Z": 23.0})
-        self.assertEqual(len(cl), 3)
 
     def test_save_load_POI(self):
         for save_hint in [0, 2]:

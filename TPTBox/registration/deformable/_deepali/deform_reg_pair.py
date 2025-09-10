@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 from pathlib import Path
 from timeit import default_timer as timer
@@ -34,6 +36,8 @@ def get_device_config(config: dict[str, Any], device: str | torch.device | None 
     r"""Get configured PyTorch device."""
     if device is None:
         device = config.get("device", "cpu")
+    if isinstance(device, torch.device):
+        return device
     if isinstance(device, int):
         device = f"cuda:{device}"
     elif device == "cuda":
@@ -112,7 +116,7 @@ def append_mask(image: Image, mask_nii: NII | None, channels: dict[str, tuple[in
 
             mask = deepali_functional.threshold(data[slice(*channels["img"])], lower_threshold, upper_threshold)
         else:
-            mask = torch.ones((1,) + data.shape[1:], dtype=data.dtype, device=data.device)
+            mask = torch.ones((1, *data.shape[1:]), dtype=data.dtype, device=data.device)
 
     else:
         # torch.nn.functional.one_hot
@@ -271,7 +275,7 @@ def register_pairwise(  # noqa: C901
     config: dict[str, Any] | None = None,
     verbose: bool | int = False,
     debug: bool | int = False,
-    device: Device | None = None,
+    device: str | Device | None = None,
     finest_spacing=None,
 ) -> SpatialTransform:
     r"""Register pair of images using ``torch.autograd`` and ``torch.optim``."""
@@ -296,7 +300,6 @@ def register_pairwise(  # noqa: C901
     min_size = config["pyramid"]["min_size"]
     pyramid_dims = config["pyramid"]["pyramid_dims"]
     device = get_device_config(config, device)
-
     verbose = int(verbose)
     debug = int(debug)
     if verbose > 0:

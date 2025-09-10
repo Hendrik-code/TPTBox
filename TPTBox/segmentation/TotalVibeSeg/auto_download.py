@@ -29,9 +29,11 @@ WEIGHTS_URL_ = "https://github.com/robert-graf/TotalVibeSegmentator/releases/dow
 env_name = "TOTALVIBE_WEIGHTS_PATH"
 
 
-def get_weights_dir(idx) -> Path:
+def get_weights_dir(idx, model_path: Path | None = None) -> Path:
     if env_name in os.environ:
         weights_dir: Path = Path(os.environ[env_name])
+    elif model_path is not None and model_path.exists():
+        weights_dir = model_path
     else:
         assert Path(__file__).parent.name == "TotalVibeSeg", Path(__file__).parent
 
@@ -55,23 +57,15 @@ def read_config(idx) -> dict[str, float]:
         return {"dataset_release": 0.0}
 
 
-def user_guard(func: Any) -> Any:
-    """Check for user defined environment variables. We do NOT want to change user directories"""
-    if env_name in os.environ:
-        logger.info("User defined environment variables detected, skip directory operations.")
-        return
-    else:
-        return func
-
-
-@user_guard
-def _download_weights(idx=85) -> None:
+def _download_weights(idx=85, addendum="", first=True) -> None:
     weights_dir = get_weights_dir(idx)
-    weights_url = WEIGHTS_URL_ + f"{idx:03}.zip"
+    weights_url = WEIGHTS_URL_ + f"{idx:03}{addendum}.zip"
     _download(weights_url, weights_dir, text="pretrained weights")
+    if first:
+        addendum_download(idx)
 
 
-def _download(weights_url, weights_dir, text="") -> None:
+def _download(weights_url, weights_dir, text="", is_zip=True) -> None:
     try:
         # Retrieve file size
         with urllib.request.urlopen(str(weights_url)) as response:
@@ -91,17 +85,28 @@ def _download(weights_url, weights_dir, text="") -> None:
         zip_path = weights_dir.parent / Path(weights_url).name
         # Download the file
         urllib.request.urlretrieve(str(weights_url), zip_path, reporthook=update_progress)
+    if is_zip:
+        print(f"Extracting {text}...")
+        with zipfile.ZipFile(zip_path, "r") as zip_ref:
+            zip_ref.extractall(weights_dir)
+        os.remove(zip_path)  # noqa: PTH107
 
-    print(f"Extracting {text}...")
-    with zipfile.ZipFile(zip_path, "r") as zip_ref:
-        zip_ref.extractall(weights_dir)
-    os.remove(zip_path)  # noqa: PTH107
 
-
-def download_weights(idx) -> Path:
+def addendum_download(idx):
     weights_dir = get_weights_dir(idx)
+    next_zip = weights_dir / "other_downloads.json"
+    if next_zip.exists():
+        with open(next_zip) as f:
+            add = json.load(f)
+        [_download_weights(idx, addendum=a, first=False) for a in add]
+        next_zip.unlink()
+
+
+def download_weights(idx, model_path: Path | None = None) -> Path:
+    weights_dir = get_weights_dir(idx, model_path)
 
     # Check if weights are downloaded
     if not weights_dir.exists():
         _download_weights(idx)
+    addendum_download(idx)
     return weights_dir

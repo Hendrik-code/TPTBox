@@ -12,11 +12,12 @@ from pathlib import Path
 import nibabel as nib
 import numpy as np
 
+from TPTBox import NII, v_idx2name
 from TPTBox.core import np_utils
 from TPTBox.core.compat import zip_strict
 from TPTBox.core.nii_wrapper import NII
 from TPTBox.core.poi import POI as Centroids  # _centroids_to_dict_list  # noqa: N811
-from TPTBox.core.poi import calc_centroids, v_idx2name
+from TPTBox.core.poi import calc_centroids
 from TPTBox.tests.test_utils import get_nii, get_random_ax_code, repeats
 
 
@@ -217,9 +218,10 @@ class Test_bids_file(unittest.TestCase):
         for _ in range(repeats):
             msk, cent, order, sizes = get_nii(num_point=random.randint(3, 10))
             label = 1
-            subreg_cc, subreg_cc_n = msk.get_segmentation_connected_components(labels=label)
+            subreg_cc = msk.get_connected_components_per_label(labels=label)
+            subreg_cc_n = {i: len(subreg_cc[i].unique()) for i in subreg_cc}
             volume = msk.volumes()
-            volume_cc = np_utils.np_volume(subreg_cc[label])
+            volume_cc = subreg_cc[label].volumes()
             self.assertTrue(volume[label], np.sum(volume_cc.values()))
 
             # see if get center of masses match with stats centroids
@@ -228,12 +230,20 @@ class Test_bids_file(unittest.TestCase):
             print(n_coms)
             print(subreg_cc_n)
             self.assertTrue(n_coms == subreg_cc_n[label])
+            coms_compare = np_utils.np_center_of_mass(subreg_cc[label].get_seg_array())
             if n_coms == 1:
-                first_centroid = np_utils.np_center_of_mass(subreg_cc[label])[1]
+                print(coms)
+                print(coms_compare)
                 self.assertTrue(
-                    abs(coms[0][0] - first_centroid[0]) <= 0.00001,
-                    msg=f"{coms[0][0]}, {first_centroid[0]}",
+                    np.array_equal(coms[0], next(iter(coms_compare.values()))),
+                    msg=f"{coms[0][0]}, {coms_compare}",
                 )
+            # if n_coms == 1:
+            #    first_centroid = np_utils.np_center_of_mass(subreg_cc[label].get_seg_array())
+            #    self.assertTrue(
+            #        abs(coms[0][0] - first_centroid[0]) <= 0.00001,
+            #        msg=f"{coms[0][0]}, {first_centroid[0]}",
+            #    )
 
     def test_apply_center_crop(self):
         for _ in range(repeats):

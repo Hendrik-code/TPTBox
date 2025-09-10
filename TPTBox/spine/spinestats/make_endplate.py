@@ -148,7 +148,7 @@ def _endplate_extraction_msk(subreg_tmp: NII, normal: np.ndarray, _extract=True)
 
 def endplate_extraction(idx, vert: NII, subreg: NII, poi: POI) -> NII | None:
     """
-    Retrospectively computes an endplate to a vertebra (Two-Sided)
+    Retrospectively computes an endplate to a vertebra (Two-Sided).
 
     Returns:
     - NII: endplates labeled 52, 53.

@@ -21,9 +21,10 @@ def convert_predicted_logits_to_segmentation_with_correct_shape(
     return_probabilities: bool = False,
     num_threads_torch: int = 8,
 ):
+    if return_probabilities:
+        raise NotImplementedError()
     old_threads = torch.get_num_threads()
     torch.set_num_threads(num_threads_torch)
-
     # resample to original shape
     current_spacing = (
         configuration_manager.spacing
@@ -31,21 +32,22 @@ def convert_predicted_logits_to_segmentation_with_correct_shape(
         else [properties_dict["spacing"][0], *configuration_manager.spacing]
     )
     predicted_logits = configuration_manager.resampling_fn_probabilities(
-        predicted_logits,
-        properties_dict["shape_after_cropping_and_before_resampling"],
-        current_spacing,
-        properties_dict["spacing"],
+        predicted_logits, properties_dict["shape_after_cropping_and_before_resampling"], current_spacing, properties_dict["spacing"]
     )
     # return value of resampling_fn_probabilities can be ndarray or Tensor but that doesnt matter because
     # apply_inference_nonlin will covnert to torch
-    predicted_probabilities = label_manager.apply_inference_nonlin(predicted_logits)
-    del predicted_logits
-    segmentation = label_manager.convert_probabilities_to_segmentation(predicted_probabilities)
-
+    # And this is stupid because convert_probabilities_to_segmentation transforms it back to a numpy...
+    if label_manager.has_regions or return_probabilities:
+        # Softmax does not change when we use argmax in the next step
+        predicted_logits = label_manager.apply_inference_nonlin(predicted_logits)
     # segmentation may be torch.Tensor but we continue with numpy
-    if isinstance(segmentation, torch.Tensor):
-        segmentation = segmentation.cpu().numpy()
+    if isinstance(predicted_logits, torch.Tensor):
+        predicted_logits = predicted_logits.cpu().numpy()
 
+    segmentation: np.ndarray = label_manager.convert_probabilities_to_segmentation(np.ascontiguousarray(predicted_logits))  # type: ignore
+    segmentation = segmentation.astype(np.uint8 if len(label_manager.foreground_labels) < 255 else np.uint16)
+    # if not return_probabilities:
+    del predicted_logits
     # put segmentation in bbox (revert cropping)
     segmentation_reverted_cropping = np.zeros(
         properties_dict["shape_before_cropping"],
@@ -53,34 +55,36 @@ def convert_predicted_logits_to_segmentation_with_correct_shape(
     )
     slicer = bounding_box_to_slice(properties_dict["bbox_used_for_cropping"])
     segmentation_reverted_cropping[slicer] = segmentation
-    del segmentation
+    segmentation = segmentation_reverted_cropping
 
     # revert transpose
-    segmentation_reverted_cropping = segmentation_reverted_cropping.transpose(plans_manager.transpose_backward)
-    if return_probabilities:
-        # revert cropping
-        try:
-            predicted_probabilities = label_manager.revert_cropping_on_probabilities(  # type: ignore
-                predicted_probabilities,
-                properties_dict["bbox_used_for_cropping"],
-                properties_dict["shape_before_cropping"],
-            )
-        except Exception:
-            predicted_probabilities = label_manager.revert_cropping(  # type: ignore
-                predicted_probabilities.numpy() if isinstance(predicted_probabilities, torch.Tensor) else predicted_probabilities,
-                properties_dict["bbox_used_for_cropping"],
-                properties_dict["shape_before_cropping"],
-            )
-
-        if isinstance(predicted_probabilities, torch.Tensor):
-            predicted_probabilities = predicted_probabilities.cpu().numpy()
-        # revert transpose
-        predicted_probabilities = predicted_probabilities.transpose([0] + [i + 1 for i in plans_manager.transpose_backward])
-        torch.set_num_threads(old_threads)
-        return segmentation_reverted_cropping, predicted_probabilities
-    else:
-        torch.set_num_threads(old_threads)
-        return segmentation_reverted_cropping
+    segmentation = segmentation.transpose(plans_manager.transpose_backward)
+    print(segmentation.shape)
+    # if return_probabilities:
+    #    raise NotImplementedError()
+    #    # revert cropping
+    #    try:
+    #        predicted_probabilities = predicted_logits  # noqa: F821
+    #        predicted_probabilities = label_manager.revert_cropping_on_probabilities(  # type: ignore
+    #            predicted_probabilities,
+    #            properties_dict["bbox_used_for_cropping"],
+    #            properties_dict["shape_before_cropping"],
+    #        )
+    #    except Exception:
+    #        predicted_probabilities = label_manager.revert_cropping(  # type: ignore
+    #            predicted_probabilities.numpy() if isinstance(predicted_probabilities, torch.Tensor) else predicted_probabilities,
+    #            properties_dict["bbox_used_for_cropping"],
+    #            properties_dict["shape_before_cropping"],
+    #        )
+    #    if isinstance(predicted_probabilities, torch.Tensor):
+    #        predicted_probabilities = predicted_probabilities.cpu().numpy()
+    #    # revert transpose
+    #    predicted_probabilities = predicted_probabilities.transpose([0] + [i + 1 for i in plans_manager.transpose_backward])
+    #    torch.set_num_threads(old_threads)
+    #    return segmentation, predicted_probabilities
+    # else:
+    torch.set_num_threads(old_threads)
+    return segmentation
 
 
 def export_prediction_from_logits(

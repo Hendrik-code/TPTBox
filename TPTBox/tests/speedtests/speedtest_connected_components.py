@@ -22,7 +22,7 @@ if __name__ == "__main__":
 
     def get_nii_array():
         num_points = random.randint(50, 51)
-        nii, points, orientation, sizes = get_nii(x=(300, 300, 300), num_point=num_points)
+        nii, points, orientation, sizes = get_nii(x=(100, 100, 100), num_point=num_points)
         # nii.map_labels_({1: -1}, verbose=False)
         arr = nii.get_seg_array().astype(np.uint8)
         # arr[arr == 1] = -1
@@ -31,6 +31,9 @@ if __name__ == "__main__":
 
     def np_naive_cc(arr: np.ndarray):
         return np_connected_components(arr)[0][1]
+
+    def np_naive_cc_extract(arr: np.ndarray):
+        return np_connected_components(arr, use_extract2=True)[0][1]
 
     def np_naive_cc_gcrop(arr: np.ndarray):
         crop = np_bbox_binary(arr)
@@ -72,31 +75,33 @@ if __name__ == "__main__":
             subreg_cc_n[subreg] = n
         return subreg_cc[1]  # , subreg_cc_n
 
-    def np_cc_once(arr: np.ndarray):
-        # call cc once, then relabel
-        connectivity = 3
-        connectivity = min((connectivity + 1) * 2, 8) if arr.ndim == 2 else 6 if connectivity == 1 else 18 if connectivity == 2 else 26
-
-        labels: list[int] = np_unique(arr)
-
-        subreg_cc = {}
-        subreg_cc_n = {}
-        crop = np_bbox_binary(arr)
-        arrc = arr[crop]
-        zarr = np.zeros((len(labels), *arr.shape), dtype=arr.dtype)
-
-        labels_out = connected_components(arrc, connectivity=connectivity, return_N=False)
-        for sidx, subreg in enumerate(labels):  # type:ignore
-            img_subreg = np_extract_label(arrc, subreg, inplace=False)
-            lcrop = np_bbox_binary(img_subreg)
-            img_subregc = img_subreg[lcrop]
-            img_subreg[lcrop] = labels_out[lcrop] * img_subregc
-
-            arrcc = zarr[sidx]
-            arrcc[crop] = img_subreg
-            subreg_cc[subreg] = arrcc
-            subreg_cc_n[subreg] = len(np_unique_withoutzero(img_subreg[lcrop]))
-        return subreg_cc[1]  # , subreg_cc_n
+    # def np_cc_once(arr: np.ndarray):
+    #    # call cc once, then relabel
+    #    connectivity = 3
+    #    connectivity = min((connectivity + 1) * 2, 8) if arr.ndim == 2 else 6 if connectivity == 1 else 18 if connectivity == 2 else 26
+    #
+    #    labels: list[int] = np_unique(arr)
+    #
+    #    subreg_cc = {}
+    #    subreg_cc_n = {}
+    #    crop = np_bbox_binary(arr)
+    #    arrc = arr[crop]
+    #    zarr = np.zeros((len(labels), *arr.shape), dtype=arr.dtype)
+    #
+    #    labels_out = connected_components(arrc, connectivity=connectivity, return_N=False)
+    #    for sidx, subreg in enumerate(labels):  # type:ignore
+    #        arrcc[crop][np.logical_and()]
+    #        # arr[s == subreg]
+    #        # img_subreg = np_extract_label(arrc, subreg, inplace=False)
+    #        # lcrop = np_bbox_binary(img_subreg)
+    #        img_subregc = img_subreg[lcrop]
+    #        img_subreg[lcrop] = labels_out[lcrop] * img_subregc
+    #
+    #        arrcc = zarr[sidx]
+    #        arrcc[crop] = img_subreg
+    #        subreg_cc[subreg] = arrcc
+    #        subreg_cc_n[subreg] = len(np_unique_withoutzero(img_subreg[lcrop]))
+    #    return subreg_cc[1]  # , subreg_cc_n
 
     def np_cc_once_lcrop(arr: np.ndarray):
         # call cc once, then relabel
@@ -125,9 +130,9 @@ if __name__ == "__main__":
         return subreg_cc[1]  # , subreg_cc_n
 
     speed_test(
-        repeats=10,
+        repeats=50,
         get_input_func=get_nii_array,
-        functions=[np_naive_cc, np_naive_cc_gcrop, np_cc_once],
+        functions=[np_naive_cc, np_naive_cc_extract],
         assert_equal_function=lambda x, y: np.count_nonzero(x) == np.count_nonzero(y),
         # np.all([x[i] == y[i] for i in range(x.shape[0])]),  # noqa: ARG005
         # np.all([x[i] == y[i] for i in range(len(x))])

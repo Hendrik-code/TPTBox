@@ -255,26 +255,27 @@ class TestNII(unittest.TestCase):
         # Test for sagittal plane
         affine[0, 0] = 0.5
         nii.affine = affine
-        assert nii.get_plane() == "sag", nii.get_plane()
-
+        assert nii.get_plane(res_threshold=0) == "sag", nii.get_plane()
+        assert nii.get_plane(res_threshold=1) == "iso"
         # Test for coronal plane
         affine[0, 0] = 1
         affine[1, 1] = 0.5
         nii.affine = affine
-        assert nii.get_plane() == "cor"
-
+        assert nii.get_plane(res_threshold=0) == "cor"
+        assert nii.get_plane(res_threshold=1) == "iso"
         # Test for axial plane
         affine[1, 1] = 1.0
         affine[2, 2] = 0.5
         nii.affine = affine
-        assert nii.get_plane() == "ax"
+        assert nii.get_plane(res_threshold=0) == "ax"
+        assert nii.get_plane(res_threshold=1) == "iso"
 
         # Test for isometric plane
         affine[0, 0] = 1
         affine[1, 1] = 1
         affine[2, 2] = 1
         nii.affine = affine
-        assert nii.get_plane() == "iso"
+        assert nii.get_plane(res_threshold=0) == "iso"
 
     # Test that the erode_msk method correctly erodes the segmentation mask.
     def test_erode_msk(self):

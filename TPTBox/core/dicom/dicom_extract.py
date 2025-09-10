@@ -14,8 +14,9 @@ import dicom2nifti.exceptions
 import numpy as np
 import pydicom
 from dicom2nifti import convert_dicom
-from func_timeout import func_timeout  # pip install func_timeout
-from func_timeout.exceptions import FunctionTimedOut
+
+# from func_timeout import func_timeout  # pip install func_timeout
+# from func_timeout.exceptions import FunctionTimedOut
 from joblib import Parallel, delayed
 from pydicom.dataset import FileDataset
 
@@ -48,7 +49,7 @@ def _inc_key(keys, inc=1):
 
 
 def _generate_bids_path(
-    nifti_dir, keys: dict, mri_format, simp_json, make_subject_chunks: int, parent="rawdata", _subject_folder_prefix="sub-"
+    dataset_nifti_dir, keys: dict, mri_format, simp_json, make_subject_chunks: int, parent="rawdata", _subject_folder_prefix="sub-"
 ):
     """
     Generate a BIDS-compatible file path for NIfTI outputs based on extracted keys from DICOM headers.
@@ -72,17 +73,17 @@ def _generate_bids_path(
     keys["sub"] = keys["sub"].replace(".", "-")
     assert keys["sub"] is not None, keys
     p = Path(
-        nifti_dir,  # dataset path
+        dataset_nifti_dir,  # dataset path
         parent,  # rawdata
         str(keys["sub"][:make_subject_chunks]) if make_subject_chunks != 0 else "",  # additional folder Optional
         _subject_folder_prefix + keys["sub"],  # Subject folder
         ses,  # Session, if exist
     )
     args = {"file_type": "json", "parent": parent, "make_parent": True, "additional_folder": mri_format, "bids_format": mri_format}
-    fname = BIDS_FILE(Path(p, "sub-000_ct.nii.gz"), nifti_dir).get_changed_bids(**args, info=keys, non_strict_mode=True)
+    fname = BIDS_FILE(Path(p, "sub-000_ct.nii.gz"), dataset_nifti_dir).get_changed_bids(**args, info=keys, non_strict_mode=True)
     while test_name_conflict(simp_json, fname.file["json"]):
         _inc_key(keys)
-        fname = BIDS_FILE(Path(p, "sub-000_ct.nii.gz"), nifti_dir).get_changed_bids(**args, info=keys, non_strict_mode=True)
+        fname = BIDS_FILE(Path(p, "sub-000_ct.nii.gz"), dataset_nifti_dir).get_changed_bids(**args, info=keys, non_strict_mode=True)
     return fname.file["json"], fname
 
 
@@ -106,7 +107,8 @@ def _convert_to_nifti(dicom_out_path, nii_path):
         if isinstance(dicom_out_path, list):
             convert_dicom.dicom_array_to_nifti(dicom_out_path, nii_path, True)
         else:
-            func_timeout(10, dicom2nifti.dicom_series_to_nifti, (dicom_out_path, nii_path, True))
+            # func_timeout(10, dicom2nifti.dicom_series_to_nifti, (dicom_out_path, nii_path, True))
+            dicom2nifti.dicom_series_to_nifti(dicom_out_path, nii_path, True)
         logger.print("Save ", nii_path, Log_Type.SAVE)
     except dicom2nifti.exceptions.ConversionValidationError as e:
         if e.args[0] in ["NON_IMAGING_DICOM_FILES"]:
@@ -127,7 +129,7 @@ def _convert_to_nifti(dicom_out_path, nii_path):
         logger.print_error()
         logger.on_fail(Path(nii_path).name)
 
-    except (FunctionTimedOut, ValueError):
+    except ValueError:  # FunctionTimedOut
         logger.print_error()
 
         return False
@@ -136,15 +138,19 @@ def _convert_to_nifti(dicom_out_path, nii_path):
 
 def _get_paths(
     simp_json: dict,
-    dcm_data_l: list[pydicom.FileDataset],
-    nifti_dir: str | Path,
+    dcm_data_l: list[pydicom.FileDataset] | NII | Path,
+    dataset_nifti_dir: str | Path,
     make_subject_chunks=0,
     use_session=False,
     parts: list | None = None,
     map_series_description_to_file_format=None,
     override_subject_name: Callable[[dict, Path], str] | None = None,
     chunk: int | str | None = None,
+    keys: dict[str, str | None] | None = None,
+    parent="rawdata",
 ):
+    if keys is None:
+        keys = {}
     (mri_format, keys) = extract_keys_from_json(
         simp_json,
         dcm_data_l,
@@ -153,8 +159,11 @@ def _get_paths(
         map_series_description_to_file_format,
         override_subject_name=override_subject_name,
         chunk=chunk,
+        keys=keys,
     )
-    json_file_name, json_bids_name = _generate_bids_path(nifti_dir, keys, mri_format, simp_json, make_subject_chunks=make_subject_chunks)
+    json_file_name, json_bids_name = _generate_bids_path(
+        dataset_nifti_dir, keys, mri_format, simp_json, make_subject_chunks=make_subject_chunks, parent=parent
+    )
     nii_path = str(json_file_name).replace(".json", "") + ".nii.gz"
     return json_file_name, json_bids_name, nii_path
 
