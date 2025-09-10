@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import typing
 from collections.abc import Sequence
 from enum import Enum
 from typing import TYPE_CHECKING, Literal, NoReturn, Union
@@ -31,7 +30,9 @@ SHAPE = Union[TRIPLE, tuple[int, int, int]]
 ORIGIN = TRIPLE
 
 
-LABEL_MAP = Union[dict[Union[int, str], Union[int, str]], dict[str, str], dict[int, int]]
+LABEL_MAP = Union[
+    dict[Union[int, str], Union[int, str]], dict[str, str], dict[int, int]
+]
 
 LABEL_REFERENCE = Union[int, Sequence[int], None]
 
@@ -83,17 +84,22 @@ class Abstract_lvl(Enum):
         _register_lvl[str(cls.__name__)] = cls
 
     @classmethod
+    def save_as_name(cls) -> bool:
+        return True
+
+    @classmethod
     def order_dict(cls) -> dict[int, int]:
         return {}  # Default integer order
 
     @classmethod
     def _get_name(cls, i: int, no_raise=True) -> str:
-        try:
-            return cls(i).name
-        except ValueError:
-            if not no_raise:
-                raise
-            return str(i)
+        if cls.save_as_name():
+            try:
+                return cls(i).name
+            except ValueError:
+                if not no_raise:
+                    raise
+        return str(i)
 
     @classmethod
     def _get_id(cls, s: str | int, no_raise=True) -> int:
@@ -102,9 +108,251 @@ class Abstract_lvl(Enum):
         try:
             return cls[s].value
         except KeyError:
+            for c in cls:
+                if c.name.lower() == s.lower():
+                    return c.value
             if not no_raise:
                 raise
             return int(s)
+
+
+class Any(Abstract_lvl):
+    def __init_subclass__(cls, **kwargs):
+        _register_lvl[str(cls.__name__)] = cls
+
+    @classmethod
+    def save_as_name(cls) -> bool:
+        return False
+
+    @classmethod
+    def _get_name(cls, i: int, no_raise=True) -> str:  # noqa: ARG003
+        return str(i)
+
+    @classmethod
+    def _get_id(cls, s: str | int, no_raise=True) -> int:  # noqa: ARG003
+        self_name = str(cls.__name__)
+        for n, cl in _register_lvl.items():
+            if n == self_name:
+                continue
+            try:
+                s = cl._get_id(cls, s, no_raise=False)
+                return s  # type: ignore # noqa: TRY300
+            except Exception:
+                pass
+        return int(s)
+
+
+class Full_Body_Instance_Vibe(Abstract_lvl):
+    spleen = 1
+    kidney_right = 2
+    kidney_left = 3
+    gallbladder = 4
+    liver = 5
+    stomach = 6
+    pancreas = 7
+    adrenal_gland_right = 8
+    adrenal_gland_left = 9
+    lung_upper_lobe_left = 10
+    lung_lower_lobe_left = 11
+    lung_upper_lobe_right = 12
+    lung_middle_lobe_right = 13
+    lung_lower_lobe_right = 14
+    esophagus = 15
+    trachea = 16
+    thyroid_gland = 17
+    intestine = 18
+    duodenum = 19
+    unused = 20
+    urinary_bladder = 21
+    prostate = 22
+    sacrum = 23
+    heart = 24
+    aorta = 25
+    pulmonary_vein = 26
+    brachiocephalic_trunk = 27
+    subclavian_artery_right = 28
+    subclavian_artery_left = 29
+    common_carotid_artery_right = 30
+    common_carotid_artery_left = 31
+    brachiocephalic_vein_left = 32
+    brachiocephalic_vein_right = 33
+    atrial_appendage_left = 34
+    superior_vena_cava = 35
+    inferior_vena_cava = 36
+    portal_vein_and_splenic_vein = 37
+    iliac_artery_left = 38
+    iliac_artery_right = 39
+    iliac_vena_left = 40
+    iliac_vena_right = 41
+    humerus_left = 42
+    humerus_right = 43
+    scapula_left = 44
+    scapula_right = 45
+    clavicula_left = 46
+    clavicula_right = 47
+    femur_left = 48
+    femur_right = 49
+    hip_left = 50
+    hip_right = 51
+    spinal_cord = 52
+    gluteus_maximus_left = 53
+    gluteus_maximus_right = 54
+    gluteus_medius_left = 55
+    gluteus_medius_right = 56
+    gluteus_minimus_left = 57
+    gluteus_minimus_right = 58
+    autochthon_left = 59
+    autochthon_right = 60
+    iliopsoas_left = 61
+    iliopsoas_right = 62
+    sternum = 63
+    costal_cartilages = 64
+    subcutaneous_fat = 65
+    muscle = 66
+    inner_fat = 67
+    IVD = 68
+    vertebra_body = 69
+    vertebra_posterior_elements = 70
+    spinal_channel = 71
+    bone_other = 72
+
+
+class Full_Body_Instance(Abstract_lvl):
+    skull = 1
+    clavicula_right = 2
+    clavicula_left = 102
+    scapula_right = 3
+    scapula_left = 103
+    humerus_right = 4
+    humerus_left = 104
+    hand_rest_right = 5
+    hand_rest_left = 105
+    sternum = 6
+    costal_cartilage = 7
+    rib_right = 8
+    rib_left = 108
+    vert_body = 9
+    vert_post = 10
+    sacrum = 11
+    hip_right = 12
+    hip_left = 112
+    femur_right = 13
+    femur_left = 113
+    patella_right = 14
+    patella_left = 114
+    tibia_right = 15
+    tibia_left = 115
+    fibula_right = 16
+    fibula_left = 116
+    talus_right = 17
+    talus_left = 117
+    calcaneus_right = 18
+    calcaneus_left = 118
+    tarsals_right = 19
+    tarsals_left = 119
+    metatarsals_right = 20
+    metatarsals_left = 120
+    phalanges_right = 21
+    phalanges_left = 121
+    trachea = 22
+    lung_right = 23
+    lung_left = 123
+    heart = 24
+    spleen = 25
+    kidney_right = 26
+    kidney_left = 126
+    liver = 27
+    gallbladder = 28
+    ivd = 29
+    stomach = 30
+    pancreas = 31
+    adrenal_gland_right = 32
+    adrenal_gland_left = 132
+    esophagus = 33
+    thyroid_gland_right = 34
+    thyroid_gland_left = 134
+    doudenum = 35
+    intestine = 36
+    urinary_bladder = 37
+    prostate = 38
+    channel = 39
+    aorta = 40
+    pulmonary_vein = 41
+    brachiocephalic_trunk = 42
+    subclavian_artery_right = 43
+    subclavian_artery_left = 143
+    common_carotid_artery_right = 44
+    common_carotid_artery_left = 144
+    brachiocephalic_vein_right = 45
+    brachiocephalic_vein_left = 145
+    atrial_appendage_left = 46
+    superior_vena_cava = 47
+    inferior_vena_cava = 48
+    iliac_artery_right = 49
+    iliac_artery_left = 149
+    portal_vein_and_splenic_vein = 50
+    iliac_vena_right = 51
+    iliac_vena_left = 151
+    gluteus_maximus_right = 52
+    gluteus_maximus_left = 152
+    gluteus_medius_right = 53
+    gluteus_medius_left = 153
+    gluteus_minimus_right = 54
+    gluteus_minimus_left = 154
+    autochthon_right = 55
+    autochthon_left = 155
+    iliopsoas_right = 56
+    iliopsoas_left = 156
+    subcutaneous_fat = 57
+    muscle_other = 58
+    inner_fat = 59
+    ignore = 60
+
+
+class Lower_Body(Abstract_lvl):
+    # Patella
+    PATELLA_PROXIMAL_POLE = 1
+    PATELLA_DISTAL_POLE = 2
+    PATELLA_MEDIAL_POLE = 3
+    PATELLA_LATERAL_POLE = 4
+    PATELLA_RIDGE_PROXIMAL_POLE = 5
+    PATELLA_RIDGE_DISTAL_POLE = 6
+    PATELLA_RIDGE_HIGH_POINT = 7
+
+    # Trochlea ossis femoris
+    TROCHLEAR_RIDGE_MEDIAL_POINT = 8
+    TROCHLEAR_RIDGE_LATERAL_POINT = 9
+    TROCHLEA_GROOVE_CENTRAL_POINT = 10
+
+    # Femur
+    HIP_CENTER = 11
+    NECK_CENTER = 12
+    TIP_OF_GREATER_TROCHANTER = 13
+    LATERAL_CONDYLE_POSTERIOR = 14
+    LATERAL_CONDYLE_POSTERIOR_CRANIAL = 15
+    LATERAL_CONDYLE_DISTAL = 16
+    MEDIAL_CONDYLE_DISTAL = 17
+    NOTCH_POINT = 18
+    # Femur, Tibia
+    ANATOMICAL_AXIS_PROXIMAL = 19
+    ANATOMICAL_AXIS_DISTAL = 20
+    MEDIAL_CONDYLE_POSTERIOR = 21
+    MEDIAL_CONDYLE_POSTERIOR_CRANIAL = 22
+
+    # Tibia
+    KNEE_CENTER = 23
+    MEDIAL_INTERCONDYLAR_TUBERCLE = 24
+    LATERAL_INTERCONDYLAR_TUBERCLE = 25
+    MEDIAL_CONDYLE_ANTERIOR = 26
+    LATERAL_CONDYLE_ANTERIOR = 27
+    MEDIAL_CONDYLE_MEDIAL = 28
+    LATERAL_CONDYLE_LATERAL = 29
+    ANKLE_CENTER = 30
+    MEDIAL_MALLEOLUS = 31
+    TGPP = 99
+    TTP = 98
+    # Fibula
+    LATERAL_MALLEOLUS = 32
 
 
 class Vertebra_Instance(Abstract_lvl):
@@ -124,7 +372,9 @@ class Vertebra_Instance(Abstract_lvl):
         self._endplate = None
         if has_rib:
             self._rib = (
-                vertebra_label + VERTEBRA_INSTANCE_RIB_LABEL_OFFSET if vertebra_label != 28 else 21 + VERTEBRA_INSTANCE_RIB_LABEL_OFFSET
+                vertebra_label + VERTEBRA_INSTANCE_RIB_LABEL_OFFSET
+                if vertebra_label != 28
+                else 21 + VERTEBRA_INSTANCE_RIB_LABEL_OFFSET
             )
         if has_ivd:
             self._ivd = vertebra_label + VERTEBRA_INSTANCE_IVD_LABEL_OFFSET
@@ -177,6 +427,8 @@ class Vertebra_Instance(Abstract_lvl):
             return cls(i) in cls.sacrum()
         except KeyError:
             return False
+        except ValueError:
+            return False
 
     @classmethod
     def cervical(cls):
@@ -184,7 +436,21 @@ class Vertebra_Instance(Abstract_lvl):
 
     @classmethod
     def thoracic(cls):
-        return (cls.T1, cls.T2, cls.T3, cls.T4, cls.T5, cls.T6, cls.T7, cls.T8, cls.T9, cls.T10, cls.T11, cls.T12, cls.T13)
+        return (
+            cls.T1,
+            cls.T2,
+            cls.T3,
+            cls.T4,
+            cls.T5,
+            cls.T6,
+            cls.T7,
+            cls.T8,
+            cls.T9,
+            cls.T10,
+            cls.T11,
+            cls.T12,
+            cls.T13,
+        )
 
     @classmethod
     def lumbar(cls):
@@ -203,7 +469,13 @@ class Vertebra_Instance(Abstract_lvl):
         return {a.value: e for e, a in enumerate(cls.order())}
 
     def get_next_poi(self, poi: POI | NII | list[int]):
-        r = poi if isinstance(poi, list) else poi.keys_region() if hasattr(poi, "keys_region") else poi.unique()  # type: ignore
+        r = (
+            poi
+            if isinstance(poi, list)
+            else poi.keys_region()
+            if hasattr(poi, "keys_region")
+            else poi.unique()
+        )  # type: ignore
         o = self.order()
         idx = o.index(self)
         for vert in o[idx + 1 :]:
@@ -212,7 +484,13 @@ class Vertebra_Instance(Abstract_lvl):
         return None
 
     def get_previous_poi(self, poi: POI | NII | list[int]):
-        r = poi if isinstance(poi, list) else poi.keys_region() if hasattr(poi, "keys_region") else poi.unique()  # type: ignore
+        r = (
+            poi
+            if isinstance(poi, list)
+            else poi.keys_region()
+            if hasattr(poi, "keys_region")
+            else poi.unique()
+        )  # type: ignore
         o = self.order()
         idx = o.index(self)
         for vert in reversed(o[:idx]):
@@ -266,7 +544,11 @@ class Vertebra_Instance(Abstract_lvl):
     @classmethod
     def rib2vert(cls, riblabel: int) -> int:
         assert riblabel in Vertebra_Instance.rib_label(), riblabel
-        return riblabel - VERTEBRA_INSTANCE_RIB_LABEL_OFFSET if riblabel != 21 + VERTEBRA_INSTANCE_RIB_LABEL_OFFSET else 28
+        return (
+            riblabel - VERTEBRA_INSTANCE_RIB_LABEL_OFFSET
+            if riblabel != 21 + VERTEBRA_INSTANCE_RIB_LABEL_OFFSET
+            else 28
+        )
 
     @property
     def IVD(self) -> int:
@@ -283,6 +565,10 @@ class Vertebra_Instance(Abstract_lvl):
 
 
 class Location(Abstract_lvl):
+    @classmethod
+    def save_as_name(cls) -> bool:
+        return False
+
     Unknown = 0
     # S1 = 26  # SACRUM
     # Vertebral subregions
