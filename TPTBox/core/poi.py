@@ -1249,7 +1249,7 @@ def calc_poi_average(pois: list[POI], keep_points_not_present_in_all_pois: bool 
     return POI(centroids=ctd, orientation=pois[0].orientation, zoom=pois[0].zoom, shape=pois[0].shape, rotation=pois[0].rotation)
 
 
-def _load_form_POI_spine_r(data: dict):
+def _load_from_POI_spine_r(data: dict):
     orientation = None
     centroids = POI_Descriptor()
     for d in data["centroids"]["centroids"]:
