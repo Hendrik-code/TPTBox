@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import numpy as np
-
 from TPTBox import BIDS_FILE, NII, POI, Image_Reference, POI_Reference
 from TPTBox.spine.snapshot2D.snapshot_modular import Snapshot_Frame, Visualization_Type, create_snapshot
 
@@ -187,34 +185,51 @@ def spline_shot(
     # print("[ ]saved snapshot into:", out_path)
 
 
+def snapshot(
+    ref: Image_Reference,
+    vert_msk: Image_Reference,
+    subreg_ctd: POI_Reference,
+    subreg_msk: Image_Reference = None,
+    out_path: str | Path | list[str | Path] | list[Path] | None = None,
+    mode="MINMAX",
+    crop=False,
+):
+    if isinstance(ref, BIDS_FILE):
+        mode = "CT" if ref.bids_format == "ct" else "MRI"
+
+    return mri_snapshot(ref, vert_msk, subreg_ctd, subreg_msk, out_path, mode, crop=crop)  # type: ignore
+
+
 def mri_snapshot(
     mrt_ref: BIDS_FILE,
     vert_msk: Image_Reference,
     subreg_ctd: POI_Reference,
     subreg_msk: Image_Reference = None,
     out_path: str | Path | list[str | Path] | list[Path] | None = None,
+    mode="MRI",
+    crop=False,
 ):
     frames = [
         Snapshot_Frame(
             image=mrt_ref,
             segmentation=vert_msk,
             centroids=subreg_ctd,
-            mode="MRI",
+            mode=mode,
             sagittal=True,
             coronal=True,
             axial=False,
-            crop_msk=False,
+            crop_msk=crop,
             hide_segmentation=True,
         ),
         Snapshot_Frame(
             image=mrt_ref,
             segmentation=vert_msk,
             centroids=subreg_ctd,
-            mode="MRI",
+            mode=mode,
             sagittal=True,
             coronal=True,
             axial=False,
-            crop_msk=False,
+            crop_msk=crop,
         ),
     ]
     if subreg_msk is not None:
@@ -223,11 +238,11 @@ def mri_snapshot(
                 image=mrt_ref,
                 segmentation=subreg_msk,
                 centroids=subreg_ctd,
-                mode="MRI",
+                mode=mode,
                 sagittal=True,
                 coronal=True,
                 axial=False,
-                crop_msk=False,
+                crop_msk=crop,
             )
         )
     if out_path is None:
@@ -323,6 +338,7 @@ def ct_mri_snapshot(
     vert_msk_ct: Image_Reference | None = None,
     subreg_ctd_ct: POI_Reference | None = None,
     out_path=None,
+    return_frames=False,
 ):
     frames = [
         Snapshot_Frame(
@@ -346,6 +362,8 @@ def ct_mri_snapshot(
             crop_msk=False,
         ),
     ]
+    if return_frames:
+        return frames
     if out_path is None:
         assert isinstance(mrt_ref, BIDS_FILE)
         out_path = mrt_ref.get_changed_path(file_type="png", bids_format="snp", info={"desc": "vert-ct-mri"})

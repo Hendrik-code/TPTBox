@@ -29,8 +29,13 @@ def load_inf_model(
     init_threads: bool = True,
     allow_non_final: bool = True,
     inference_augmentation: bool = False,
+    use_gaussian=True,
     verbose: bool = False,
     gpu=None,
+    memory_base=5000,  # Base memory in MB, default is 5GB
+    memory_factor=160,  # prod(shape)*memory_factor / 1000, 160 ~> 30 GB
+    memory_max=160000,  # in MB, default is 160GB
+    wait_till_gpu_percent_is_free=0.3
 ) -> nnUNetPredictor:
     """Loads the Nako-Segmentor Model Predictor
 
@@ -40,6 +45,9 @@ def load_inf_model(
         "the prediction. Default: 0.5. Cannot be larger than 1.
         ddevice (str, optional): The device the inference should run with. Available options are 'cuda' "
         "(GPU), 'cpu' (CPU) and 'mps' (Apple M1/M2). Do NOT use this to set which GPU ID!. Defaults to "cuda".
+        memory_base (int, optional): Base memory in MB for the model. Default is 5000 MB (5GB).
+        memory_factor (int, optional): Memory factor for the model. Default is 160, which is ~30GB for a 512x512x512 image.
+        memory_max (int, optional): Maximum memory in MB for the model. Default is 160000 MB (160GB).
 
     Returns:
         predictor: Loaded model predictor object
@@ -69,13 +77,17 @@ def load_inf_model(
 
     predictor = nnUNetPredictor(
         tile_step_size=step_size,
-        use_gaussian=True,
+        use_gaussian=use_gaussian,
         use_mirroring=inference_augmentation,  # <- mirroring augmentation!
         perform_everything_on_gpu=ddevice != "cpu",
         device=device,
-        verbose=False,
+        verbose=verbose,
         verbose_preprocessing=False,
         cuda_id=0 if gpu is None else gpu,
+        memory_base=memory_base,
+        memory_factor=memory_factor,
+        memory_max=memory_max,
+        wait_till_gpu_percent_is_free=wait_till_gpu_percent_is_free
     )
     check_name = "checkpoint_final.pth"  # if not allow_non_final else "checkpoint_best.pth"
     try:
@@ -116,6 +128,8 @@ def run_inference(
     Returns:
         Segmentation (NII), Uncertainty Map (NII), Softmax Logits (numpy arr)
     """
+    if logits:
+        raise NotImplementedError("logits=True")
     if isinstance(input_nii, str):
         assert input_nii.endswith(".nii.gz"), f"input file is not a .nii.gz! Got {input_nii}"
         input_nii = NII.load(input_nii, seg=False)
@@ -124,52 +138,78 @@ def run_inference(
     if isinstance(input_nii, NII):
         input_nii = [input_nii]
     orientation = input_nii[0].orientation
-    zoom = input_nii[0].zoom
 
     img_arrs = []
     # Prepare for nnUNet behavior
     for i in input_nii:
         if reorient_PIR:
             i.reorient_()
-        sitk_nii = sitk_utils.nii_to_sitk(i)
-        nii_img_converted = sitk.GetArrayFromImage(sitk_nii).astype(np.float16)[np.newaxis, :]
-        # nii_img_converted = i.get_array()
-        # nii_img_converted = np.pad(nii_img_converted, pad_width=pad_size, mode="edge")
-        # nii_img_converted = np.swapaxes(nii_img_converted, 0, 2)[np.newaxis, :].astype(np.float16)
+        a = i.get_array().astype(np.float16)
+        nii_img_converted = np.transpose(a, axes=a.ndim - 1 - np.arange(a.ndim))[np.newaxis, :]
         img_arrs.append(nii_img_converted)
     try:
         img = np.vstack(img_arrs)
     except Exception:
-        print([a.shape for a in img_arrs])
+        print("could not stack images; shapes=", [a.shape for a in img_arrs])
         raise
-    props = {
-        "sitk_stuff": {
-            # this saves the sitk geometry information. This part is NOT used by nnU-Net!
-            "spacing": sitk_nii.GetSpacing(),  # type:ignore
-            "origin": sitk_nii.GetOrigin(),  # type:ignore
-            "direction": sitk_nii.GetDirection(),  # type:ignore
-        },
-        "spacing": zoom[::-1],  # PIR
-    }
-    out = predictor.predict_single_npy_array(img, props, save_or_return_probabilities=logits)
-    if logits:
-        segmentation, _, softmax_logits = out  # type: ignore
-        softmax_logits = np.expand_dims(softmax_logits.astype(np.float16), 0)
-        # softmax_logits = np.swapaxes(softmax_logits, 0, 3)
-        # PRI label
-        # softmax_logits = np.swapaxes(softmax_logits, 1, 2)
-    else:
-        segmentation, _ = out  # type: ignore
-        softmax_logits = None
-    itk_image = sitk.GetImageFromArray(segmentation.astype(np.uint8))
-    itk_image.SetSpacing(sitk_nii.GetSpacing())
-    itk_image.SetOrigin(sitk_nii.GetOrigin())
-    itk_image.SetDirection(sitk_nii.GetDirection())
-    seg_nii = sitk_utils.sitk_to_nii(itk_image, True)
-
-    # segmentation = np.swapaxes(segmentation, 0, 2)
-    # assert isinstance(segmentation, np.ndarray)
-    # seg_nii = NII(nib.ni1.Nifti1Image(segmentation, affine=affine, header=header), seg=True)
-
+    props = {"spacing": i.zoom[::-1]}  # PIR
+    out = predictor.predict_single_npy_array(img, props, save_or_return_probabilities=False)
+    segmentation: np.ndarray = out  # type: ignore
+    softmax_logits = None
+    segmentation = np.transpose(segmentation, axes=segmentation.ndim - 1 - np.arange(segmentation.ndim))
+    assert segmentation.shape == input_nii[0].shape, (segmentation.shape, input_nii[0].shape)
+    seg_nii = input_nii[0].set_array(segmentation.astype(np.uint8), seg=True)
     seg_nii.reorient_(orientation, verbose=False)
     return seg_nii, None, softmax_logits
+
+
+# def predict_single_npy_array(predictor: nnUNetPredictor, img, props, logits, rescale):
+#    return predictor.predict_single_npy_array(img, props, save_or_return_probabilities=logits, rescale=rescale)
+#
+#    def fun(x):
+#        return predictor.predict_single_npy_array(x, props, save_or_return_probabilities=False)[0][None]
+#
+#    p = 750 if max_v % 700 > max_v % 800 else 800
+#    patch_size = tuple(p for _ in img.shape)
+#    overlap = min(50, max(predictor.configuration_manager.patch_size) // 2)
+#    print(f"image very large ({img.shape}>1000); use sliding window", f"{patch_size=}", predictor.configuration_manager.patch_size)
+#
+#    return sliding_nd_slices(img, patch_size=patch_size, overlap=overlap, fun=fun)[0], None
+
+
+def sliding_nd_slices(arr: np.ndarray, patch_size, overlap, fun):
+    print("sliding window")
+    step = tuple(p - overlap for p in patch_size)
+    half_overlap = overlap // 2
+    shape = arr.shape
+
+    # Compute number of steps in each dimension
+    ranges = [range(0, max(s, 1), st) if s != 1 else [0] for s, st in zip(shape, step)]
+    result = np.zeros_like(arr)
+    for starts in np.ndindex(*[len(r) for r in ranges]):
+        # Compute actual start and end indices for this patch
+        idx_start = [ranges[dim][i] for dim, i in enumerate(starts)]
+        idx_start2 = [ranges[dim][i] + half_overlap if ranges[dim][i] != 0 else 0 for dim, i in enumerate(starts)]
+        idx_start3 = [half_overlap if ranges[dim][i] != 0 else 0 for dim, i in enumerate(starts)]
+        idx_end = [min(start + size, shape[dim]) for start, size, dim in zip(idx_start, patch_size, range(len(shape)))]
+        idx_end2 = [
+            (start + size - half_overlap if start + size < shape[dim] else shape[dim])
+            for start, size, dim in zip(idx_start, patch_size, range(len(shape)))
+        ]
+        idx_end3 = [(-half_overlap if a != shape[dim] else None) for a, dim in zip(idx_end2, range(len(shape)))]
+
+        slices = tuple(slice(s, e) for s, e in zip(idx_start, idx_end))
+        slices2 = tuple(slice(s, e) for s, e in zip(idx_start2, idx_end2))
+        slices3 = tuple(slice(s, e) for s, e in zip(idx_start3, idx_end3))
+        print("sliding window", slices)
+        patch = arr[slices]
+        patch = fun(patch)
+        result[slices2] = patch[slices3]
+    return result
+
+
+# if __name__ == "__main__":
+# np.zeros((1, 2243, 472, 622))
+# x = sliding_nd_slices()
+# max_v=2243, (1, 2243, 472, 622)
+# image very large ((1, 2243, 472, 622)>1000); use sliding window patch_size=<generator object predict_single_npy_array.<locals>.<genexpr> at 0x7f89c12dfac0> [160, 192, 192]

@@ -13,6 +13,7 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.colors import ListedColormap, Normalize
 from matplotlib.patches import Circle, FancyArrow
+from matplotlib.patheffects import withStroke
 from scipy import ndimage
 from scipy.interpolate import RegularGridInterpolator, interp1d
 from scipy.signal import savgol_filter
@@ -24,7 +25,6 @@ from TPTBox import (
     Location,
     POI_Reference,
     calc_centroids,
-    load_centroids,
     to_nii,
     to_nii_optional,
     v_idx2name,
@@ -167,7 +167,9 @@ def sag_cor_curve_projection(
 
     ctd_list.sort()
     if curve_location == Location.Vertebra_Corpus:
-        l = [v for k1, k2, v in ctd_list.items() if k2 in (0, 50, 40)]
+        s = ctd_list.keys_subregion()
+        ids = 50 if 50 in s else (40 if 40 in s else 0)
+        l = [v for k1, k2, v in ctd_list.items() if k2 == ids]
     else:
         l = [v for k1, k2, v in ctd_list.items() if k2 == curve_location.value]
 
@@ -391,7 +393,7 @@ def curve_projection_axial_fallback(img_data, x_ctd, heights: list[float] | None
 
 
 def make_isotropic2d(arr2d: np.ndarray, zms2d, msk=False) -> np.ndarray:
-    if arr2d.dtype in (np.float64, np.float16, np.float32):
+    if np.issubdtype(arr2d.dtype, np.floating):
         arr2d = arr2d.astype(int)
     xs = list(range(arr2d.shape[0]))
     ys = list(range(arr2d.shape[1]))
@@ -406,8 +408,8 @@ def make_isotropic2d(arr2d: np.ndarray, zms2d, msk=False) -> np.ndarray:
     pts = np.vstack([xx.ravel(), yy.ravel()]).T
     try:
         lt = interpolator(pts)
-    except Exception:
-        raise ValueError(f"Needs to be casted into a other type: arr2d {arr2d.dtype}")  # noqa: B904
+    except Exception as e:
+        raise ValueError(f"Needs to be casted into a other type: arr2d {arr2d.dtype}") from e  # noqa: B904
     img = np.reshape(lt, new_shp, order="F")
     return img
 
@@ -424,6 +426,14 @@ def make_isotropic2dpluscolor(arr3d, zms2d, msk=False):
     img = np.stack([r_img, g_img, b_img], axis=-1)
     # print(img.shape)
     return img
+
+
+def get_contrasting_stroke_color(rgb):
+    # Convert RGBA to RGB if necessary
+    if len(rgb) == 4:
+        rgb = rgb[:3]
+    luminance = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]
+    return "gray" if luminance < 0.3 else "black"
 
 
 def create_figure(dpi, planes: list, has_title=True):
@@ -460,11 +470,32 @@ def plot_sag_centroids(
     if show_these_subreg_poi is not None:
         ctd2 = ctd.extract_subregion(*show_these_subreg_poi)
     for k1, k2, v in ctd2.items():
+        color = cmap((k1 - 1) % LABEL_MAX % cmap.N)
+        backgroundcolor = get_contrasting_stroke_color(color)
         # print(k, v, (v[1] * zms[1], v[0] * zms[0]), zms)
         try:
-            axs.add_patch(Circle((v[1] * zms[1], v[0] * zms[0]), 2, color=cmap((k1 - 1) % LABEL_MAX % cmap.N)))
+            circle = Circle(
+                (v[1] * zms[1], v[0] * zms[0]),
+                3,
+                edgecolor=backgroundcolor,
+                facecolor=color,
+                linewidth=0.5,
+            )
+            axs.add_patch(circle)
             if not hide_centroid_labels and k2 == curve_location.value and k1 in poi_labelmap:
-                axs.text(4, v[0] * zms[0], poi_labelmap[k1], fontdict={"color": cmap(k1 - 1), "weight": "bold"})
+                axs.text(
+                    4,
+                    v[0] * zms[0],
+                    poi_labelmap[k1],
+                    fontdict={
+                        "color": color,
+                        "weight": "bold",
+                        "fontsize": 18,
+                    },
+                    # bbox=dict(boxstyle="square,pad=0.2", facecolor="gray", edgecolor="none"),
+                    path_effects=[withStroke(linewidth=3.0, foreground=backgroundcolor)],
+                    zorder=2,
+                )
         except Exception as e:
             print(e)
     if "line_segments_sag" in ctd.info:
@@ -477,6 +508,7 @@ def plot_sag_centroids(
             axs.add_patch(FancyArrow(v[1] * zms[1], v[0] * zms[0], c, d, color=cmap(color - 1 % LABEL_MAX % cmap.N)))
     if "text_sag" in ctd.info:
         for color, x in ctd.info["text_sag"]:
+            backgroundcolor = get_contrasting_stroke_color(color)
             if not isinstance(color, int) and len(color) == 2:
                 color, curve_location = color  # noqa: PLW2901
             if isinstance(x, str) or len(x) == 1:
@@ -488,7 +520,19 @@ def plot_sag_centroids(
             elif len(x) == 2:
                 (text, a) = x
                 b = zms[0] * ctd[color, curve_location][0]
-            axs.text(a, b, text, fontdict={"color": cmap(color - 1), "weight": "bold"})
+            axs.text(
+                a,
+                b,
+                text,
+                fontdict={
+                    "color": color,
+                    "weight": "bold",
+                    "fontsize": 18,
+                },
+                # bbox=dict(boxstyle="square,pad=0.2", facecolor="gray", edgecolor="none"),
+                path_effects=[withStroke(linewidth=3.0, foreground=backgroundcolor)],
+                zorder=2,
+            )
 
 
 def plot_cor_centroids(
@@ -507,16 +551,31 @@ def plot_cor_centroids(
 
     # requires v_dict = dictionary of mask labels
     for k1, k2, v in ctd2.items():
+        color = cmap((k1 - 1) % LABEL_MAX % cmap.N)
+        backgroundcolor = get_contrasting_stroke_color(color)
         try:
-            axs.add_patch(
-                Circle(
-                    (v[2] * zms[2], v[0] * zms[0]),
-                    2,
-                    color=cmap((k1 - 1) % LABEL_MAX % cmap.N),
-                )
+            circle = Circle(
+                (v[2] * zms[2], v[0] * zms[0]),
+                3,
+                edgecolor=backgroundcolor,
+                facecolor=color,
+                linewidth=0.5,
             )
+            axs.add_patch(circle)
             if not hide_centroid_labels and k2 == curve_location.value and k1 in poi_labelmap:
-                axs.text(4, v[0] * zms[0], poi_labelmap[k1], fontdict={"color": cmap(k1 - 1), "weight": "bold"})
+                axs.text(
+                    4,
+                    v[0] * zms[0],
+                    poi_labelmap[k1],
+                    fontdict={
+                        "color": color,
+                        "weight": "bold",
+                        "fontsize": 18,
+                    },
+                    # bbox=dict(boxstyle="square,pad=0.2", facecolor="gray", edgecolor="none"),
+                    path_effects=[withStroke(linewidth=3.0, foreground=backgroundcolor)],
+                    zorder=2,
+                )
         except Exception:
             pass
     if "line_segments_cor" in ctd.info:
@@ -528,6 +587,7 @@ def plot_cor_centroids(
             axs.add_patch(FancyArrow(v[2] * zms[2], v[0] * zms[0], c, d, color=cmap(color - 1 % LABEL_MAX % cmap.N)))
     if "text_cor" in ctd.info:
         for color, x in ctd.info["text_cor"]:
+            backgroundcolor = get_contrasting_stroke_color(color)
             if isinstance(color, Sequence) and len(color) == 2:
                 color, curve_location = color  # noqa: PLW2901
             if isinstance(x, str) or len(x) == 1:
@@ -539,7 +599,19 @@ def plot_cor_centroids(
             elif len(x) == 2:
                 (text, a) = x
                 b = zms[0] * ctd[color, curve_location][0]
-            axs.text(a, b, text, fontdict={"color": cmap(color - 1), "weight": "bold"})
+            axs.text(
+                a,
+                b,
+                text,
+                fontdict={
+                    "color": color,
+                    "weight": "bold",
+                    "fontsize": 18,
+                },
+                # bbox=dict(boxstyle="square,pad=0.2", facecolor="gray", edgecolor="none"),
+                path_effects=[withStroke(linewidth=3.0, foreground=backgroundcolor)],
+                zorder=2,
+            )
 
 
 def make_2d_slice(
@@ -612,12 +684,8 @@ def make_2d_slice(
                 ctd_list=ctd_reo,
                 axial_heights=axial_heights,
             )
-
-    # elif visualization_type == visualization_type.Mean_Intensity:
-    #    plane_dict = {"S": "ax", "I": "ax", "L": "sag", "R": "sag", "A": "cor", "P": "cor"}
-    #    idx_view = {plane_dict[s]: i for i, s in enumerate(to_ax)}
-    else:
-        raise NotImplementedError(visualization_type)
+        else:
+            raise NotImplementedError(visualization_type)
 
     if rescale_to_iso:
         if sag.ndim == 2:
@@ -691,7 +759,7 @@ class Snapshot_Frame:
     hide_segmentation: bool = False
     hide_centroids: bool = False
     hide_centroid_labels: bool = False
-    poi_labelmap: dict[int, str] = field(default_factory=lambda: v_idx2name)
+    poi_labelmap: dict[int, str] = field(default_factory=lambda: {k: v for k, v in v_idx2name.items() if k < 35})
     force_show_cdt: bool = False  # Shows the centroid computed by a segmentation, if no centroids are provided
     curve_location: Location | None = None  # Location.Vertebra_Corpus
     show_these_subreg_poi: list[int | Location] | None = None
@@ -700,7 +768,7 @@ class Snapshot_Frame:
 def to_cdt(ctd_bids: POI_Reference | None) -> POI | None:
     if ctd_bids is None:
         return None
-    ctd = load_centroids(ctd_bids)
+    ctd = POI.load(ctd_bids, allow_global=True)
     if len(ctd) > 0:  # handle case if empty centroid file given
         return ctd
     print("[!][snp] To few centroids", ctd)
@@ -742,7 +810,10 @@ def create_snapshot(  # noqa: C901
         seg = to_nii_optional(frame.segmentation, seg=True)  # can be None
         ctd = copy.deepcopy(to_cdt(frame.centroids))
         if (crop or frame.crop_msk) and seg is not None:  # crop to segmentation
-            ex_slice = seg.compute_crop()
+            try:
+                ex_slice = seg.compute_crop()
+            except ValueError:
+                ex_slice = None
             img = img.copy().apply_crop_(ex_slice)
             seg = seg.copy().apply_crop_(ex_slice)
             ctd = ctd.apply_crop(ex_slice).filter_points_inside_shape() if ctd is not None else None
@@ -752,9 +823,16 @@ def create_snapshot(  # noqa: C901
             seg = seg.apply_crop_(ex_slice) if seg is not None else None
             ctd = ctd.apply_crop(ex_slice).filter_points_inside_shape() if ctd is not None else None
         img = img.reorient_(to_ax)
-        seg = seg.reorient_(to_ax) if seg is not None else None
+        if seg is not None:
+            seg = seg.reorient_(to_ax)
+            if not seg.assert_affine(img, raise_error=False):
+                seg.resample_from_to_(img)
         assert not isinstance(seg, tuple), "seg is a tuple"
         if ctd is not None:
+            if ctd.is_global:
+                ctd = ctd.resample_from_to(img)
+            if ctd.shape is None:
+                POI.load(ctd, img)
             ctd = ctd.reorient(img.orientation) if ctd.shape is not None else ctd.reorient_centroids_to(img)
             if ctd.zoom not in (img.zoom, None):
                 ctd.rescale_(img.zoom)

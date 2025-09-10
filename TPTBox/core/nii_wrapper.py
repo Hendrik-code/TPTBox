@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import traceback
 import warnings
 import zlib
@@ -21,23 +22,27 @@ from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.nii_wrapper_math import NII_Math
 from TPTBox.core.np_utils import (
     _pad_to_parameters,
+    np_bbox_binary,
     np_calc_boundary_mask,
     np_calc_convex_hull,
     np_calc_overlapping_labels,
     np_center_of_mass,
     np_compute_surface,
     np_connected_components,
+    np_connected_components_per_label,
     np_dilate_msk,
     np_erode_msk,
     np_extract_label,
     np_fill_holes,
     np_fill_holes_global_with_majority_voting,
+    np_filter_connected_components,
     np_get_connected_components_center_of_mass,
-    np_get_largest_k_connected_components,
+    np_is_empty,
     np_map_labels,
     np_map_labels_based_on_majority_label_mask_overlap,
     np_point_coordinates,
     np_smooth_gaussian_labelwise,
+    np_translate_arr,
     np_unique,
     np_unique_withoutzero,
     np_volume,
@@ -62,7 +67,7 @@ from .vert_constants import (
 )
 
 if TYPE_CHECKING:
-    pass
+    from torch import device
 MODES = Literal["constant", "nearest", "reflect", "wrap"]
 _unpacked_nii = tuple[np.ndarray, AFFINE, nib.nifti1.Nifti1Header]
 _formatwarning = warnings.formatwarning
@@ -77,13 +82,86 @@ def formatwarning_tb(*args, **kwargs):
     return s
 
 
-_dtype_max = {"int8": 128, "uint8": 256, "int16": 32768, "uint16": 65536}
+_dtype_max = {
+    "int8": 128,
+    "uint8": 256,
+    "int16": 32768,
+    "uint16": 65536,
+    "int32": 2147483647,
+    "uint32": 4294967294,
+}  # uint32 not supported by nifty
+_dtype_u = {"uint8", "uint16"}
+_dtype_non_u = {"int8", "int16"}
+
+
+def _check_if_nifty_is_lying_about_its_dtype(self: NII):
+    change_dtype = False
+    arr = self.nii.dataobj
+    dtype = self._nii.dataobj.dtype  # type: ignore
+    dtype_s = str(self._nii.dataobj.dtype)
+    mi = np.min(arr)
+    ma = np.max(arr)
+    has_neg = mi < 0
+    max_v = _dtype_max.get(str(dtype), 0)
+    positive = str(dtype) in _dtype_u
+
+    if has_neg and positive:
+        warnings.warn(
+            f"Loaded NIfTY: incorrect dtype detected: {dtype}, but has negative values; min={mi}",
+            stacklevel=3,
+        )
+        change_dtype = True
+        positive = False
+    if not has_neg and self.seg:
+        positive = True
+        if str(dtype) in _dtype_non_u:
+            change_dtype = True
+    if ma > max_v and "float" not in dtype_s:
+        change_dtype = True
+        warnings.warn(
+            f"Loaded NIfTY: incorrect dtype detected: {dtype}, but has larger max values; max={max_v}",
+            stacklevel=3,
+        )
+
+    out_dtype = dtype
+    if dtype == np.float16:
+        warnings.warn(
+            f"Loaded NIfTY: incorrect dtype detected: {dtype} is not supported",
+            stacklevel=3,
+        )
+        out_dtype = np.float32
+    if "float" in dtype_s and not change_dtype:
+        pass
+    elif positive and change_dtype:
+        if ma < 256:
+            out_dtype = np.uint8
+        elif ma < 65536:
+            out_dtype = np.uint16
+        else:
+            out_dtype = np.int32
+    elif change_dtype:
+        ma_abs = np.max(np.abs(arr))
+        if ma_abs < 128:
+            out_dtype = np.int8
+        elif ma_abs < 32768:
+            out_dtype = np.int16
+        else:
+            out_dtype = np.int32
+    # print("check", out_dtype, change_dtype, positive, has_neg)
+    return out_dtype
+
 
 warnings.formatwarning = formatwarning_tb
 
 N = TypeVar("N", bound="NII")
 Image_Reference = Union[bids_files.BIDS_FILE, Nifti1Image, Path, str, N]
-Interpolateable_Image_Reference = Union[bids_files.BIDS_FILE, tuple[Nifti1Image, bool], tuple[Path, bool], tuple[str, bool], N]
+Interpolateable_Image_Reference = Union[
+    bids_files.BIDS_FILE,
+    tuple[Nifti1Image, bool],
+    tuple[Path, bool],
+    tuple[str, bool],
+    N,
+]
 
 Proxy = tuple[tuple[int, int, int], np.ndarray]
 suppress_dtype_change_printout_in_set_array = False
@@ -152,11 +230,17 @@ class NII(NII_Math):
         self.__min = None
         self.info = info if info is not None else {}
         self.set_description(desc)
+        if seg:
+            self._unpack()
+            if isinstance(self.dtype,np.floating):
+                self.set_dtype_("smallest_uint")
 
 
     @classmethod
     def load(cls, path: Image_Reference, seg, c_val=None)-> Self:
         nii= to_nii(path,seg)
+        if seg:
+            nii = nii.set_dtype("smallest_uint")
         nii.c_val = c_val
         return nii
 
@@ -187,7 +271,9 @@ class NII(NII_Math):
             raise ImportError("The `pynrrd` package is required but not installed. Install it with `pip install pynrrd`.") from None
         _nrrd = nrrd.read(path)
         data = _nrrd[0]
+
         header = dict(_nrrd[1])
+        #print(data.shape, header)
         #print(header)
         # Example print out: OrderedDict([
         # ('type', 'short'), ('dimension', 3), ('space', 'left-posterior-superior'),
@@ -208,7 +294,13 @@ class NII(NII_Math):
             #space_directions = space_directions[~np.isnan(space_directions).any(axis=1)] #Filter NAN
             n = header['dimension']
             #print(data.shape)
-
+            if space_directions.shape != (n, n):
+                space_directions = space_directions[~np.isnan(space_directions).all(axis=1)]
+                m = len(space_directions[0])
+                if m != n:
+                    n=m
+                    data = data.sum(axis=0)
+                    space_directions = space_directions.T
             if space_directions.shape != (n, n):
                 raise ValueError(f"Expected 'space directions' to be a nxn matrix. n = {n} is not {space_directions.shape}",space_directions)
             if space_origin.shape != (n,):
@@ -232,10 +324,11 @@ class NII(NII_Math):
 
         except KeyError as e:
             raise KeyError(f"Missing expected header field: {e}") from None
+        if len(data.shape) != n:
+            raise ValueError(f"{len(data.shape)=} diffrent from n = ", n)
         ref_orientation = header.get("ref_orientation")
         for i in ["ref_orientation","dimension","space directions","space origin""space","type","endian"]:
-            if i in header :
-                del header[i]
+            header.pop(i, None)
         for key in list(header.keys()):
             if "_Extent" in key:
                 del header[key]
@@ -279,28 +372,11 @@ class NII(NII_Math):
         try:
             if self.__unpacked:
                 return
-            if self.seg:
-                m = np.max(self.nii.dataobj)
-                if m<256:
-                    dtype = np.uint8
-                elif m<65536:
-                    dtype = np.uint16
-                else:
-                    dtype = np.int32
-                self._arr = np.asanyarray(self.nii.dataobj, dtype=self.nii.dataobj.dtype).astype(dtype).copy() # type: ignore
+            if not self._checked_dtype or self.seg:
+                dtype = _check_if_nifty_is_lying_about_its_dtype(self)
+                #print("unpack-nii",f"{self.seg=}",dtype)
                 self._checked_dtype = True
-            elif not self._checked_dtype:
-                # if the maximum is lager than the dtype, we use float.
-                self._checked_dtype = True
-                dtype = str(self.dtype)
-                if dtype not in _dtype_max:
-                    self._arr = np.asanyarray(self.nii.dataobj, dtype=self.nii.dataobj.dtype).copy() #type: ignore
-                else:
-                    m = np.max(self.nii.dataobj)
-                    if m > _dtype_max[dtype]:
-                        self._arr = self.nii.get_fdata()
-                    else:
-                        self._arr = np.asanyarray(self.nii.dataobj, dtype=self.nii.dataobj.dtype).copy() #type: ignore
+                self._arr = np.asanyarray(self.nii.dataobj, dtype=dtype).copy()
             else:
                 self._arr = np.asanyarray(self.nii.dataobj, dtype=self.nii.dataobj.dtype).copy() #type: ignore
 
@@ -353,7 +429,10 @@ class NII(NII_Math):
                 # is there a dimesion with size 1?
                 arr = arr.squeeze()
                 # TODO try to get back to a saveabel state, if this did not work
-
+            if arr.dtype == np.uint64:#throws error
+                arr = arr.astype(np.uint32)
+            if arr.dtype == np.int64:#throws error
+                arr = arr.astype(np.int32)
             self._arr = arr
             self._aff = aff
             self._checked_dtype = True
@@ -404,45 +483,60 @@ class NII(NII_Math):
     def orientation(self) -> AX_CODES:
         ort = nio.io_orientation(self.affine)
         return nio.ornt2axcodes(ort) # type: ignore
-
+    @property
+    def dims(self)->int:
+        self._unpack()
+        return self.affine.shape[0]-1
     @property
     def zoom(self) -> ZOOMS:
-        rotation_zoom = self.affine[:3, :3]
+        n = self.dims
+        rotation_zoom = self.affine[:n, :n]
         zoom = np.sqrt(np.sum(rotation_zoom * rotation_zoom, axis=0)) if self.__divergent else self.header.get_zooms()
 
         z = tuple(np.round(zoom,7))
-        if len(z) == 4:
-            z = z[:3]
-        assert len(z) == 3,z
+        if len(z) >= n:
+            z = z[:n]
+        #assert len(z) == 3,z
         return z # type: ignore
 
     @property
     def origin(self) -> tuple[float, float, float]:
-        z = tuple(np.round(self.affine[:3,3],7))
+        n = self.dims
+        z = tuple(np.round(self.affine[:n,n],7))
         assert len(z) == 3
         return z # type: ignore
     @origin.setter
     def origin(self,x:tuple[float, float, float]):
+        n = self.dims
         self._unpack()
         self.__divergent = True
         affine = self._aff
-        affine[:3,3] = np.array(x) # type: ignore
+        affine[:n,n] = np.array(x) # type: ignore
         self._aff = affine
     @property
     def rotation(self)->np.ndarray:
-        rotation_zoom = self.affine[:3, :3]
+        n = self.dims
+        rotation_zoom = self.affine[:n, :n]
         zoom = np.array(self.zoom)
         rotation = rotation_zoom / zoom
         return rotation
 
+    @property
+    def direction(self) -> list:
+        direction_matrix = self.rotation
+        direction_flat = direction_matrix.flatten().tolist()
+        return direction_flat
+    @property
+    def direction_itk(self) -> list:
+        a = np.array(self.direction)
+        a[:len(a)//3*2]*=-1
+        return a.tolist()
 
     @orientation.setter
     def orientation(self, value: AX_CODES):
         self.reorient_(value, verbose=False)
 
 
-    def get_num_dims(self):
-        return len(self.shape)
     def split_4D_image_to_3D(self):
         assert self.get_num_dims() == 4,self.get_num_dims()
         arr_4d = self.get_array()
@@ -488,7 +582,7 @@ class NII(NII_Math):
         return self._arr.copy()
     def numpy(self, *_args):
         return self.get_array()
-    def set_array(self,arr:np.ndarray|Self, inplace=False,verbose:logging=False)-> Self:  # noqa: ARG002
+    def set_array(self,arr:np.ndarray|Self, inplace=False,verbose:logging=False,seg=None)-> Self:  # noqa: ARG002
         """Creates a NII where the array is replaces with the input array.
 
         Note: This function works "Out-of-place" by default, like all other methods.
@@ -500,6 +594,7 @@ class NII(NII_Math):
         Returns:
             self
         """
+
         if hasattr(arr,"get_array"):
             arr = arr.get_array() # type: ignore
         if arr.dtype == bool:
@@ -520,17 +615,26 @@ class NII(NII_Math):
         #if all(a is None for a in self.header.get_slope_inter()):
         #    nii.header.set_slope_inter(1,self.get_c_val()) # type: ignore
         if inplace:
+            if seg is not None:
+                self.seg = seg
             self.nii = nii
             return self
         else:
-            return self.copy(nii) # type: ignore
+            return self.copy(nii,seg=seg) # type: ignore
 
     def set_array_(self,arr:np.ndarray,verbose:logging=True):
         return self.set_array(arr,inplace=True,verbose=verbose)
-    def set_dtype(self,dtype:type|Literal['smallest_int'] = np.float32,order:Literal["C","F","A","K"] ='K',casting:Literal["no","equiv","safe","same_kind","unsafe"] = "unsafe", inplace=False):
+    def set_dtype(self,dtype:type|Literal['smallest_int','smallest_uint'] = np.float32,order:Literal["C","F","A","K"] ='K',casting:Literal["no","equiv","safe","same_kind","unsafe"] = "unsafe", inplace=False):
         sel = self if inplace else self.copy()
-
-        if dtype == "smallest_int":
+        if dtype == "smallest_uint":
+            arr = self.get_array()
+            if arr.max()<256:
+                dtype = np.uint8
+            elif arr.max()<65536:
+                dtype = np.uint16
+            else:
+                dtype = np.int32
+        elif dtype == "smallest_int":
             arr = self.get_array()
             if arr.max()<128:
                 dtype = np.int8
@@ -538,16 +642,20 @@ class NII(NII_Math):
                 dtype = np.int16
             else:
                 dtype = np.int32
-
-        sel.nii.set_data_dtype(dtype)
-        if sel.nii.get_data_dtype() != self.dtype: #type: ignore
-            sel.nii = Nifti1Image(self.get_array().astype(dtype,casting=casting,order=order),self.affine,self.header)
+        if self.__unpacked:
+            self._unpack()
+            sel._arr = sel._arr.astype(dtype)
+            sel.header.set_data_dtype(dtype)
+        else:
+            sel.nii.set_data_dtype(dtype)
+            if sel.nii.get_data_dtype() != self.dtype: #type: ignore
+                sel.nii = Nifti1Image(self.get_array().astype(dtype,casting=casting,order=order),self.affine,self.header)
 
         return sel
-    def set_dtype_(self,dtype:type|Literal['smallest_int'] = np.float32,order:Literal["C","F","A","K"] ='K',casting:Literal["no","equiv","safe","same_kind","unsafe"] = "unsafe"):
+    def set_dtype_(self,dtype:type|Literal['smallest_uint','smallest_int'] = np.float32,order:Literal["C","F","A","K"] ='K',casting:Literal["no","equiv","safe","same_kind","unsafe"] = "unsafe"):
         return self.set_dtype(dtype=dtype,order=order,casting=casting, inplace=True)
 
-    def astype(self,dtype,order:Literal["C","F","A","K"] ='K', casting:Literal["no","equiv","safe","same_kind","unsafe"] = "unsafe",subok=True, copy=True):
+    def astype(self,dtype,order:Literal["C","F","A","K"] ='K', casting:Literal["no","equiv","safe","same_kind","unsafe"] = "unsafe",subok=True, copy=True)->Self:
         ''' numpy wrapper '''
         if subok:
             c = self.set_dtype(dtype,order=order,casting=casting, inplace=copy)
@@ -627,28 +735,10 @@ class NII(NII_Math):
             - If other_crop is not None, the computed slice is combined with the slice of another image to obtain a common region of interest.
             - Only None slice is supported for combining slices.
         """
-        shp = self.shape
-        zms = self.zoom
-
-        d = np.around(dist / np.asarray(zms)).astype(int) if use_mm else (int(dist),int(dist),int(dist))
+        d = np.around(dist / np.asarray(self.zoom)).astype(int) if use_mm else (int(dist),int(dist),int(dist))
         array = self.get_array() #+ minimum
-        msk_bin = np.zeros(array.shape,dtype=bool)
-        #bool_arr[array<minimum] = 0
-        msk_bin[array>minimum] = 1
-        #msk_bin = np.asanyarray(bool_arr, dtype=bool)
-        msk_bin[np.isnan(msk_bin)] = 0
-        cor_msk = np.where(msk_bin > 0)
-        if cor_msk[0].shape[0] == 0:
-            raise ValueError(f'Array would be reduced to zero size; Before {self}; {self.unique()=}')
-        c_min = [cor_msk[0].min(), cor_msk[1].min(), cor_msk[2].min()]
-        c_max = [cor_msk[0].max(), cor_msk[1].max(), cor_msk[2].max()]
-        x0 = max(0, c_min[0] - d[0])
-        y0 = max(0, c_min[1] - d[1])
-        z0 = max(0, c_min[2] - d[2])
-        x1 = min(shp[0], c_max[0] + d[0])
-        y1 = min(shp[1], c_max[1] + d[1])
-        z1 = min(shp[2], c_max[2] + d[2])
-        ex_slice = [slice(x0, x1+1), slice(y0, y1+1), slice(z0, z1+1)]
+
+        ex_slice = list(np_bbox_binary(array > minimum, px_dist=d))
 
         if other_crop is not None:
             assert all((a.step is None) for a in other_crop), 'Only None slice is supported for combining x'
@@ -662,7 +752,7 @@ class NII(NII_Math):
                     min_w = min_w.stop - min_w.start  # noqa: PLW2901
                 curr_w =  ex_slice[i].stop - ex_slice[i].start
                 dif = min_w - curr_w
-                if min_w > 0:
+                if min_w > 0 and dif > 0:
                     new_start = ex_slice[i].start - floor(dif/2)
                     new_goal = ex_slice[i].stop + ceil(dif/2)
                     if new_goal > self.shape[i]:
@@ -696,9 +786,9 @@ class NII(NII_Math):
         else:
             arr_padded = arr
 
-        crop_rel_x = int(round((shp_x - crop_x) / 2.0))
-        crop_rel_y = int(round((shp_y - crop_y) / 2.0))
-        crop_rel_z = int(round((shp_z - crop_z) / 2.0))
+        crop_rel_x = round((shp_x - crop_x) / 2.0)
+        crop_rel_y = round((shp_y - crop_y) / 2.0)
+        crop_rel_z = round((shp_z - crop_z) / 2.0)
 
         crop_slices = (slice(crop_rel_x, crop_rel_x + crop_x),slice(crop_rel_y, crop_rel_y + crop_y),slice(crop_rel_z, crop_rel_z + crop_z))
         arr_cropped = arr_padded[crop_slices]
@@ -718,7 +808,7 @@ class NII(NII_Math):
         warnings.warn("apply_crop_slice_ id deprecated use apply_crop_ instead",stacklevel=5) #TODO remove in version 1.0
         return self.apply_crop_(*args,**qargs)
 
-    def apply_crop(self,ex_slice:tuple[slice,slice,slice]|Sequence[slice] , inplace=False):
+    def apply_crop(self,ex_slice:tuple[slice,slice,slice]|Sequence[slice]|None , inplace=False):
         """
         The apply_crop_slice function applies a given slice to reduce the Nifti image volume. If a list of slices is provided, it computes the minimum volume of all slices and applies it.
 
@@ -750,10 +840,14 @@ class NII(NII_Math):
     def apply_pad(self,padd:Sequence[tuple[int|None,int]],mode:MODES="constant",inplace = False,verbose:logging=True):
         #TODO add other modes
         #TODO add testcases and options for modes
-        transform = np.eye(4, dtype=int)
+        transform = np.eye(self.dims+1, dtype=int)
+        assert len(padd) == self.dims
         for i, (before,_) in enumerate(padd):
             #transform[i, i] = pad_slice.step if pad_slice.step is not None else 1
             transform[i, 3] = -before  if before is not None else 0
+
+        while len(padd) < len(self.shape):
+            padd = (*tuple(padd), (0, 0))
         affine = self.affine.dot(transform)
         args = {}
         if mode == "constant":
@@ -786,7 +880,7 @@ class NII(NII_Math):
         return self.reorient(axcodes_to=axcodes_to, verbose=verbose, inplace=inplace)
     def reorient_same_as_(self, img_as: Nifti1Image | Self, verbose:logging=False) -> Self:
         return self.reorient_same_as(img_as=img_as,verbose=verbose,inplace=True)
-    def rescale(self, voxel_spacing=(1, 1, 1), c_val:float|None=None, verbose:logging=False, inplace=False,mode:MODES='nearest',order: int |None = None,align_corners:bool=False):
+    def rescale(self, voxel_spacing:float|tuple[float,...]=(1, 1, 1), c_val:float|None=None, verbose:logging=False, inplace=False,mode:MODES='nearest',order: int |None = None,align_corners:bool=False,atol=0.001):
         """
         Rescales the NIfTI image to a new voxel spacing.
 
@@ -801,12 +895,16 @@ class NII(NII_Math):
             mode (str, optional): One of the supported modes by scipy.ndimage.interpolation (e.g., "constant", "nearest",
                 "reflect", "wrap"). See the documentation for more details. Defaults to "constant".
             align_corners (bool|default): If True or not set and seg==True. Aline corners for scaling. This prevents segmentation mask to shift in a direction.
+            atol: absolute tolerance for skipping if already close in voxel_spacing
         Returns:
             NII: A new NII object with the resampled image data.
         """
         if isinstance(voxel_spacing, (int,float)):
-            voxel_spacing =(voxel_spacing,voxel_spacing,voxel_spacing)
-        if voxel_spacing in ((-1, -1, -1), self.zoom):
+            voxel_spacing =(voxel_spacing for _ in range(min(3,self.affine.shape[0]-1)))
+        n = self.dims
+        while  n> len(voxel_spacing):
+            voxel_spacing = (*voxel_spacing, -1)
+        if all(a in (-1, b) for a,b in zip(voxel_spacing, self.zoom)):
             log.print(f"Image already resampled to voxel size {self.zoom}",verbose=verbose)
             return self.copy() if inplace else self
 
@@ -817,15 +915,18 @@ class NII(NII_Math):
         zms = self.zoom
         if order is None:
             order = 0 if self.seg else 3
+        #print(aff.shape,shp,zms,voxel_spacing)
         voxel_spacing = tuple([v if v != -1 else z for v,z in zip_strict(voxel_spacing,zms)])
-        if voxel_spacing == self.zoom:
+        if np.isclose(voxel_spacing, self.zoom,atol=atol).all():
             log.print(f"Image already resampled to voxel size {self.zoom}",verbose=verbose)
             return self.copy() if inplace else self
 
         # Calculate new shape
         new_shp = tuple(np.rint([shp[i] * zms[i] / voxel_spacing[i] for i in range(len(voxel_spacing))]).astype(int))
-        new_aff = nib.affines.rescale_affine(aff, shp, voxel_spacing, new_shp)  # type: ignore
-        new_aff[:3, 3] = nib.affines.apply_affine(aff, [0, 0, 0])# type: ignore
+        if len(new_shp) < len(shp):
+            new_shp = new_shp + shp[len(new_shp):]
+        new_aff = _rescale_affine(aff, shp, voxel_spacing, new_shp)  # type: ignore
+        new_aff[:n, n] = nib.affines.apply_affine(aff, [0 for _ in range(n)])# type: ignore
         new_img = _resample_from_to(self, (new_shp, new_aff,voxel_spacing), order=order, mode=mode,align_corners=align_corners)
         log.print(f"Image resampled from {zms} to voxel size {voxel_spacing}",verbose=verbose)
         if inplace:
@@ -850,9 +951,12 @@ class NII(NII_Math):
         """        ''''''
         c_val = self.get_c_val(c_val)
         if isinstance(to_vox_map,Has_Grid):
-            mapping = to_vox_map
+            mapping = to_vox_map.to_gird()
         else:
             mapping = to_vox_map if isinstance(to_vox_map, tuple) else to_nii_optional(to_vox_map, seg=self.seg, default=to_vox_map)
+        if isinstance(mapping,Has_Grid) and mapping.assert_affine(self,raise_error=False,origin_tolerance=0.000001,error_tolerance=0.000001,shape_tolerance=0):
+            log.print(f"resample_from_to skipped; already in space: {self}",verbose=verbose)
+            return self if inplace else self.copy()
         assert mapping is not None
         log.print(f"resample_from_to: {self} to {mapping}",verbose=verbose)
         if order is None:
@@ -865,6 +969,15 @@ class NII(NII_Math):
             return self.copy(nii)
     def resample_from_to_(self, to_vox_map:Image_Reference|Has_Grid|tuple[SHAPE,AFFINE,ZOOMS], mode:MODES='nearest', c_val:float|None=None,verbose:logging=True,aline_corners=False):
         return self.resample_from_to(to_vox_map,mode=mode,c_val=c_val,inplace=True,verbose=verbose,align_corners=aline_corners)
+
+    @property
+    def is_empty(self) -> bool:
+        """Checks if the array in the nifti is empty
+
+        Returns:
+            bool: Whether the nifti is empty or not
+        """
+        return np_is_empty(self.get_array())
 
     def n4_bias_field_correction(
         self,
@@ -958,7 +1071,25 @@ class NII(NII_Math):
             self.set_dtype_(self_dtype)
         log.print(f"Shifted from range {mi, ma} to range {self.min(), self.max()}", verbose=verbose)
 
+    def get_histogram(self, bins=256, hrange=None, density=False, c_val:float|None=None):
+        """Returns the histogram of the image array.
+
+        Args:
+            bins (int, optional): Number of bins for the histogram. Defaults to 256.
+            range (tuple, optional): Range of values to consider for the histogram. Defaults to None.
+            density (bool, optional): If True, the result is the probability density function at the bin, normalized such that the integral over the range is 1. Defaults to False.
+            c_val (float|None, optional): The value below which all values are set to c_val. Defaults to None.
+
+        Returns:
+            tuple: A tuple containing the histogram values and the bin edges.
+        """
+        arr = self.get_array()
+        if c_val is not None:
+            arr[arr <= c_val] = c_val
+        return np.histogram(arr, bins=bins, range=hrange, density=density)
+
     def match_histograms(self, reference:Image_Reference,c_val = 0,inplace=False):
+        assert not self.seg
         ref_nii = to_nii(reference)
         assert ref_nii.seg is False
         assert self.seg is False
@@ -992,7 +1123,7 @@ class NII(NII_Math):
         radius: int = 6,
         truncate: int = 4,
         boundary_mode: str = "nearest",
-        dilate_prior: int = 1,
+        dilate_prior: int = 0,
         dilate_connectivity: int = 1,
         smooth_background: bool = True,
         inplace: bool = False,
@@ -1035,7 +1166,7 @@ class NII(NII_Math):
             import ants
         except Exception:
             log.print_error()
-            log.on_fail("run 'pip install antspyx' to install deepali")
+            log.on_fail("run 'pip install antspyx' to install hf-deepali")
             raise
         return ants.from_nibabel(self.nii)
 
@@ -1043,7 +1174,7 @@ class NII(NII_Math):
         from TPTBox.core.sitk_utils import nii_to_sitk
         return nii_to_sitk(self)
 
-    def to_deepali(self,align_corners: bool = True,dtype=None,device = "cuda"):
+    def to_deepali(self,align_corners: bool = True,dtype=None,device:device|str = "cpu"):
         import torch
         try:
             from deepali.data import Image as deepaliImage  # type: ignore
@@ -1107,6 +1238,7 @@ class NII(NII_Math):
             The method uses binary erosion with a 3D structuring element to erode the mask by the specified number of voxels.
 
         """
+        assert self.seg
         log.print("erode mask",end='\r',verbose=verbose)
         msk_i_data = self.get_seg_array()
         labels = self.unique() if labels is None else labels
@@ -1139,6 +1271,7 @@ class NII(NII_Math):
             The method uses binary dilation with a 3D structuring element to dilate the mask by the specified number of voxels.
 
         """
+        assert self.seg
         log.print("dilate mask",end='\r',verbose=verbose)
         if labels is None:
             labels = self.unique()
@@ -1168,29 +1301,18 @@ class NII(NII_Math):
         Returns:
             NII: If inplace is True, returns the current NIfTI image object with filled holes. Otherwise, returns a new NIfTI image object with filled holes.
         """
+        assert self.seg
         if labels is None:
             labels = list(self.unique())
 
         if isinstance(labels, int):
             labels = [labels]
 
-        if use_crop:
-            try:
-                crop = (self if labels is None else self.extract_label(labels)).compute_crop(dist=1)
-            except ValueError:
-                return self if inplace else self.copy()
-
-            msk_i_data_org = self.get_seg_array()
-            seg_arr = msk_i_data_org[crop]
-        else:
-            seg_arr = self.get_seg_array()
+        seg_arr = self.get_seg_array()
         if isinstance(slice_wise_dim,str):
             slice_wise_dim = self.get_axis(slice_wise_dim)
         #seg_arr = self.get_seg_array()
         filled = np_fill_holes(seg_arr, label_ref=labels, slice_wise_dim=slice_wise_dim, use_crop=use_crop)
-        if use_crop:
-            msk_i_data_org[crop] = filled
-            filled = msk_i_data_org
         return self.set_array(filled,inplace=inplace)
 
     def fill_holes_(self, labels: LABEL_REFERENCE = None, slice_wise_dim: int | None = None, verbose:logging=True,use_crop=True):
@@ -1241,43 +1363,18 @@ class NII(NII_Math):
         """
         return self.set_array(np_calc_boundary_mask(self.get_array(),threshold),inplace=inplace,verbose=False)
 
-    def get_segmentation_connected_components(self, labels: int |list[int], connectivity: int = 3, transform_back_to_nii: bool = False, verbose: bool=False):
-        """Calculates and returns the connected components of this segmentation NII
-
-        Args:
-            label (int): the label(s) of the connected components
-            connectivity (int, optional): Connectivity for the connected components. Defaults to 3.
-            transform_back_to_nii (bool): If True, will map the labels to nifty, not numpy arrays. Defaults to False.
-
-        Returns:
-            cc: dict[label, cc_idx, arr], cc_n: dict[label, int]
-        """
-        import warnings
-        warnings.warn("get_segmentation_connected_components id deprecated",stacklevel=5) #TODO remove in version 1.0
-        arr = self.get_seg_array()
-        cc, cc_n = np_connected_components(arr, connectivity=connectivity, label_ref=labels, verbose=verbose)
-        if transform_back_to_nii:
-            cc = {i: self.set_array(k) for i,k in cc.items()}
-        return cc, cc_n
-
-    def get_connected_components(self, labels: int |list[int]=1, connectivity: int = 3, verbose: bool=False,inplace=False) -> Self:  # noqa: ARG002
-        out = np_get_largest_k_connected_components(self.get_seg_array(), label_ref=labels, connectivity=connectivity, return_original_labels=False)
+    def get_connected_components(self, labels: int |list[int]=1, connectivity: int = 3, include_zero: bool=False,inplace=False) -> Self:  # noqa: ARG002
+        assert self.seg, "This only works on segmentations"
+        out, _ = np_connected_components(self.get_seg_array(), label_ref=labels, connectivity=connectivity, include_zero=include_zero)
         return self.set_array(out,inplace=inplace)
 
-        #arr = self.get_seg_array()
-        #cc, _ = np_connected_components(arr, connectivity=connectivity, label_ref=labels, verbose=verbose)
-        #out = None
+    def get_connected_components_per_label(self, labels: int |list[int], connectivity: int = 3, include_zero: bool=False) -> dict[int, Self]:  # noqa: ARG002
+        assert self.seg, "This only works on segmentations"
+        out = np_connected_components_per_label(self.get_seg_array(), label_ref=labels, connectivity=connectivity, include_zero=include_zero)
+        cc = {i: self.set_array(k) for i,k in out.items()}
+        return cc
 
-        #for i,k in cc.items():
-        #    if out is None:
-        #        out = k
-        #    else:
-        #        out += i*k
-        #if out is None:
-        #    return self if inplace else self.copy()
-        #return self.set_array(out,inplace=inplace)
-
-    def filter_connected_components(self, labels: int |list[int]|None,min_volume:int=0,max_volume:int|None=None, max_count_component = None, connectivity: int = 3,removed_to_label=0,keep_label=False, inplace=False):
+    def filter_connected_components(self, labels: int |list[int]|None=None,min_volume:int=0,max_volume:int|None=None, max_count_component = None, connectivity: int = 3,removed_to_label=0,keep_label=False, inplace=False,):
         """
         Filter connected components in a segmentation array based on specified volume constraints.
 
@@ -1292,22 +1389,23 @@ class NII(NII_Math):
         Returns:
         None
         """
-        nii = self.get_largest_k_segmentation_connected_components(max_count_component,labels,connectivity=connectivity,return_original_labels=keep_label,min_volume=min_volume,max_volume=max_volume,removed_to_label=removed_to_label)
+        assert self.seg, "This only works on segmentations"
+        arr = np_filter_connected_components(self.get_seg_array(), largest_k_components=max_count_component,label_ref=labels,connectivity=connectivity,return_original_labels=keep_label,min_volume=min_volume,max_volume=max_volume,removed_to_label=removed_to_label,)
+        assert arr.shape == self.shape, f"Shape mismatch: {arr.shape} != {self.shape}"
         if keep_label and labels is not None:
             if isinstance(labels,int):
                 labels = [labels]
             old_labels = [i for i in self.unique() if i not in labels]
             if len(old_labels) != 0:
-                s = self.extract_label(old_labels,keep_label=True)
-                nii[s != 0] = s[s!=0]
+                s = self.extract_label(old_labels,keep_label=True).get_array()
+                arr[s != 0] = s[s!=0]
         #print("filter",nii.unique())
         #assert max_count_component is None or nii.max() <= max_count_component, nii.unique()
-        if inplace:
-            return self.set_array_(nii.get_array())
-        return nii
+        return self.set_array(arr, inplace=inplace)
     def filter_connected_components_(self, labels: int |list[int]|None,min_volume:int=0,max_volume:int|None=None, max_count_component = None, connectivity: int = 3,keep_label=False):
         return self.filter_connected_components(labels,min_volume=min_volume,max_volume=max_volume, max_count_component = max_count_component, connectivity = connectivity,keep_label=keep_label,inplace=True)
-    def get_segmentation_connected_components_center_of_mass(self, label: int, connectivity: int = 3, sort_by_axis: int | None = None):
+
+    def get_segmentation_connected_components_center_of_mass(self, label: int, connectivity: int = 3, sort_by_axis: int | None = None) -> list[COORDINATE]:
         """Calculates the center of mass of the different connected components of a given label in an array
 
         Args:
@@ -1318,11 +1416,12 @@ class NII(NII_Math):
         Returns:
             _type_: _description_
         """
+        assert self.seg, "This only works on segmentations"
         arr = self.get_seg_array()
         return np_get_connected_components_center_of_mass(arr, label=label, connectivity=connectivity, sort_by_axis=sort_by_axis)
 
 
-    def get_largest_k_segmentation_connected_components(self, k: int | None, labels: int | list[int] | None = None, connectivity: int = 1, return_original_labels: bool = True,inplace=False,min_volume:int=0,max_volume:int|None=None,removed_to_label=0):
+    def get_largest_k_segmentation_connected_components(self, k: int | None, labels: int | list[int] | None = None, connectivity: int = 1, return_original_labels: bool = True,inplace=False,min_volume:int=0,max_volume:int|None=None,removed_to_label=0) -> Self:
         """Finds the largest k connected components in a given array (does NOT work with zero as label!)
 
         Args:
@@ -1331,26 +1430,29 @@ class NII(NII_Math):
             labels (int | list[int] | None, optional): Labels that the algorithm should be applied to. If none, applies on all labels found in this NII. Defaults to None.
             return_original_labels (bool): If set to False, will label the components from 1 to k. Defaults to True
         """
+        raise DeprecationWarning("Use filter_connected_components instead")
         msk_i_data = self.get_seg_array()
-        out = np_get_largest_k_connected_components(msk_i_data, k=k, label_ref=labels, connectivity=connectivity, return_original_labels=return_original_labels,min_volume=min_volume,max_volume=max_volume,removed_to_label=removed_to_label)
+        out = np_filter_connected_components(msk_i_data, largest_k_components=k, label_ref=labels, connectivity=connectivity, return_original_labels=return_original_labels,min_volume=min_volume,max_volume=max_volume,removed_to_label=removed_to_label)
         return self.set_array(out,inplace=inplace)
 
-    def compute_surface_mask(self, connectivity: int, dilated_surface: bool = False):
+    def compute_surface_mask(self, connectivity: int = 3, dilated_surface: bool = False) -> Self:
         """ Removes everything but surface voxels
 
         Args:
             connectivity (int): Connectivity for surface calculation
             dilated_surface (bool): If False, will return msk - eroded mask. If true, will return dilated msk - msk
         """
+        assert self.seg, "This only works on segmentations"
         return self.set_array(np_compute_surface(self.get_seg_array(), connectivity=connectivity, dilated_surface=dilated_surface))
 
 
-    def compute_surface_points(self, connectivity: int, dilated_surface: bool = False):
+    def compute_surface_points(self, connectivity: int = 3, dilated_surface: bool = False) -> list[tuple[int,int,int]]:
+        assert self.seg, "This only works on segmentations"
         surface = self.compute_surface_mask(connectivity, dilated_surface)
         return np_point_coordinates(surface.get_seg_array()) # type: ignore
 
 
-    def fill_holes_global_with_majority_voting(self, connectivity: int = 3, inplace: bool = False, verbose: bool = False):
+    def fill_holes_global_with_majority_voting(self, connectivity: int = 3, inplace: bool = False, verbose: bool = False) -> Self:
         """Fills 3D holes globally, and resolves inter-label conflicts with majority voting by neighbors
 
         Args:
@@ -1361,12 +1463,12 @@ class NII(NII_Math):
         Returns:
             NII:
         """
-        assert self.seg, "only works with segmentation masks"
+        assert self.seg, "This only works on segmentations"
         arr = np_fill_holes_global_with_majority_voting(self.get_seg_array(), connectivity=connectivity, verbose=verbose, inplace=inplace)
         return self.set_array(arr,inplace=inplace)
 
 
-    def map_labels_based_on_majority_label_mask_overlap(self, label_mask: Self, labels: int | list[int] | None = None, dilate_pixel: int = 1, inplace: bool = False):
+    def map_labels_based_on_majority_label_mask_overlap(self, label_mask: Self, labels: int | list[int] | None = None, dilate_pixel: int = 1, inplace: bool = False,no_match_label=0) -> Self:
         """Relabels all individual labels from input array to the majority labels of a given label_mask
 
         Args:
@@ -1379,7 +1481,7 @@ class NII(NII_Math):
             NII: Relabeled nifti
         """
         assert self.seg and label_mask.seg, "This only works on segmentations"
-        return self.set_array(np_map_labels_based_on_majority_label_mask_overlap(self.get_seg_array(), label_mask.get_seg_array(), labels=labels, dilate_pixel=dilate_pixel, inplace=inplace), inplace=inplace,)
+        return self.set_array(np_map_labels_based_on_majority_label_mask_overlap(self.get_seg_array(), label_mask.get_seg_array(), label_ref=labels, dilate_pixel=dilate_pixel, inplace=inplace,no_match_label=no_match_label), inplace=inplace,)
 
 
     def get_segmentation_difference_to(self, mask_gt: Self, ignore_background_tp: bool = False) -> Self:
@@ -1391,6 +1493,7 @@ class NII(NII_Math):
         Returns:
             NII: Difference NII (1: FN, 2: TP, 3: FP, 4: Wrong label)
         """
+        assert self.seg and mask_gt.seg, "This only works on segmentations"
         if self.orientation != mask_gt.orientation:
             mask_gt = mask_gt.reorient_same_as(self)
 
@@ -1426,6 +1529,27 @@ class NII(NII_Math):
         """
         assert self.seg and mask_other.seg
         return np_calc_overlapping_labels(self.get_seg_array(), mask_other.get_seg_array())
+
+    def is_segmentation_in_border(self,minimum=0, voxel_tolerance: int = 2,use_mm=False) -> bool:
+        """
+        Checks if the segmentation is touching the border of the image volume.
+
+        Parameters:
+        - minimum (int, optional): Minimum intensity threshold for segmentation. Defaults to 0.
+        - voxel_tolerance (int, optional): Number of voxels allowed as tolerance from the border. Defaults to 2.
+        - use_mm (bool, optional): Whether to use millimeter units instead of voxels. Defaults to False.
+
+        Returns:
+        - bool: True if the segmentation is within the defined voxel tolerance of the border, False otherwise.
+        """
+        slices = self.compute_crop(minimum,dist=0,use_mm=use_mm)
+        shp = self.shape
+        seg_at_border = False
+        for d in range(3):
+            if slices[d].start <= voxel_tolerance or slices[d].stop - 1 >= shp[d] - voxel_tolerance:
+                seg_at_border = True
+                break
+        return seg_at_border
 
     def truncate_labels_beyond_reference_(
         self, idx: int | list[int] = 1, not_beyond: int | list[int] = 1, fill: int = 0,  axis: DIRECTIONS = "S", inclusion: bool = False, inplace: bool = True
@@ -1496,6 +1620,129 @@ class NII(NII_Math):
         inclusion: bool = False
     ):
         return self.truncate_labels_beyond_reference_(idx,not_beyond,fill,axis,inclusion)
+
+    def infect_conv(self: NII, reference_mask: NII, max_iters=100,inplace=False):
+        """
+        Expands labels from self_mask into regions of reference_mask == 1 via breadth-first diffusion.
+
+        Args:
+            self_mask (ndarray): (H, W) or (D, H, W) integer-labeled array.
+            reference_mask (ndarray): Binary array of same shape as self_mask.
+            max_iters (int): Maximum number of propagation steps.
+
+        Returns:
+            ndarray: Updated label mask.
+        """
+        from scipy.ndimage import convolve
+        crop = reference_mask.compute_crop(0,1)
+        self.assert_affine(reference_mask)
+        self_mask = self.apply_crop(crop).get_seg_array().copy()
+        ref_mask = np.clip(reference_mask.apply_crop(crop).get_seg_array(), 0, 1)
+
+        ndim = len(self_mask.shape)
+
+        # Define neighborhood kernel
+        if ndim == 2:
+            kernel = np.array([[0, 1, 0],
+                               [1, 0, 1],
+                               [0, 1, 0]], dtype=np.uint8)
+        elif ndim == 3:
+            kernel = np.zeros((3, 3, 3), dtype=np.uint8)
+            kernel[1, 1, 0] = kernel[1, 1, 2] = 1
+            kernel[1, 0, 1] = kernel[1, 2, 1] = 1
+            kernel[0, 1, 1] = kernel[2, 1, 1] = 1
+        else:
+            raise NotImplementedError("Only 2D or 3D masks are supported.")
+        try:
+            from tqdm import tqdm
+            r = tqdm(range(max_iters),desc="infect")
+        except Exception:
+            r = range(max_iters)
+        for _ in r:
+            unlabeled = (self_mask == 0) & (ref_mask == 1)
+            updated = False
+
+            for label in np_unique(self_mask):
+                if label == 0:
+                    continue  # skip background
+
+                binary_label_mask = (self_mask == label).astype(np.uint8)
+                neighbor_count = convolve(binary_label_mask, kernel, mode="constant", cval=0)
+
+                # Find unlabeled voxels adjacent to current label
+                new_voxels = (neighbor_count > 0) & unlabeled
+
+                if np.any(new_voxels):
+                    self_mask[new_voxels] = label
+                    updated = True
+
+            if not updated:
+                break
+        org = self.get_seg_array()
+        org[crop] = self_mask
+        return self.set_array(org,inplace=inplace)
+    def infect(self: NII, reference_mask: NII, inplace=False,verbose=True):
+        """
+        Expands labels from self_mask into regions of reference_mask == 1 via breadth-first diffusion.
+
+        Args:
+            self_mask (ndarray): (H, W) or (D, H, W) integer-labeled array.
+            reference_mask (ndarray): Binary array of same shape as self_mask.
+            max_iters (int): Maximum number of propagation steps.
+
+        Returns:
+            ndarray: Updated label mask.
+        """
+        self.assert_affine(reference_mask)
+        self_mask = self.compute_surface_mask().get_seg_array().copy()
+        self_mask_org = self.get_seg_array().copy()
+        ref_mask = np.clip(reference_mask.get_seg_array(), 0, 1)
+        ref_mask[self_mask_org != 0] = 0
+        searched = np.clip(self_mask,0,1).astype(np.uint8)
+        ndim = len(self_mask.shape)
+
+        # Define neighborhood kernel
+        if ndim == 3:
+            kernel = [(1,0,0),(0,1,0),(0,0,1),(-1,0,0),(0,-1,0),(0,0,-1)]
+        else:
+            raise NotImplementedError("Only 2D or 3D masks are supported.")
+        search = []
+        coords = np.where(self_mask != 0)
+        def _add_idx(x,y,z,v):
+            for x1,y1,z1 in kernel:
+                a = x+x1
+                b = y+y1
+                c = z+z1
+                if a < 0 or b < 0 or c < 0:
+                    continue
+                if a >= self_mask.shape[0] or b >= self_mask.shape[1] or c >= self_mask.shape[2]:
+                    continue
+                #try:
+                if searched[a,b,c] == 0 and ref_mask[a,b,c] == 1:
+                    search.append((a,b,c,v))
+                #except Exception:
+                #    pass
+        def _infect(a,b,c,v):
+            if searched[a,b,c] != 0:
+                return
+            if ref_mask[a,b,c] == 0:
+                return
+            #print(a,b,c)
+            searched[a,b,c] = 1
+            self_mask[a,b,c] = v
+            _add_idx(x,y,z,v)
+
+        from tqdm import tqdm
+        for x,y,z in tqdm(zip(coords[0],coords[1],coords[2]),total=len(coords[0]),disable=not verbose,desc="Collecting Surface"):
+            _add_idx(x,y,z,self_mask[x,y,z])
+        while len(search) != 0:
+            search2 = search
+            search = []
+            for x,y,z,v in tqdm(search2,disable=not verbose,desc="infect"):
+                _infect(x,y,z,v)
+        self_mask[self_mask == 0] = self_mask_org[self_mask == 0]
+        return self.set_array(self_mask,inplace=inplace)
+
     def map_labels(self, label_map:LABEL_MAP , verbose:logging=True, inplace=False):
         """
         Maps labels in the given NIfTI image according to the label_map dictionary.
@@ -1538,10 +1785,10 @@ class NII(NII_Math):
     def map_labels_(self, label_map: LABEL_MAP, verbose:logging=True):
         return self.map_labels(label_map,verbose=verbose,inplace=True)
 
-    def copy(self, nib:Nifti1Image|_unpacked_nii|None = None):
+    def copy(self, nib:Nifti1Image|_unpacked_nii|None = None,seg=None):
         if nib is None:
             nib = (self.get_array().copy(), self.affine.copy(), self.header.copy())
-        return NII(nib,seg=self.seg,c_val = self.c_val,info = self.info)
+        return NII(nib,seg=self.seg if seg is None else seg,c_val = self.c_val,info = self.info)
 
     def clone(self):
         return self.copy()
@@ -1549,17 +1796,16 @@ class NII(NII_Math):
     def save(self,file:str|Path,make_parents=True,verbose:logging=True, dtype = None):
         if make_parents:
             Path(file).parent.mkdir(exist_ok=True,parents=True)
-        arr = self.get_array()
+
+        arr = self.get_array() if not self.seg else self.get_seg_array()
+        if isinstance(arr,np.floating) and self.seg:
+            self.set_dtype_("smallest_uint")
+            arr = self.get_array() if not self.seg else self.get_seg_array()
+
+
         out = Nifti1Image(arr, self.affine,self.header)#,dtype=arr.dtype)
         if dtype is not None:
             out.set_data_dtype(dtype)
-        elif self.seg:
-            if arr.max()<256:
-                out.set_data_dtype(np.uint8)
-            elif arr.max()<65536:
-                out.set_data_dtype(np.uint16)
-            else:
-                out.set_data_dtype(np.int32)
         if out.header["qform_code"] == 0: #NIFTI_XFORM_UNKNOWN Will cause an error for some rounding of the affine in ITKSnap ...
             # 1 means Scanner coordinate system
             # 2 means align (to something) coordinate system
@@ -1618,8 +1864,7 @@ class NII(NII_Math):
             'encoding': 'gzip',
             **_header,**self.info
         }
-        if "Segmentation_ConversionParameters" in header:
-            del header["Segmentation_ConversionParameters"]
+        header.pop("Segmentation_ConversionParameters", None)
         # Save NRRD file
 
         log.print(f"Saveing {file}",verbose=verbose,ltype=Log_Type.SAVE,end='\r')
@@ -1636,9 +1881,10 @@ class NII(NII_Math):
                 return self._arr
             else:
                 return self._arr.astype(dtype, copy=False)
-    def __array_wrap__(self, array):
+    def __array_wrap__(self, array,context=None, return_scalar=False):
+        assert not return_scalar,context
         if array.shape != self.shape:
-            raise SyntaxError(f"Function call induce a shape change of nii image. Before {self.shape} after {array.shape}.")
+            raise SyntaxError(f"Function call induce a shape change of nii image. Before {self.shape} after {array.shape}. {context}")
         return self.set_array(array)
     def __getitem__(self, key)-> Any:
         if isinstance(key,Sequence):
@@ -1702,15 +1948,16 @@ class NII(NII_Math):
             return True
         return min_v < x2[2] < max_v
 
-    def get_intersecting_volume(self, b: Self) -> bool:
+    def get_intersecting_volume(self, b: Self) -> float:
         '''
         computes intersecting volume
         '''
-        b = b.copy() # type: ignore
+        b = to_nii(b).copy() # type: ignore
         b.nii = Nifti1Image(b.get_array()*0+1,affine=b.affine)
         b.seg = True
         b.set_dtype_(np.uint8)
-        b = b.resample_from_to(self,c_val=0,verbose=False) # type: ignore
+        b.c_val = 0
+        b = b.resample_from_to(self,c_val=0,verbose=False,mode="constant") # type: ignore
         return b.get_array().sum()
 
     def extract_background(self,inplace=False):
@@ -1719,7 +1966,6 @@ class NII(NII_Math):
         arr_bg = np_extract_label(arr_bg, label=0, to_label=1)
         return self.set_array(arr_bg, inplace, False)
 
-
     def extract_label(self,label:int|Enum|Sequence[int]|Sequence[Enum], keep_label=False,inplace=False):
         '''If this NII is a segmentation you can single out one label with [0,1].'''
         assert self.seg, "extracting a label only makes sense for a segmentation mask"
@@ -1727,11 +1973,8 @@ class NII(NII_Math):
 
         if isinstance(label, Sequence):
             label_int:list[int] = [idx.value if isinstance(idx,Enum) else idx for idx in label]
-            if 1 not in label_int:
-                seg_arr[seg_arr == 1] = 0
-            for idx in label_int:
-                seg_arr[seg_arr == idx] = 1
-            seg_arr[seg_arr != 1] = 0
+            assert 0 not in label_int, 'Zero label does not make sense. This is the background'
+            seg_arr = np_extract_label(seg_arr, label_int, to_label=1, inplace=True)
         else:
             if isinstance(label,Enum):
                 label = label.value
@@ -1739,23 +1982,24 @@ class NII(NII_Math):
                 label = int(label)
 
             assert label != 0, 'Zero label does not make sense. This is the background'
-            seg_arr[seg_arr != label] = 0
-            seg_arr[seg_arr == label] = 1
+            seg_arr = np_extract_label(seg_arr, label, to_label=1, inplace=True)
         if keep_label:
             seg_arr = seg_arr * self.get_seg_array()
         return self.set_array(seg_arr,inplace=inplace)
     def extract_label_(self,label:int|Location|Sequence[int]|Sequence[Location], keep_label=False):
         return self.extract_label(label,keep_label,inplace=True)
-    def remove_labels(self,*label:int|Location|Sequence[int]|Sequence[Location], inplace=False, verbose:logging=True):
+    def remove_labels(self,label:int|Location|Sequence[int]|Sequence[Location], inplace=False, verbose:logging=True, removed_to_label=0):
         '''If this NII is a segmentation you can single out one label.'''
         assert label != 0, 'Zero label does not make sens.  This is the background'
         seg_arr = self.get_seg_array()
+        if not isinstance(label,Sequence):
+            label = [label] # type: ignore
         for l in label:
             if isinstance(l, list):
                 for g in l:
-                    seg_arr[seg_arr == g] = 0
+                    seg_arr[seg_arr == g] = removed_to_label
             else:
-                seg_arr[seg_arr == l] = 0
+                seg_arr[seg_arr == l] = removed_to_label
         return self.set_array(seg_arr,inplace=inplace, verbose=verbose)
     def remove_labels_(self,label:int|Location|Sequence[int]|Sequence[Location], verbose:logging=True):
         return self.remove_labels(label,inplace=True,verbose=verbose)
@@ -1771,10 +2015,53 @@ class NII(NII_Math):
         out = np_unique_withoutzero(self.get_seg_array())
         log.print(out,verbose=verbose)
         return out
+    def voxel_volume(self):
 
-    def volumes(self, include_zero: bool = False) -> dict[int, int]:
+        product = math.prod(self.spacing)
+        return product
+
+    def volumes(self, include_zero: bool = False, in_mm3=False) -> dict[int, float]|dict[int, int]:
         '''Returns a dict stating how many pixels are present for each label'''
-        return np_volume(self.get_seg_array(), include_zero=include_zero)
+        dic =  np_volume(self.get_seg_array(), include_zero=include_zero)
+        if in_mm3:
+            voxel_size = self.voxel_volume()
+            dic = {k:v*voxel_size for k,v in dic.items()}
+        return dic
+    def translate_arr(
+        self,
+        translation_vector: tuple[int, int, int] | dict[str,int]| dict[DIRECTIONS,int],
+        inplace: bool = False,
+        verbose: bool = True
+    ):
+        """
+        Translates the NIfTI image array by a given vector. Translation can be specified as a tuple
+        or as a dict using anatomical directions ('S', 'I', 'R', 'L', 'P', 'A').
+
+        Args:
+            translation_vector (tuple or dict): Vector to translate with. Can be a tuple of ints
+                                                or a dict with keys from 'SIRLPA' and int values.
+            inplace (bool): Whether to modify the array in place.
+            verbose (bool): Whether to print log messages.
+
+        Returns:
+            NII: Translated image.
+        """
+        log.print("Translating array", end="\r", verbose=verbose)
+        arr = self.get_array()
+
+        if isinstance(translation_vector, dict):
+            # Start with zero translation for all axes
+            vector = [0] * arr.ndim
+            for direction, amount in translation_vector.items():
+                axis = self.get_axis(direction=direction) # type: ignore
+                sign = +1 if direction in self.orientation else -1
+                vector[axis] += sign * amount
+            v: tuple[int, int, int] = tuple(vector) # type: ignore
+        else:
+            v = translation_vector
+        arr_translated = np_translate_arr(arr, v)
+        log.print(f"Translated by {v}; ", verbose=verbose)
+        return self.set_array(arr_translated, inplace=inplace)
 
     def center_of_masses(self) -> dict[int, COORDINATE]:
         '''Returns a dict stating the center of mass for each present label (not including zero!)'''
@@ -1797,7 +2084,8 @@ def to_nii_optional(img_bids: Image_Reference|None, seg=False, default=None) -> 
 def to_nii(img_bids: Image_Reference, seg=False) -> NII:
     if isinstance(img_bids, Path):
         img_bids = str(img_bids)
-    if isinstance(img_bids, NII):
+    # ugly workaround due to module import issues with nii files
+    if isinstance(img_bids, NII) or img_bids.__class__.__name__ == "NII":
         return img_bids.copy()
     elif isinstance(img_bids, bids_files.BIDS_FILE):
         return img_bids.open_nii()
@@ -1815,7 +2103,7 @@ def to_nii(img_bids: Image_Reference, seg=False) -> NII:
     elif isinstance(img_bids, Nifti1Image):
         return NII(img_bids, seg)
     else:
-        raise TypeError(img_bids)
+        raise TypeError(type(img_bids))
 
 def to_nii_seg(img: Image_Reference) -> NII:
     return to_nii(img,seg=True)
@@ -1831,3 +2119,18 @@ def to_nii_interpolateable(i_img:Interpolateable_Image_Reference) -> NII:
         return i_img.open_nii()
     else:
         raise TypeError("to_nii_interpolateable",i_img)
+
+def _rescale_affine(affine, shape, zooms, new_shape=None):
+    shape = np.asarray(shape)
+    new_shape = np.array(new_shape if new_shape is not None else shape)
+    s = nib.affines.voxel_sizes(affine)
+    n = len(zooms)
+    if len(shape)>= n:
+        shape = shape[:n]
+        new_shape = new_shape[:n]
+    rzs_out = affine[:n, :n] * zooms / s
+
+    # Using xyz = A @ ijk, determine translation
+    centroid = nib.affines.apply_affine(affine, (shape - 1) // 2)
+    t_out = centroid - rzs_out @ ((new_shape - 1) // 2)
+    return nib.affines.from_matvec(rzs_out, t_out)

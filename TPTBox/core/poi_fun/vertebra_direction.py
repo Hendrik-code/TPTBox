@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from warnings import warn
 
 import numpy as np
 from numpy.linalg import norm
@@ -25,6 +26,7 @@ def calc_orientation_of_vertebra_PIR(
     do_fill_back: bool = False,
     spine_plot_path: None | str = None,
     save_normals_in_info=False,
+    _orientation_version=0,
 ) -> tuple[POI, NII | None]:
     """Calculate the orientation of vertebrae using PIR (Posterior, Inferior, Right) DIRECTIONS.
 
@@ -45,6 +47,8 @@ def calc_orientation_of_vertebra_PIR(
     assert poi is None or poi.zoom is not None
     from TPTBox import calc_centroids
 
+    if _orientation_version != 0:
+        warn("out dated _orientation_version; Set is to 0", stacklevel=1)
     # Step 1 compute the up direction
     # check if label 50 is already computed in POI
     if poi is None or spline_subreg_point_id.value not in poi.keys_subregion():
@@ -52,20 +56,26 @@ def calc_orientation_of_vertebra_PIR(
     # compute Spline in ISO space
     poi_iso = poi.rescale().reorient()
     body_spline, body_spline_der = poi_iso.fit_spline(location=spline_subreg_point_id, vertebra=True)
-    # Step 2 compute the back direction by spinal channel or arcus
+    # Step 2 compute the back direction by Spinosus_Process or arcus
     intersection_target = [Location.Spinosus_Process, Location.Arcus_Vertebrae]
     # We compute everything in iso space
     subreg_iso = subreg.rescale().reorient()
-
-    target_labels = subreg_iso.extract_label(intersection_target).get_array()
-    # we want to see more of the Spinosus_Process and Arcus_Vertebrae than we cut with the plane. Should reduce randomness.
-    # The ideal solution would be to make a projection onto the plane. Instead we fill values that have a vertical distanc of 10 mm up and down. This approximates the projection on to the plane.
-    # Without this we have the chance to miss most of the arcus and spinosus, witch leads to instability in the direction.
-    # TODO this will fail if the vertebra is not roughly aligned with S/I-direction
-    for _ in range(15):
-        target_labels[:, :-1] += target_labels[:, 1:]
-        target_labels[:, 1:] += target_labels[:, :-1]
-    target_labels = np.clip(target_labels, 0, 1)
+    if _orientation_version == 0:
+        target_labels = subreg_iso.extract_label(intersection_target).get_array()
+        # we want to see more of the Spinosus_Process and Arcus_Vertebrae than we cut with the plane. Should reduce randomness.
+        # The ideal solution would be to make a projection onto the plane. Instead we fill values that have a vertical distanc of 10 mm up and down. This approximates the projection on to the plane.
+        # Without this we have the chance to miss most of the arcus and spinosus, witch leads to instability in the direction.
+        # TODO this will fail if the vertebra is not roughly aligned with S/I-direction
+        for _ in range(15):
+            target_labels[:, :-1] += target_labels[:, 1:]
+            target_labels[:, 1:] += target_labels[:, :-1]
+        target_labels = np.clip(target_labels, 0, 1)
+    elif _orientation_version == 1:
+        target_labels = subreg_iso.extract_label(intersection_target).get_array()
+    elif _orientation_version == 2:
+        target_labels = subreg_iso.extract_label(list(range(40, 49))).get_array()
+    else:
+        raise NotImplementedError(_orientation_version)
     out = target_labels * 0
     fill_back_nii = subreg_iso.copy() if do_fill_back else None
     fill_back = out.copy() if do_fill_back else None
@@ -120,12 +130,7 @@ def calc_orientation_of_vertebra_PIR(
         arr = subreg_sar.get_array()
         fill_back_nii.set_array_(arr)
 
-    ret = calc_centroids(
-        subreg_iso.set_array(out),
-        second_stage=subreg_id,
-        extend_to=poi_iso.copy(),
-        inplace=True,
-    )
+    ret = calc_centroids(subreg_iso.set_array(out), second_stage=subreg_id, extend_to=poi_iso.copy(), inplace=True)
 
     poi._vert_orientation_pir = {}
     if save_normals_in_info:

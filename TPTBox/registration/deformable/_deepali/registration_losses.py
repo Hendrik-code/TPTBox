@@ -1,4 +1,4 @@
-r"""Registration loss for pairwise image registration."""
+from __future__ import annotations
 
 import re
 from collections import defaultdict
@@ -23,6 +23,8 @@ from deepali.modules import SampleImage
 from deepali.spatial import BSplineTransform, CompositeTransform, SequentialTransform, SpatialTransform
 from torch import Tensor
 from torch.nn import Module
+
+r"""Registration loss for pairwise image registration."""
 
 RE_WEIGHT = re.compile(r"^((?P<mul>[0-9]+(\.[0-9]+)?)\s*[\* ])?\s*(?P<chn>[a-zA-Z0-9_-]+)\s*(\+\s*(?P<add>[0-9]+(\.[0-9]+)?))?$")
 RE_TERM_VAR = re.compile(r"^[a-zA-Z0-9_-]+\((?P<var>[a-zA-Z0-9_]+)\)$")
