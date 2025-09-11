@@ -70,6 +70,12 @@ class POI_Global(Abstract_POI):
         return (0, 0, 0)
 
     @property
+    def orientation(self):
+        if self.itk_coords:
+            return ("L", "A", "S")
+        return ("R", "P", "S")
+
+    @property
     def is_global(self) -> bool:
         """
         Check if the POI is global.
