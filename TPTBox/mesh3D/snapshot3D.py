@@ -77,7 +77,7 @@ def make_snapshot3D(
     if output_path is None:
         t = NamedTemporaryFile(suffix="_snap3D.png")  # noqa: SIM115
         output_path = str(t.name)
-    Path(output_path).parent.mkdir(exist_ok=True)
+    Path(output_path).parent.mkdir(exist_ok=True, parents=True)
     nii = to_nii_seg(img)
     if crop:
         try:
