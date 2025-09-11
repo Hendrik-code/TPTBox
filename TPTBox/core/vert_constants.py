@@ -236,6 +236,51 @@ class Full_Body_Instance(Abstract_lvl):
     ignore = 63
 
     @classmethod
+    def bone(cls):
+        return [
+            Full_Body_Instance.skull,
+            Full_Body_Instance.clavicula_right,
+            Full_Body_Instance.clavicula_left,
+            Full_Body_Instance.scapula_right,
+            Full_Body_Instance.scapula_left,
+            Full_Body_Instance.humerus_right,
+            Full_Body_Instance.humerus_left,
+            Full_Body_Instance.hand_right,
+            Full_Body_Instance.hand_left,
+            Full_Body_Instance.radius_right,
+            Full_Body_Instance.radius_left,
+            Full_Body_Instance.ulna_right,
+            Full_Body_Instance.ulna_left,
+            Full_Body_Instance.sternum,
+            Full_Body_Instance.costal_cartilage,
+            Full_Body_Instance.rib_right,
+            Full_Body_Instance.rib_left,
+            Full_Body_Instance.vert_body,
+            Full_Body_Instance.vert_post,
+            Full_Body_Instance.sacrum,
+            Full_Body_Instance.hip_right,
+            Full_Body_Instance.hip_left,
+            Full_Body_Instance.femur_right,
+            Full_Body_Instance.femur_left,
+            Full_Body_Instance.patella_right,
+            Full_Body_Instance.patella_left,
+            Full_Body_Instance.tibia_right,
+            Full_Body_Instance.tibia_left,
+            Full_Body_Instance.fibula_right,
+            Full_Body_Instance.fibula_left,
+            Full_Body_Instance.talus_right,
+            Full_Body_Instance.talus_left,
+            Full_Body_Instance.calcaneus_right,
+            Full_Body_Instance.calcaneus_left,
+            Full_Body_Instance.tarsals_right,
+            Full_Body_Instance.tarsals_left,
+            Full_Body_Instance.metatarsals_right,
+            Full_Body_Instance.metatarsals_left,
+            Full_Body_Instance.phalanges_right,
+            Full_Body_Instance.phalanges_left,
+        ]
+
+    @classmethod
     def get_totalVibeSegMapping(cls):
         return {
             1: Full_Body_Instance.spleen.value,  # spleen
