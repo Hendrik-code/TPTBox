@@ -959,7 +959,7 @@ class NII(NII_Math):
         mi, ma = self.min(), self.max()
         self += -mi + min_value  # min = 0
         self_dtype = self.dtype
-        max_value2 = ma
+        max_value2 = self.max() # this is a new value if min got shifted
         if max_value2 > max_value:
             self *= max_value / max_value2
             self.set_dtype_(self_dtype)
@@ -1019,7 +1019,9 @@ class NII(NII_Math):
         boundary_mode: str = "nearest",
         dilate_prior: int = 1,
         dilate_connectivity: int = 1,
+        dilate_channelwise: bool = False,
         smooth_background: bool = True,
+        background_threshold: float | None = None,
         inplace: bool = False,
     ):
         """Smoothes the segmentation mask by applying a gaussian filter label-wise and then using argmax to derive the smoothed segmentation labels again.
@@ -1039,7 +1041,7 @@ class NII(NII_Math):
             NII: The smoothed NII object.
         """
         assert self.seg, "You cannot use this on a non-segmentation NII"
-        smoothed = np_smooth_gaussian_labelwise(self.get_seg_array(), label_to_smooth=label_to_smooth, sigma=sigma, radius=radius, truncate=truncate, boundary_mode=boundary_mode, dilate_prior=dilate_prior, dilate_connectivity=dilate_connectivity,smooth_background=smooth_background,)
+        smoothed = np_smooth_gaussian_labelwise(self.get_seg_array(), label_to_smooth=label_to_smooth, sigma=sigma, radius=radius, truncate=truncate, boundary_mode=boundary_mode, dilate_prior=dilate_prior, dilate_connectivity=dilate_connectivity,smooth_background=smooth_background,background_threshold=background_threshold,dilate_channelwise=dilate_channelwise)
         return self.set_array(smoothed,inplace,verbose=False)
 
     def smooth_gaussian_labelwise_(
@@ -1051,9 +1053,11 @@ class NII(NII_Math):
         boundary_mode: str = "nearest",
         dilate_prior: int = 1,
         dilate_connectivity: int = 1,
-        smooth_background: bool = True
+        dilate_channelwise: bool = False,
+        smooth_background: bool = True,
+        background_threshold: float | None = None,
     ):
-        return self.smooth_gaussian_labelwise(label_to_smooth=label_to_smooth, sigma=sigma, radius=radius, truncate=truncate, boundary_mode=boundary_mode, dilate_prior=dilate_prior, dilate_connectivity=dilate_connectivity, smooth_background=smooth_background, inplace=True,)
+        return self.smooth_gaussian_labelwise(label_to_smooth=label_to_smooth, sigma=sigma, radius=radius, truncate=truncate, boundary_mode=boundary_mode, dilate_prior=dilate_prior, dilate_connectivity=dilate_connectivity, smooth_background=smooth_background, inplace=True, background_threshold=background_threshold, dilate_channelwise=dilate_channelwise)
 
     def to_ants(self):
         try:
@@ -1296,7 +1300,7 @@ class NII(NII_Math):
         #print("filter",nii.unique())
         #assert max_count_component is None or nii.max() <= max_count_component, nii.unique()
         return self.set_array(arr, inplace=inplace)
-    def filter_connected_components_(self, labels: int |list[int]|None,min_volume:int=0,max_volume:int|None=None, max_count_component = None, connectivity: int = 3,keep_label=False):
+    def filter_connected_components_(self, labels: int |list[int]|None=None,min_volume:int=0,max_volume:int|None=None, max_count_component = None, connectivity: int = 3,keep_label=False):
         return self.filter_connected_components(labels,min_volume=min_volume,max_volume=max_volume, max_count_component = max_count_component, connectivity = connectivity,keep_label=keep_label,inplace=True)
 
     def get_segmentation_connected_components_center_of_mass(self, label: int, connectivity: int = 3, sort_by_axis: int | None = None) -> list[COORDINATE]:

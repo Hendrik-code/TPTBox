@@ -634,9 +634,14 @@ def np_compute_surface(arr: UINTARRAY, connectivity: int = 3, dilated_surface: b
     """
     assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
     if dilated_surface:
-        return np_dilate_msk(arr.copy(), n_pixel=1, connectivity=connectivity) - arr
+        dil = np_dilate_msk(arr.copy(), n_pixel=1, connectivity=connectivity)
+        dil[arr != 0] = 0  # remove all non-zero entries
+        return dil
     else:
-        return arr - np_erode_msk(arr.copy(), n_pixel=1, connectivity=connectivity)
+        ero = np_erode_msk(arr.copy(), n_pixel=1, connectivity=connectivity)
+        arr = arr.copy()
+        arr[ero != 0] = 0  # remove all non-zero entries
+        return arr
 
 
 def np_point_coordinates(
@@ -954,7 +959,9 @@ def np_smooth_gaussian_labelwise(
     boundary_mode: str = "nearest",
     dilate_prior: int = 0,
     dilate_connectivity: int = 3,
+    dilate_channelwise: bool = False,
     smooth_background: bool = True,
+    background_threshold: float | None = None,
 ) -> UINTARRAY:
     """Smoothes labels in a segmentation mask array
 
@@ -983,7 +990,7 @@ def np_smooth_gaussian_labelwise(
     for l in label_to_smooth:
         assert l in sem_labels, f"You want to smooth label {l} but it is not present in the given segmentation mask"
 
-    if dilate_prior > 0:
+    if dilate_prior > 0 and not dilate_channelwise:
         arr = np_dilate_msk(
             arr,
             n_pixel=dilate_prior,
@@ -996,6 +1003,13 @@ def np_smooth_gaussian_labelwise(
     sem_labels_plus_background.append(0)
     for l in sem_labels_plus_background[:-1]:
         arr_l = (arr == l).astype(float)
+        if dilate_prior > 0 and dilate_channelwise:
+            arr_l = np_dilate_msk(
+                arr_l,
+                n_pixel=dilate_prior,
+                label_ref=1,
+                connectivity=dilate_connectivity,
+            )
         if l in label_to_smooth:
             arr_l = gaussian_filter(
                 arr_l,
@@ -1025,6 +1039,9 @@ def np_smooth_gaussian_labelwise(
     arr_stack = np.stack(smoothed_arrs)
     seg_arr_smoothed = np.argmax(arr_stack, axis=0)
     seg_arr_s = seg_arr_smoothed.copy()
+
+    if background_threshold is not None:
+        seg_arr_smoothed[seg_arr_smoothed < background_threshold] = len(sem_labels_plus_background) - 1  # background label
 
     for idx, l in enumerate(sem_labels_plus_background):
         seg_arr_s[seg_arr_smoothed == idx] = l
