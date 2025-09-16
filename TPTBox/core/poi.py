@@ -40,7 +40,13 @@ from TPTBox.logger import Log_Type
 
 ### CURRENT TYPE DEFINITIONS
 C = TypeVar("C", bound="POI")
-POI_Reference = Union[bids_files.BIDS_FILE, Path, str, tuple[Image_Reference, Image_Reference, Sequence[int]], C]
+POI_Reference = Union[
+    bids_files.BIDS_FILE,
+    Path,
+    str,
+    tuple[Image_Reference, Image_Reference, Sequence[int]],
+    C,
+]
 
 
 @dataclass
@@ -114,6 +120,15 @@ class POI(Abstract_POI, Has_Grid):
     _zoom: ZOOMS = field(init=False, default=(1, 1, 1), repr=False, compare=False)
     _vert_orientation_pir = {}  # Elusive; will not be saved; will not be copied. For Buffering results  # noqa: RUF012
 
+    def _set_inplace(self, poi: Self):
+        self.orientation = poi.orientation
+        self.centroids = poi.centroids
+        self.zoom = poi.zoom
+        self.shape = poi.shape
+        self.origin = poi.origin
+        self.rotation = poi.rotation
+        return self
+
     @property
     def is_global(self):
         return False
@@ -154,6 +169,8 @@ class POI(Abstract_POI, Has_Grid):
 
     def clone(self, **qargs):
         return self.copy(**qargs)
+
+    __hash__ = None  # type: ignore # explicitly mark as unhashable
 
     def copy(
         self,
@@ -557,6 +574,9 @@ class POI(Abstract_POI, Has_Grid):
     def resample_from_to(self, ref: Has_Grid):
         return self.to_global().to_other(ref)
 
+    def resample_from_to_(self, ref: Has_Grid):
+        return self._set_inplace(self.resample_from_to_(ref))
+
     def save(
         self,
         out_path: Path | str,
@@ -901,6 +921,7 @@ def calc_poi_from_subreg_vert(
     # use_vertebra_special_action=True,
     _vert_ids=None,
     _print_phases=False,
+    _orientation_version=0,
 ) -> POI:
     """
     Calculates the POIs of a subregion within a vertebral mask. This function is spine opinionated, the general implementation is "calc_poi_from_two_masks".
@@ -943,7 +964,7 @@ def calc_poi_from_subreg_vert(
     if _vert_ids is None:
         _vert_ids = vert_msk.unique()
 
-    from TPTBox.core.poi_fun.vertebra_pois_non_centroids import add_prerequisites, compute_non_centroid_pois
+    from TPTBox.core.poi_fun.vertebra_pois_non_centroids import add_prerequisites, compute_non_centroid_pois  # noqa: PLC0415
 
     subreg_id = add_prerequisites(_int2loc(subreg_id if isinstance(subreg_id, Sequence) else [subreg_id]))  # type: ignore
 
@@ -1035,6 +1056,7 @@ def calc_poi_from_subreg_vert(
             subreg_msk,
             _vert_ids=_vert_ids,
             log=log,
+            _orientation_version=_orientation_version,
         )
     extend_to.apply_crop_reverse(crop, org_shape, inplace=True)
     return extend_to
@@ -1128,6 +1150,8 @@ def calc_centroids(
     second_stage: int | Abstract_lvl = 50,
     extend_to: POI | None = None,
     inplace: bool = False,
+    bar=False,
+    _crop=True,
 ) -> POI:
     """
     Calculates the centroid coordinates of each region in the given mask image.
@@ -1169,15 +1193,31 @@ def calc_centroids(
         if not inplace:
             extend_to = extend_to.copy()
         ctd_list = extend_to.centroids
-        extend_to.assert_affine(msk_nii, shape_tolerance=0.5, origin_tolerance=0.5)
-    for i in msk_nii.unique():
-        msk_temp = np.zeros(msk_data.shape, dtype=bool)
-        msk_temp[msk_data == i] = True
-        ctr_mass: Sequence[float] = center_of_mass(msk_temp)  # type: ignore
-        if second_stage == -1:
-            ctd_list[first_stage, int(i)] = tuple(round(x, decimals) for x in ctr_mass)
+        extend_to.assert_affine(msk_nii, shape_tolerance=1, origin_tolerance=1)
+    u = msk_nii.unique()
+    if bar:
+        from tqdm import tqdm
+
+        u = tqdm(u)
+    for i in u:
+        if _crop:
+            # TODO test implementation and remove old
+            m = msk_nii.extract_label(i)
+            crop = m.compute_crop()
+            m2: NII = m[crop]
+            ctr_mass: Sequence[float] = center_of_mass(m2.get_seg_array())  # type: ignore
+            out_coord = tuple(round(x + crop.start, decimals) for x, crop in zip(ctr_mass, crop))
         else:
-            ctd_list[int(i), second_stage] = tuple(round(x, decimals) for x in ctr_mass)
+            # OLD
+            msk_temp = np.zeros(msk_data.shape, dtype=bool)
+            msk_temp[msk_data == i] = True
+            ctr_mass: Sequence[float] = center_of_mass(msk_temp)  # type: ignore
+            out_coord = tuple(round(x, decimals) for x in ctr_mass)
+
+        if second_stage == -1:
+            ctd_list[first_stage, int(i)] = out_coord
+        else:
+            ctd_list[int(i), second_stage] = out_coord
     return POI(ctd_list, **msk_nii._extract_affine(), **args)
 
 
@@ -1207,3 +1247,16 @@ def calc_poi_average(pois: list[POI], keep_points_not_present_in_all_pois: bool 
     # Sort the new ctd by keys
     ctd = dict(sorted(ctd.items()))
     return POI(centroids=ctd, orientation=pois[0].orientation, zoom=pois[0].zoom, shape=pois[0].shape, rotation=pois[0].rotation)
+
+
+def _load_from_POI_spine_r(data: dict):
+    orientation = None
+    centroids = POI_Descriptor()
+    for d in data["centroids"]["centroids"]:
+        if "direction" in d:
+            orientation = d["direction"]
+            continue
+        centroids[d["label"], 50] = (d["X"], d["Y"], d["Z"])
+    zoom = data["Spacing"]
+    shape = data["Shape"]
+    return POI(centroids, orientation=orientation, zoom=zoom, shape=shape, info=data, rotation=None)  # type: ignore

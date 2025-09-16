@@ -104,7 +104,7 @@ def make_snapshot3D(
     window_size = (width * len(ids_list), nii.shape[1])
     with Xvfb():
         scene = window.Scene()
-        show_m = window.ShowManager(scene, size=window_size, reset_camera=False)
+        show_m = window.ShowManager(scene=scene, size=window_size, reset_camera=False)
         show_m.initialize()
         for i, ids in enumerate(ids_list):
             x = width * i
@@ -121,26 +121,29 @@ def make_snapshot3D(
     return out_img
 
 
-def make_sub_snapshot_parallel(
-    imgs: list[Path],
+def make_snapshot3D_parallel(
+    imgs: list[Path | str],
     output_paths: list[Image_Reference],
-    orientation: VIEW | list[VIEW] = "A",
+    view: VIEW | list[VIEW] = "A",
     ids_list: list[Sequence[int]] | None = None,
     smoothing=20,
-    resolution=2,
+    resolution: float = 2,
     cpus=10,
     width_factor=1.0,
     scale_factor: int = 1,
+    override=True,
 ):
     ress = []
     with Pool(cpus) as p:  # type: ignore
         for out_path, img in zip_strict(output_paths, imgs):
+            if not override and Path(out_path).exists():
+                continue
             res = p.apply_async(
                 make_snapshot3D,
                 kwds={
                     "output_path": out_path,
                     "img": img,
-                    "view": orientation,
+                    "view": view,
                     "ids_list": ids_list,
                     "smoothing": smoothing,
                     "resolution": resolution,
@@ -153,6 +156,9 @@ def make_sub_snapshot_parallel(
             res.get()
         p.close()
         p.join()
+
+
+make_sub_snapshot_parallel = make_snapshot3D_parallel
 
 
 def _plot_sub_seg(scene: window.Scene, nii: NII, x, y, smoothing, orientation: VIEW):
@@ -177,11 +183,27 @@ def _plot_sub_seg(scene: window.Scene, nii: NII, x, y, smoothing, orientation: V
         raise NotImplementedError()
     for idx in nii.unique():
         color = get_color_by_label(idx)
-        cont_actor = _plot_mask(nii.extract_label(idx), affine, x, y, smoothing=smoothing, color=color, opacity=1)
+        cont_actor = _plot_mask(
+            nii.extract_label(idx),
+            affine,
+            x,
+            y,
+            smoothing=smoothing,
+            color=color,
+            opacity=1,
+        )
         scene.add(cont_actor)
 
 
-def _plot_mask(nii: NII, affine, x_current, y_current, smoothing=10, color: list | np.ndarray = _red, opacity=1):
+def _plot_mask(
+    nii: NII,
+    affine,
+    x_current,
+    y_current,
+    smoothing=10,
+    color: list | np.ndarray = _red,
+    opacity=1,
+):
     mask = nii.get_seg_array()
     cont_actor = _contour_from_roi_smooth(mask, affine=affine, color=color, opacity=opacity, smoothing=smoothing)
     cont_actor.SetPosition(x_current, y_current, 0)

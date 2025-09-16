@@ -152,6 +152,7 @@ formats = [
     "logit",
     "localizer",
     "difference",
+    "labels",
 ]
 # https://bids-specification.readthedocs.io/en/stable/appendices/entity-table.html
 formats_relaxed = [*formats, "t2", "t1", "t2c", "t1c", "cta", "mr", "snapshot", "t1dixon", "dwi"]
@@ -175,6 +176,7 @@ formats_relaxed = [*formats, "t2", "t1", "t2c", "t1c", "cta", "mr", "snapshot", 
 file_types = [
     "nii.gz",
     "json",
+    "mrk.json",
     "png",
     "jpg",
     "tsv",
@@ -190,6 +192,7 @@ file_types = [
     "xlsx",
     "bvec",
     "bval",
+    "html",
 ]
 # Description see: https://bids-specification.readthedocs.io/en/stable/99-appendices/09-entities.html
 

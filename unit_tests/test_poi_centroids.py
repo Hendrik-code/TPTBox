@@ -17,7 +17,7 @@ from TPTBox.core.poi import calc_poi_from_subreg_vert
 from TPTBox.core.poi_fun.save_load import _poi_to_dict_list, load_poi
 from TPTBox.core.vert_constants import Location
 from TPTBox.tests.test_utils import get_nii, get_random_ax_code, overlap, repeats
-from unit_tests.test_centroids_save import get_centroids
+from unit_tests.test_poi_save import get_centroids
 
 
 class Test_Centroids(unittest.TestCase):
