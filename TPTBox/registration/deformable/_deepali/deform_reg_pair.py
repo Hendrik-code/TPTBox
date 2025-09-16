@@ -116,7 +116,7 @@ def append_mask(image: Image, mask_nii: NII | None, channels: dict[str, tuple[in
 
             mask = deepali_functional.threshold(data[slice(*channels["img"])], lower_threshold, upper_threshold)
         else:
-            mask = torch.ones((1,) + data.shape[1:], dtype=data.dtype, device=data.device)
+            mask = torch.ones((1, *data.shape[1:]), dtype=data.dtype, device=data.device)
 
     else:
         # torch.nn.functional.one_hot

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import sys
 import typing
 from collections.abc import Sequence
@@ -358,10 +359,14 @@ class BIDS_Global_info:
         ) if self.verbose else None
         self.subjects[subject].add(bids)
 
-    def enumerate_subjects(self, sort=False) -> list[tuple[str, Subject_Container]]:
+    def enumerate_subjects(self, sort=False, shuffle=False) -> list[tuple[str, Subject_Container]]:
         # TODO Enumerate should put out numbers...
         if sort:
             return sorted(self.subjects.items())
+        if shuffle:
+            s = list(self.subjects.items())
+            random.shuffle(s)
+            return s
         return self.subjects.items()  # type: ignore
 
     def iter_subjects(self, sort=False) -> list[tuple[str, Subject_Container]]:
@@ -686,7 +691,7 @@ class BIDS_FILE:
         from_info=False,
         auto_add_run_id=False,
         additional_folder: str | None = None,
-        dataset_path: str | None = None,
+        dataset_path: str | Path | None = None,
         make_parent=False,
         no_sorting_mode: bool = False,
         non_strict_mode: bool = False,

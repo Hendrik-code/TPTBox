@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import nibabel as nib
 import nibabel.orientations as nio
 import numpy as np
+from scipy.spatial.transform import Rotation
 from typing_extensions import Self
 
 from TPTBox.core.np_utils import np_count_nonzero
@@ -113,6 +114,65 @@ class Has_Grid(Grid_Proxy):
             out.pop(k)
         return out
 
+    def change_affine(
+        self,
+        translation=None,
+        rotation_degrees=None,
+        scaling=None,
+        degrees=True,
+        inplace=False,
+    ):
+        """
+        Apply a transformation (translation, rotation, scaling) to the affine matrix.
+
+        Parameters:
+            translation: (n,) array-like in mm
+            rotation_degrees: (n,) array-like (pitch, yaw, roll) in degrees
+            scaling: (n,) array-like scaling factors along x, y, z
+        """
+        warnings.warn("change_affine is untested", stacklevel=2)
+        n = self.affine.shape[0]
+        transform = np.eye(n)
+
+        # Scaling
+        if scaling is not None:
+            assert len(scaling) == n - 1, f"Scaling must be a {n - 1}-element array-like."
+            S = np.diag([*list(scaling), 1])
+            transform = S @ transform
+
+        # Rotation
+        if rotation_degrees is not None:
+            assert len(rotation_degrees) == n - 1, f"Rotation must be a {n - 1}-element array-like."
+            rot = Rotation.from_euler("xyz", rotation_degrees, degrees=degrees).as_matrix()
+            R_mat = np.eye(n)
+            R_mat[: n - 1, : n - 1] = rot
+            transform = R_mat @ transform
+
+        # Translation
+        if translation is not None:
+            T = np.eye(n)
+            T[: n - 1, n - 1] = translation
+            transform = T @ transform
+        if not inplace:
+            self = self.copy()  # noqa: PLW0642
+        # Update the affine
+        self.affine = transform @ self.affine
+        return self
+
+    def change_affine_(self, translation=None, rotation_degrees=None, scaling=None, degrees=True):
+        return self.change_affine(
+            translation=translation,
+            rotation_degrees=rotation_degrees,
+            scaling=scaling,
+            degrees=degrees,
+            inplace=True,
+        )
+
+    def copy(self) -> Self:
+        raise NotImplementedError(
+            "The copy method must be implemented in the subclass. It should return a new instance of the same type with the same attributes."
+        )
+
     def assert_affine(
         self,
         other: Self | Has_Grid | None = None,
@@ -181,11 +241,11 @@ class Has_Grid(Grid_Proxy):
                 found_errors.append(f"rotation mismatch {self.rotation}, {rotation}") if not rotation_match else None
         if zoom is not None and (not ignore_missing_values or self.zoom is not None):
             if self.zoom is None:
-                found_errors.append(f"zoom mismatch {self.zoom}, {zoom}")
+                found_errors.append(f"spacing mismatch {self.zoom}, {zoom}")
             else:
                 zms_diff = (self.zoom[i] - zoom[i] for i in range(3))
                 zms_match = np.all([abs(a) <= error_tolerance for a in zms_diff])
-                found_errors.append(f"zoom mismatch {self.zoom}, {zoom}") if not zms_match else None
+                found_errors.append(f"spacing mismatch {self.zoom}, {zoom}") if not zms_match else None
         if orientation is not None and (not ignore_missing_values or self.affine is not None):
             if self.orientation is None:
                 found_errors.append(f"orientation mismatch {self.orientation}, {orientation}")
@@ -256,7 +316,14 @@ class Has_Grid(Grid_Proxy):
         from TPTBox import POI
 
         p = {} if points is None else points
-        return POI(p, orientation=self.orientation, zoom=self.zoom, shape=self.shape, rotation=self.rotation, origin=self.origin)
+        return POI(
+            p,
+            orientation=self.orientation,
+            zoom=self.zoom,
+            shape=self.shape,
+            rotation=self.rotation,
+            origin=self.origin,
+        )
 
     def make_empty_POI(self, points: dict | None = None):
         from TPTBox import POI
@@ -267,7 +334,15 @@ class Has_Grid(Grid_Proxy):
             args["level_one_info"] = self.level_one_info
             args["level_two_info"] = self.level_two_info
 
-        return POI(p, orientation=self.orientation, zoom=self.zoom, shape=self.shape, rotation=self.rotation, origin=self.origin, **args)
+        return POI(
+            p,
+            orientation=self.orientation,
+            zoom=self.zoom,
+            shape=self.shape,
+            rotation=self.rotation,
+            origin=self.origin,
+            **args,
+        )
 
     def make_empty_nii(self, seg=False, _arr=None):
         from TPTBox import NII
@@ -332,6 +407,30 @@ class Has_Grid(Grid_Proxy):
         grid = grid.align_corners_(align_corners)
         return grid
 
+    @classmethod
+    def from_deepali_grid(cls, grid):
+        try:
+            from deepali.core import Grid as dp_Grid
+        except Exception:
+            log.print_error()
+            log.on_fail("run 'pip install hf-deepali' to install deepali")
+            raise
+        grid_: dp_Grid = grid
+        size = grid_.size()
+        spacing = grid_.spacing().cpu().numpy()
+        origin = grid_.origin().cpu().numpy()
+        direction = grid_.direction().cpu().numpy()
+        # Convert to ITK LPS convention
+        origin[:2] *= -1
+        direction[:2] *= -1
+        # Replace small values and -0 by 0
+        epsilon = sys.float_info.epsilon
+        origin[np.abs(origin) < epsilon] = 0
+        direction[np.abs(direction) < epsilon] = 0
+        grid = Grid(shape=size, origin=origin, spacing=spacing, rotation=direction)  # type: ignore
+
+        return grid
+
     def get_num_dims(self):
         return len(self.shape)
 
@@ -342,9 +441,14 @@ class Grid(Has_Grid):
         for k, v in qargs.items():
             if k == "spacing":
                 k = "zoom"  # noqa: PLW2901
+            if k == "direction":
+                k = "rotation"  # noqa: PLW2901
             if k == "rotation":
                 v = np.array(v)  # noqa: PLW2901
                 if len(v.shape) == 1:
                     s = int(np.sqrt(v.shape[0]))
                     v = v.reshape(s, s)  # noqa: PLW2901
             setattr(self, k, v)
+
+        ort = nio.io_orientation(self.affine)
+        self.orientation = nio.ornt2axcodes(ort)  # type: ignore

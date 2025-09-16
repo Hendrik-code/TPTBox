@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import typing
 from collections.abc import Sequence
 from enum import Enum
 from typing import TYPE_CHECKING, Literal, NoReturn, Union
@@ -141,6 +140,81 @@ class Any(Abstract_lvl):
         return int(s)
 
 
+class Full_Body_Instance_Vibe(Abstract_lvl):
+    spleen = 1
+    kidney_right = 2
+    kidney_left = 3
+    gallbladder = 4
+    liver = 5
+    stomach = 6
+    pancreas = 7
+    adrenal_gland_right = 8
+    adrenal_gland_left = 9
+    lung_upper_lobe_left = 10
+    lung_lower_lobe_left = 11
+    lung_upper_lobe_right = 12
+    lung_middle_lobe_right = 13
+    lung_lower_lobe_right = 14
+    esophagus = 15
+    trachea = 16
+    thyroid_gland = 17
+    intestine = 18
+    duodenum = 19
+    unused = 20
+    urinary_bladder = 21
+    prostate = 22
+    sacrum = 23
+    heart = 24
+    aorta = 25
+    pulmonary_vein = 26
+    brachiocephalic_trunk = 27
+    subclavian_artery_right = 28
+    subclavian_artery_left = 29
+    common_carotid_artery_right = 30
+    common_carotid_artery_left = 31
+    brachiocephalic_vein_left = 32
+    brachiocephalic_vein_right = 33
+    atrial_appendage_left = 34
+    superior_vena_cava = 35
+    inferior_vena_cava = 36
+    portal_vein_and_splenic_vein = 37
+    iliac_artery_left = 38
+    iliac_artery_right = 39
+    iliac_vena_left = 40
+    iliac_vena_right = 41
+    humerus_left = 42
+    humerus_right = 43
+    scapula_left = 44
+    scapula_right = 45
+    clavicula_left = 46
+    clavicula_right = 47
+    femur_left = 48
+    femur_right = 49
+    hip_left = 50
+    hip_right = 51
+    spinal_cord = 52
+    gluteus_maximus_left = 53
+    gluteus_maximus_right = 54
+    gluteus_medius_left = 55
+    gluteus_medius_right = 56
+    gluteus_minimus_left = 57
+    gluteus_minimus_right = 58
+    autochthon_left = 59
+    autochthon_right = 60
+    iliopsoas_left = 61
+    iliopsoas_right = 62
+    sternum = 63
+    costal_cartilages = 64
+    subcutaneous_fat = 65
+    muscle = 66
+    inner_fat = 67
+    IVD = 68
+    vertebra_body = 69
+    vertebra_posterior_elements = 70
+    spinal_channel = 71
+    bone_other = 72
+
+
 class Full_Body_Instance(Abstract_lvl):
     skull = 1
     clavicula_right = 2
@@ -230,6 +304,7 @@ class Full_Body_Instance(Abstract_lvl):
     subcutaneous_fat = 57
     muscle_other = 58
     inner_fat = 59
+    ignore = 60
 
 
 class Lower_Body(Abstract_lvl):
@@ -358,7 +433,21 @@ class Vertebra_Instance(Abstract_lvl):
 
     @classmethod
     def thoracic(cls):
-        return (cls.T1, cls.T2, cls.T3, cls.T4, cls.T5, cls.T6, cls.T7, cls.T8, cls.T9, cls.T10, cls.T11, cls.T12, cls.T13)
+        return (
+            cls.T1,
+            cls.T2,
+            cls.T3,
+            cls.T4,
+            cls.T5,
+            cls.T6,
+            cls.T7,
+            cls.T8,
+            cls.T9,
+            cls.T10,
+            cls.T11,
+            cls.T12,
+            cls.T13,
+        )
 
     @classmethod
     def lumbar(cls):
