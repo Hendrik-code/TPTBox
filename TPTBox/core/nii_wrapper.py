@@ -1175,7 +1175,19 @@ class NII(NII_Math):
         smooth_background: bool = True,
         background_threshold: float | None = None,
     ):
-        return self.smooth_gaussian_labelwise(label_to_smooth=label_to_smooth, sigma=sigma, radius=radius, truncate=truncate, boundary_mode=boundary_mode, dilate_prior=dilate_prior, dilate_connectivity=dilate_connectivity, smooth_background=smooth_background, inplace=True, background_threshold=background_threshold, dilate_channelwise=dilate_channelwise)
+        return self.smooth_gaussian_labelwise(
+            label_to_smooth=label_to_smooth,
+            sigma=sigma,
+            radius=radius,
+            truncate=truncate,
+            boundary_mode=boundary_mode,
+            dilate_prior=dilate_prior,
+            dilate_connectivity=dilate_connectivity,
+            smooth_background=smooth_background,
+            inplace=True,
+            background_threshold=background_threshold,
+            dilate_channelwise=dilate_channelwise,
+        )
 
     def to_ants(self):
         try:
