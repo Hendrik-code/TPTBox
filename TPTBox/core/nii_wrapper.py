@@ -1147,8 +1147,20 @@ class NII(NII_Math):
             NII: The smoothed NII object.
         """
         assert self.seg, "You cannot use this on a non-segmentation NII"
-        smoothed = np_smooth_gaussian_labelwise(self.get_seg_array(), label_to_smooth=label_to_smooth, sigma=sigma, radius=radius, truncate=truncate, boundary_mode=boundary_mode, dilate_prior=dilate_prior, dilate_connectivity=dilate_connectivity,smooth_background=smooth_background,background_threshold=background_threshold,dilate_channelwise=dilate_channelwise)
-        return self.set_array(smoothed,inplace,verbose=False)
+        smoothed = np_smooth_gaussian_labelwise(
+            self.get_seg_array(),
+            label_to_smooth=label_to_smooth,
+            sigma=sigma,
+            radius=radius,
+            truncate=truncate,
+            boundary_mode=boundary_mode,
+            dilate_prior=dilate_prior,
+            dilate_connectivity=dilate_connectivity,
+            smooth_background=smooth_background,
+            background_threshold=background_threshold,
+            dilate_channelwise=dilate_channelwise,
+        )
+        return self.set_array(smoothed, inplace, verbose=False)
 
     def smooth_gaussian_labelwise_(
         self,
