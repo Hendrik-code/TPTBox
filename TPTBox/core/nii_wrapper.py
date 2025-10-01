@@ -286,6 +286,7 @@ class NII(NII_Math):
         # ('space origin', array([-249.51171875, -392.51171875,  119.7]))])
 
         # Construct the affine transformation matrix
+        #print(header)
         try:
             #print(header['space directions'])
             #print(header['space origin'])
@@ -300,7 +301,7 @@ class NII(NII_Math):
                 if m != n:
                     n=m
                     data = data.sum(axis=0)
-                    space_directions = space_directions.T
+            space_directions = space_directions.T
             if space_directions.shape != (n, n):
                 raise ValueError(f"Expected 'space directions' to be a nxn matrix. n = {n} is not {space_directions.shape}",space_directions)
             if space_origin.shape != (n,):
@@ -309,6 +310,7 @@ class NII(NII_Math):
             affine = np.eye(n+1)  # Initialize 4x4 identity matrix
             affine[:n, :n] = space_directions  # Set rotation and scaling
             affine[:n, n] = space_origin       # Set translation
+            #print(affine,space)
             if space =="left-posterior-superior": #LPS (SITK-space)
                 affine[0] *=-1
                 affine[1] *=-1
@@ -320,7 +322,7 @@ class NII(NII_Math):
                 pass
             else:
                 raise ValueError(space)
-
+            #print(affine)
 
         except KeyError as e:
             raise KeyError(f"Missing expected header field: {e}") from None
