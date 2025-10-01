@@ -79,7 +79,9 @@ class Point_Registration:
 
         if len(inter) < 2:
             log.print("[!] To few points, skip registration", Log_Type.FAIL)
-            raise ValueError("[!] To few points, skip registration", inter)
+            raise ValueError(
+                f"[!] To few points, skip registration; {poi_fixed.keys()=}; {poi_moving.keys()=}",
+            )
         img_movig = poi_moving.make_empty_nii()
         assert img_movig.shape == poi_moving.shape_int, (img_movig, poi_moving.shape)
         assert img_movig.orientation == poi_moving.orientation

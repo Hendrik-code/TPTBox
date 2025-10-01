@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Literal
 
 import numpy as np
 from numpy.linalg import norm
@@ -169,14 +170,16 @@ def strategy_ligament_attachment_point_flava(
     goal: Location | np.ndarray,
     log: Logger_Interface = _log,
     delta=0.0000001,
+    shift_direction: Literal["S", "I"] = "S",
+    dir2: Literal["A"] = "A",
 ):
     if vert_id in sacrum_w_o_arcus:
         return
     try:
-        normal_vector1 = get_direction("S", poi, vert_id)  # / np.array(poi.zoom)
+        normal_vector1 = get_direction(shift_direction, poi, vert_id)  # / np.array(poi.zoom)
         v1 = normal_vector1 / norm(normal_vector1)
 
-        normal_vector2 = get_direction("A", poi, vert_id)  # / np.array(poi.zoom)
+        normal_vector2 = get_direction(dir2, poi, vert_id)  # / np.array(poi.zoom)
         v2 = normal_vector2 / norm(normal_vector2)
     except KeyError:
         return
