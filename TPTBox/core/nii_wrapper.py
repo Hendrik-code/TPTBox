@@ -99,7 +99,10 @@ def _check_if_nifty_is_lying_about_its_dtype(self: NII):
     arr = self.nii.dataobj
     dtype = self._nii.dataobj.dtype  # type: ignore
     dtype_s = str(self._nii.dataobj.dtype)
-    mi = np.min(arr)
+    try:
+        mi = np.min(arr)
+    except Exception:
+        return np.float32
     ma = np.max(arr)
     has_neg = mi < 0
     max_v = _dtype_max.get(str(dtype), 0)
