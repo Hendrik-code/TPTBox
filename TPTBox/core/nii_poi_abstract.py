@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import warnings
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import nibabel as nib
@@ -435,6 +436,7 @@ class Has_Grid(Grid_Proxy):
         return len(self.shape)
 
 
+@dataclass
 class Grid(Has_Grid):
     def __init__(self, **qargs) -> None:
         super().__init__()

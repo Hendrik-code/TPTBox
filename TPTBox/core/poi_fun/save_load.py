@@ -200,6 +200,12 @@ def _poi_to_dict_list(  # noqa: C901
         elif save_hint in (FORMAT_POI, FORMAT_GLOBAL):
             v_name = ctd.level_one_info._get_name(vert_id, no_raise=True)
             subreg_id = ctd.level_two_info._get_name(subreg_id, no_raise=True)  # noqa: PLW2901
+            if "_ignore_level_one_info_range" in ctd.info:
+                try:
+                    if vert_id in ctd.info["_ignore_level_one_info_range"]:
+                        v_name = vert_id
+                except Exception:
+                    pass
             # sub_name = v_idx2name[subreg_id]
             if v_name not in temp_dict:
                 temp_dict[v_name] = {}
@@ -465,7 +471,8 @@ def _load_mkr_POI(dict_mkr: dict):
 
     if "@schema" not in dict_mkr or "markups-schema-v1.0.3" not in dict_mkr["@schema"]:
         log.on_warning(
-            "this file is possible incompatible. Tested only with markups-schema-v1.0.3 and not", dict_mkr.get("@schmea", "No Schema")
+            "this file is possible incompatible. Tested only with markups-schema-v1.0.3 and not",
+            dict_mkr.get("@schmea", "No Schema"),
         )
     if "markups" not in dict_mkr:
         raise ValueError("markups is missing")

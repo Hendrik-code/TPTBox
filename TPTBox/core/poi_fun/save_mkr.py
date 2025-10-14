@@ -294,6 +294,13 @@ def get_desc(self: POI_Global, region, subregion):
         name = str(subregion)
     try:
         name2 = self.level_one_info(region).name
+        if "_ignore_level_one_info_range" in self.info:
+            try:
+                if region in self.info["_ignore_level_one_info_range"]:
+                    name2 = str(region)
+            except Exception:
+                pass
+
     except Exception:
         name2 = str(region)
     return name, name2, label
