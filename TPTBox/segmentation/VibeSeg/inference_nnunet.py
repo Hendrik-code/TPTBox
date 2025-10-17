@@ -11,7 +11,7 @@ import numpy as np
 import torch
 
 from TPTBox import NII, Image_Reference, Log_Type, Print_Logger, to_nii
-from TPTBox.segmentation.TotalVibeSeg.auto_download import download_weights
+from TPTBox.segmentation.VibeSeg.auto_download import download_weights
 
 logger = Print_Logger()
 out_base = Path(__file__).parent.parent / "nnUNet/"
@@ -187,7 +187,7 @@ def run_inference_on_file(
 idx_models = [80, 87, 86, 85]
 
 
-def run_total_seg(
+def run_VibeSeg(
     img: Path | str | list[Path] | list[NII],
     out_path: Path,
     override=False,
