@@ -94,7 +94,7 @@ def dicom_to_nifti_multiframe(ds, nii_path):
 
     # Pixel spacing (mm)
     if hasattr(ds, "PixelSpacing"):
-        dy, dx = [float(v) for v in ds.PixelSpacing]
+        dy, dx = (float(v) for v in ds.PixelSpacing)
         # Image orientation (row and column direction cosines)
         orientation = [float(v) for v in ds.ImageOrientationPatient]
         row_cosines = np.array(orientation[0:3])
@@ -119,7 +119,7 @@ def dicom_to_nifti_multiframe(ds, nii_path):
         affine[0:3, 2] = slice_cosines * dz
         affine[0:3, 3] = origin
     else:
-        dy, dx = [float(v) for v in ds.ImagerPixelSpacing]
+        dy, dx = (float(v) for v in ds.ImagerPixelSpacing)
         # Einfaches affine (nur 2D + Zeit, keine Lage im Patientenraum)
         affine = np.eye(4)
         affine[0, 0] = -dx
@@ -577,12 +577,9 @@ def extract_dicom_folder(
 
 
 if __name__ == "__main__":
-    extract_dicom_folder(
-        Path("/media/robert/NRAD/DSA_Data/DICOMS_DSA_all/0001018804/"),
-        Path("/media/data/robert/test/dicom2nii", f"dataset-{'dsa'}"),
-        False,
-        0,
-    )
+    for p in Path("E:/DSA_Data/DICOMS_DSA_all/").iterdir():
+        extract_dicom_folder(p, Path("D:/data/DSA", "dataset-DSA"), False, False)
+
     sys.exit()
     # s = "/home/robert/Downloads/bein/dataset-oberschenkel/rawdata/sub-1-3-46-670589-11-2889201787-2305829596-303261238-2367429497/mr/sub-1-3-46-670589-11-2889201787-2305829596-303261238-2367429497_sequ-406_mr.nii.gz"
     # nii2 = NII.load(s, False)

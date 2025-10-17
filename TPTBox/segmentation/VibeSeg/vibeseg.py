@@ -4,9 +4,9 @@ from pathlib import Path
 from typing import Literal
 
 from TPTBox import Image_Reference, to_nii
-from TPTBox.segmentation.TotalVibeSeg.inference_nnunet import run_inference_on_file
+from TPTBox.segmentation.VibeSeg.inference_nnunet import run_inference_on_file
 
-total_vibe_map = {
+VibeSeg_map = {
     1: "spleen",
     2: "kidney_right",
     3: "kidney_left",
@@ -82,7 +82,7 @@ total_vibe_map = {
 }
 
 
-def run_totalvibeseg(
+def run_vibeseg(
     i: Image_Reference,
     out_seg: str | Path,
     override=False,
@@ -126,22 +126,22 @@ def run_nnunet(
     )
 
 
-def extract_vertebra_bodies_from_totalVibe(
-    nii_total: Image_Reference,
+def extract_vertebra_bodies_from_VibeSeg(
+    nii_vibeSeg: Image_Reference,
     num_thoracic_verts: int = 12,
     num_lumbar_verts: int = 5,
     out_path: str | Path | None = None,
     out_path_poi: str | Path | None = None,
 ):
     """
-    Extracts and labels vertebra bodies from a totalVibe segmentation NIfTI file.
+    Extracts and labels vertebra bodies from a VibeSeg segmentation NIfTI file.
 
     This function processes a segmentation mask containing vertebrae and intervertebral discs (IVDs).
     It separates individual vertebra bodies by eroding and splitting the mask at IVD regions, labels the vertebrae
     from bottom to top (lumbar and thoracic), and optionally saves the labeled mask and point-of-interest (POI) data.
 
     Args:
-        nii_total (Image_Reference): Path or reference to the NIfTI file containing the totalVibe segmentation mask.
+        nii_vibeSeg (Image_Reference): Path or reference to the NIfTI file containing the VibeSeg segmentation mask.
         num_thoracic_verts (int, optional): Number of thoracic vertebrae to include. Defaults to 12.
         num_lumbar_verts (int, optional): Number of lumbar vertebrae to include. Defaults to 5.
         out_path (str | Path | None, optional): Path to save the processed mask data. If None, no files are saved. Defaults to None.
@@ -159,13 +159,13 @@ def extract_vertebra_bodies_from_totalVibe(
           - Mask file: `<out_path>`
           - POI file: `<out_path>` with `_poi.json` suffix recommended.
     Example:
-        >>> nii_total = "/path/to/vibe_segmentation.nii.gz"
-        >>> labeled_mask, centroids = extract_vertebra_bodies_from_totalVibe(nii_total, out_path="output_mask.nii.gz")
+        >>> nii_vibeSeg = "/path/to/vibe_segmentation.nii.gz"
+        >>> labeled_mask, centroids = extract_vertebra_bodies_from_nii_vibeSeg(nii_vibeSeg, out_path="output_mask.nii.gz")
     """
     from TPTBox import Vertebra_Instance, calc_centroids
 
-    # Load the totalVibe segmentation
-    nii = to_nii(nii_total, seg=True)
+    # Load the nii_vibeSeg segmentation
+    nii = to_nii(nii_vibeSeg, seg=True)
     vertebrae = nii.extract_label(69)
     ivds = nii.extract_label(68)
 
@@ -211,9 +211,8 @@ def extract_vertebra_bodies_from_totalVibe(
 
 if __name__ == "__main__":
     from TPTBox import BIDS_FILE
-    from TPTBox.segmentation import run_totalvibeseg
+    from TPTBox.segmentation import run_vibeseg
 
-    # run_totalvibeseg
     # You can also use a string/Path if you want to set the path yourself.
     dataset = "/media/data/robert/datasets/dicom_example/dataset-VR-DICOM2/"
     in_file = BIDS_FILE(
@@ -224,6 +223,6 @@ if __name__ == "__main__":
         "nii.gz",
         "msk",
         parent="derivative",
-        info={"seg": "TotalVibeSegmentator", "mod": in_file.bids_format},
+        info={"seg": "VibeSeg", "mod": in_file.bids_format},
     )
-    run_totalvibeseg(in_file, out_file)
+    run_vibeseg(in_file, out_file)
