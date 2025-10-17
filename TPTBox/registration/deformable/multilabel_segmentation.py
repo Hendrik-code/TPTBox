@@ -28,7 +28,7 @@ class Register_Multi_Seg:
         target_grid (NII): Cropped spatial grid used for deformable registration.
     """
 
-    def __init__(
+    def __init__(  # noqa: C901
         self,
         target: NII,
         atlas: NII,
@@ -40,11 +40,13 @@ class Register_Multi_Seg:
         loss_terms=None,  # type: ignore
         weights=None,
         lr=0.01,
+        lr_end_factor=None,
         max_steps=1500,
         min_delta=1e-06,
         pyramid_levels=4,
         coarsest_level=3,
         finest_level=0,
+        crop: bool = True,
         cms_ids: list | None = None,
         poi_target_cms: POI | None = None,
         **args,
@@ -110,41 +112,56 @@ class Register_Multi_Seg:
                         poi_target_cms[k1, k2] = (x, poi_target_cms.shape[1] - 1 - y, z)
                     elif axis == 2:
                         poi_target_cms[k1, k2] = (x, y, poi_target_cms.shape[2] - 1 - z)
-        print("crop")
-        crop = 50
-        t_crop = (target).compute_crop(0, crop)
-        target = target.apply_crop(t_crop)
-        if atlas.is_segmentation_in_border():
-            atlas = atlas.apply_pad(((1, 1), (1, 1), (1, 1)))
-        for i in range(10):  # 1000,
-            if i != 0:
-                target = target.apply_pad(((25, 25), (25, 25), (25, 25)))
-                crop += 50
-            t_crop = (target).compute_crop(0, crop)  # if the angel is to different we need a larger crop...
-            target_ = target.apply_crop(t_crop)
-            # Point Registration
-            print("calc_centroids")
+        if crop:
+            print("crop")
+            crop = 50
+            t_crop = (target).compute_crop(0, crop)
+            target = target.apply_crop(t_crop)
+            if atlas.is_segmentation_in_border():
+                atlas = atlas.apply_pad(((1, 1), (1, 1), (1, 1)))
+            for i in range(10):  # 1000,
+                if i != 0:
+                    target = target.apply_pad(((25, 25), (25, 25), (25, 25)))
+                    crop += 50
+                t_crop = (target).compute_crop(0, crop)  # if the angel is to different we need a larger crop...
+                target_ = target.apply_crop(t_crop)
+                # Point Registration
+                print("calc_centroids")
+                if poi_target_cms is None:
+                    x = target_.extract_label(cms_ids, keep_label=True) if cms_ids else target_
+                    poi_target = calc_centroids(x, second_stage=40, bar=True)  # TODO REMOVE
+                else:
+                    poi_target = poi_target_cms.resample_from_to(target_)
+                if poi_cms is None:
+                    x = atlas.extract_label(cms_ids, keep_label=True) if cms_ids else atlas
+                    poi_cms = calc_centroids(x, second_stage=40, bar=True)  # This will be needlessly computed all the time
+                if not poi_cms.assert_affine(atlas, raise_error=False):
+                    poi_cms = poi_cms.resample_from_to(atlas)
+                self.reg_point = Point_Registration(poi_target, poi_cms)
+                atlas_reg = self.reg_point.transform_nii(atlas)
+                if atlas_reg.is_segmentation_in_border():
+                    print("atlas_reg does touch the border")
+                else:
+                    target = target_
+                    break
+        else:
+            target_ = target
             if poi_target_cms is None:
                 x = target_.extract_label(cms_ids, keep_label=True) if cms_ids else target_
                 poi_target = calc_centroids(x, second_stage=40, bar=True)  # TODO REMOVE
             else:
                 poi_target = poi_target_cms.resample_from_to(target_)
-            if poi_cms is None:
-                x = atlas.extract_label(cms_ids, keep_label=True) if cms_ids else atlas
-                poi_cms = calc_centroids(x, second_stage=40, bar=True)  # This will be needlessly computed all the time
-            if not poi_cms.assert_affine(atlas, raise_error=False):
-                poi_cms = poi_cms.resample_from_to(atlas)
             self.reg_point = Point_Registration(poi_target, poi_cms)
             atlas_reg = self.reg_point.transform_nii(atlas)
-            if atlas_reg.is_segmentation_in_border():
-                print("atlas_reg does touch the border")
-            else:
-                target = target_
-                break
+
         target = target_
-        self.crop = (target + atlas_reg).compute_crop(0, 5)
-        target = target.apply_crop(self.crop)
-        atlas_reg = atlas_reg.apply_crop(self.crop)
+        if crop:
+            self.crop = (target + atlas_reg).compute_crop(0, 5)
+            target = target.apply_crop(self.crop)
+            atlas_reg = atlas_reg.apply_crop(self.crop)
+        else:
+            self.crop = None
+
         self.target_grid = target.to_gird()
         self.reg_deform = Deformable_Registration(
             target,
@@ -154,6 +171,7 @@ class Register_Multi_Seg:
             loss_terms=loss_terms,
             weights=weights,
             lr=lr,
+            lr_end_factor=lr_end_factor,
             max_steps=max_steps,
             min_delta=min_delta,
             pyramid_levels=pyramid_levels,
@@ -223,7 +241,7 @@ class Register_Multi_Seg:
         self.same_side, self.atlas_org, self.target_grid_org, self.target_grid, self.crop = x
         return self
 
-    def forward_nii(self, nii_atlas: NII):
+    def transform_nii(self, nii_atlas: NII):
         """
         Apply both rigid and deformable registration to a new NII object.
 
@@ -253,7 +271,7 @@ class Register_Multi_Seg:
 
         return target
 
-    def forward_poi(self, poi_atlas: POI_Global | POI):
+    def transform_poi(self, poi_atlas: POI_Global | POI):
         """
         Apply both rigid and deformable registration to a POI (landmark) object.
 

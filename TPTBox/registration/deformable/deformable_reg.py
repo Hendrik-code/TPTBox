@@ -48,8 +48,9 @@ class Deformable_Registration(General_Registration):
         fixed_mask: Image_Reference | None = None,
         moving_mask: Image_Reference | None = None,
         # normalize
-        normalize_strategy: Literal["auto", "CT", "MRI"]
-        | None = "auto",  # Override on_normalize for finer normalization schema or normalize before and set to None. auto: [min,max] -> [0,1]; None: Do noting
+        normalize_strategy: (
+            Literal["auto", "CT", "MRI"] | None
+        ) = "auto",  # Override on_normalize for finer normalization schema or normalize before and set to None. auto: [min,max] -> [0,1]; None: Do noting
         # Pyramid
         pyramid_levels: int | None = 3,  # 1/None = no pyramid; int: number of stacks, tuple from to (0 is finest)
         finest_level: int = 0,
@@ -63,6 +64,7 @@ class Deformable_Registration(General_Registration):
         transform_init: PathStr | None = None,  # reload initial flowfield from file
         optim_name="Adam",  # Optimizer name defined in torch.optim. or override on_optimizer finer controle
         lr: float | Sequence[float] = 0.001,  # Learning rate
+        lr_end_factor: float | None = None,  # if set, will use a LinearLR scheduler to reduce the learning rate to this factor * lr
         optim_args=None,  # args of Optimizer with out lr
         smooth_grad=0.0,
         verbose=0,
@@ -112,6 +114,7 @@ class Deformable_Registration(General_Registration):
             transform_init=transform_init,
             optim_name=optim_name,
             lr=lr,
+            lr_end_factor=lr_end_factor,
             optim_args=optim_args,
             smooth_grad=smooth_grad,
             verbose=verbose,
