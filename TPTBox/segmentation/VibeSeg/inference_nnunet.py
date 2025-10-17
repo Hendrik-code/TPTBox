@@ -72,7 +72,7 @@ def run_inference_on_file(
     if out_file is not None and Path(out_file).exists() and not override:
         return out_file, None
 
-    from TPTBox.segmentation.nnUnet_utils.inference_api import load_inf_model, run_inference  # noqa: PLC0415
+    from TPTBox.segmentation.nnUnet_utils.inference_api import load_inf_model, run_inference
 
     if isinstance(idx, int):
         download_weights(idx, model_path)
