@@ -16,6 +16,7 @@ import numpy as np
 from nibabel import Nifti1Header, Nifti1Image  # type: ignore
 from typing_extensions import Self
 
+from TPTBox.core import bids_files
 from TPTBox.core.compat import zip_strict
 from TPTBox.core.internal.nii_help import _resample_from_to, secure_save
 from TPTBox.core.nii_poi_abstract import Has_Grid
@@ -47,10 +48,7 @@ from TPTBox.core.np_utils import (
     np_unique_withoutzero,
     np_volume,
 )
-from TPTBox.logger.log_file import Log_Type
-
-from . import bids_files
-from .vert_constants import (
+from TPTBox.core.vert_constants import (
     AFFINE,
     AX_CODES,
     COORDINATE,
@@ -65,6 +63,7 @@ from .vert_constants import (
     logging,
     v_name2idx,
 )
+from TPTBox.logger.log_file import Log_Type
 
 if TYPE_CHECKING:
     from torch import device

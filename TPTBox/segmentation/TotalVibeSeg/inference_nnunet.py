@@ -41,7 +41,7 @@ def squash_so_it_fits_in_float16(x: NII):
 
 
 def run_inference_on_file(
-    idx,
+    idx: int | Path,
     input_nii: list[NII],
     out_file: str | Path | None = None,
     orientation=None,
@@ -74,12 +74,16 @@ def run_inference_on_file(
 
     from TPTBox.segmentation.nnUnet_utils.inference_api import load_inf_model, run_inference  # noqa: PLC0415
 
-    download_weights(idx, model_path)
-    try:
-        nnunet_path = next(next(iter(model_path.glob(f"*{idx:03}*"))).glob("*__nnUNet*ResEnc*"))
-    except StopIteration:
-        nnunet_path = next(next(iter(model_path.glob(f"*{idx:03}*"))).glob("*__nnUNetPlans*"))
-    folds = sorted([int(f.name.split("fold_")[-1]) for f in nnunet_path.glob("fold*")])
+    if isinstance(idx, int):
+        download_weights(idx, model_path)
+        try:
+            nnunet_path = next(next(iter(model_path.glob(f"*{idx:03}*"))).glob("*__nnUNet*ResEnc*"))
+        except StopIteration:
+            nnunet_path = next(next(iter(model_path.glob(f"*{idx:03}*"))).glob("*__nnUNetPlans*"))
+    else:
+        nnunet_path = Path(idx)
+    assert nnunet_path.exists(), nnunet_path
+    folds = sorted([f.name.split("fold_")[-1] for f in nnunet_path.glob("fold*")])
     if max_folds is not None:
         folds = max_folds if isinstance(max_folds, list) else folds[:max_folds]
 
