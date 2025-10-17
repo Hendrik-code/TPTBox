@@ -34,7 +34,8 @@ def make_snapshot3D(
     ids_list: list[Sequence[int]] | None = None,
     smoothing=20,
     resolution: float | None = None,
-    width_factor=1.0,
+    width_factor: float = 1.0,
+    scale_factor: int = 1,
     verbose=True,
     crop=True,
 ) -> Image.Image:
@@ -80,7 +81,7 @@ def make_snapshot3D(
     nii = to_nii_seg(img)
     if crop:
         try:
-            nii.apply_crop_(nii.compute_crop())
+            nii.apply_crop_(nii.compute_crop(dist=2))
         except ValueError:
             pass
     if resolution is None:
@@ -98,7 +99,7 @@ def make_snapshot3D(
         ids_list = ids_list2
 
     # TOP : ("A", "I", "R")
-    nii = nii.reorient(("A", "S", "L")).rescale_((resolution, resolution, resolution))
+    nii = nii.reorient(("A", "S", "L")).rescale_((resolution, resolution, resolution), mode="constant")
     width = int(max(nii.shape[0], nii.shape[2]) * width_factor)
     window_size = (width * len(ids_list), nii.shape[1])
     with Xvfb():
@@ -110,7 +111,7 @@ def make_snapshot3D(
             _plot_sub_seg(scene, nii.extract_label(ids, keep_label=True), x, 0, smoothing, view[i % len(view)])
         scene.projection(proj_type="parallel")
         scene.reset_camera_tight(margin_factor=1.02)
-        window.record(scene, size=window_size, out_path=output_path, reset_camera=False)
+        window.record(scene, size=window_size, out_path=output_path, reset_camera=False, magnification=scale_factor)
         scene.clear()
     if not is_tmp:
         logger.on_save("Save Snapshot3D:", output_path, verbose=verbose)
@@ -129,6 +130,7 @@ def make_snapshot3D_parallel(
     resolution: float = 2,
     cpus=10,
     width_factor=1.0,
+    scale_factor: int = 1,
     override=True,
 ):
     ress = []
@@ -146,6 +148,7 @@ def make_snapshot3D_parallel(
                     "smoothing": smoothing,
                     "resolution": resolution,
                     "width_factor": width_factor,
+                    "scale_factor": scale_factor,
                 },
             )
             ress.append(res)
