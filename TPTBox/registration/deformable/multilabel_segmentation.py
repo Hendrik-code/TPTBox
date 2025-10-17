@@ -28,7 +28,7 @@ class Register_Multi_Seg:
         target_grid (NII): Cropped spatial grid used for deformable registration.
     """
 
-    def __init__(
+    def __init__(  # noqa: C901
         self,
         target: NII,
         atlas: NII,
