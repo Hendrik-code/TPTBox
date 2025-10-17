@@ -575,6 +575,7 @@ class Vertebra_Instance(Abstract_lvl):
         self._rib = None
         self._ivd = None
         self._endplate = None
+        self.has_rib = has_rib
         if has_rib:
             self._rib = (
                 vertebra_label + VERTEBRA_INSTANCE_RIB_LABEL_OFFSET if vertebra_label != 28 else 21 + VERTEBRA_INSTANCE_RIB_LABEL_OFFSET
@@ -696,7 +697,7 @@ class Vertebra_Instance(Abstract_lvl):
     C3 = 3
     C4 = 4
     C5 = 5
-    C6 = 6
+    C6 = 6, True, True
     C7 = 7, True, True
     T1 = 8, True, True
     T2 = 9, True, True

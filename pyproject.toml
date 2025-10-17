@@ -129,6 +129,7 @@ select = [
 
 
 ignore = [
+    "C901",
     "RUF100",
     "F401",
     "BLE001",
@@ -157,6 +158,7 @@ ignore = [
     "B905", # strict= in zip
     "UP007", # Union and "|" python 3.9
     "PLC0415", # import-outside-top-level
+    "RUF059",
 ]
 
 # Allow fix for all enabled rules (when `--fix`) is provided.
