@@ -186,28 +186,40 @@ def Buffered_BIDS_Global_info(
 
                 age = today - file_mod_time
                 if age.days >= int(max_age_days):
-                    print(
-                        "[ ] Delete Buffer - to old:",
-                        (folder / buffer_name),
-                        f"{' ':20}",
-                    ) if verbose else None
+                    (
+                        print(
+                            "[ ] Delete Buffer - to old:",
+                            (folder / buffer_name),
+                            f"{' ':20}",
+                        )
+                        if verbose
+                        else None
+                    )
                     (folder / buffer_name).unlink()
             if (folder / buffer_name).exists() and parent not in recompute_parents:
                 with open((folder / buffer_name), "rb") as b:
                     l = pickle.load(b)
-                    print(
-                        f"[{len(l):8}] Read Buffer:",
-                        (folder / buffer_name),
-                        f"{' ':20}",
-                    ) if verbose else None
+                    (
+                        print(
+                            f"[{len(l):8}] Read Buffer:",
+                            (folder / buffer_name),
+                            f"{' ':20}",
+                        )
+                        if verbose
+                        else None
+                    )
                     files[dataset] += l
             else:
-                print(
-                    f"[{_cont:8}] Create new Buffer:",
-                    (folder / buffer_name),
-                    f"{' ':20}",
-                    end="\r",
-                ) if verbose else None
+                (
+                    print(
+                        f"[{_cont:8}] Create new Buffer:",
+                        (folder / buffer_name),
+                        f"{' ':20}",
+                        end="\r",
+                    )
+                    if verbose
+                    else None
+                )
                 files[dataset] += save_buffer((folder), buffer_name)
     if filter_file is not None:
         files: dict[Path | str, list[Path]] = {d: [g for g in f if filter_file(g)] for d, f in files.items()}
@@ -353,10 +365,14 @@ class BIDS_Global_info:
         if subject not in self.subjects:
             self.subjects[subject] = Subject_Container(subject, self.sequence_splitting_keys)
         self.count_file += 1
-        print(
-            f"Found: {subject}, total file keys {(self.count_file)},  total subjects = {len(self.subjects)}    ",
-            end="\r",
-        ) if self.verbose else None
+        (
+            print(
+                f"Found: {subject}, total file keys {(self.count_file)},  total subjects = {len(self.subjects)}    ",
+                end="\r",
+            )
+            if self.verbose
+            else None
+        )
         self.subjects[subject].add(bids)
 
     def enumerate_subjects(self, sort=False, shuffle=False) -> list[tuple[str, Subject_Container]]:
@@ -729,6 +745,9 @@ class BIDS_FILE:
             info = {}
         if non_strict_mode and not self.BIDS_key.startswith("sub"):
             info["sub"] = self.BIDS_key.replace("_", "-").replace(".", "-")
+        else:
+            # replace _ with - in all info
+            self.info = {k: v.replace("_", "-") for k, v in self.info.items()}
         if isinstance(file_type, str) and file_type.startswith("."):
             file_type = file_type[1:]
         path = self.insert_info_into_path(path)

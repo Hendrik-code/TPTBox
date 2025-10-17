@@ -34,10 +34,11 @@ def make_snapshot3D(
     ids_list: list[Sequence[int]] | None = None,
     smoothing=20,
     resolution: float | None = None,
-    width_factor=1.0,
-    png_magnify=1,
+    width_factor: float = 1.0,
+    scale_factor: int = 1,
     verbose=True,
     crop=True,
+    png_magnify=1,
 ) -> Image.Image:
     """
     Generate a 3D snapshot from a medical image and save it to the specified output path.
@@ -81,7 +82,7 @@ def make_snapshot3D(
     nii = to_nii_seg(img)
     if crop:
         try:
-            nii.apply_crop_(nii.compute_crop(0, 5))
+            nii.apply_crop_(nii.compute_crop(dist=2))
         except ValueError:
             pass
     if resolution is None:
@@ -99,7 +100,7 @@ def make_snapshot3D(
         ids_list = ids_list2
 
     # TOP : ("A", "I", "R")
-    nii = nii.reorient(("A", "S", "L")).rescale_((resolution, resolution, resolution))
+    nii = nii.reorient(("A", "S", "L")).rescale_((resolution, resolution, resolution), mode="constant")
     width = int(max(nii.shape[0], nii.shape[2]) * width_factor)
     window_size = (width * len(ids_list) * png_magnify, nii.shape[1] * png_magnify)
     with Xvfb():
@@ -108,10 +109,23 @@ def make_snapshot3D(
         show_m.initialize()
         for i, ids in enumerate(ids_list):
             x = width * i
-            _plot_sub_seg(scene, nii.extract_label(ids, keep_label=True), x, 0, smoothing, view[i % len(view)])
+            _plot_sub_seg(
+                scene,
+                nii.extract_label(ids, keep_label=True),
+                x,
+                0,
+                smoothing,
+                view[i % len(view)],
+            )
         scene.projection(proj_type="parallel")
         scene.reset_camera_tight(margin_factor=1.02)
-        window.record(scene=scene, size=window_size, out_path=output_path, reset_camera=False)
+        window.record(
+            scene,
+            size=window_size,
+            out_path=output_path,
+            reset_camera=False,
+            magnification=scale_factor,
+        )
         scene.clear()
     if not is_tmp:
         logger.on_save("Save Snapshot3D:", output_path, verbose=verbose)
@@ -131,6 +145,7 @@ def make_snapshot3D_parallel(
     cpus=10,
     width_factor=1.0,
     png_magnify=1,
+    scale_factor: int = 1,
     override=True,
     crop=True,
 ):
@@ -151,6 +166,7 @@ def make_snapshot3D_parallel(
                     "width_factor": width_factor,
                     "png_magnify": png_magnify,
                     "crop": crop,
+                    "scale_factor": scale_factor,
                 },
             )
             ress.append(res)
