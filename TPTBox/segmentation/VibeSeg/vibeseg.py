@@ -93,7 +93,7 @@ def run_vibeseg(
     keep_size=False,  # Keep size of the model Segmentation
     **args,
 ):
-    run_inference_on_file(
+    return run_inference_on_file(
         dataset_id,
         [to_nii(i)],
         out_file=out_seg,
@@ -103,7 +103,7 @@ def run_vibeseg(
         padd=padd,
         keep_size=keep_size,
         **args,
-    )
+    )[0]
 
 
 def run_nnunet(

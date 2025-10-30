@@ -130,11 +130,26 @@ class nnUNetPredictor:
                     ],
                     "use_mask_for_norm": plans["use_mask_for_norm"],
                     "resampling_fn_data": "resample_data_or_seg_to_shape",
-                    "resampling_fn_data_kwargs": {"is_seg": False, "order": 3, "order_z": 0, "force_separate_z": None},
+                    "resampling_fn_data_kwargs": {
+                        "is_seg": False,
+                        "order": 3,
+                        "order_z": 0,
+                        "force_separate_z": None,
+                    },
                     "resampling_fn_seg": "resample_data_or_seg_to_shape",
-                    "resampling_fn_seg_kwargs": {"is_seg": True, "order": 1, "order_z": 0, "force_separate_z": None},
+                    "resampling_fn_seg_kwargs": {
+                        "is_seg": True,
+                        "order": 1,
+                        "order_z": 0,
+                        "force_separate_z": None,
+                    },
                     "resampling_fn_probabilities": "resample_data_or_seg_to_shape",
-                    "resampling_fn_probabilities_kwargs": {"is_seg": False, "order": 1, "order_z": 0, "force_separate_z": None},
+                    "resampling_fn_probabilities_kwargs": {
+                        "is_seg": False,
+                        "order": 1,
+                        "order_z": 0,
+                        "force_separate_z": None,
+                    },
                     **plans["plans_per_stage"][0],
                 }
             }
@@ -709,6 +724,8 @@ class intermediate_slice:
 
 
 def empty_cache(device: torch.device):
+    if isinstance(device, str):
+        device = torch.device(device)
     if device.type == "cuda":
         torch.cuda.empty_cache()
     elif device.type == "mps":
