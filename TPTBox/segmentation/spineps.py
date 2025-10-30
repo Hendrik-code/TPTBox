@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import Literal
 
 from TPTBox import BIDS_FILE, NII, Print_Logger
 
@@ -18,7 +19,22 @@ def get_outpaths_spineps_single(
     dataset=None,
     derivative_name="derivative",
     ignore_bids_filter=True,
-):
+) -> dict[
+    Literal[
+        "out_spine",
+        "out_spine_raw",
+        "out_vert",
+        "out_vert_raw",
+        "out_unc",
+        "out_logits",
+        "out_snap",
+        "out_ctD",
+        "out_snap2",
+        "out_debug",
+        "out_raw",
+    ],
+    Path,
+]:
     from spineps.seg_run import output_paths_from_input
 
     if not isinstance(file_path, BIDS_FILE):
