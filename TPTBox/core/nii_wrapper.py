@@ -59,6 +59,7 @@ from TPTBox.core.vert_constants import (
     SHAPE,
     ZOOMS,
     Location,
+    _same_direction,
     log,
     logging,
     v_name2idx,
@@ -666,7 +667,7 @@ class NII(NII_Math):
             return c
         else:
             return self.get_array().astype(dtype,order=order,casting=casting, subok=subok,copy=copy)
-    def reorient(self:Self, axcodes_to: AX_CODES = ("P", "I", "R"), verbose:logging=False, inplace=False)-> Self:
+    def reorient(self:Self, axcodes_to: AX_CODES|None = ("P", "I", "R"), verbose:logging=False, inplace=False)-> Self:
         """
         Reorients the input Nifti image to the desired orientation, specified by the axis codes.
 
@@ -683,30 +684,34 @@ class NII(NII_Math):
         """
         # Note: nibabel axes codes describe the direction not origin of axes
         # direction PIR+ = origin ASL
-
-        aff = self.affine
-        ornt_fr = self.orientation_ornt
-        arr = self.get_array()
-        ornt_to = nio.axcodes2ornt(axcodes_to)
-        ornt_trans = nio.ornt_transform(ornt_fr, ornt_to)
-        if (ornt_fr == ornt_to).all():
-            log.print("Image is already rotated to", axcodes_to,verbose=verbose)
-            if inplace:
-                return self
-            return self.copy() # type: ignore
-        arr = nio.apply_orientation(arr, ornt_trans)
-        aff_trans = nio.inv_ornt_aff(ornt_trans, arr.shape)
-        new_aff = np.matmul(aff, aff_trans)
-        ### Reset origin ###
-        flip = ornt_trans[:, 1]
-        change = ((-flip) + 1) / 2  # 1 if flip else 0
-        change = tuple(a * (s-1) for a, s in zip(change, self.shape))
-        new_aff[:3, 3] = nib.affines.apply_affine(aff,change) # type: ignore
-        ######
-        #if self.header is not None:
-        #    self.header.set_sform(new_aff, code=1)
-        new_img = arr, new_aff,self.header
-        log.print("Image reoriented from", nio.ornt2axcodes(ornt_fr), "to", axcodes_to,verbose=verbose)
+        if isinstance(axcodes_to,str):
+            axcodes_to = tuple(axcodes_to)
+        if axcodes_to is not None:
+            aff = self.affine
+            ornt_fr = self.orientation_ornt
+            arr = self.get_array()
+            ornt_to = nio.axcodes2ornt(axcodes_to)
+            ornt_trans = nio.ornt_transform(ornt_fr, ornt_to)
+            if (ornt_fr == ornt_to).all():
+                log.print("Image is already rotated to", axcodes_to,verbose=verbose)
+                if inplace:
+                    return self
+                return self.copy() # type: ignore
+            arr = nio.apply_orientation(arr, ornt_trans)
+            aff_trans = nio.inv_ornt_aff(ornt_trans, arr.shape)
+            new_aff = np.matmul(aff, aff_trans)
+            ### Reset origin ###
+            flip = ornt_trans[:, 1]
+            change = ((-flip) + 1) / 2  # 1 if flip else 0
+            change = tuple(a * (s-1) for a, s in zip(change, self.shape))
+            new_aff[:3, 3] = nib.affines.apply_affine(aff,change) # type: ignore
+            ######
+            #if self.header is not None:
+            #    self.header.set_sform(new_aff, code=1)
+            new_img = arr, new_aff,self.header
+            log.print("Image reoriented from", nio.ornt2axcodes(ornt_fr), "to", axcodes_to,verbose=verbose)
+        else:
+            return self if not inplace else self.copy()
         if inplace:
             self.nii = new_img
             return self
@@ -1420,7 +1425,8 @@ class NII(NII_Math):
         max_count_component (int | None): Maximum number of components to retain. Once this limit is reached, remaining components will be removed.
         connectivity (int): Connectivity criterion for defining connected components (default is 3).
         removed_to_label (int): Label to assign to removed components (default is 0).
-
+        TODO : max_count_component currently filters over all labels instead of per label. will be changed.
+        TODO : removed_to_label does not work when keep_label=False
         Returns:
         None
         """
@@ -1437,8 +1443,8 @@ class NII(NII_Math):
         #print("filter",nii.unique())
         #assert max_count_component is None or nii.max() <= max_count_component, nii.unique()
         return self.set_array(arr, inplace=inplace)
-    def filter_connected_components_(self, labels: int |list[int]|None=None,min_volume:int=0,max_volume:int|None=None, max_count_component = None, connectivity: int = 3,keep_label=False):
-        return self.filter_connected_components(labels,min_volume=min_volume,max_volume=max_volume, max_count_component = max_count_component, connectivity = connectivity,keep_label=keep_label,inplace=True)
+    def filter_connected_components_(self, labels: int |list[int]|None=None,min_volume:int=0,max_volume:int|None=None, max_count_component = None, connectivity: int = 3,keep_label=False,removed_to_label=0):
+        return self.filter_connected_components(labels,min_volume=min_volume,max_volume=max_volume, max_count_component = max_count_component, connectivity = connectivity,removed_to_label=removed_to_label,keep_label=keep_label,inplace=True)
 
     def get_segmentation_connected_components_center_of_mass(self, label: int, connectivity: int = 3, sort_by_axis: int | None = None) -> list[COORDINATE]:
         """Calculates the center of mass of the different connected components of a given label in an array
@@ -1835,6 +1841,16 @@ class NII(NII_Math):
             nib = (self.get_array().copy(), self.affine.copy(), self.header.copy())
         return NII(nib,seg=self.seg if seg is None else seg,c_val = self.c_val,info = self.info)
 
+
+    def flip(self, axis:int|str,keep_global_coords=True,inplace=False):
+        axis = self.get_axis(axis) if not isinstance(axis,int) else axis
+        if keep_global_coords:
+            orient = list(self.orientation)
+            orient[axis] = _same_direction[orient[axis] ]
+            return self.reorient(tuple(orient),inplace=inplace)
+        else:
+            return self.set_array(np.flip(self.get_array(),axis),inplace=inplace)
+
     def clone(self):
         return self.copy()
     @secure_save
@@ -2011,9 +2027,14 @@ class NII(NII_Math):
         arr_bg = np_extract_label(arr_bg, label=0, to_label=1)
         return self.set_array(arr_bg, inplace, False)
 
-    def extract_label(self,label:int|Enum|Sequence[int]|Sequence[Enum], keep_label=False,inplace=False):
+    def extract_label(self,label:int|Enum|Sequence[int]|Sequence[Enum]|None, keep_label=False,inplace=False):
         '''If this NII is a segmentation you can single out one label with [0,1].'''
         assert self.seg, "extracting a label only makes sense for a segmentation mask"
+        if label is None:
+            if keep_label:
+                return self.copy() if inplace else self
+            else:
+                return self.clamp(0,1,inplace=inplace)
         seg_arr = self.get_seg_array()
 
         if isinstance(label, Sequence):

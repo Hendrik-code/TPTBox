@@ -74,8 +74,9 @@ class Has_Grid(Grid_Proxy):
         except Exception:
             origin = self.origin
         try:
-            zoom = tuple(np.around(self.zoom, decimals=2).tolist())
-        except Exception:
+            zoom = "(" + ",".join([f"{a:.2f}" for a in self.zoom]) + ")"
+        except Exception as e:
+            print(e)
             zoom = self.zoom
 
         return f"shape={self.shape_int},spacing={zoom}, origin={origin}, ori={self.orientation}"  # type: ignore
@@ -127,11 +128,11 @@ class Has_Grid(Grid_Proxy):
         Apply a transformation (translation, rotation, scaling) to the affine matrix.
 
         Parameters:
-            translation: (n,) array-like in mm
+            translation: (n,) array-like in mm in (R, A, S)
             rotation_degrees: (n,) array-like (pitch, yaw, roll) in degrees
             scaling: (n,) array-like scaling factors along x, y, z
         """
-        warnings.warn("change_affine is untested", stacklevel=2)
+        # warnings.warn("change_affine is untested", stacklevel=2)
         n = self.affine.shape[0]
         transform = np.eye(n)
 

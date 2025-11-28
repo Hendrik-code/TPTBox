@@ -127,23 +127,24 @@ def run_inference_on_file(
 
     try:
         zoom_old = ds_info.get("spacing")
-        zoom = plans_info["configurations"]["3d_fullres"]["spacing"]
-        order = plans_info["transpose_backward"]
-        # order2 = plans_info["transpose_forward"]
-        zoom = [zoom[order[0]], zoom[order[1]], zoom[order[2]]][::-1]
-        orientation_ref = ("P", "I", "R")
-        orientation_ref = [
-            orientation_ref[order[0]],
-            orientation_ref[order[1]],
-            orientation_ref[order[2]],
-        ]  # [::-1]
+
+        if zoom_old is None:
+            zoom = plans_info["configurations"]["3d_fullres"]["spacing"]
+            if all(zoom[0] == z for z in zoom):
+                zoom_old = zoom
+        # order = plans_info["transpose_backward"]
+        ## order2 = plans_info["transpose_forward"]
+        # zoom = [zoom[order[0]], zoom[order[1]], zoom[order[2]]][::-1]
+        # orientation_ref = ("P", "I", "R")
+        # orientation_ref = [
+        #    orientation_ref[order[0]],
+        #    orientation_ref[order[1]],
+        #    orientation_ref[order[2]],
+        # ]  # [::-1]
 
         # zoom_old = zoom_old[::-1]
-        if zoom is None:
-            pass
 
-        else:
-            zoom = [float(z) for z in zoom]
+        zoom_old = [float(z) for z in zoom_old]
     except Exception:
         pass
     assert len(ds_info["channel_names"]) == len(input_nii), (
@@ -156,9 +157,9 @@ def run_inference_on_file(
         print("orientation", orientation, f"{orientation_ref=}") if verbose else None
         input_nii = [i.reorient(orientation) for i in input_nii]
 
-    if zoom is not None:
-        print("rescale", zoom, f"{zoom_old=}, {order=}") if verbose else None
-        input_nii = [i.rescale_(zoom, mode=mode) for i in input_nii]
+    if zoom_old is not None:
+        print("rescale", zoom, f"{zoom_old=}") if verbose else None
+        input_nii = [i.rescale_(zoom_old, mode=mode) for i in input_nii]
         print(input_nii)
     print("squash to float16") if verbose else None
     input_nii = [squash_so_it_fits_in_float16(i) for i in input_nii]
