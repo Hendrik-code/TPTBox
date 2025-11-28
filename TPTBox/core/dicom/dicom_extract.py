@@ -90,7 +90,9 @@ def _generate_bids_path(
 
 def dicom_to_nifti_multiframe(ds, nii_path):
     pixel_array = ds.pixel_array
-    n_frames, n_rows, n_cols = pixel_array.shape
+    if len(pixel_array.shape) != 3 and len(pixel_array.shape) != 4:
+        raise ValueError(f"Expected a shape with 3 colums not {len(pixel_array.shape)}; {pixel_array.shape=}")
+    n_frames = pixel_array.shape[0]
 
     # Pixel spacing (mm)
     if hasattr(ds, "PixelSpacing"):
@@ -118,15 +120,37 @@ def dicom_to_nifti_multiframe(ds, nii_path):
         affine[0:3, 1] = col_cosines * dy
         affine[0:3, 2] = slice_cosines * dz
         affine[0:3, 3] = origin
-    else:
+        nii = nib.Nifti1Image(np.transpose(pixel_array, (2, 1, 0)), affine)
+
+    elif hasattr(ds, "ImagerPixelSpacing"):
         dy, dx = (float(v) for v in ds.ImagerPixelSpacing)
         # Einfaches affine (nur 2D + Zeit, keine Lage im Patientenraum)
         affine = np.eye(4)
         affine[0, 0] = -dx
         affine[1, 1] = -dy
+        nii = nib.Nifti1Image(np.transpose(pixel_array, (2, 1, 0)), affine)
+
+    else:
+        if hasattr(ds, "RelatedSeriesSequence"):
+            raise NotImplementedError("RelatedSeriesSequence Affine lookup not implemented")
+        raise NotImplementedError("No spatial metadata found")
+        ### Some could be solved by looking up the "RelatedSeriesSequence"
+        # "RelatedSeriesSequence": [
+        # {
+        #    "StudyInstanceUID": "1.2.276.0.38.1.1.1.7712.20250929100319.54200288",
+        #    "SeriesInstanceUID": "1.3.46.670589.7.8.1.6.1403526999.1.9608.1759142950287.2",
+        #    "PurposeOfReferenceCodeSequence": []
+        # }
+        # ],
+        # --- No geometry info (e.g. RGB screen captures or video frames) ---
+        print("⚠️ No spatial metadata found — assuming pixel size = 1mm and identity orientation.")
+        affine = np.eye(4)
+        affine[0, 0] = 1.0
+        affine[1, 1] = 1.0
+        affine[2, 2] = 1.0
+        nii = nib.Nifti1Image(pixel_array, affine)
 
     # Reihenfolge anpassen: Nibabel erwartet (X,Y,Z)
-    nii = nib.Nifti1Image(np.transpose(pixel_array, (2, 1, 0)), affine)
     nib.save(nii, nii_path)
 
     return nii_path
@@ -491,6 +515,7 @@ def extract_dicom_folder(
     validate_slicecount=True,
     validate_orientation=True,
     validate_orthogonal=False,
+    validate_slice_increment=True,
     n_cpu: int | None = 1,
     override_subject_name: Callable[[dict, Path], str] | None = None,
     skip_localizer=True,
@@ -517,7 +542,8 @@ def extract_dicom_folder(
         convert_dicom.settings.disable_validate_orientation()
     if not validate_orthogonal:
         convert_dicom.settings.disable_validate_orthogonal()
-
+    if not validate_slice_increment:
+        convert_dicom.settings.disable_validate_slice_increment()
     outs = {}
 
     for p in _find_all_files(dicom_folder):
@@ -566,6 +592,8 @@ def extract_dicom_folder(
                     try:
                         key2, out = process_series(key, files, parts)
                         outs[key2] = out
+                    except NotImplementedError as e:
+                        logger.on_warning("NotImplementedError:", e)
                     except Exception:
                         logger.print_error()
 
@@ -577,8 +605,8 @@ def extract_dicom_folder(
 
 
 if __name__ == "__main__":
-    for p in Path("E:/DSA_Data/DICOMS_DSA_all/").iterdir():
-        extract_dicom_folder(p, Path("D:/data/DSA", "dataset-DSA"), False, False)
+    for p in Path("/DATA/NAS/datasets_source/brain/dsa").iterdir():
+        extract_dicom_folder(p, Path("/DATA/NAS/datasets_source/brain/", "dataset-DSA"), False, False, validate_slice_increment=False)
 
     sys.exit()
     # s = "/home/robert/Downloads/bein/dataset-oberschenkel/rawdata/sub-1-3-46-670589-11-2889201787-2305829596-303261238-2367429497/mr/sub-1-3-46-670589-11-2889201787-2305829596-303261238-2367429497_sequ-406_mr.nii.gz"

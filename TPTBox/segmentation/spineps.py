@@ -9,12 +9,7 @@ from TPTBox import BIDS_FILE, NII, Print_Logger
 logger = Print_Logger()
 
 
-def injection_function(seg_nii: NII):
-    # TODO do something with semantic mask
-    return seg_nii
-
-
-def get_outpaths_spineps_single(
+def get_outpaths_spineps(
     file_path: str | Path | BIDS_FILE,
     dataset=None,
     derivative_name="derivative",
@@ -50,7 +45,7 @@ def get_outpaths_spineps_single(
     return output_paths
 
 
-def run_spineps_single(
+def run_spineps(
     file_path: str | Path | BIDS_FILE,
     dataset=None,
     model_semantic: str | Path = "t2w",
@@ -111,7 +106,7 @@ def run_spineps_single(
     return output_paths
 
 
-def run_spineps_all(nii_dataset: Path | str):
+def _run_spineps_all(nii_dataset: Path | str):
     for model_semantic in ["t2w", "t1w", "vibe"]:
         command = [
             "spineps",

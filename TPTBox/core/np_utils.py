@@ -792,6 +792,7 @@ def np_filter_connected_components(
     arr2[np.isin(arr2, labels, invert=True)] = 0  # type:ignore
 
     labels_out, n = _connected_components(arr2, connectivity=connectivity, return_N=True)
+    largest_k_components_org = largest_k_components
     if largest_k_components is None:
         largest_k_components = n
     assert largest_k_components is not None
@@ -801,8 +802,23 @@ def np_filter_connected_components(
     ]
     largest_k_components = min(largest_k_components, len(label_volume_pairs))
     label_volume_pairs.sort(key=lambda x: x[1], reverse=True)
-    preserve: list[int] = [x[0] for x in label_volume_pairs[:largest_k_components]]
 
+    if len(labels) == 1 or label_volume_pairs == largest_k_components or largest_k_components_org is None:
+        preserve: list[int] = [x[0] for x in label_volume_pairs[:largest_k_components]]
+    else:
+        counter = dict.fromkeys(labels, 0)
+        preserve = []
+        for preserve_label, _ in label_volume_pairs:
+            idx = arr[labels_out == preserve_label].max()
+            if counter.get(idx, largest_k_components + 1) <= largest_k_components_org:
+                preserve.append(preserve_label)
+                counter[idx] += 1
+                # print("add perserve", idx)
+            if counter.get(idx, largest_k_components + 1) == largest_k_components_org:
+                del counter[idx]
+                # print("del perserve", idx)
+            if len(counter) == 0:
+                break
     cc_out = np.zeros(arr.shape, dtype=arr.dtype)
     i = 1
     for preserve_label in preserve:
@@ -1013,9 +1029,6 @@ def np_smooth_gaussian_labelwise(
 
     if isinstance(label_to_smooth, int):
         label_to_smooth = [label_to_smooth]
-
-    for l in label_to_smooth:
-        assert l in sem_labels, f"You want to smooth label {l} but it is not present in the given segmentation mask"
 
     if dilate_prior > 0 and not dilate_channelwise:
         arr = np_dilate_msk(
