@@ -765,6 +765,7 @@ def np_filter_connected_components(
     min_volume: float = 0,
     max_volume: float | None = None,
     removed_to_label=0,
+    k_larges_global=False,
 ) -> UINTARRAY:
     """finds the largest k connected components in a given array (does NOT work with zero as label!)
 
@@ -774,7 +775,7 @@ def np_filter_connected_components(
         labels (int | list[int] | None, optional): Labels that the algorithm should be applied to. If none, applies on all labels found in arr. Defaults to None.
         connectivity: in range [1,3]. For 2D images, 2 and 3 is the same.
         return_original_labels (bool): If set to False, will label the components from 1 to k. Defaults to True
-
+        k_larges_global(bool): If true largest_k_components is filterd over all labels instead of each lable individualy
     Returns:
         np.ndarray: array with the largest k connected components
     """
@@ -803,7 +804,7 @@ def np_filter_connected_components(
     largest_k_components = min(largest_k_components, len(label_volume_pairs))
     label_volume_pairs.sort(key=lambda x: x[1], reverse=True)
 
-    if len(labels) == 1 or label_volume_pairs == largest_k_components or largest_k_components_org is None:
+    if len(labels) == 1 or label_volume_pairs == largest_k_components or largest_k_components_org is None or k_larges_global:
         preserve: list[int] = [x[0] for x in label_volume_pairs[:largest_k_components]]
     else:
         counter = dict.fromkeys(labels, 0)
