@@ -55,6 +55,8 @@ class Test_test_samples(unittest.TestCase):
     @unittest.skipIf(not has_spineps, "requires spineps to be installed")
     def test_spineps(self):
         tests_path = get_tests_dir()
+        if (tests_path / "derivative").exists():
+            shutil.rmtree(tests_path / "derivative")
 
         mri_nii, subreg_nii, vert_nii, label = get_test_mri()
         from TPTBox.segmentation.spineps import run_spineps
@@ -70,7 +72,7 @@ class Test_test_samples(unittest.TestCase):
         assert out["out_ctd"].exists()
 
         vert_nii = to_nii(out["out_vert"], True)
-        assert label in vert_nii.unique(), vert_nii.unique()
+        assert label in vert_nii.unique(), (label, vert_nii.unique())
         shutil.rmtree(tests_path / "derivative")
 
     @unittest.skipIf(not has_spineps, "requires spineps to be installed")
