@@ -5,7 +5,7 @@ import sys
 from collections.abc import Sequence
 from contextlib import ContextDecorator
 from pathlib import Path
-from typing import Literal, Optional, Union
+from typing import Literal, Union
 
 import torch
 import torch.optim
@@ -49,7 +49,7 @@ def get_post_transform(
     target_grid: Grid,
     source_grid: Grid,
     align=False,
-) -> Optional[SpatialTransform]:
+) -> SpatialTransform | None:
     r"""Get constant rigid transformation between image grid domains."""
     if align is False or align is None:
         return None
@@ -90,7 +90,7 @@ def load_transform(path: PathStr, grid: Grid) -> SpatialTransform:
     """
     target_grid = grid
 
-    def convert_matrix(matrix: Tensor, grid: Optional[Grid] = None) -> Tensor:
+    def convert_matrix(matrix: Tensor, grid: Grid | None = None) -> Tensor:
         if grid is None:
             pre = target_grid.transform(Axes.CUBE_CORNERS, Axes.WORLD)
             post = target_grid.transform(Axes.WORLD, Axes.CUBE_CORNERS)
@@ -166,7 +166,7 @@ class OptimizerWrapper(ContextDecorator):
                 self.scheduler.step()
 
 
-def overlap_mask(source_mask: Tensor | None, target_mask: Tensor | None) -> Optional[Tensor]:
+def overlap_mask(source_mask: Tensor | None, target_mask: Tensor | None) -> Tensor | None:
     r"""Overlap mask at which to evaluate pairwise data term."""
     if source_mask is None:
         return target_mask
@@ -184,11 +184,12 @@ def make_foreground_mask(image: Image, foreground_lower_threshold, foreground_up
     return Image(mask, image.grid())
 
 
-def normalize_img(image: Image, normalize_strategy: Optional[Literal["auto", "CT", "MRI"]]):
+def normalize_img(image: Image, normalize_strategy: Literal["auto", "CT", "MRI"] | None):
     if normalize_strategy is None:
         return image
     data = image.tensor()
     if normalize_strategy == "MRI":
+        data = data.float()
         max_v = torch.quantile(data[data > 0], q=0.95)
         min_v = 0
     elif normalize_strategy == "CT":
@@ -210,7 +211,7 @@ def normalize_img(image: Image, normalize_strategy: Optional[Literal["auto", "CT
     return Image(data, image.grid())
 
 
-def clamp_mask(image: Optional[Image]):
+def clamp_mask(image: Image | None):
     if image is None:
         return image
     data = image.tensor()
