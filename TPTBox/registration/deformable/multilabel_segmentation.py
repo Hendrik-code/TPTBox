@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import pickle
 from pathlib import Path
 
@@ -32,8 +34,8 @@ class Register_Multi_Seg:
         self,
         target: NII,
         atlas: NII,
-        poi_cms: POI | None,
-        same_side: bool,
+        poi_cms: POI | None = None,
+        same_side: bool = True,
         verbose=99,
         gpu=0,
         ddevice: DEVICES = "cuda",
@@ -42,13 +44,15 @@ class Register_Multi_Seg:
         lr=0.01,
         lr_end_factor=None,
         max_steps=1500,
-        min_delta=1e-06,
+        min_delta: float | list[float] = 1e-06,
         pyramid_levels=4,
         coarsest_level=3,
         finest_level=0,
         crop: bool = True,
         cms_ids: list | None = None,
         poi_target_cms: POI | None = None,
+        max_history=100,
+        change_after_point_reg=lambda x, y: (x, y),
         **args,
     ):
         """
@@ -163,6 +167,7 @@ class Register_Multi_Seg:
             self.crop = None
 
         self.target_grid = target.to_gird()
+        target, atlas_reg = change_after_point_reg(target, atlas_reg)
         self.reg_deform = Deformable_Registration(
             target,
             atlas_reg,
@@ -180,6 +185,7 @@ class Register_Multi_Seg:
             verbose=verbose,
             gpu=gpu,
             ddevice=ddevice,
+            max_history=max_history,
             **args,
         )
 
@@ -195,7 +201,13 @@ class Register_Multi_Seg:
             1,  # version
             (self.reg_point.get_dump()),
             (self.reg_deform.get_dump()),
-            (self.same_side, self.atlas_org, self.target_grid_org, self.target_grid, self.crop),
+            (
+                self.same_side,
+                self.atlas_org,
+                self.target_grid_org,
+                self.target_grid,
+                self.crop,
+            ),
         )
 
     def save(self, path: str | Path):
@@ -238,7 +250,13 @@ class Register_Multi_Seg:
         self = cls.__new__(cls)
         self.reg_point = Point_Registration.load_(t0)
         self.reg_deform = Deformable_Registration.load_(t1)
-        self.same_side, self.atlas_org, self.target_grid_org, self.target_grid, self.crop = x
+        (
+            self.same_side,
+            self.atlas_org,
+            self.target_grid_org,
+            self.target_grid,
+            self.crop,
+        ) = x
         return self
 
     def transform_nii(self, nii_atlas: NII):

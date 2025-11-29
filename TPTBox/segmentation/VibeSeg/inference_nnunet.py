@@ -11,7 +11,7 @@ import numpy as np
 import torch
 
 from TPTBox import NII, Image_Reference, Log_Type, Print_Logger, to_nii
-from TPTBox.segmentation.TotalVibeSeg.auto_download import download_weights
+from TPTBox.segmentation.VibeSeg.auto_download import download_weights
 
 logger = Print_Logger()
 out_base = Path(__file__).parent.parent / "nnUNet/"
@@ -72,7 +72,7 @@ def run_inference_on_file(
     if out_file is not None and Path(out_file).exists() and not override:
         return out_file, None
 
-    from TPTBox.segmentation.nnUnet_utils.inference_api import load_inf_model, run_inference  # noqa: PLC0415
+    from TPTBox.segmentation.nnUnet_utils.inference_api import load_inf_model, run_inference
 
     if isinstance(idx, int):
         download_weights(idx, model_path)
@@ -90,11 +90,20 @@ def run_inference_on_file(
     # if idx in _unets:
     #    nnunet = _unets[idx]
     # else:
-    print("load model", nnunet_path.name, "; folds", folds) if verbose else None
+    print("load model", nnunet_path, "; folds", folds) if verbose else None
     with open(Path(nnunet_path, "plans.json")) as f:
         plans_info = json.load(f)
     with open(Path(nnunet_path, "dataset.json")) as f:
         ds_info = json.load(f)
+    inference_config = Path(nnunet_path, "inference_config.json")
+    if inference_config.exists():
+        with open() as f:
+            ds_info2 = json.load(f)
+            if "model_expected_orientation" in ds_info2:
+                ds_info["orientation"] = ds_info2["model_expected_orientation"]
+            if "resolution_range" in ds_info2:
+                ds_info["spacing"] = ds_info2["resolution_range"]
+
     nnunet = load_inf_model(
         nnunet_path,
         allow_non_final=True,
@@ -111,13 +120,31 @@ def run_inference_on_file(
     #    _unets[idx] = nnunet
     if "orientation" in ds_info:
         orientation = ds_info["orientation"]
+
     zoom = None
+    orientation_ref = None
     og_nii = input_nii[0].copy()
 
     try:
-        zoom = plans_info["configurations"]["3d_fullres"]["spacing"]
-        order = plans_info["transpose_backward"]
-        zoom = [zoom[order[0]], zoom[order[1]], zoom[order[2]]][::-1]
+        zoom_old = ds_info.get("spacing")
+
+        if zoom_old is None:
+            zoom = plans_info["configurations"]["3d_fullres"]["spacing"]
+            if all(zoom[0] == z for z in zoom):
+                zoom_old = zoom
+        # order = plans_info["transpose_backward"]
+        ## order2 = plans_info["transpose_forward"]
+        # zoom = [zoom[order[0]], zoom[order[1]], zoom[order[2]]][::-1]
+        # orientation_ref = ("P", "I", "R")
+        # orientation_ref = [
+        #    orientation_ref[order[0]],
+        #    orientation_ref[order[1]],
+        #    orientation_ref[order[2]],
+        # ]  # [::-1]
+
+        # zoom_old = zoom_old[::-1]
+
+        zoom_old = [float(z) for z in zoom_old]
     except Exception:
         pass
     assert len(ds_info["channel_names"]) == len(input_nii), (
@@ -127,12 +154,13 @@ def run_inference_on_file(
         nnunet_path,
     )
     if orientation is not None:
-        print("orientation", orientation) if verbose else None
+        print("orientation", orientation, f"{orientation_ref=}") if verbose else None
         input_nii = [i.reorient(orientation) for i in input_nii]
 
-    if zoom is not None:
-        print("rescale", zoom) if verbose else None
-        input_nii = [i.rescale_(zoom, mode=mode) for i in input_nii]
+    if zoom_old is not None:
+        print("rescale", zoom, f"{zoom_old=}") if verbose else None
+        input_nii = [i.rescale_(zoom_old, mode=mode) for i in input_nii]
+        print(input_nii)
     print("squash to float16") if verbose else None
     input_nii = [squash_so_it_fits_in_float16(i) for i in input_nii]
 
@@ -164,7 +192,7 @@ def run_inference_on_file(
 idx_models = [80, 87, 86, 85]
 
 
-def run_total_seg(
+def run_VibeSeg(
     img: Path | str | list[Path] | list[NII],
     out_path: Path,
     override=False,

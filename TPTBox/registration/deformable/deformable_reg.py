@@ -2,7 +2,7 @@ from __future__ import annotations
 
 # pip install hf-deepali
 from collections.abc import Sequence
-from typing import Literal, Optional, Union
+from typing import Literal, Union
 
 import numpy as np
 import torch
@@ -69,7 +69,7 @@ class Deformable_Registration(General_Registration):
         smooth_grad=0.0,
         verbose=0,
         max_steps: int | Sequence[int] = 1000,  # Early stopping.  override on_converged finer controle
-        max_history: int | None = None,
+        max_history: int | None = 100,
         min_value=0.0,  # Early stopping.  override on_converged finer controle
         min_delta: float | Sequence[float] = -0.0001,  # Early stopping.  override on_converged finer controle
         loss_terms: list[LOSS | str] | dict[str, LOSS] | dict[str, str] | dict[str, tuple[str, dict]] | None = None,

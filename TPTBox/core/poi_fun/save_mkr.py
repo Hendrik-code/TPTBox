@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import json
 import random
 from pathlib import Path
 
 ###### GLOBAL POI #####
-from typing import TYPE_CHECKING, Any, Literal, Optional, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, Union
 
 import numpy as np
 from typing_extensions import NotRequired
@@ -107,11 +109,16 @@ class MeasurementVolumeMarkup(Markup, total=False):
     boundingBox: list[float]
 
 
-MKR_DEFINITION = MKR_Lines | dict
+MKR_DEFINITION = Union[MKR_Lines, dict]
 
 
 def _get_display_dict(
-    display: MKR_Display | dict, color=None, selectedColor=None, activeColor=None, pointLabelsVisibility=False, glyphScale=1.0
+    display: MKR_Display | dict,
+    color=None,
+    selectedColor=None,
+    activeColor=None,
+    pointLabelsVisibility=False,
+    glyphScale=1.0,
 ):
     if activeColor is None:
         activeColor = [0.4, 1.0, 0.0]
@@ -153,7 +160,13 @@ def _get_display_dict(
     }
 
 
-def _get_markup_color(definition: MKR_DEFINITION, region, subregion, split_by_region=False, split_by_subregion=False):
+def _get_markup_color(
+    definition: MKR_DEFINITION,
+    region,
+    subregion,
+    split_by_region=False,
+    split_by_subregion=False,
+):
     color = definition.get("color", None)
     if color is None:
         if split_by_region:
@@ -188,7 +201,11 @@ def _get_control_point(cp: ControlPoint, position, id_name="", label="", name=""
 
 
 def _make_default_markup(
-    markup_type: MarkupType, name, coordinateSystem: CoordinateSystem, controlPoints=None, display=None
+    markup_type: MarkupType,
+    name,
+    coordinateSystem: CoordinateSystem,
+    controlPoints=None,
+    display=None,
 ) -> Markup | MeasurementVolumeMarkup:
     if controlPoints is None:
         controlPoints = []
@@ -209,7 +226,13 @@ def _make_default_markup(
     if markup_type == "ROI":
         base.update({"roiType": "Box", "insideOut": False})
     elif markup_type == "Plane":
-        base.update({"planeType": "PointNormal", "sizeMode": "auto", "autoScalingSizeFactor": 1.0})
+        base.update(
+            {
+                "planeType": "PointNormal",
+                "sizeMode": "auto",
+                "autoScalingSizeFactor": 1.0,
+            }
+        )
     elif markup_type == "MeasurementVolume":
         mv: MeasurementVolumeMarkup = {
             **base,
@@ -226,7 +249,7 @@ def _make_default_markup(
 
 def _get_markup_lines(
     definition: MKR_Lines,
-    poi: "POI_Global",
+    poi: POI_Global,
     coordinate_system: Literal["LPS", "RAS"],
     split_by_region=False,
     split_by_subregion=False,
@@ -235,7 +258,6 @@ def _get_markup_lines(
     if display is None:
         display = {}
     key_points = definition.get("key_points")
-
     region, subregion = key_points[0]
     color = _get_markup_color(definition, region, subregion, split_by_region, split_by_subregion)
     display = _get_display_dict(display | definition.get("display", {}), selectedColor=color)
@@ -245,26 +267,57 @@ def _get_markup_lines(
         name, name2 = get_desc(poi, region, subregion)
         controlPoints.append(
             _get_control_point(
-                definition.get("controlPoint", {}), poi[region, subregion], f"{region}-{subregion}", f"{region}-{subregion}", name, name2
+                definition.get("controlPoint", {}),
+                poi[region, subregion],
+                f"{region}-{subregion}",
+                f"{region}-{subregion}",
+                name,
+                name2,
             )
         )
-    return _make_default_markup("Line", definition.get("name"), coordinate_system, controlPoints=controlPoints, display=display)
+    return _make_default_markup(
+        "Line",
+        definition.get("name"),
+        coordinate_system,
+        controlPoints=controlPoints,
+        display=display,
+    )
 
 
-def get_desc(self: "POI_Global", region, subregion):
+def get_desc(self: POI_Global, region, subregion):
+    label = self.info.get("label_name", {}).get(str((region, subregion)))
+    if label is None:
+        label = f"{region}-{subregion}"
     try:
         name = self.level_two_info(subregion).name
     except Exception:
         name = str(subregion)
     try:
         name2 = self.level_one_info(region).name
+        if "_ignore_level_one_info_range" in self.info:
+            try:
+                if region in self.info["_ignore_level_one_info_range"]:
+                    name2 = str(region)
+            except Exception:
+                pass
+
     except Exception:
         name2 = str(region)
-    return name, name2
+    return name, name2, label
+
+
+def _get_key(region, subregion, split_by_region, split_by_subregion, main_key="POI"):
+    key = main_key
+    if split_by_region:
+        key += str(region) + "_"
+    if split_by_subregion:
+        key += str(subregion)
+
+    return key
 
 
 def _save_mrk(
-    poi: "POI_Global",
+    poi: POI_Global,
     filepath: str | Path,
     color=None,
     split_by_region=True,
@@ -274,6 +327,7 @@ def _save_mrk(
     display: MKR_Display | dict = None,  # type: ignore
     pointLabelsVisibility=False,
     glyphScale=1.0,
+    main_key="P",
     **args,
 ):
     """
@@ -301,12 +355,14 @@ def _save_mrk(
     if add_points:
         # Create list of control points
         for region, subregion, coords in poi.centroids.items():
-            key = "P"
-            if split_by_region:
-                key += str(region) + "_"
-            if split_by_subregion:
-                key += str(subregion)
-            name, name2 = get_desc(poi, region, subregion)
+            key = _get_key(
+                region,
+                subregion,
+                split_by_region,
+                split_by_subregion,
+                main_key=main_key,
+            )
+            name, name2, label = get_desc(poi, region, subregion)
             if key not in list_markups:
                 list_markups[key] = _make_default_markup(
                     "Fiducial",
@@ -316,17 +372,40 @@ def _save_mrk(
                     display=_get_display_dict(
                         display,
                         selectedColor=_get_markup_color(
-                            {"color": color}, region, subregion, split_by_region=split_by_subregion, split_by_subregion=split_by_subregion
+                            {"color": color},
+                            region,
+                            subregion,
+                            split_by_region=split_by_subregion,
+                            split_by_subregion=split_by_subregion,
                         ),
                         **addendum,
                     ),
                 )
             list_markups[key]["controlPoints"].append(
-                _get_control_point({}, coords, f"{region}-{subregion}", f"{region}-{subregion}", name, name2)
+                _get_control_point(
+                    {},
+                    coords,
+                    f"{region}-{subregion}",
+                    label,
+                    name,
+                    name2,
+                )
             )
     markups = list(list_markups.values())
-    # Lines
-    [markups.append(_get_markup_lines(line, poi, coordinate_system, split_by_region, split_by_subregion, display)) for line in add_lines]
+
+    [
+        markups.append(
+            _get_markup_lines(
+                line,
+                poi,
+                coordinate_system,
+                split_by_region,
+                split_by_subregion,
+                display,
+            )
+        )
+        for line in add_lines
+    ]
     mrk_data = {
         "@schema": "https://raw.githubusercontent.com/slicer/slicer/master/Modules/Loadable/Markups/Resources/Schema/markups-schema-v1.0.3.json#",
         "markups": markups,

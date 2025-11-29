@@ -23,12 +23,14 @@ class POI_Global(Abstract_POI):
 
     def __init__(
         self,
-        input_poi: poi.POI | POI_Descriptor | dict[str, dict[str, tuple[float, ...]]],
+        input_poi: poi.POI | POI_Descriptor | dict[str, dict[str, tuple[float, ...]]] = None,
         itk_coords: bool = False,
         level_one_info: type[Abstract_lvl] | None = None,  # Must be Enum and must has order_dict
         level_two_info: type[Abstract_lvl] | None = None,
         info: dict | None = None,
     ):
+        if input_poi is None:
+            input_poi = {}
         args = {}
         if level_one_info is not None:
             args["level_one_info"] = level_one_info
@@ -157,6 +159,8 @@ class POI_Global(Abstract_POI):
         if centroids is None:
             centroids = self.centroids.copy()
         p = POI_Global(centroids)
+        p.level_one_info = self.level_one_info
+        p.level_two_info = self.level_two_info
         p.format = self.format
         p.info = deepcopy(self.info)
         p.itk_coords = self.itk_coords
@@ -195,6 +199,7 @@ class POI_Global(Abstract_POI):
         display: save_mkr.MKR_Display | dict = None,  # type: ignore
         pointLabelsVisibility=False,
         glyphScale=5.0,
+        main_key="Point",
     ):
         save_mkr._save_mrk(
             poi=self,
@@ -207,4 +212,5 @@ class POI_Global(Abstract_POI):
             display=display,
             pointLabelsVisibility=pointLabelsVisibility,
             glyphScale=glyphScale,
+            main_key=main_key,
         )

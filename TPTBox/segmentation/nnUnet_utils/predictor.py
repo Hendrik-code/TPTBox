@@ -130,11 +130,26 @@ class nnUNetPredictor:
                     ],
                     "use_mask_for_norm": plans["use_mask_for_norm"],
                     "resampling_fn_data": "resample_data_or_seg_to_shape",
-                    "resampling_fn_data_kwargs": {"is_seg": False, "order": 3, "order_z": 0, "force_separate_z": None},
+                    "resampling_fn_data_kwargs": {
+                        "is_seg": False,
+                        "order": 3,
+                        "order_z": 0,
+                        "force_separate_z": None,
+                    },
                     "resampling_fn_seg": "resample_data_or_seg_to_shape",
-                    "resampling_fn_seg_kwargs": {"is_seg": True, "order": 1, "order_z": 0, "force_separate_z": None},
+                    "resampling_fn_seg_kwargs": {
+                        "is_seg": True,
+                        "order": 1,
+                        "order_z": 0,
+                        "force_separate_z": None,
+                    },
                     "resampling_fn_probabilities": "resample_data_or_seg_to_shape",
-                    "resampling_fn_probabilities_kwargs": {"is_seg": False, "order": 1, "order_z": 0, "force_separate_z": None},
+                    "resampling_fn_probabilities_kwargs": {
+                        "is_seg": False,
+                        "order": 1,
+                        "order_z": 0,
+                        "force_separate_z": None,
+                    },
                     **plans["plans_per_stage"][0],
                 }
             }
@@ -224,7 +239,8 @@ class nnUNetPredictor:
                     self.network.load_state_dict(params)  # type: ignore
                 else:
                     self.network._orig_mod.load_state_dict(params)
-                self.network.cuda()  # type: ignore
+                if self.device.type == "cuda":
+                    self.network.cuda()  # type: ignore
                 self.network.eval()  # type: ignore
                 self.loaded_networks.append(self.network)
         # print(type(self.loaded_networks[0]))
@@ -567,6 +583,8 @@ class nnUNetPredictor:
         predicted_logits, n_predictions, _, _ = self._allocate(data, "cpu", pbar)
         for e, i in enumerate(inter_mediate_slice, 1):
             slices = i.get_intermediate()
+            if slices is None:
+                continue
             sub_data = data[slices]
             logits, n_pred = self._run_sub(
                 sub_data, network, self.device, i.get_slices(), pbar, addendum=f"chunks={e}/{len(inter_mediate_slice)}"
@@ -689,6 +707,8 @@ class intermediate_slice:
         self.slicers.append(s)
 
     def get_intermediate(self):
+        if self.min_s is None or self.max_s is None:
+            return None
         return (
             slice(None),
             *tuple(slice(mi, ma) for mi, ma in zip(self.min_s, self.max_s)),
@@ -704,6 +724,8 @@ class intermediate_slice:
 
 
 def empty_cache(device: torch.device):
+    if isinstance(device, str):
+        device = torch.device(device)
     if device.type == "cuda":
         torch.cuda.empty_cache()
     elif device.type == "mps":
