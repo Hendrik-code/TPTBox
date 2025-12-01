@@ -6,7 +6,7 @@ import pickle
 import time
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Literal, Optional, Self, Union
+from typing import Literal, Union
 
 import torch
 import torch.optim
@@ -15,16 +15,18 @@ from deepali.core import Axes, PathStr
 from deepali.core import Grid as Deepali_Grid
 from deepali.data import Image as deepaliImage
 from deepali.modules import TransformImage
-from deepali.spatial import (
-    SpatialTransform,
-)
+from deepali.spatial import SpatialTransform
+from typing_extensions import Self
 
 from TPTBox import NII, POI, Image_Reference, to_nii
 from TPTBox.core.compat import zip_strict
 from TPTBox.core.internal.deep_learning_utils import DEVICES, get_device
 from TPTBox.core.nii_poi_abstract import Grid as TPTBox_Grid
 from TPTBox.core.nii_poi_abstract import Has_Grid
-from TPTBox.registration.deepali.deepali_trainer import LOSS, DeepaliPairwiseImageTrainer
+from TPTBox.registration.deepali.deepali_trainer import (
+    LOSS,
+    DeepaliPairwiseImageTrainer,
+)
 
 
 def center_of_mass(tensor):
@@ -194,7 +196,7 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         smooth_grad=0.0,
         verbose=99,
         max_steps: int | Sequence[int] = 250,  # Early stopping.  override on_converged finer control
-        max_history: int | None = None,
+        max_history: int | None = 100,
         min_value=0.0,  # Early stopping.  override on_converged finer control
         min_delta: float | Sequence[float] = 0.0,  # Early stopping.  override on_converged finer control
         loss_terms: list[LOSS | str] | dict[str, LOSS] | dict[str, str] | dict[str, tuple[str, dict]] | None = None,

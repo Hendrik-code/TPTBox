@@ -10,7 +10,7 @@ import numpy as np
 import pydicom
 from dicom2nifti import common
 
-from TPTBox.core.bids_constants import formats
+from TPTBox.core.bids_constants import formats, modalities
 from TPTBox.core.nii_wrapper import NII, to_nii
 
 dixon_mapping = {
@@ -266,7 +266,25 @@ def extract_keys_from_json(  # noqa: C901
         found = False
         if modality == "ct":
             mri_format = "ct"
-        else:
+        elif modality == "xa":  # Angiography
+            if "BIPLANE A" in image_type or "SINGLE A" in image_type:
+                keys["acq"] = "A"
+            elif "BIPLANE B" in image_type or "SINGLE B" in image_type:
+                keys["acq"] = "B"
+            monitor = _get("PositionerMotion", " ").lower()
+            # ftv = _get("FrameTimeVector", None).lower()
+            monitor = _get("PositionerMotion", " ").lower()
+            tag = _get("DerivationDescription", " ").lower()
+            # ftv is not None
+            if tag == "subtraction":
+                mri_format = "DSA" if monitor == "static" and "VOLUME" not in image_type and "RECON" not in image_type else "subtraction"
+            elif "3DRA_PROP" in image_type:
+                mri_format = "3DRA"
+            elif monitor == "dynamic" or "VOLUME" in image_type or "RECON" in image_type or "3DRA_PROP" in image_type:
+                mri_format = "DSA3D"
+            else:
+                mri_format = "XA"
+        elif modality == "mr":
             for key, mri_format_new in map_series_description_to_file_format.items():
                 regex = re.compile(key)
                 if re.match(regex, series_description):
@@ -280,14 +298,16 @@ def extract_keys_from_json(  # noqa: C901
                         break
             if mri_format is None:
                 mri_format = "mr"
-        if mri_format == "T1w":
-            if "sub" in series_description.lower() and keys.get("part") is None:
-                keys["part"] = "subtraction"
-            if (
-                " km " in series_description.lower() or series_description.startswith("km") or series_description.endswith("km")
-            ) and keys.get("ce") is None:
-                keys["ce"] = "ContrastAgent"
+            if mri_format == "T1w":
+                if "sub" in series_description.lower() and keys.get("part") is None:
+                    keys["part"] = "subtraction"
+                if (
+                    " km " in series_description.lower() or series_description.startswith("km") or series_description.endswith("km")
+                ) and keys.get("ce") is None:
+                    keys["ce"] = "ContrastAgent"
+        else:
+            raise NotImplementedError(f"modality='{modality.upper()}', ({modalities.get(modality.upper())})")
+
             # ".*sub.*t1.*": "subtraktion",
         # "subtraktion.*t1.*": "subtraktion",
-
         return mri_format, keys

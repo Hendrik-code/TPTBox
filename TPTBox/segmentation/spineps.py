@@ -2,18 +2,50 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import Literal
 
 from TPTBox import BIDS_FILE, NII, Print_Logger
 
 logger = Print_Logger()
 
 
-def injection_function(seg_nii: NII):
-    # TODO do something with semantic mask
-    return seg_nii
+def get_outpaths_spineps(
+    file_path: str | Path | BIDS_FILE,
+    dataset=None,
+    derivative_name="derivative",
+    ignore_bids_filter=True,
+) -> dict[
+    Literal[
+        "out_spine",
+        "out_spine_raw",
+        "out_vert",
+        "out_vert_raw",
+        "out_unc",
+        "out_logits",
+        "out_snap",
+        "out_ctD",
+        "out_snap2",
+        "out_debug",
+        "out_raw",
+    ],
+    Path,
+]:
+    from spineps.seg_run import output_paths_from_input
+
+    if not isinstance(file_path, BIDS_FILE):
+        file_path = Path(file_path)
+        file_path = BIDS_FILE(file_path, file_path.parent if dataset is None else dataset)
+    output_paths = output_paths_from_input(
+        file_path,
+        derivative_name,
+        None,
+        input_format=file_path.format,
+        non_strict_mode=ignore_bids_filter,
+    )
+    return output_paths
 
 
-def run_spineps_single(
+def run_spineps(
     file_path: str | Path | BIDS_FILE,
     dataset=None,
     model_semantic: str | Path = "t2w",
@@ -74,7 +106,7 @@ def run_spineps_single(
     return output_paths
 
 
-def run_spineps_all(nii_dataset: Path | str):
+def _run_spineps_all(nii_dataset: Path | str):
     for model_semantic in ["t2w", "t1w", "vibe"]:
         command = [
             "spineps",
@@ -181,7 +213,11 @@ def _run_spineps_vert(
     verbose=True,
     use_cpu=False,
 ):
-    from spineps import get_instance_model, phase_postprocess_combined, predict_instance_mask
+    from spineps import (
+        get_instance_model,
+        phase_postprocess_combined,
+        predict_instance_mask,
+    )
     from spineps.get_models import get_actual_model
 
     if isinstance(model_instance, Path):
