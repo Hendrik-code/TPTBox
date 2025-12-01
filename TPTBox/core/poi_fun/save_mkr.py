@@ -331,7 +331,7 @@ def _save_mrk(
         "@schema": "https://raw.githubusercontent.com/slicer/slicer/master/Modules/Loadable/Markups/Resources/Schema/markups-schema-v1.0.3.json#",
         "markups": markups,
     }
-    print(markups[-1].get("display"))
+    # print(markups[-1].get("display"))
     filepath.unlink(missing_ok=True)
     with open(filepath, "w") as f:
         json.dump(mrk_data, f, indent=2)
