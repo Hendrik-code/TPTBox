@@ -575,7 +575,7 @@ class POI(Abstract_POI, Has_Grid):
         return self.to_global().to_other(ref)
 
     def resample_from_to_(self, ref: Has_Grid):
-        return self._set_inplace(self.resample_from_to_(ref))
+        return self._set_inplace(self.resample_from_to(ref))
 
     def save(
         self,
