@@ -254,7 +254,7 @@ class DISTANCE_to_TARGET(PairwiseImageLoss):
 
             # Pairwise distances (N_wrong, N_gt); differentiable
             d = torch.cdist(subsample_coords(wrong_coords, 5000), gt_coords)
-            min_dists = d.min(dim=1).values  # (N_wrong,)
+            min_dists = d.min(dim=1).to_numpy()  # (N_wrong,)
 
             per_class_losses.append(min_dists.mean())
 
@@ -264,38 +264,6 @@ class DISTANCE_to_TARGET(PairwiseImageLoss):
 
         # Average over foreground classes
         return torch.stack(per_class_losses).mean()
-
-
-class LABEL_LOSS(PairwiseImageLoss):
-    def __init__(
-        self,
-        max_v=1,
-        *args,
-        **kwargs,
-    ) -> None:
-        self.max_v = max_v
-        super().__init__(*args, **kwargs)
-
-    def forward(
-        self,
-        source: torch.Tensor,
-        target: torch.Tensor,
-        mask: torch.Tensor | None = None,  # noqa: ARG002
-    ) -> torch.Tensor:  # noqa: ARG002
-        loss = torch.zeros(1, device=source.device)
-        target = (target * self.max_v).round(decimals=0)
-        source = (source * self.max_v).round(decimals=0)
-        u = torch.unique(target)
-        for i in u:
-            if i == 0:
-                continue
-            com_fixed = (target == i) ^ (source == i)
-            l_com = com_fixed.sum() / ((source == i).sum() + (target == i).sum())
-            l_com = torch.nan_to_num(l_com, nan=0)
-            print(i, l_com)
-            loss += l_com
-
-        return loss / len(u)
 
 
 class Rigid_Registration_with_Tether(General_Registration):

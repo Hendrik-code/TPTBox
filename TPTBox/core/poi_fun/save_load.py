@@ -137,7 +137,11 @@ def save_poi(
 
 
 def _poi_to_dict_list(  # noqa: C901
-    ctd: POI | POI_Global, additional_info: dict | None, save_hint=0, resample_reference: Has_Grid | None = None, verbose: logging = False
+    ctd: POI | POI_Global,
+    additional_info: dict | None,
+    save_hint=0,
+    resample_reference: Has_Grid | None = None,
+    verbose: logging = False,
 ):
     from TPTBox import POI, POI_Global
 
@@ -196,6 +200,12 @@ def _poi_to_dict_list(  # noqa: C901
         elif save_hint in (FORMAT_POI, FORMAT_GLOBAL):
             v_name = ctd.level_one_info._get_name(vert_id, no_raise=True)
             subreg_id = ctd.level_two_info._get_name(subreg_id, no_raise=True)  # noqa: PLW2901
+            if "_ignore_level_one_info_range" in ctd.info:
+                try:
+                    if vert_id in ctd.info["_ignore_level_one_info_range"]:
+                        v_name = vert_id
+                except Exception:
+                    pass
             # sub_name = v_idx2name[subreg_id]
             if v_name not in temp_dict:
                 temp_dict[v_name] = {}
@@ -274,7 +284,13 @@ def load_poi(ctd_path: POI_Reference, verbose=True) -> POI | POI_Global:  # noqa
         centroids = POI_Descriptor()
         itk_coords = global_spacing_name_key2value[dict_list[0].get("coordinate_system", "nib")]
         _load_POI_centroids(dict_list, centroids, level_one_info, level_two_info)
-        return POI_Global(centroids, itk_coords=itk_coords, level_one_info=level_one_info, level_two_info=level_two_info, info=info)
+        return POI_Global(
+            centroids,
+            itk_coords=itk_coords,
+            level_one_info=level_one_info,
+            level_two_info=level_two_info,
+            info=info,
+        )
 
     ### Ours ###
     assert "direction" in dict_list[0], f'File format error: first index must be a "Direction" but got {dict_list[0]}'
@@ -455,13 +471,15 @@ def _load_mkr_POI(dict_mkr: dict):
 
     if "@schema" not in dict_mkr or "markups-schema-v1.0.3" not in dict_mkr["@schema"]:
         log.on_warning(
-            "this file is possible incompatible. Tested only with markups-schema-v1.0.3 and not", dict_mkr.get("@schmea", "No Schema")
+            "this file is possible incompatible. Tested only with markups-schema-v1.0.3 and not",
+            dict_mkr.get("@schmea", "No Schema"),
         )
     if "markups" not in dict_mkr:
         raise ValueError("markups is missing")
     itk_coords = None
     if dict_mkr.get("coordinateSystem") in ["LPS", "RAS"]:
         itk_coords = dict_mkr["coordinateSystem"] == "LPS"
+    label_name = {}
     for markup in dict_mkr["markups"]:
         if markup["type"] != "Fiducial":
             log.on_warning("skip unknown markup type:", markup["type"])
@@ -493,6 +511,7 @@ def _load_mkr_POI(dict_mkr: dict):
             # orientation = controlPoints.get("orientation", None)
             region, subregion = _get_poi_idx_from_text(idx, label, centroids)
             centroids[region, subregion] = tuple(position)
+            label_name[str((region, subregion))] = label
     assert itk_coords is not None, "itk_coords not set"
     from TPTBox import POI_Global
 
@@ -500,4 +519,5 @@ def _load_mkr_POI(dict_mkr: dict):
     if "display" in dict_mkr and "color" in dict_mkr["display"]:
         # TODO keep all display, locked etc info in the info dict
         poi.info["color"] = dict_mkr["display"]["color"]
+    poi.info["label_name"] = label_name
     return poi
