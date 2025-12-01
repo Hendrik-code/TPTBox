@@ -103,7 +103,7 @@ class DeepaliPairwiseImageTrainer:
         smooth_grad=0.0,
         verbose=0,
         max_steps: int | Sequence[int] = 250,  # Early stopping.  override on_converged finer control
-        max_history: int | None = None,
+        max_history: int | None = 100,  # Used for on_converged. look at the last n sample to compute the convergence
         min_value=0.0,  # Early stopping.  override on_converged finer control
         min_delta: float | Sequence[float] = 0.0,  # Early stopping.  override on_converged finer control
         loss_terms: list[LOSS | str] | dict[str, LOSS] | dict[str, str] | dict[str, tuple[str, dict]] | None = None,
@@ -200,6 +200,32 @@ class DeepaliPairwiseImageTrainer:
         self.min_delta = min_delta if not isinstance(min_delta, (Sequence)) else min_delta[::-1]
         self.verbose = verbose
         self.loss_terms, self.weights = parse_loss(loss_terms, weights)
+
+        self.pyramid_levels = pyramid_levels
+        self.finest_level = finest_level
+        self.coarsest_level = coarsest_level
+        self.dims = dims
+        self.pyramid_finest_spacing = pyramid_finest_spacing
+        self.pyramid_min_size = pyramid_min_size
+        self._load_all(source, target, source_seg, target_seg, source_mask, target_mask)
+
+        self.source_pset = source_pset
+        self.target_pset = target_pset
+        self.source_landmarks = source_landmarks
+        self.target_landmarks = target_landmarks
+        self.smooth_grad = smooth_grad
+        self._eval_hooks = OrderedDict()
+        self._step_hooks = OrderedDict()
+
+    def _load_all(
+        self,
+        source,
+        target,
+        source_seg,
+        target_seg,
+        source_mask=None,
+        target_mask=None,
+    ):
         # reading images
         self.source = self._read(source)
         self.target = self._read(target)
@@ -211,9 +237,15 @@ class DeepaliPairwiseImageTrainer:
         # normalize
         self.source, self.target = self.on_normalize(self.source, self.target)
         # Pyramid
-
         self.source_pyramid, self.target_pyramid = self.make_pyramid(
-            self.source, self.target, pyramid_levels, finest_level, coarsest_level, dims, pyramid_finest_spacing, pyramid_min_size
+            self.source,
+            self.target,
+            self.pyramid_levels,
+            self.finest_level,
+            self.coarsest_level,
+            self.dims,
+            self.pyramid_finest_spacing,
+            self.pyramid_min_size,
         )
         if source_seg is not None or target_seg is not None:
             with torch.no_grad():
@@ -225,7 +257,16 @@ class DeepaliPairwiseImageTrainer:
                 u = [a for a in u if a != 0]
                 # Build a mapping from original label -> index (starting from 1)
                 mapping = {int(label.item()): idx for idx, label in enumerate(u, 1)}
+                num_classes = len(mapping) + 1  # Add 1 for background or assume no 0
 
+                u2 = torch.unique(self.source_seg_org.tensor())
+                u2 = u2.detach().cpu()
+                u2 = [a for a in u2 if a != 0]
+                for idx in u2:
+                    idx = int(idx.item())  # noqa: PLW2901
+                    if idx not in mapping:
+                        print("Warning no matching idx found:", idx)
+                        mapping[idx] = 0
                 # Remap the segmentation labels according to mapping
                 source_remapped = self.source_seg_org.tensor().clone()
                 target_remapped = self.target_seg_org.tensor().clone()
@@ -234,8 +275,7 @@ class DeepaliPairwiseImageTrainer:
                     target_remapped[self.target_seg_org.tensor() == orig_label] = new_label
 
                 # Convert to one-hot if needed (optional)
-                num_classes = len(mapping) + 1  # Add 1 for background or assume no 0
-                print(f"Found {num_classes=}, {source_remapped.unique()}, {target_remapped.unique()}")
+                print(f"Found {num_classes=}, {source_remapped.unique()}, {target_remapped.unique()}; internal mapping: {mapping}")
                 one_hot_source = (
                     (torch.nn.functional.one_hot(source_remapped.long(), num_classes).to(self._dtype).to(self.device))
                     .permute(0, 4, 1, 2, 3)
@@ -265,12 +305,12 @@ class DeepaliPairwiseImageTrainer:
             self.source_pyramid_seg, self.target_pyramid_seg = self.make_pyramid(
                 self.source_seg,
                 self.target_seg,
-                pyramid_levels,
-                finest_level,
-                coarsest_level,
-                dims,
-                pyramid_finest_spacing,
-                pyramid_min_size,
+                self.pyramid_levels,
+                self.finest_level,
+                self.coarsest_level,
+                self.dims,
+                self.pyramid_finest_spacing,
+                self.pyramid_min_size,
             )
             print("make_pyramid seg end", self.source_seg.dtype)
         else:
@@ -278,14 +318,6 @@ class DeepaliPairwiseImageTrainer:
             self.target_seg = None
             self.source_pyramid_seg = None
             self.target_pyramid_seg = None
-
-        self.source_pset = source_pset
-        self.target_pset = target_pset
-        self.source_landmarks = source_landmarks
-        self.target_landmarks = target_landmarks
-        self.smooth_grad = smooth_grad
-        self._eval_hooks = OrderedDict()
-        self._step_hooks = OrderedDict()
 
     def on_normalize(self, source: Image, target: Image):
         return normalize_img(source, self.normalize_strategy), normalize_img(target, self.normalize_strategy)

@@ -11,6 +11,7 @@ from pathlib import Path
 
 import dicom2nifti
 import dicom2nifti.exceptions
+import nibabel as nib
 import numpy as np
 import pydicom
 from dicom2nifti import convert_dicom
@@ -87,6 +88,74 @@ def _generate_bids_path(
     return fname.file["json"], fname
 
 
+def dicom_to_nifti_multiframe(ds, nii_path):
+    pixel_array = ds.pixel_array
+    if len(pixel_array.shape) != 3 and len(pixel_array.shape) != 4:
+        raise ValueError(f"Expected a shape with 3 colums not {len(pixel_array.shape)}; {pixel_array.shape=}")
+    n_frames = pixel_array.shape[0]
+
+    # Pixel spacing (mm)
+    if hasattr(ds, "PixelSpacing"):
+        dy, dx = (float(v) for v in ds.PixelSpacing)
+        # Image orientation (row and column direction cosines)
+        orientation = [float(v) for v in ds.ImageOrientationPatient]
+        row_cosines = np.array(orientation[0:3])
+        col_cosines = np.array(orientation[3:6])
+        # Normal vector (slice direction)
+        slice_cosines = np.cross(row_cosines, col_cosines)
+
+        # Image position (origin of first slice)
+        origin = np.array([float(v) for v in ds.ImagePositionPatient])
+        # Slice spacing - robust: Abstand zwischen Slice 0 und 1
+        if n_frames > 1:
+            pos1 = np.array([float(v) for v in ds.PerFrameFunctionalGroupsSequence[0].PlanePositionSequence[0].ImagePositionPatient])
+            pos2 = np.array([float(v) for v in ds.PerFrameFunctionalGroupsSequence[1].PlanePositionSequence[0].ImagePositionPatient])
+            dz = np.linalg.norm(pos2 - pos1)
+        else:
+            dz = float(getattr(ds, "SpacingBetweenSlices", ds.SliceThickness))
+
+        # Affine bauen
+        affine = np.eye(4)
+        affine[0:3, 0] = row_cosines * dx
+        affine[0:3, 1] = col_cosines * dy
+        affine[0:3, 2] = slice_cosines * dz
+        affine[0:3, 3] = origin
+        nii = nib.Nifti1Image(np.transpose(pixel_array, (2, 1, 0)), affine)
+
+    elif hasattr(ds, "ImagerPixelSpacing"):
+        dy, dx = (float(v) for v in ds.ImagerPixelSpacing)
+        # Einfaches affine (nur 2D + Zeit, keine Lage im Patientenraum)
+        affine = np.eye(4)
+        affine[0, 0] = -dx
+        affine[1, 1] = -dy
+        nii = nib.Nifti1Image(np.transpose(pixel_array, (2, 1, 0)), affine)
+
+    else:
+        if hasattr(ds, "RelatedSeriesSequence"):
+            raise NotImplementedError("RelatedSeriesSequence Affine lookup not implemented")
+        raise NotImplementedError("No spatial metadata found")
+        ### Some could be solved by looking up the "RelatedSeriesSequence"
+        # "RelatedSeriesSequence": [
+        # {
+        #    "StudyInstanceUID": "1.2.276.0.38.1.1.1.7712.20250929100319.54200288",
+        #    "SeriesInstanceUID": "1.3.46.670589.7.8.1.6.1403526999.1.9608.1759142950287.2",
+        #    "PurposeOfReferenceCodeSequence": []
+        # }
+        # ],
+        # --- No geometry info (e.g. RGB screen captures or video frames) ---
+        print("⚠️ No spatial metadata found — assuming pixel size = 1mm and identity orientation.")
+        affine = np.eye(4)
+        affine[0, 0] = 1.0
+        affine[1, 1] = 1.0
+        affine[2, 2] = 1.0
+        nii = nib.Nifti1Image(pixel_array, affine)
+
+    # Reihenfolge anpassen: Nibabel erwartet (X,Y,Z)
+    nib.save(nii, nii_path)
+
+    return nii_path
+
+
 def _convert_to_nifti(dicom_out_path, nii_path):
     """
     Convert DICOM files to NIfTI format and handle common conversion errors.
@@ -105,6 +174,15 @@ def _convert_to_nifti(dicom_out_path, nii_path):
     """
     try:
         if isinstance(dicom_out_path, list):
+            try:
+                if len(dicom_out_path) == 1:
+                    ds = dicom_out_path[0]
+                    if hasattr(ds, "pixel_array") and len(ds.pixel_array.shape) >= 2:
+                        dicom_to_nifti_multiframe(ds, nii_path)
+
+                    return True
+            except Exception as e:
+                logger.on_debug("Multi-Frame DICOM did not work:", e)
             convert_dicom.dicom_array_to_nifti(dicom_out_path, nii_path, True)
         else:
             # func_timeout(10, dicom2nifti.dicom_series_to_nifti, (dicom_out_path, nii_path, True))
@@ -112,8 +190,9 @@ def _convert_to_nifti(dicom_out_path, nii_path):
         logger.print("Save ", nii_path, Log_Type.SAVE)
     except dicom2nifti.exceptions.ConversionValidationError as e:
         if e.args[0] in ["NON_IMAGING_DICOM_FILES"]:
+            s = f"dicom_array_to_nifti len={len(dicom_out_path)}" if isinstance(dicom_out_path, list) else "dicom_series_to_nifti"
             Path(str(nii_path).replace(".nii.gz", ".json")).unlink(missing_ok=True)
-            logger.on_debug(f"Not exportable '{Path(nii_path).name}':", e.args[0])
+            logger.on_debug(f"Not exportable '{Path(nii_path).name}':", e.args[0], s)
             return False
         for key, reason in [
             ("validate_orthogonal", "NON_CUBICAL_IMAGE/GANTRY_TILT"),
@@ -311,7 +390,7 @@ def _read_dicom_files(dicom_out_path: Path) -> tuple[dict[str, list[FileDataset]
         path = Path(_paths)
         if path.is_file():
             try:
-                dcm_data = pydicom.dcmread(path, defer_size="1 KB", force=True)
+                dcm_data = pydicom.dcmread(path, defer_size="1 KB", force=True)  # , stop_before_pixels=True
                 try:
                     typ = (
                         str(dcm_data.get_item((0x0008, 0x0008)).value)
@@ -324,7 +403,6 @@ def _read_dicom_files(dicom_out_path: Path) -> tuple[dict[str, list[FileDataset]
                 except Exception:
                     typ = ""
                 key1 = str(dcm_data.SeriesInstanceUID)
-
                 key = f"{key1}_{typ}"
                 if not hasattr(dcm_data, "ImageOrientationPatient"):
                     key += "_" + dcm_data.get("SOPInstanceUID", 0)
@@ -437,6 +515,7 @@ def extract_dicom_folder(
     validate_slicecount=True,
     validate_orientation=True,
     validate_orthogonal=False,
+    validate_slice_increment=True,
     n_cpu: int | None = 1,
     override_subject_name: Callable[[dict, Path], str] | None = None,
     skip_localizer=True,
@@ -463,7 +542,8 @@ def extract_dicom_folder(
         convert_dicom.settings.disable_validate_orientation()
     if not validate_orthogonal:
         convert_dicom.settings.disable_validate_orthogonal()
-
+    if not validate_slice_increment:
+        convert_dicom.settings.disable_validate_slice_increment()
     outs = {}
 
     for p in _find_all_files(dicom_folder):
@@ -512,6 +592,8 @@ def extract_dicom_folder(
                     try:
                         key2, out = process_series(key, files, parts)
                         outs[key2] = out
+                    except NotImplementedError as e:
+                        logger.on_warning("NotImplementedError:", e)
                     except Exception:
                         logger.print_error()
 
@@ -523,6 +605,10 @@ def extract_dicom_folder(
 
 
 if __name__ == "__main__":
+    for p in Path("/DATA/NAS/datasets_source/brain/dsa").iterdir():
+        extract_dicom_folder(p, Path("/DATA/NAS/datasets_source/brain/", "dataset-DSA"), False, False, validate_slice_increment=False)
+
+    sys.exit()
     # s = "/home/robert/Downloads/bein/dataset-oberschenkel/rawdata/sub-1-3-46-670589-11-2889201787-2305829596-303261238-2367429497/mr/sub-1-3-46-670589-11-2889201787-2305829596-303261238-2367429497_sequ-406_mr.nii.gz"
     # nii2 = NII.load(s, False)
     # print(nii2.affine, nii2.orientation)

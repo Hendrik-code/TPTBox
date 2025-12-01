@@ -20,6 +20,9 @@ except ModuleNotFoundError:
     raise
 from TPTBox import AX_CODES, NII
 
+"""
+Wrapper functions for different registration methods with ants and nipy.
+"""
 Similarity_Measures = Literal["slr", "mi", "pmi", "dpmi", "cc", "cr", "crl1"]
 Affine_Transforms = Literal["affine", "affine2d", "similarity", "similarity2d", "rigid", "rigid2d"]
 

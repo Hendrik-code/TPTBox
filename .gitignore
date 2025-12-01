@@ -164,6 +164,6 @@ tutorials/tutorial_data_processing/*
 tutorials/*PixelPandemonium/*
 tutorials/dataset-PixelPandemonium/*
 *.html
-_*.py
+#_*.py
 dicom_select
 examples

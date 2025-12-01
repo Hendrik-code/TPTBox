@@ -793,7 +793,8 @@ class BIDS_FILE:
                 if key in same_info:
                     continue
                 if value is not None:
-                    assert validate_entities(key, value, f"..._{key}-{value}_...", True)
+                    if not non_strict_mode:
+                        assert validate_entities(key, value, f"..._{key}-{value}_...", True), f"..._{key}-{value}_..."
                     final_info[key] = value
                 # file_name += f"{key}-{value}_"
             # sort by order
