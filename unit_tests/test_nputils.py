@@ -286,17 +286,17 @@ class Test_np_utils(unittest.TestCase):
                         msg=f"{coms[0][0]}, {coms_compare}",
                     )
 
-    def test_get_largest_k_connected_components(self):
+    def test_get_largest_k_connected_components_non_global(self):
         a = np.zeros((50, 50), dtype=np.uint16)
-        a[10:20, 10:20] = 5
-        a[30:50, 30:50] = 7
+        a[10:20, 10:20] = 1
+        a[30:50, 30:50] = 1
         a[1:4, 1:4] = 1
 
         # k less than N
         a_cc = np_utils.np_filter_connected_components(a, largest_k_components=2, return_original_labels=False)
         a_volume = np_utils.np_volume(a_cc)
         print(a_volume)
-        self.assertTrue(len(a_volume) == 2)
+        self.assertTrue(len(a_volume) == 2, a_volume)
         self.assertTrue(a_volume[1] > a_volume[2])
 
         # k == N
@@ -312,6 +312,55 @@ class Test_np_utils(unittest.TestCase):
         print(a_volume)
         self.assertTrue(len(a_volume) == 3)
         self.assertTrue(a_volume[1] > a_volume[2] > a_volume[3])
+
+        a = np.zeros((50, 50), dtype=np.uint16)
+        a[10:20, 10:20] = 7
+        a[30:50, 30:50] = 5
+        a[1:4, 1:4] = 1
+
+        # k less than N
+        a_cc = np_utils.np_filter_connected_components(a, largest_k_components=2, return_original_labels=False)
+        a_volume = np_utils.np_volume(a_cc)
+        self.assertTrue(len(a_volume) == 3, a_volume)
+
+    def test_get_largest_k_connected_components(self):
+        a = np.zeros((50, 50), dtype=np.uint16)
+        a[10:20, 10:20] = 5
+        a[30:50, 30:50] = 7
+        a[1:4, 1:4] = 1
+
+        # k less than N
+        a_cc = np_utils.np_filter_connected_components(a, largest_k_components=2, return_original_labels=False, k_larges_global=True)
+        a_volume = np_utils.np_volume(a_cc)
+        print(a_volume)
+        self.assertTrue(len(a_volume) == 2, a_volume)
+        self.assertTrue(a_volume[1] > a_volume[2])
+
+        # k == N
+        a_cc = np_utils.np_filter_connected_components(a, largest_k_components=3, return_original_labels=False, k_larges_global=True)
+        a_volume = np_utils.np_volume(a_cc)
+        print(a_volume)
+        self.assertTrue(len(a_volume) == 3)
+        self.assertTrue(a_volume[1] > a_volume[2] > a_volume[3])
+
+        # k > N
+        a_cc = np_utils.np_filter_connected_components(a, largest_k_components=20, return_original_labels=False, k_larges_global=True)
+        a_volume = np_utils.np_volume(a_cc)
+        print(a_volume)
+        self.assertTrue(len(a_volume) == 3)
+        self.assertTrue(a_volume[1] > a_volume[2] > a_volume[3])
+
+        a = np.zeros((50, 50), dtype=np.uint16)
+        a[10:20, 10:20] = 1
+        a[30:50, 30:50] = 1
+        a[1:4, 1:4] = 1
+
+        # k less than N
+        a_cc = np_utils.np_filter_connected_components(a, largest_k_components=2, return_original_labels=False, k_larges_global=True)
+        a_volume = np_utils.np_volume(a_cc)
+        print(a_volume)
+        self.assertTrue(len(a_volume) == 2, a_volume)
+        self.assertTrue(a_volume[1] > a_volume[2])
 
     def test_fill_holes(self):
         # Create a test NII object with a segmentation mask
