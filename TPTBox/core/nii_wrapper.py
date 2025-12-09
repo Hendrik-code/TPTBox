@@ -667,7 +667,7 @@ class NII(NII_Math):
             return c
         else:
             return self.get_array().astype(dtype,order=order,casting=casting, subok=subok,copy=copy)
-    def reorient(self:Self, axcodes_to: AX_CODES|None = ("P", "I", "R"), verbose:logging=False, inplace=False)-> Self:
+    def reorient(self:Self, axcodes_to: AX_CODES|str|None = ("P", "I", "R"), verbose:logging=False, inplace=False)-> Self:
         """
         Reorients the input Nifti image to the desired orientation, specified by the axis codes.
 
@@ -1863,7 +1863,7 @@ class NII(NII_Math):
             self.set_dtype_("smallest_uint")
             arr = self.get_array() if not self.seg else self.get_seg_array()
 
-
+        self.header.set_data_dtype(arr.dtype)
         out = Nifti1Image(arr, self.affine,self.header)#,dtype=arr.dtype)
         if dtype is not None:
             out.set_data_dtype(dtype)
@@ -1929,7 +1929,7 @@ class NII(NII_Math):
         # Save NRRD file
 
         log.print(f"Saveing {file}",verbose=verbose,ltype=Log_Type.SAVE,end='\r')
-        nrrd.write(file, data=data, header=header,**args)
+        nrrd.write(str(file), data=data, header=header,**args) # nrrd only acepts strings...
         log.print(f"Save {file} as {header['type']}",verbose=verbose,ltype=Log_Type.SAVE)
 
     def __str__(self) -> str:
