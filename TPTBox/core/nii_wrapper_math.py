@@ -81,7 +81,7 @@ class NII_Math(NII_Proxy,Has_Grid):
     def __rshift__(self,p2):
         return self._binary_opt(p2,operator.rshift)
     def __and__(self,p2):
-        return self._binary_opt(p2,operator.add)
+        return self._binary_opt(p2,operator.and_)
     def __or__(self,p2):
         return self._binary_opt(p2,operator.or_)
     def __xor__(self,p2):
