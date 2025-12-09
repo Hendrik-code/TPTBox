@@ -72,7 +72,10 @@ def run_inference_on_file(
     if out_file is not None and Path(out_file).exists() and not override:
         return out_file, None
 
-    from TPTBox.segmentation.nnUnet_utils.inference_api import load_inf_model, run_inference
+    from TPTBox.segmentation.nnUnet_utils.inference_api import (
+        load_inf_model,
+        run_inference,
+    )
 
     if isinstance(idx, int):
         download_weights(idx, model_path)
@@ -102,7 +105,7 @@ def run_inference_on_file(
             if "model_expected_orientation" in ds_info2:
                 ds_info["orientation"] = ds_info2["model_expected_orientation"]
             if "resolution_range" in ds_info2:
-                ds_info["spacing"] = ds_info2["resolution_range"]
+                ds_info["resolution_range"] = ds_info2["resolution_range"]
 
     nnunet = load_inf_model(
         nnunet_path,
@@ -127,7 +130,10 @@ def run_inference_on_file(
 
     try:
         zoom_old = ds_info.get("spacing")
+        if idx not in [527] and zoom_old is not None:
+            zoom_old = zoom_old[::-1]
 
+        zoom_old = ds_info.get("resolution_range", zoom_old)
         if zoom_old is None:
             zoom = plans_info["configurations"]["3d_fullres"]["spacing"]
             if all(zoom[0] == z for z in zoom):
