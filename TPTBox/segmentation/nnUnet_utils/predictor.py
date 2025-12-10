@@ -523,9 +523,8 @@ class nnUNetPredictor:
                         j = np.argmax(s)
                         if s[j] == 1:
                             device = "cpu"
-                            print("Fall Back CPU. Not enough space", shape, patch_size, splits, s)
+                            print("Fall Back CPU. Not enough space; s[j] == 1", shape, patch_size, splits, s)
                             break
-                        splits[j] += 1
                         shape_split = [ceil(s / sp) for s, sp in zip(shape, splits)]
                         # print(shape, patch_size, splits, s, np.prod(shape) / 1000000)
                         if check_mem(shape_split):
@@ -543,6 +542,7 @@ class nnUNetPredictor:
                                 print(e)
                                 break
 
+                        splits[j] += 1
                 predicted_logits, n_predictions = self._run_sub(data, network, device, slicers, pbar)
                 pbar.desc = "finish"
                 pbar.update(0)
