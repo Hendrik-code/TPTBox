@@ -30,7 +30,7 @@ from TPTBox import (
     v_idx2name,
     v_idx_order,
 )
-from TPTBox.mesh3D.mesh_colors import _color_map_in_row  # vert_color_map
+from TPTBox.mesh3D.mesh_colors import _color_map_in_row, get_color_by_label
 
 NII.suppress_dtype_change_printout_in_set_array(True)
 """
@@ -430,6 +430,8 @@ def make_isotropic2dpluscolor(arr3d, zms2d, msk=False):
 
 def get_contrasting_stroke_color(rgb):
     # Convert RGBA to RGB if necessary
+    if isinstance(rgb, int):
+        rgb = list(get_color_by_label(rgb).rgb / 255.0)
     if len(rgb) == 4:
         rgb = rgb[:3]
     luminance = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]
@@ -505,7 +507,15 @@ def plot_sag_centroids(
             elif len(x) == 4:
                 v = (np.array(ctd[x[0], x[1]]) + np.array(ctd[x[2], x[3]])) / 2
 
-            axs.add_patch(FancyArrow(v[1] * zms[1], v[0] * zms[0], c, d, color=cmap(color - 1 % LABEL_MAX % cmap.N)))
+            axs.add_patch(
+                FancyArrow(
+                    v[1] * zms[1],
+                    v[0] * zms[0],
+                    c,
+                    d,
+                    color=cmap(color - 1 % LABEL_MAX % cmap.N),
+                )
+            )
     if "text_sag" in ctd.info:
         for color, x in ctd.info["text_sag"]:
             backgroundcolor = get_contrasting_stroke_color(color)
@@ -578,15 +588,29 @@ def plot_cor_centroids(
                 )
         except Exception:
             pass
+
     if "line_segments_cor" in ctd.info:
         for color, x, (c, d) in ctd.info["line_segments_cor"]:
+            # if isinstance(color, int):
+            #    color = list(get_color_by_label(color).rgb / 255.0)
+
             if len(x) == 2:
                 v = ctd[x]
             elif len(x) == 4:
                 v = (np.array(ctd[x[0], x[1]]) + np.array(ctd[x[2], x[3]])) / 2
-            axs.add_patch(FancyArrow(v[2] * zms[2], v[0] * zms[0], c, d, color=cmap(color - 1 % LABEL_MAX % cmap.N)))
+            axs.add_patch(
+                FancyArrow(
+                    v[2] * zms[2],
+                    v[0] * zms[0],
+                    c,
+                    d,
+                    color=cmap(color - 1 % LABEL_MAX % cmap.N),
+                )
+            )
     if "text_cor" in ctd.info:
         for color, x in ctd.info["text_cor"]:
+            if isinstance(color, int):
+                color = list(get_color_by_label(color).rgb / 255.0)
             backgroundcolor = get_contrasting_stroke_color(color)
             if isinstance(color, Sequence) and len(color) == 2:
                 color, curve_location = color  # noqa: PLW2901
@@ -1038,9 +1062,21 @@ def create_snapshot(  # noqa: C901
             )
 
     fig, axs = create_figure(dpi, img_list, has_title=frame.title is None)
-    for ax, (img, msk, ctd, wdw, is_sag, alpha, cmap, zms, curve_location, poi_labelmap, hide_centroid_labels, title, frame) in zip(
-        axs, frame_list
-    ):
+    for ax, (
+        img,
+        msk,
+        ctd,
+        wdw,
+        is_sag,
+        alpha,
+        cmap,
+        zms,
+        curve_location,
+        poi_labelmap,
+        hide_centroid_labels,
+        title,
+        frame,
+    ) in zip(axs, frame_list):
         if title is not None:
             ax.set_title(title, fontdict={"fontsize": 18, "color": "black"}, loc="center")
         if img.ndim == 3:

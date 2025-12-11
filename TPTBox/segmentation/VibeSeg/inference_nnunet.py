@@ -129,15 +129,15 @@ def run_inference_on_file(
     og_nii = input_nii[0].copy()
 
     try:
-        zoom_old = ds_info.get("spacing")
-        if idx not in [527] and zoom_old is not None:
-            zoom_old = zoom_old[::-1]
+        zoom = ds_info.get("spacing")
+        if idx not in [527] and zoom is not None:
+            zoom = zoom[::-1]
 
-        zoom_old = ds_info.get("resolution_range", zoom_old)
-        if zoom_old is None:
-            zoom = plans_info["configurations"]["3d_fullres"]["spacing"]
-            if all(zoom[0] == z for z in zoom):
-                zoom_old = zoom
+        zoom = ds_info.get("resolution_range", zoom)
+        if zoom is None:
+            zoom_ = plans_info["configurations"]["3d_fullres"]["spacing"]
+            if all(zoom[0] == z for z in zoom_):
+                zoom = zoom
         # order = plans_info["transpose_backward"]
         ## order2 = plans_info["transpose_forward"]
         # zoom = [zoom[order[0]], zoom[order[1]], zoom[order[2]]][::-1]
@@ -150,7 +150,7 @@ def run_inference_on_file(
 
         # zoom_old = zoom_old[::-1]
 
-        zoom_old = [float(z) for z in zoom_old]
+        zoom = [float(z) for z in zoom]
     except Exception:
         pass
     assert len(ds_info["channel_names"]) == len(input_nii), (
@@ -163,9 +163,9 @@ def run_inference_on_file(
         print("orientation", orientation, f"{orientation_ref=}") if verbose else None
         input_nii = [i.reorient(orientation) for i in input_nii]
 
-    if zoom_old is not None:
-        print("rescale", zoom, f"{zoom_old=}") if verbose else None
-        input_nii = [i.rescale_(zoom_old, mode=mode) for i in input_nii]
+    if zoom is not None:
+        print("rescale", input_nii[0].orientation, f"{zoom=}") if verbose else None
+        input_nii = [i.rescale_(zoom, mode=mode) for i in input_nii]
         print(input_nii)
     print("squash to float16") if verbose else None
     input_nii = [squash_so_it_fits_in_float16(i) for i in input_nii]
