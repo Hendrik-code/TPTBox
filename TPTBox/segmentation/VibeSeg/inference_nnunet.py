@@ -137,7 +137,7 @@ def run_inference_on_file(
         if zoom is None:
             zoom_ = plans_info["configurations"]["3d_fullres"]["spacing"]
             if all(zoom[0] == z for z in zoom_):
-                zoom = zoom
+                zoom = zoom_
         # order = plans_info["transpose_backward"]
         ## order2 = plans_info["transpose_forward"]
         # zoom = [zoom[order[0]], zoom[order[1]], zoom[order[2]]][::-1]

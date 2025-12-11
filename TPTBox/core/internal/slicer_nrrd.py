@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import re
 from collections import OrderedDict
 from pathlib import Path
@@ -5,27 +7,10 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from TPTBox import Print_Logger
-from TPTBox.core.vert_constants import (
-    AFFINE,
-    AX_CODES,
-    COORDINATE,
-    DIRECTIONS,
-    LABEL_MAP,
-    LABEL_REFERENCE,
-    MODES,
-    SHAPE,
-    ZOOMS,
-    Location,
-    _same_direction,
-    log,
-    logging,
-    v_name2idx,
-)
+from TPTBox.core.vert_constants import log, logging
 from TPTBox.logger.log_constants import Log_Type
 
 if TYPE_CHECKING:
-    from TPTBox import BIDS_FILE
     from TPTBox.core.nii_wrapper import NII
 
 
@@ -607,7 +592,7 @@ def remove_not_supported_values(nrrd_dict: dict):
             i.pop("extent", None)
 
 
-def load_slicer_nrrd(filename, seg, skip_voxels=False, verbos=True) -> "NII":
+def load_slicer_nrrd(filename, seg, skip_voxels=False, verbos=True) -> NII:
     """
     Load a 3D/4D Slicer NRRD segmentation and return a NII object (wrapper around NIfTI).
 
@@ -648,7 +633,7 @@ def load_slicer_nrrd(filename, seg, skip_voxels=False, verbos=True) -> "NII":
     return NII(nib_obj, seg=seg, c_val=c_val, desc="", info=nrrd_dict)
 
 
-def save_slicer_nrrd(nii: "NII", file: str | Path, make_parents=True, verbose: logging = True, compression_level=9, index_order=None):
+def save_slicer_nrrd(nii: NII, file: str | Path, make_parents=True, verbose: logging = True, compression_level=9, index_order=None):
     """
     Save a NII object (segmentation) to a Slicer-compatible NRRD file.
 
@@ -756,7 +741,7 @@ if __name__ == "__main__":
         "SegOverlap": f"{base}/SegmentationOverlapping.seg.nrrd",
     }
     # Download
-    for name, url in files.items():
+    for url in files.values():
         out_local = os.path.join(slicerio_data, url.split("/")[-1])
         if not os.path.exists(out_local):
             download_file(url, out_local)

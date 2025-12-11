@@ -29,6 +29,7 @@ tqdm = "*"
 joblib = "*"
 scikit-learn = "*"
 antspyx = "0.4.2"
+pynrrd = "*"
 #hf-deepali = "*"
 
 [poetry.group.dev.dependencies]
