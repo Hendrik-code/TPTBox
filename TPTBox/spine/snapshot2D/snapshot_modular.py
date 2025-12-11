@@ -610,7 +610,7 @@ def plot_cor_centroids(
     if "text_cor" in ctd.info:
         for color, x in ctd.info["text_cor"]:
             if isinstance(color, int):
-                color = list(get_color_by_label(color).rgb / 255.0)
+                color = list(get_color_by_label(color).rgb / 255.0)  # noqa: PLW2901
             backgroundcolor = get_contrasting_stroke_color(color)
             if isinstance(color, Sequence) and len(color) == 2:
                 color, curve_location = color  # noqa: PLW2901
