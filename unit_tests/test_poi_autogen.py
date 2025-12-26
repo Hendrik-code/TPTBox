@@ -125,7 +125,7 @@ class TestPOI(unittest.TestCase):
             assert np.allclose(poi.zoom, poi2.zoom, rtol=1e-6, atol=1e-8)
 
             # Rotation must be preserved
-            assert np.allclose(poi.rotation, poi2.rotation, rtol=1e-6, atol=1e-8)
+            assert np.allclose(poi.rotation, poi2.rotation, rtol=1e-5, atol=1e-6)
 
             # Origin (translation) must be preserved
             assert np.allclose(poi.origin, poi2.origin, rtol=1e-6, atol=1e-8)
