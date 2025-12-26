@@ -32,7 +32,7 @@ antspyx = "0.4.2"
 pynrrd = "*"
 #hf-deepali = "*"
 
-[poetry.group.dev.dependencies]
+[tool.poetry.group.dev.dependencies]
 pytest = ">=8.1.1"
 vtk = "*"
 pre-commit = "*"
@@ -40,7 +40,7 @@ pyvista = "^0.43.2"
 coverage = ">=7.0.1"
 pytest-mock = "^3.6.0"
 exceptiongroup = { version = "^1.2", python = "<3.11" }
-
+tomli = {version = "*", python = "<3.11" }
 
 [build-system]
 requires = ["poetry-core>=1.0.0", "poetry-dynamic-versioning>=1.0.0,<2.0.0"]
@@ -191,7 +191,7 @@ exclude_lines = [
     "raise "
 ]
 omit = [
-    "test/speedtest/*",
+    "TPTBox/test/speedtest/*",
 ]
 [tool.ruff.format]
 # Like Black, use double quotes for strings.
