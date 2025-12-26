@@ -248,7 +248,7 @@ class NII(NII_Math):
         return nii
 
     @classmethod
-    def load_nrrd(cls, path: str | Path, seg: bool):
+    def load_nrrd(cls, path: str | Path, seg: bool,verbos=False):
         """
         Load an NRRD file and convert it into a Nifti1Image object.
 
@@ -272,76 +272,8 @@ class NII(NII_Math):
             import nrrd  # pip install pynrrd, if pynrrd is not already installed
         except ModuleNotFoundError:
             raise ImportError("The `pynrrd` package is required but not installed. Install it with `pip install pynrrd`.") from None
-        _nrrd = nrrd.read(path)
-        data = _nrrd[0]
-
-        header = dict(_nrrd[1])
-        #print(data.shape, header)
-        #print(header)
-        # Example print out: OrderedDict([
-        # ('type', 'short'), ('dimension', 3), ('space', 'left-posterior-superior'),
-        # ('sizes', array([512, 512, 1637])),
-        # ('space directions', array([[0.9765625, 0.       , 0.       ],
-        #                             [0.       , 0.9765625, 0.       ],
-        #                             [0.       , 0.       , 0.6997555]])),
-        # ('kinds', ['domain', 'domain', 'domain']), ('endian', 'little'),
-        # ('encoding', 'gzip'),
-        # ('space origin', array([-249.51171875, -392.51171875,  119.7]))])
-
-        # Construct the affine transformation matrix
-        #print(header)
-        try:
-            #print(header['space directions'])
-            #print(header['space origin'])
-            space_directions = np.array(header['space directions'])
-            space_origin = np.array(header['space origin'])
-            #space_directions = space_directions[~np.isnan(space_directions).any(axis=1)] #Filter NAN
-            n = header['dimension']
-            #print(data.shape)
-            if space_directions.shape != (n, n):
-                space_directions = space_directions[~np.isnan(space_directions).all(axis=1)]
-                m = len(space_directions[0])
-                if m != n:
-                    n=m
-                    data = data.sum(axis=0)
-            space_directions = space_directions.T
-            if space_directions.shape != (n, n):
-                raise ValueError(f"Expected 'space directions' to be a nxn matrix. n = {n} is not {space_directions.shape}",space_directions)
-            if space_origin.shape != (n,):
-                raise ValueError("Expected 'space origin' to be a n-element vector. n = ", n, "is not",space_origin.shape )
-            space = header.get("space","left-posterior-superior")
-            affine = np.eye(n+1)  # Initialize 4x4 identity matrix
-            affine[:n, :n] = space_directions  # Set rotation and scaling
-            affine[:n, n] = space_origin       # Set translation
-            #print(affine,space)
-            if space =="left-posterior-superior": #LPS (SITK-space)
-                affine[0] *=-1
-                affine[1] *=-1
-            elif space == "right-posterior-superior": #RPS
-                affine[0] *=-1
-            elif space == "left-anterior-superior":  #LAS
-                affine[1] *=-1
-            elif space == "right-anterior-superior": #RAS
-                pass
-            else:
-                raise ValueError(space)
-            #print(affine)
-
-        except KeyError as e:
-            raise KeyError(f"Missing expected header field: {e}") from None
-        if len(data.shape) != n:
-            raise ValueError(f"{len(data.shape)=} diffrent from n = ", n)
-        ref_orientation = header.get("ref_orientation")
-        for i in ["ref_orientation","dimension","space directions","space origin""space","type","endian"]:
-            header.pop(i, None)
-        for key in list(header.keys()):
-            if "_Extent" in key:
-                del header[key]
-        nii =  NII((data,affine,None),seg=seg,info = header)
-        if ref_orientation is not None:
-            nii.reorient_(ref_orientation)
-        return nii
-
+        from TPTBox.core.internal.slicer_nrrd import load_slicer_nrrd
+        return load_slicer_nrrd(path,seg,verbos=verbos)
     @classmethod
     def load_bids(cls, nii_bids: bids_files.BIDS_FILE):
         nifty = None
@@ -1355,7 +1287,7 @@ class NII(NII_Math):
         filled = np_fill_holes(seg_arr, label_ref=labels, slice_wise_dim=slice_wise_dim, use_crop=use_crop)
         return self.set_array(filled,inplace=inplace)
 
-    def fill_holes_(self, labels: LABEL_REFERENCE = None, slice_wise_dim: int | None = None, verbose:logging=True,use_crop=True):
+    def fill_holes_(self, labels: LABEL_REFERENCE = None, slice_wise_dim: int |str| None = None, verbose:logging=True,use_crop=True):
         return self.fill_holes(labels, slice_wise_dim, verbose, inplace=True,use_crop=use_crop)
 
     def calc_convex_hull(
@@ -1376,7 +1308,7 @@ class NII(NII_Math):
             return self.set_array_(convex_hull_arr)
         return self.set_array(convex_hull_arr)
 
-    def calc_convex_hull_(self, axis: DIRECTIONS="S", verbose: bool = False,):
+    def calc_convex_hull_(self, axis: None|DIRECTIONS="S", verbose: bool = False,):
         return self.calc_convex_hull(axis=axis, inplace=True, verbose=verbose)
 
 
@@ -1662,67 +1594,6 @@ class NII(NII_Math):
     ):
         return self.truncate_labels_beyond_reference_(idx,not_beyond,fill,axis,inclusion)
 
-    def infect_conv(self: NII, reference_mask: NII, max_iters=100,inplace=False):
-        """
-        Expands labels from self_mask into regions of reference_mask == 1 via breadth-first diffusion.
-
-        Args:
-            self_mask (ndarray): (H, W) or (D, H, W) integer-labeled array.
-            reference_mask (ndarray): Binary array of same shape as self_mask.
-            max_iters (int): Maximum number of propagation steps.
-
-        Returns:
-            ndarray: Updated label mask.
-        """
-        from scipy.ndimage import convolve
-        crop = reference_mask.compute_crop(0,1)
-        self.assert_affine(reference_mask)
-        self_mask = self.apply_crop(crop).get_seg_array().copy()
-        ref_mask = np.clip(reference_mask.apply_crop(crop).get_seg_array(), 0, 1)
-
-        ndim = len(self_mask.shape)
-
-        # Define neighborhood kernel
-        if ndim == 2:
-            kernel = np.array([[0, 1, 0],
-                               [1, 0, 1],
-                               [0, 1, 0]], dtype=np.uint8)
-        elif ndim == 3:
-            kernel = np.zeros((3, 3, 3), dtype=np.uint8)
-            kernel[1, 1, 0] = kernel[1, 1, 2] = 1
-            kernel[1, 0, 1] = kernel[1, 2, 1] = 1
-            kernel[0, 1, 1] = kernel[2, 1, 1] = 1
-        else:
-            raise NotImplementedError("Only 2D or 3D masks are supported.")
-        try:
-            from tqdm import tqdm
-            r = tqdm(range(max_iters),desc="infect")
-        except Exception:
-            r = range(max_iters)
-        for _ in r:
-            unlabeled = (self_mask == 0) & (ref_mask == 1)
-            updated = False
-
-            for label in np_unique(self_mask):
-                if label == 0:
-                    continue  # skip background
-
-                binary_label_mask = (self_mask == label).astype(np.uint8)
-                neighbor_count = convolve(binary_label_mask, kernel, mode="constant", cval=0)
-
-                # Find unlabeled voxels adjacent to current label
-                new_voxels = (neighbor_count > 0) & unlabeled
-
-                if np.any(new_voxels):
-                    self_mask[new_voxels] = label
-                    updated = True
-
-            if not updated:
-                break
-        org = self.get_seg_array()
-        org[crop] = self_mask
-        return self.set_array(org,inplace=inplace)
-
     def infect(self: NII, reference_mask: NII, inplace=False,verbose=True,axis:int|str|None=None):
         """
         Expands labels from self_mask into regions of reference_mask == 1 via breadth-first diffusion.
@@ -1846,7 +1717,7 @@ class NII(NII_Math):
         axis = self.get_axis(axis) if not isinstance(axis,int) else axis
         if keep_global_coords:
             orient = list(self.orientation)
-            orient[axis] = _same_direction[orient[axis] ]
+            orient[axis] = _same_direction[orient[axis]]
             return self.reorient(tuple(orient),inplace=inplace)
         else:
             return self.set_array(np.flip(self.get_array(),axis),inplace=inplace)
@@ -1856,8 +1727,7 @@ class NII(NII_Math):
     @secure_save
     def save(self,file:str|Path,make_parents=True,verbose:logging=True, dtype = None):
         if make_parents:
-            Path(file).parent.mkdir(exist_ok=True,parents=True)
-
+            Path(file).parent.mkdir(0o777,exist_ok=True,parents=True)
         arr = self.get_array() if not self.seg else self.get_seg_array()
         if isinstance(arr,np.floating) and self.seg:
             self.set_dtype_("smallest_uint")
@@ -1894,43 +1764,10 @@ class NII(NII_Math):
             raise ImportError("The `pynrrd` package is required but not installed. Install it with `pip install pynrrd`." ) from None
         if isinstance(file, bids_files.BIDS_FILE):
             file = file.file['nrrd']
-        if not str(file).endswith(".nrrd"):
-            file = str(file)+".nrrd"
-        if make_parents:
-            Path(file).parent.mkdir(exist_ok=True,parents=True)
-        _header = {}
-        #if self.orientation not in [("L","P","S")]: #,("R","P","S"),("R","A","S"),("L","A","S")
-        #    _header = {"ref_orientation": "".join(self.orientation)}
-        #    self = self.reorient(("P","L","S"))  # Convert to LAS-SimpleITK  # noqa: PLW0642
-        # Slicer only allows LPS and flip of L and P axis
-        ori = "left-posterior-superior"# "-".join([_dirction_name_itksnap_dict[i] for i in self.orientation])
 
-        data = self.get_array()
-        affine = self.affine.copy()
-        affine[0] *=-1
-        affine[1] *=-1
-        # Extract header fields from the affine matrix
-        n = affine.shape[0] - 1
-        space_directions = affine[:n, :n]
-        space_origin = affine[:n, n]
-        _header["kinds"]= ['domain'] * n if "kinds" not in self.info else self.info["kinds"]
-        header = {
-            'type': str(data.dtype),
-            'dimension': n,
-            'space': ori,
-            'sizes': data.shape,#(data.shape[1],data.shape[0],data.shape[2]),
-            'space directions': space_directions.tolist(),
-            'space origin': space_origin,
-            'endian': 'little',
-            'encoding': 'gzip',
-            **_header,**self.info
-        }
-        header.pop("Segmentation_ConversionParameters", None)
-        # Save NRRD file
+        from TPTBox.core.internal.slicer_nrrd import save_slicer_nrrd
+        save_slicer_nrrd(self,file,make_parents=make_parents,verbose=verbose,**args)
 
-        log.print(f"Saveing {file}",verbose=verbose,ltype=Log_Type.SAVE,end='\r')
-        nrrd.write(str(file), data=data, header=header,**args) # nrrd only acepts strings...
-        log.print(f"Save {file} as {header['type']}",verbose=verbose,ltype=Log_Type.SAVE)
 
     def __str__(self) -> str:
         return f"{super().__str__()}, seg={self.seg}" # type: ignore
@@ -1970,6 +1807,8 @@ class NII(NII_Math):
             return self.get_array()[key.get_array()==1]
         elif isinstance(key,np.ndarray):
             return self.get_array()[key]
+        elif isinstance(key,slice):
+            self.__getitem__((key,Ellipsis,Ellipsis))
         else:
             raise TypeError("Invalid argument type:", type(key))
     def __setitem__(self, key,value):
@@ -2086,9 +1925,11 @@ class NII(NII_Math):
         product = math.prod(self.spacing)
         return product
 
-    def volumes(self, include_zero: bool = False, in_mm3=False) -> dict[int, float]|dict[int, int]:
+    def volumes(self, include_zero: bool = False, in_mm3=False,sort=False) -> dict[int, float]|dict[int, int]:
         '''Returns a dict stating how many pixels are present for each label'''
         dic =  np_volume(self.get_seg_array(), include_zero=include_zero)
+        if sort:
+            dic = dict(sorted(dic.items()))
         if in_mm3:
             voxel_size = self.voxel_volume()
             dic = {k:v*voxel_size for k,v in dic.items()}

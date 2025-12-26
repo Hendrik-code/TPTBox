@@ -18,16 +18,24 @@ out_base = Path(__file__).parent.parent / "nnUNet/"
 model_path = out_base / "nnUNet_results"
 
 
-def get_ds_info(idx) -> dict:
+def get_ds_info(idx, _model_path: str | Path | None = None, exit_one_fail=True) -> dict:
+    if _model_path is not None:
+        _model_path = Path(_model_path)
+        model_path = _model_path / "nnUNet_results"
+        assert model_path.exists(), model_path
+
     try:
         nnunet_path = next(next(iter(model_path.glob(f"*{idx}*"))).glob("*__nnUNetPlans*"))
     except StopIteration:
         try:
             nnunet_path = next(next(iter(model_path.glob(f"*{idx}*"))).glob("*__nnUNet*ResEnc*"))
         except StopIteration:
-            Print_Logger().print(f"Please add Dataset {idx} to {model_path}", Log_Type.FAIL)
-            model_path.mkdir(exist_ok=True, parents=True)
-            sys.exit()
+            if exit_one_fail:
+                Print_Logger().print(f"Please add Dataset {idx} to {model_path}", Log_Type.FAIL)
+                model_path.mkdir(exist_ok=True, parents=True)
+                sys.exit()
+            else:
+                return None
     with open(Path(nnunet_path, "dataset.json")) as f:
         ds_info = json.load(f)
     return ds_info
@@ -129,15 +137,15 @@ def run_inference_on_file(
     og_nii = input_nii[0].copy()
 
     try:
-        zoom_old = ds_info.get("spacing")
-        if idx not in [527] and zoom_old is not None:
-            zoom_old = zoom_old[::-1]
+        zoom = ds_info.get("spacing")
+        if idx not in [527] and zoom is not None:
+            zoom = zoom[::-1]
 
-        zoom_old = ds_info.get("resolution_range", zoom_old)
-        if zoom_old is None:
-            zoom = plans_info["configurations"]["3d_fullres"]["spacing"]
-            if all(zoom[0] == z for z in zoom):
-                zoom_old = zoom
+        zoom = ds_info.get("resolution_range", zoom)
+        if zoom is None:
+            zoom_ = plans_info["configurations"]["3d_fullres"]["spacing"]
+            if all(zoom[0] == z for z in zoom_):
+                zoom = zoom_
         # order = plans_info["transpose_backward"]
         ## order2 = plans_info["transpose_forward"]
         # zoom = [zoom[order[0]], zoom[order[1]], zoom[order[2]]][::-1]
@@ -150,7 +158,7 @@ def run_inference_on_file(
 
         # zoom_old = zoom_old[::-1]
 
-        zoom_old = [float(z) for z in zoom_old]
+        zoom = [float(z) for z in zoom]
     except Exception:
         pass
     assert len(ds_info["channel_names"]) == len(input_nii), (
@@ -163,9 +171,9 @@ def run_inference_on_file(
         print("orientation", orientation, f"{orientation_ref=}") if verbose else None
         input_nii = [i.reorient(orientation) for i in input_nii]
 
-    if zoom_old is not None:
-        print("rescale", zoom, f"{zoom_old=}") if verbose else None
-        input_nii = [i.rescale_(zoom_old, mode=mode) for i in input_nii]
+    if zoom is not None:
+        print("rescale", input_nii[0].orientation, f"{zoom=}") if verbose else None
+        input_nii = [i.rescale_(zoom, mode=mode) for i in input_nii]
         print(input_nii)
     print("squash to float16") if verbose else None
     input_nii = [squash_so_it_fits_in_float16(i) for i in input_nii]
@@ -199,8 +207,8 @@ idx_models = [80, 87, 86, 85]
 
 
 def run_VibeSeg(
-    img: Path | str | list[Path] | list[NII],
-    out_path: Path,
+    img: Path | str | list[Path] | list[NII] | Image_Reference,
+    out_path: str | Path | None,
     override=False,
     dataset_id=None,
     gpu: int | None = None,
@@ -215,7 +223,9 @@ def run_VibeSeg(
     **_kargs,
 ):
     global model_path  # noqa: PLW0603
-    if out_path.exists() and not override:
+    if isinstance(out_path, str):
+        out_path = Path(out_path)
+    if out_path is not None and out_path.exists() and not override:
         logger.print(out_path, "already exists. SKIP!", Log_Type.OK)
         return out_path
 
@@ -243,13 +253,14 @@ def run_VibeSeg(
         gpu = "auto"  # type: ignore
     logger.print("run", f"{dataset_id=}, {gpu=}", Log_Type.STAGE)
     ds_info = get_ds_info(dataset_id)
-    orientation = ds_info["orientation"]
-    if not isinstance(img, Sequence):
+    orientation = ds_info.get("orientation", ("R", "A", "S"))
+    if not isinstance(img, Sequence) or isinstance(img, str):
         img = [img]
+
     if "roi" in ds_info:
         raise NotImplementedError("roi")
     else:
-        in_niis = [to_nii(i) for i in img]
+        in_niis = [to_nii(i) for i in img]  # type: ignore
     in_niis = [i.resample_from_to_(in_niis[0]) if i.shape != in_niis[0].shape else i for i in in_niis]
     if (in_niis[0].affine == np.eye(4)).all():
         warn(

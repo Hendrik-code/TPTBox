@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import random
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,6 +11,7 @@ import numpy as np
 
 from TPTBox.core.poi import POI
 from TPTBox.core.poi_fun.poi_global import POI_Global
+from TPTBox.tests.test_utils import get_random_ax_code
 
 
 class TestPOI(unittest.TestCase):
@@ -77,22 +79,143 @@ class TestPOI(unittest.TestCase):
         # Check if the returned global coordinates match the expected coordinates
         assert global_coords == expected_coords
 
-    # Test that the 'affine' property returns the expected value when all required attributes are set.
     def test_affine_property(self):
-        # Create a POI object with all required attributes set
-        poi = POI()
-        poi.zoom = (1.0, 1.0, 1.0)
-        poi.rotation = np.eye(3)
-        poi.origin = (0.0, 0.0, 0.0)
-        poi.shape = (10, 10, 10)
+        # Random but valid parameters
+        zoom = tuple(np.random.uniform(0.1, 5.0, size=3))
+        rotation = np.linalg.qr(np.random.randn(3, 3))[0]  # orthonormal rotation
+        origin = tuple(np.random.uniform(-100.0, 100.0, size=3))
+        shape = tuple(np.random.randint(1, 512, size=3))
 
-        # Calculate the expected affine matrix
+        # Create a POI object
+        poi = POI()
+        poi.zoom = zoom
+        poi.rotation = rotation
+        poi.origin = origin
+        poi.shape = shape
+
+        # Manually construct expected affine
         expected_affine = np.eye(4)
-        expected_affine[:3, :3] = np.eye(3)
-        expected_affine[:3, 3] = (0.0, 0.0, 0.0)
+        expected_affine[:3, :3] = rotation @ np.diag(zoom)
+        expected_affine[:3, 3] = origin
 
         # Check that the 'affine' property returns the expected value
-        assert np.array_equal(poi.affine, expected_affine)
+        assert np.allclose(poi.affine, expected_affine)
+
+    def test_affine_property_2(self):
+        for _ in range(10):
+            # Random but valid parameters
+            zoom = tuple(np.random.uniform(0.1, 5.0, size=3))
+            rotation = np.linalg.qr(np.random.randn(3, 3))[0]  # random orthonormal rotation
+            origin = tuple(np.random.uniform(-100.0, 100.0, size=3))
+            shape = tuple(np.random.randint(1, 512, size=3))
+
+            # Create first POI
+            poi = POI({(1, 1): (0, 0, 0)})
+            poi.zoom = zoom
+            poi.rotation = rotation
+            poi.origin = origin
+            poi.shape = shape
+            poi.reorient(get_random_ax_code())
+
+            # Create second POI from affine
+            poi2 = POI()
+            poi2.affine = poi.affine
+
+            # Zoom must be preserved
+            assert np.allclose(poi.zoom, poi2.zoom, rtol=1e-6, atol=1e-8)
+
+            # Rotation must be preserved
+            assert np.allclose(poi.rotation, poi2.rotation, rtol=1e-5, atol=1e-6)
+
+            # Origin (translation) must be preserved
+            assert np.allclose(poi.origin, poi2.origin, rtol=1e-6, atol=1e-8)
+
+            # Full affine round-trip consistency
+            assert np.allclose(poi.affine, poi2.affine, rtol=1e-6, atol=1e-8)
+
+    def test_change_affine_translation_only(self):
+        poi = POI()
+        poi.affine = np.eye(4)
+
+        translation = np.array([10.0, -5.0, 2.5])
+
+        out = poi.change_affine(translation=translation)
+
+        expected = np.eye(4)
+        expected[:3, 3] = translation
+
+        assert np.allclose(out.affine, expected, rtol=1e-6, atol=1e-8)
+        # not inplace
+        assert not np.allclose(poi.affine, expected, rtol=1e-6, atol=1e-8)
+
+    def test_change_affine_scaling_only(self):
+        poi = POI()
+        poi.affine = np.eye(4)
+
+        scaling = np.array([2.0, 0.5, 3.0])
+
+        out = poi.change_affine(scaling=scaling)
+
+        expected = np.eye(4)
+        expected[:3, :3] = np.diag(scaling)
+
+        assert np.allclose(out.affine, expected, rtol=1e-6, atol=1e-8)
+
+    def test_change_affine_rotation_only(self):
+        from scipy.spatial.transform import Rotation
+
+        poi = POI()
+        poi.affine = np.eye(4)
+
+        rotation = np.array([90.0, 0.0, 0.0])
+
+        out = poi.change_affine(rotation_degrees=rotation)
+
+        R = Rotation.from_euler("xyz", rotation, degrees=True).as_matrix()
+
+        expected = np.eye(4)
+        expected[:3, :3] = R
+
+        assert np.allclose(out.affine, expected, rtol=1e-6, atol=1e-8)
+
+    def test_change_affine_combined_order(self):
+        from scipy.spatial.transform import Rotation
+
+        poi = POI()
+        poi.affine = np.eye(4)
+
+        scaling = np.array([2.0, 2.0, 2.0])
+        rotation = np.array([0.0, 0.0, 90.0])
+        translation = np.array([1.0, 2.0, 3.0])
+
+        out = poi.change_affine(scaling=scaling, rotation_degrees=rotation, translation=translation)
+
+        S = np.eye(4)
+        S[:3, :3] = np.diag(scaling)
+
+        R = np.eye(4)
+        R[:3, :3] = Rotation.from_euler("xyz", rotation, degrees=True).as_matrix()
+
+        T = np.eye(4)
+        T[:3, 3] = translation
+
+        expected = T @ R @ S
+
+        assert np.allclose(out.affine, expected, rtol=1e-6, atol=1e-8)
+
+    def test_change_affine_inplace(self):
+        poi = POI()
+        poi.affine = np.eye(4)
+
+        translation = np.array([1.0, 2.0, 3.0])
+
+        out = poi.change_affine_(translation=translation)
+
+        expected = np.eye(4)
+        expected[:3, 3] = translation
+
+        assert out is poi
+        assert np.allclose(poi.affine, expected)
 
     # Test that the 'POI' instance can be saved to a file.
     def test_save_poi(self):

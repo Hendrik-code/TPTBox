@@ -125,12 +125,45 @@ class Has_Grid(Grid_Proxy):
         inplace=False,
     ):
         """
-        Apply a transformation (translation, rotation, scaling) to the affine matrix.
+        Apply a transformation (scaling, rotation, translation) to the affine matrix.
 
-        Parameters:
-            translation: (n,) array-like in mm in (R, A, S)
-            rotation_degrees: (n,) array-like (pitch, yaw, roll) in degrees
-            scaling: (n,) array-like scaling factors along x, y, z
+        Assumptions
+        -----------
+        - `self.affine` is a square homogeneous affine matrix of shape (n, n),
+        where the spatial dimensionality is n-1 (typically n=4 for 3D).
+        - The affine follows the convention:
+            x_world = A @ x_homogeneous
+        - Transformations are applied in the following order (right-multiplied):
+            1. Scaling
+            2. Rotation
+            3. Translation
+        i.e. the final update is:
+            self.affine = (T @ R @ S) @ self.affine
+        - Rotation is specified as Euler angles in the "xyz" convention
+        (pitch, yaw, roll) using scipy.spatial.transform.Rotation.
+        - Translation is specified in world units (e.g. mm) in (x, y, z)
+        corresponding to the affine axes.
+        - Scaling is applied along the affine axes, not object-local axes.
+        - If `inplace=False`, a copy of the object is returned.
+        If `inplace=True`, the object is modified in place.
+
+        Parameters
+        ----------
+        translation : (n-1,) array-like, optional
+            Translation vector in world coordinates.
+        rotation_degrees : (n-1,) array-like, optional
+            Euler angles (x, y, z) in degrees by default.
+        scaling : (n-1,) array-like, optional
+            Scaling factors along each axis.
+        degrees : bool, default=True
+            Whether rotation angles are given in degrees.
+        inplace : bool, default=False
+            Whether to modify the object in place.
+
+        Returns
+        -------
+        self or copy of self
+            Object with updated affine.
         """
         # warnings.warn("change_affine is untested", stacklevel=2)
         n = self.affine.shape[0]
@@ -311,21 +344,6 @@ class Has_Grid(Grid_Proxy):
         if direction not in self.orientation:
             direction = _same_direction[direction]
         return self.orientation.index(direction)
-
-    def get_empty_POI(self, points: dict | None = None):
-        warnings.warn("get_empty_POI id deprecated use make_empty_POI instead", stacklevel=5)  # TODO remove in version 1.0
-
-        from TPTBox import POI
-
-        p = {} if points is None else points
-        return POI(
-            p,
-            orientation=self.orientation,
-            zoom=self.zoom,
-            shape=self.shape,
-            rotation=self.rotation,
-            origin=self.origin,
-        )
 
     def make_empty_POI(self, points: dict | None = None):
         from TPTBox import POI
