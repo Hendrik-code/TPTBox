@@ -18,16 +18,24 @@ out_base = Path(__file__).parent.parent / "nnUNet/"
 model_path = out_base / "nnUNet_results"
 
 
-def get_ds_info(idx) -> dict:
+def get_ds_info(idx, _model_path: str | Path | None = None, exit_one_fail=True) -> dict:
+    if _model_path is not None:
+        _model_path = Path(_model_path)
+        model_path = _model_path / "nnUNet_results"
+        assert model_path.exists(), model_path
+
     try:
         nnunet_path = next(next(iter(model_path.glob(f"*{idx}*"))).glob("*__nnUNetPlans*"))
     except StopIteration:
         try:
             nnunet_path = next(next(iter(model_path.glob(f"*{idx}*"))).glob("*__nnUNet*ResEnc*"))
         except StopIteration:
-            Print_Logger().print(f"Please add Dataset {idx} to {model_path}", Log_Type.FAIL)
-            model_path.mkdir(exist_ok=True, parents=True)
-            sys.exit()
+            if exit_one_fail:
+                Print_Logger().print(f"Please add Dataset {idx} to {model_path}", Log_Type.FAIL)
+                model_path.mkdir(exist_ok=True, parents=True)
+                sys.exit()
+            else:
+                return None
     with open(Path(nnunet_path, "dataset.json")) as f:
         ds_info = json.load(f)
     return ds_info
@@ -199,8 +207,8 @@ idx_models = [80, 87, 86, 85]
 
 
 def run_VibeSeg(
-    img: Path | str | list[Path] | list[NII],
-    out_path: Path,
+    img: Path | str | list[Path] | list[NII] | Image_Reference,
+    out_path: str | Path | None,
     override=False,
     dataset_id=None,
     gpu: int | None = None,
@@ -215,7 +223,9 @@ def run_VibeSeg(
     **_kargs,
 ):
     global model_path  # noqa: PLW0603
-    if out_path.exists() and not override:
+    if isinstance(out_path, str):
+        out_path = Path(out_path)
+    if out_path is not None and out_path.exists() and not override:
         logger.print(out_path, "already exists. SKIP!", Log_Type.OK)
         return out_path
 
@@ -243,13 +253,14 @@ def run_VibeSeg(
         gpu = "auto"  # type: ignore
     logger.print("run", f"{dataset_id=}, {gpu=}", Log_Type.STAGE)
     ds_info = get_ds_info(dataset_id)
-    orientation = ds_info["orientation"]
-    if not isinstance(img, Sequence):
+    orientation = ds_info.get("orientation", ("R", "A", "S"))
+    if not isinstance(img, Sequence) or isinstance(img, str):
         img = [img]
+
     if "roi" in ds_info:
         raise NotImplementedError("roi")
     else:
-        in_niis = [to_nii(i) for i in img]
+        in_niis = [to_nii(i) for i in img]  # type: ignore
     in_niis = [i.resample_from_to_(in_niis[0]) if i.shape != in_niis[0].shape else i for i in in_niis]
     if (in_niis[0].affine == np.eye(4)).all():
         warn(
