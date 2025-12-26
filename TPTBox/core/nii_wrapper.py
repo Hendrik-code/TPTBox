@@ -1287,7 +1287,7 @@ class NII(NII_Math):
         filled = np_fill_holes(seg_arr, label_ref=labels, slice_wise_dim=slice_wise_dim, use_crop=use_crop)
         return self.set_array(filled,inplace=inplace)
 
-    def fill_holes_(self, labels: LABEL_REFERENCE = None, slice_wise_dim: int | None = None, verbose:logging=True,use_crop=True):
+    def fill_holes_(self, labels: LABEL_REFERENCE = None, slice_wise_dim: int |str| None = None, verbose:logging=True,use_crop=True):
         return self.fill_holes(labels, slice_wise_dim, verbose, inplace=True,use_crop=use_crop)
 
     def calc_convex_hull(
@@ -1308,7 +1308,7 @@ class NII(NII_Math):
             return self.set_array_(convex_hull_arr)
         return self.set_array(convex_hull_arr)
 
-    def calc_convex_hull_(self, axis: DIRECTIONS="S", verbose: bool = False,):
+    def calc_convex_hull_(self, axis: None|DIRECTIONS="S", verbose: bool = False,):
         return self.calc_convex_hull(axis=axis, inplace=True, verbose=verbose)
 
 
@@ -1717,7 +1717,7 @@ class NII(NII_Math):
         axis = self.get_axis(axis) if not isinstance(axis,int) else axis
         if keep_global_coords:
             orient = list(self.orientation)
-            orient[axis] = _same_direction[orient[axis] ]
+            orient[axis] = _same_direction[orient[axis]]
             return self.reorient(tuple(orient),inplace=inplace)
         else:
             return self.set_array(np.flip(self.get_array(),axis),inplace=inplace)
@@ -1727,7 +1727,7 @@ class NII(NII_Math):
     @secure_save
     def save(self,file:str|Path,make_parents=True,verbose:logging=True, dtype = None):
         if make_parents:
-            Path(file).parent.mkdir(0o771,exist_ok=True,parents=True)
+            Path(file).parent.mkdir(0o777,exist_ok=True,parents=True)
         arr = self.get_array() if not self.seg else self.get_seg_array()
         if isinstance(arr,np.floating) and self.seg:
             self.set_dtype_("smallest_uint")
@@ -1807,6 +1807,8 @@ class NII(NII_Math):
             return self.get_array()[key.get_array()==1]
         elif isinstance(key,np.ndarray):
             return self.get_array()[key]
+        elif isinstance(key,slice):
+            self.__getitem__((key,Ellipsis,Ellipsis))
         else:
             raise TypeError("Invalid argument type:", type(key))
     def __setitem__(self, key,value):
@@ -1923,9 +1925,11 @@ class NII(NII_Math):
         product = math.prod(self.spacing)
         return product
 
-    def volumes(self, include_zero: bool = False, in_mm3=False) -> dict[int, float]|dict[int, int]:
+    def volumes(self, include_zero: bool = False, in_mm3=False,sort=False) -> dict[int, float]|dict[int, int]:
         '''Returns a dict stating how many pixels are present for each label'''
         dic =  np_volume(self.get_seg_array(), include_zero=include_zero)
+        if sort:
+            dic = dict(sorted(dic.items()))
         if in_mm3:
             voxel_size = self.voxel_volume()
             dic = {k:v*voxel_size for k,v in dic.items()}
