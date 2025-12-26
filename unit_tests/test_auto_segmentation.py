@@ -31,6 +31,14 @@ except ModuleNotFoundError:
     has_spineps = False
 
 
+try:
+    import torch
+
+    has_torch = True
+except ModuleNotFoundError:
+    has_torch = False
+
+
 class Test_test_samples(unittest.TestCase):
     # def test_load_ct(self):
     #    ct_nii, subreg_nii, vert_nii, label = get_test_ct()
@@ -103,3 +111,15 @@ class Test_test_samples(unittest.TestCase):
             assert isinstance(out, (NII, Path))
             assert seg_out_path.exists()
             seg_out_path.unlink(missing_ok=True)
+
+    @unittest.skipIf(not has_torch, "requires torch to be installed")
+    def test_get_device(self):
+        import torch
+
+        from TPTBox.core.internal.deep_learning_utils import get_device
+
+        assert get_device("cpu", 0) == torch.device("cpu")
+        assert get_device("cuda", 0) == torch.device("cuda:0")
+        assert get_device("cuda", 1) == torch.device("cuda:1")
+        assert get_device("cuda", 1) != torch.device("cuda:0")
+        assert get_device("mps", 0) == torch.device("mps")
