@@ -122,16 +122,16 @@ class TestPOI(unittest.TestCase):
             poi2.affine = poi.affine
 
             # Zoom must be preserved
-            assert np.allclose(poi.zoom, poi2.zoom)
+            assert np.allclose(poi.zoom, poi2.zoom, rtol=1e-6, atol=1e-8)
 
             # Rotation must be preserved
-            assert np.allclose(poi.rotation, poi2.rotation)
+            assert np.allclose(poi.rotation, poi2.rotation, rtol=1e-6, atol=1e-8)
 
             # Origin (translation) must be preserved
-            assert np.allclose(poi.origin, poi2.origin)
+            assert np.allclose(poi.origin, poi2.origin, rtol=1e-6, atol=1e-8)
 
             # Full affine round-trip consistency
-            assert np.allclose(poi.affine, poi2.affine)
+            assert np.allclose(poi.affine, poi2.affine, rtol=1e-6, atol=1e-8)
 
     def test_change_affine_translation_only(self):
         poi = POI()
@@ -144,9 +144,9 @@ class TestPOI(unittest.TestCase):
         expected = np.eye(4)
         expected[:3, 3] = translation
 
-        assert np.allclose(out.affine, expected)
+        assert np.allclose(out.affine, expected, rtol=1e-6, atol=1e-8)
         # not inplace
-        assert not np.allclose(poi.affine, expected)
+        assert not np.allclose(poi.affine, expected, rtol=1e-6, atol=1e-8)
 
     def test_change_affine_scaling_only(self):
         poi = POI()
@@ -159,7 +159,7 @@ class TestPOI(unittest.TestCase):
         expected = np.eye(4)
         expected[:3, :3] = np.diag(scaling)
 
-        assert np.allclose(out.affine, expected)
+        assert np.allclose(out.affine, expected, rtol=1e-6, atol=1e-8)
 
     def test_change_affine_rotation_only(self):
         from scipy.spatial.transform import Rotation
@@ -176,7 +176,7 @@ class TestPOI(unittest.TestCase):
         expected = np.eye(4)
         expected[:3, :3] = R
 
-        assert np.allclose(out.affine, expected)
+        assert np.allclose(out.affine, expected, rtol=1e-6, atol=1e-8)
 
     def test_change_affine_combined_order(self):
         from scipy.spatial.transform import Rotation
@@ -188,11 +188,7 @@ class TestPOI(unittest.TestCase):
         rotation = np.array([0.0, 0.0, 90.0])
         translation = np.array([1.0, 2.0, 3.0])
 
-        out = poi.change_affine(
-            scaling=scaling,
-            rotation_degrees=rotation,
-            translation=translation,
-        )
+        out = poi.change_affine(scaling=scaling, rotation_degrees=rotation, translation=translation)
 
         S = np.eye(4)
         S[:3, :3] = np.diag(scaling)
@@ -205,7 +201,7 @@ class TestPOI(unittest.TestCase):
 
         expected = T @ R @ S
 
-        assert np.allclose(out.affine, expected)
+        assert np.allclose(out.affine, expected, rtol=1e-6, atol=1e-8)
 
     def test_change_affine_inplace(self):
         poi = POI()
