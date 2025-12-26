@@ -48,7 +48,7 @@ if __name__ == "__main__":
         "/DATA/NAS/ongoing_projects/robert/datasets/Carotis-CoW-Projekt/Carotis-CoW-Projekt/CT_Datensatz_TUM_20250827/",
         parents=["CT_CAROTIS"],
     )
-    for sub, subj in bgi.iter_subjects():
+    for _, subj in bgi.iter_subjects():
         q = subj.new_query(flatten=True)
         q.filter_format(lambda x: "ct" in str(x))
         q.filter_filetype(["nii.gz", "nii", "nrrd", "mrk"])
