@@ -8,6 +8,35 @@ import requests
 # Import your functions
 from TPTBox.core.internal.slicer_nrrd import load_slicer_nrrd, save_slicer_nrrd
 from TPTBox.core.nii_wrapper import NII
+from TPTBox.tests.test_utils import get_nii_paths_ct
+
+try:
+    import ants
+
+    has_ants = True
+except Exception:
+    has_ants = False
+
+
+class TestAnts(unittest.TestCase):
+    @unittest.skipIf(not has_ants, "requires spineps to be installed")
+    def test_segmentation_CT(self):
+        """Test round-trip for Segmentation.seg.nrrd."""
+        ct, subreg, vert = get_nii_paths_ct()
+        from TPTBox import NII, to_nii
+        from TPTBox.core.internal import ants_to_nifti, nifti_to_ants
+
+        nii = to_nii(ct)
+        nii2 = ants_to_nifti(nifti_to_ants(nii.nii), nii.header)
+        nii2 = NII(nii2)
+        assert nii.orientation == nii2.orientation
+        assert np.isclose(nii.affine, nii2.affine).all()
+        assert np.isclose(nii.get_array(), nii.get_array()).all()
+
+    # @unittest.skipIf(not has_ants, "requires spineps to be installed")
+    # def test_raf_ants():
+    #    ct, subreg, vert = get_nii_paths_ct()
+    #    from TPTBox.core.internal import get_ras_affine_from_ants
 
 
 class TestSlicerSegmentationIO(unittest.TestCase):

@@ -56,8 +56,8 @@ class NII_Math(NII_Proxy,Has_Grid):
         if isinstance(other,NII_Math):
             other = other.get_array()
         return self.set_array(opt(self.get_array(),other),inplace=inplace,verbose=False)
-    def _uni_opt(self, opt,inplace = False)-> Self:
-        return self.set_array(opt(self.get_array()),inplace=inplace,verbose=False)
+    def _uni_opt(self, opt,inplace = False,**args)-> Self:
+        return self.set_array(opt(self.get_array(),**args),inplace=inplace,verbose=False)
     def __add__(self,p2):
         return self._binary_opt(p2,operator.add)
     def __radd__(self,p2):
@@ -81,12 +81,20 @@ class NII_Math(NII_Proxy,Has_Grid):
     def __rshift__(self,p2):
         return self._binary_opt(p2,operator.rshift)
     def __and__(self,p2):
+        if not np.issubdtype(self.get_array().dtype, np.integer):
+            raise TypeError("Bitwise operations require integer arrays")
         return self._binary_opt(p2,operator.and_)
     def __or__(self,p2):
+        if not np.issubdtype(self.get_array().dtype, np.integer):
+            raise TypeError("Bitwise operations require integer arrays")
         return self._binary_opt(p2,operator.or_)
     def __xor__(self,p2):
+        if not np.issubdtype(self.get_array().dtype, np.integer):
+            raise TypeError("Bitwise operations require integer arrays")
         return self._binary_opt(p2,operator.xor)
     def __invert__(self):
+        if not np.issubdtype(self.get_array().dtype, np.integer):
+            raise TypeError("Bitwise operations require integer arrays")
         return self._uni_opt(operator.invert)
 
     def __lt__(self,p2):
@@ -125,7 +133,7 @@ class NII_Math(NII_Proxy,Has_Grid):
         return self._uni_opt(operator.abs)
 
     def __round__(self, decimals=0):
-        return self._uni_opt(np.round)
+        return self._uni_opt(np.round,decimals=decimals)
     def round(self,decimals):
         return self.__round__(decimals=decimals)
     def __floor__(self):
