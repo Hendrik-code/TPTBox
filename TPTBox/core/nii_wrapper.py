@@ -1665,6 +1665,9 @@ class NII(NII_Math):
         self_mask[self_mask == 0] = self_mask_org[self_mask == 0]
         return self.set_array(self_mask,inplace=inplace)
 
+    def infect_(self: NII, reference_mask: NII,verbose=True,axis:int|str|None=None):
+        return self.infect(reference_mask, inplace=True,verbose=verbose,axis=axis)
+
     def map_labels(self, label_map:LABEL_MAP , verbose:logging=True, inplace=False):
         """
         Maps labels in the given NIfTI image according to the label_map dictionary.
