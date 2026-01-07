@@ -26,6 +26,15 @@ def get_tests_dir():
     return Path(__file__).parent
 
 
+def get_nii_paths_ct() -> tuple[Path, Path, Path]:
+    tests_path = get_tests_dir()
+    ct_path = tests_path.joinpath("sample_ct")
+    ct = ct_path.joinpath("sub-ct_label-22_ct.nii.gz")
+    subreg = ct_path.joinpath("sub-ct_seg-subreg_label-22_msk.nii.gz")
+    vert = ct_path.joinpath("sub-ct_seg-vert_label-22_msk.nii.gz")
+    return ct, subreg, vert
+
+
 def get_test_ct() -> tuple[NII, NII, NII, int]:
     tests_path = get_tests_dir()
     ct_path = tests_path.joinpath("sample_ct")

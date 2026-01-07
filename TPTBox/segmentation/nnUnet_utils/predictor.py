@@ -522,8 +522,10 @@ class nnUNetPredictor:
                         s = [floor((s / p) / sp) for s, p, sp in zip(shape, patch_size, splits)]
                         j = np.argmax(s)
                         if s[j] == 1:
-                            device = "cpu"
-                            print("Fall Back CPU. Not enough space; s[j] == 1", shape, patch_size, splits, s)
+                            if s == [1, 1, 1]:
+                                break
+                            # device = "cpu"
+                            print("Fall Back into regular patch mode. Not enough space; s[j] == 1", shape, patch_size, splits, s)
                             break
                         shape_split = [ceil(s / sp) for s, sp in zip(shape, splits)]
                         # print(shape, patch_size, splits, s, np.prod(shape) / 1000000)

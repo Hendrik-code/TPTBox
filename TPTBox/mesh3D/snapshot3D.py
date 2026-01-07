@@ -120,7 +120,7 @@ def make_snapshot3D(
         scene.projection(proj_type="parallel")
         scene.reset_camera_tight(margin_factor=1.02)
         window.record(
-            scene,
+            scene=scene,
             size=window_size,
             out_path=output_path,
             reset_camera=False,

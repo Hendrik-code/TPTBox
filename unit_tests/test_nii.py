@@ -4,6 +4,7 @@
 # coverage html
 from __future__ import annotations
 
+import operator
 import random
 import sys
 import unittest
@@ -11,6 +12,7 @@ from pathlib import Path
 
 import nibabel as nib
 import numpy as np
+import pytest
 
 from TPTBox import NII, v_idx2name
 from TPTBox.core import np_utils
@@ -30,6 +32,126 @@ def get_all_corner_points(affine, shape) -> np.ndarray:
     lst = np.array(lst) * (np.array(shape))  # counting starts an 0 to shape-1
     a = apply_affine(affine, lst)
     return a
+
+
+class TestNII_MathOperators(unittest.TestCase):
+    """Tests that NII_Math operators match explicit NumPy array operations.
+
+    Operator domain assumptions:
+    - Arithmetic & comparison ops operate on float arrays
+    - Bitwise ops (and, or, xor, invert) require integer arrays
+    """
+
+    @staticmethod
+    def make_nii(shape=(8, 9, 10), seed=0, dtype=float):
+        rng = np.random.default_rng(seed)
+        arr = rng.normal(size=shape) if dtype is float else rng.integers(0, 8, size=shape, dtype=dtype)
+        import nibabel as nib
+
+        nii = NII((arr, np.eye(4), nib.nifti1.Nifti1Header()))
+        return nii
+
+    def test_binary_operator_equivalence_float(self):
+        """Binary operators valid for float arrays."""
+        binary_ops = [
+            operator.add,
+            operator.sub,
+            operator.mul,
+            operator.truediv,
+            operator.floordiv,
+            operator.mod,
+            operator.pow,
+            operator.lt,
+            operator.le,
+            operator.eq,
+            operator.ne,
+            operator.gt,
+            operator.ge,
+        ]
+
+        for op in binary_ops:
+            with self.subTest(op=op):
+                nii1 = self.make_nii(seed=1, dtype=float)
+                nii2 = self.make_nii(seed=2, dtype=float)
+
+                out_op = op(nii1, nii2)
+                expected = op(nii1.get_array(), nii2.get_array())
+
+                out_manual = nii1.set_array(expected, inplace=False)
+
+                self.assertTrue(np.allclose(out_op.get_array(), out_manual.get_array(), equal_nan=True))
+
+    def test_binary_operator_equivalence_bitwise(self):
+        """Bitwise binary operators require integer arrays."""
+        bitwise_ops = [
+            operator.and_,
+            operator.or_,
+            operator.xor,
+        ]
+
+        for op in bitwise_ops:
+            with self.subTest(op=op):
+                nii1 = self.make_nii(seed=3, dtype=np.int32)
+                nii2 = self.make_nii(seed=4, dtype=np.int32)
+
+                out_op = op(nii1, nii2)
+                expected = op(nii1.get_array(), nii2.get_array())
+
+                out_manual = nii1.set_array(expected, inplace=False)
+
+                np.testing.assert_array_equal(out_op.get_array(), out_manual.get_array())
+
+    def test_unary_operator_equivalence_float(self):
+        """Unary operators valid for float arrays."""
+        unary_ops = [operator.neg, operator.pos, operator.abs, np.floor, np.ceil]
+
+        for op in unary_ops:
+            with self.subTest(op=op):
+                nii = self.make_nii(seed=5, dtype=float)
+
+                out_op = op(nii)
+                expected = op(nii.get_array())
+
+                out_manual = nii.set_array(expected, inplace=False)
+
+                self.assertTrue(np.allclose(out_op.get_array(), out_manual.get_array()))
+
+    def test_unary_operator_invert_integer(self):
+        """Bitwise invert requires integer arrays."""
+        nii = self.make_nii(seed=6, dtype=np.int32)
+
+        out_op = ~nii
+        expected = ~nii.get_array()
+
+        out_manual = nii.set_array(expected, inplace=False)
+
+        np.testing.assert_array_equal(out_op.get_array(), out_manual.get_array())
+
+    def test_inplace_binary_operator(self):
+        nii1 = self.make_nii(seed=7, dtype=float)
+        nii2 = self.make_nii(seed=8, dtype=float)
+
+        arr_before = nii1.get_array().copy()
+
+        nii1 += nii2
+        expected = arr_before + nii2.get_array()
+
+        self.assertTrue(np.allclose(nii1.get_array(), expected))
+
+    def test_inplace_unary_operator(self):
+        nii = self.make_nii(seed=9, dtype=float)
+        arr_before = nii.get_array().copy()
+
+        nii *= 2
+        self.assertTrue(np.allclose(nii.get_array(), arr_before * 2))
+
+    def test_round_equivalence(self):
+        nii = self.make_nii(seed=4)
+        out_op = round(nii, 2)
+        expected = np.round(nii.get_array(), 2)
+        out_manual = nii.set_array(expected, inplace=False)
+        print((out_op.get_array()[0], out_manual.get_array()[0]))
+        self.assertTrue(np.allclose(out_op.get_array(), out_manual.get_array()))
 
 
 class Test_bids_file(unittest.TestCase):
