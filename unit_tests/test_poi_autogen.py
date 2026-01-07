@@ -115,7 +115,7 @@ class TestPOI(unittest.TestCase):
             poi.rotation = rotation
             poi.origin = origin
             poi.shape = shape
-            poi.reorient(get_random_ax_code())
+            poi.reorient_(get_random_ax_code())
 
             # Create second POI from affine
             poi2 = POI()
