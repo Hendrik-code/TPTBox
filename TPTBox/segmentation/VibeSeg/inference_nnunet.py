@@ -15,7 +15,7 @@ from TPTBox.segmentation.VibeSeg.auto_download import download_weights
 
 logger = Print_Logger()
 out_base = Path(__file__).parent.parent / "nnUNet/"
-model_path = out_base / "nnUNet_results"
+_model_path_ = out_base / "nnUNet_results"
 
 
 def get_ds_info(idx, _model_path: str | Path | None = None, exit_one_fail=True) -> dict:
@@ -23,7 +23,8 @@ def get_ds_info(idx, _model_path: str | Path | None = None, exit_one_fail=True) 
         _model_path = Path(_model_path)
         model_path = _model_path / "nnUNet_results"
         assert model_path.exists(), model_path
-
+    else:
+        model_path = _model_path_
     try:
         nnunet_path = next(next(iter(model_path.glob(f"*{idx}*"))).glob("*__nnUNetPlans*"))
     except StopIteration:
@@ -72,11 +73,12 @@ def run_inference_on_file(
     wait_till_gpu_percent_is_free=0.1,
     verbose=True,
 ) -> tuple[Image_Reference, np.ndarray | None]:
-    global model_path  # noqa: PLW0603
     if _model_path is not None:
         _model_path = Path(_model_path)
         model_path = _model_path / "nnUNet_results"
         assert model_path.exists(), model_path
+    else:
+        model_path = _model_path_
     if out_file is not None and Path(out_file).exists() and not override:
         return out_file, None
 
@@ -203,7 +205,7 @@ def run_inference_on_file(
     return seg_nii, softmax_logits
 
 
-idx_models = [80, 87, 86, 85]
+idx_models = [100]
 
 
 def run_VibeSeg(
@@ -222,7 +224,6 @@ def run_VibeSeg(
     step_size=0.5,
     **_kargs,
 ):
-    global model_path  # noqa: PLW0603
     if isinstance(out_path, str):
         out_path = Path(out_path)
     if out_path is not None and out_path.exists() and not override:
@@ -231,6 +232,8 @@ def run_VibeSeg(
 
     if _model_path is not None:
         model_path = _model_path
+    else:
+        model_path = _model_path_
     if dataset_id is None:
         for idx in known_idx:
             download_weights(idx)
@@ -247,7 +250,8 @@ def run_VibeSeg(
             )
             return
     else:
-        download_weights(dataset_id)
+        weights_dir = download_weights(dataset_id)
+        print("to", weights_dir)
     selected_gpu = gpu
     if gpu is None:
         gpu = "auto"  # type: ignore
