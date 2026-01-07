@@ -662,6 +662,10 @@ class BIDS_FILE:
     def bids_format(self):
         return self.format
 
+    @property
+    def mod(self):
+        return self.mod
+
     def get_parent(self, file_type=None):
         return self.get_path_decomposed(file_type)[1]
 
@@ -1213,7 +1217,7 @@ class Searchquery:
             return self.filter_format(lambda x: x in filter_fun)
         return self.filter("format", filter_fun=filter_fun, required=True)
 
-    def filter_filetype(self, filter_fun: str | typing.Callable[[str | object], bool], required=True):
+    def filter_filetype(self, filter_fun: list[str] | str | typing.Callable[[str | object], bool], required=True):
         return self.filter("filetype", filter_fun=filter_fun, required=required)
 
     def filter_non_existence(

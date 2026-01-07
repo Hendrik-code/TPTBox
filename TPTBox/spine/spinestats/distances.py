@@ -31,7 +31,7 @@ def _compute_distance(
         all_pois_computed = True
     if not all_pois_computed:
         poi = calc_poi_from_subreg_vert(vert, subreg, extend_to=poi, subreg_id=[l1, l2])
-    poi.info[key] = poi.calculate_distances_poi_two_locations(l1, l2, keep_zoom=False)
+    poi.info[key] = poi.calculate_distances_poi_across_regions(l1, l2, keep_zoom=False)
     return poi
 
 

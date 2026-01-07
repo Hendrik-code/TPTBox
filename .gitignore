@@ -167,3 +167,6 @@ tutorials/dataset-PixelPandemonium/*
 #_*.py
 dicom_select
 examples
+slicerio_data
+*.nrrd
+nnUNet_results
