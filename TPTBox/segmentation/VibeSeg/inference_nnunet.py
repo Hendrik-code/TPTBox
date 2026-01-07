@@ -230,10 +230,7 @@ def run_VibeSeg(
         logger.print(out_path, "already exists. SKIP!", Log_Type.OK)
         return out_path
 
-    if _model_path is not None:
-        model_path = _model_path
-    else:
-        model_path = _model_path_
+    model_path = _model_path if _model_path is not None else _model_path_
     if dataset_id is None:
         for idx in known_idx:
             download_weights(idx)
