@@ -954,7 +954,10 @@ class NII(NII_Math):
         assert self.seg is False, "n4 bias field correction on a segmentation does not make any sense"
         # install antspyx not ants!
         import ants
-        import ants.utils.bias_correction as bc  # install antspyx not ants!
+        try:
+            import ants.ops.bias_correction as bc  # install antspyx not ants!
+        except ModuleNotFoundError:
+            import ants.utils.bias_correction as bc  # install antspyx not ants!
         from ants.utils.convert_nibabel import from_nibabel
         from scipy.ndimage import binary_dilation, generate_binary_structure
         dtype = self.dtype
