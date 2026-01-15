@@ -14,7 +14,6 @@ import nibabel as nib  # noqa: E402
 import numpy as np  # noqa: E402
 
 import TPTBox.core.bids_files as bids  # noqa: E402
-from TPTBox import Centroids  # noqa: E402
 from TPTBox.core.nii_wrapper import NII  # noqa: E402
 from TPTBox.core.poi import POI  # noqa: E402
 from TPTBox.core.vert_constants import AX_CODES  # noqa: E402
