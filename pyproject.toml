@@ -31,6 +31,7 @@ scikit-learn = "*"
 antspyx = "0.4.2"
 pynrrd = "*"
 #hf-deepali = "*"
+requests = "*"
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8.1.1"
