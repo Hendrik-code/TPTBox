@@ -265,6 +265,8 @@ modalities = {
 
 file_types = [
     "nii.gz",
+    "nii",
+    "nrrd",
     "json",
     "mrk.json",
     "png",
@@ -334,7 +336,7 @@ entities = {
     # Single class segmentation
     "Label": "label",
     # Others (never used)
-    "Split": "split",
+    "Split": "split",  # Never use, legacy. Is applied inconsistently by other datasets.
     "Density": "den",
     "version": "version",
     "Description": "desc",
