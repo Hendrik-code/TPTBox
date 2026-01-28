@@ -30,7 +30,9 @@ SHAPE = Union[TRIPLE, tuple[int, int, int]]
 ORIGIN = TRIPLE
 
 
-LABEL_MAP = Union[dict[Union[int, str], Union[int, str]], dict[str, str], dict[int, int]]
+LABEL_MAP = Union[
+    dict[Union[int, str], Union[int, str]], dict[str, str], dict[int, int]
+]
 
 LABEL_REFERENCE = Union[int, Sequence[int], None]
 
@@ -190,8 +192,8 @@ class Full_Body_Instance_Vibe(Abstract_lvl):
     clavicula_right = 47
     femur_left = 48
     femur_right = 49
-    hip_left = 50
-    hip_right = 51
+    pelvis_left = 50
+    pelvis_right = 51
     spinal_cord = 52
     gluteus_maximus_left = 53
     gluteus_maximus_right = 54
@@ -232,8 +234,8 @@ class Full_Body_Instance(Abstract_lvl):
     vert_body = 9
     vert_post = 10
     sacrum = 11
-    hip_right = 12
-    hip_left = 112
+    pelvis_right = 12
+    pelvis_left = 112
     femur_right = 13
     femur_left = 113
     patella_right = 14
@@ -370,7 +372,9 @@ class Vertebra_Instance(Abstract_lvl):
         self._endplate = None
         if has_rib:
             self._rib = (
-                vertebra_label + VERTEBRA_INSTANCE_RIB_LABEL_OFFSET if vertebra_label != 28 else 21 + VERTEBRA_INSTANCE_RIB_LABEL_OFFSET
+                vertebra_label + VERTEBRA_INSTANCE_RIB_LABEL_OFFSET
+                if vertebra_label != 28
+                else 21 + VERTEBRA_INSTANCE_RIB_LABEL_OFFSET
             )
         if has_ivd:
             self._ivd = vertebra_label + VERTEBRA_INSTANCE_IVD_LABEL_OFFSET
@@ -465,7 +469,13 @@ class Vertebra_Instance(Abstract_lvl):
         return {a.value: e for e, a in enumerate(cls.order())}
 
     def get_next_poi(self, poi: POI | NII | list[int]):
-        r = poi if isinstance(poi, list) else poi.keys_region() if hasattr(poi, "keys_region") else poi.unique()  # type: ignore
+        r = (
+            poi
+            if isinstance(poi, list)
+            else poi.keys_region()
+            if hasattr(poi, "keys_region")
+            else poi.unique()
+        )  # type: ignore
         o = self.order()
         idx = o.index(self)
         for vert in o[idx + 1 :]:
@@ -474,7 +484,13 @@ class Vertebra_Instance(Abstract_lvl):
         return None
 
     def get_previous_poi(self, poi: POI | NII | list[int]):
-        r = poi if isinstance(poi, list) else poi.keys_region() if hasattr(poi, "keys_region") else poi.unique()  # type: ignore
+        r = (
+            poi
+            if isinstance(poi, list)
+            else poi.keys_region()
+            if hasattr(poi, "keys_region")
+            else poi.unique()
+        )  # type: ignore
         o = self.order()
         idx = o.index(self)
         for vert in reversed(o[:idx]):
@@ -528,7 +544,11 @@ class Vertebra_Instance(Abstract_lvl):
     @classmethod
     def rib2vert(cls, riblabel: int) -> int:
         assert riblabel in Vertebra_Instance.rib_label(), riblabel
-        return riblabel - VERTEBRA_INSTANCE_RIB_LABEL_OFFSET if riblabel != 21 + VERTEBRA_INSTANCE_RIB_LABEL_OFFSET else 28
+        return (
+            riblabel - VERTEBRA_INSTANCE_RIB_LABEL_OFFSET
+            if riblabel != 21 + VERTEBRA_INSTANCE_RIB_LABEL_OFFSET
+            else 28
+        )
 
     @property
     def IVD(self) -> int:
