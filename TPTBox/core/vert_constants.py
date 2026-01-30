@@ -434,6 +434,96 @@ class Full_Body_Instance(Abstract_lvl):
         ]
 
     @classmethod
+    def lung_system(cls):
+        return [
+            Full_Body_Instance.trachea,
+            Full_Body_Instance.lung_right,
+            Full_Body_Instance.lung_left,
+        ]
+
+    @classmethod
+    def organs(cls):
+        return [
+            Full_Body_Instance.heart,
+            Full_Body_Instance.kidney_right,
+            Full_Body_Instance.kidney_left,
+            Full_Body_Instance.liver,
+            Full_Body_Instance.gallbladder,
+            Full_Body_Instance.adrenal_gland_right,
+            Full_Body_Instance.adrenal_gland_left,
+            Full_Body_Instance.thyroid_gland_right,
+            Full_Body_Instance.thyroid_gland_left,
+            Full_Body_Instance.urinary_bladder,
+            Full_Body_Instance.prostate,
+        ]
+
+    @classmethod
+    def digestion(cls):
+        return [
+            Full_Body_Instance.stomach,
+            Full_Body_Instance.pancreas,
+            Full_Body_Instance.esophagus,
+            Full_Body_Instance.doudenum,
+            Full_Body_Instance.intestine,
+        ]
+
+    @classmethod
+    def vessels(cls):
+        return [
+            Full_Body_Instance.aorta,
+            Full_Body_Instance.pulmonary_vein,
+            Full_Body_Instance.brachiocephalic_trunk,
+            Full_Body_Instance.subclavian_artery_right,
+            Full_Body_Instance.subclavian_artery_left,
+            Full_Body_Instance.common_carotid_artery_right,
+            Full_Body_Instance.common_carotid_artery_left,
+            Full_Body_Instance.brachiocephalic_vein_right,
+            Full_Body_Instance.brachiocephalic_vein_left,
+            Full_Body_Instance.atrial_appendage_left,
+            Full_Body_Instance.superior_vena_cava,
+            Full_Body_Instance.inferior_vena_cava,
+            Full_Body_Instance.iliac_artery_right,
+            Full_Body_Instance.iliac_artery_left,
+            Full_Body_Instance.portal_vein_and_splenic_vein,
+            Full_Body_Instance.iliac_vena_right,
+            Full_Body_Instance.iliac_vena_left,
+        ]
+
+    @classmethod
+    def full_spine(cls):
+        return [
+            Full_Body_Instance.channel,
+            Full_Body_Instance.ivd,
+            Full_Body_Instance.vert_body,
+            Full_Body_Instance.vert_post,
+            Full_Body_Instance.sacrum,
+        ]
+
+    @classmethod
+    def muscle(cls):
+        return [
+            Full_Body_Instance.gluteus_maximus_right,
+            Full_Body_Instance.gluteus_maximus_left,
+            Full_Body_Instance.gluteus_medius_right,
+            Full_Body_Instance.gluteus_medius_left,
+            Full_Body_Instance.gluteus_minimus_right,
+            Full_Body_Instance.gluteus_minimus_left,
+            Full_Body_Instance.autochthon_right,
+            Full_Body_Instance.autochthon_left,
+            Full_Body_Instance.iliopsoas_right,
+            Full_Body_Instance.iliopsoas_left,
+        ]
+
+    @classmethod
+    def body_comp(cls):
+        return [
+            Full_Body_Instance.subcutaneous_fat,
+            Full_Body_Instance.muscle_other,
+            Full_Body_Instance.inner_fat,
+            *Full_Body_Instance.muscle(),
+        ]
+
+    @classmethod
     def get_VIBESeg_mapping(cls):
         return {
             1: Full_Body_Instance.spleen.value,  # spleen
