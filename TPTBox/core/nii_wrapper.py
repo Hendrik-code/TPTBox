@@ -58,7 +58,6 @@ from TPTBox.core.vert_constants import (
     MODES,
     SHAPE,
     ZOOMS,
-    Location,
     _same_direction,
     log,
     logging,
@@ -1567,7 +1566,7 @@ class NII(NII_Math):
         if len(threshold[axis_]) == 0:
             return self if inplace else self.copy()
         flip_up = flip
-        if inclusion:
+        if not inclusion:
             flip_up = not flip_up
         # Determine the lowest index along the axis
         limit = threshold[axis_].min() if flip_up else threshold[axis_].max()
@@ -1593,11 +1592,12 @@ class NII(NII_Math):
         not_beyond: int | list[int] = 1,
         fill: int = 0,
         axis: DIRECTIONS = "S",
-        inclusion: bool = False
+        inclusion: bool = False,
+        inplace=False
     ):
-        return self.truncate_labels_beyond_reference_(idx,not_beyond,fill,axis,inclusion)
+        return self.truncate_labels_beyond_reference_(idx,not_beyond,fill,axis,inclusion,inplace=inplace)
 
-    def infect(self: NII, reference_mask: NII, inplace=False,verbose=True,axis:int|str|None=None):
+    def infect(self: NII, reference_mask: NII, inplace=False,verbose=True,axis:int|str|None=None,max_depth=None):
         """
         Expands labels from self_mask into regions of reference_mask == 1 via breadth-first diffusion.
 
@@ -1633,7 +1633,7 @@ class NII(NII_Math):
 
         search = []
         coords = np.where(self_mask != 0)
-        def _add_idx(x,y,z,v):
+        def _add_idx(x,y,z,v,d):
             for x1,y1,z1 in kernel:
                 a = x+x1
                 b = y+y1
@@ -1644,10 +1644,12 @@ class NII(NII_Math):
                     continue
                 #try:
                 if searched[a,b,c] == 0 and ref_mask[a,b,c] == 1:
-                    search.append((a,b,c,v))
+                    search.append((a,b,c,v,d))
                 #except Exception:
                 #    pass
-        def _infect(a,b,c,v):
+        def _infect(a,b,c,v,d):
+            if d-1 == max_depth:
+                return
             if searched[a,b,c] != 0:
                 return
             if ref_mask[a,b,c] == 0:
@@ -1655,16 +1657,16 @@ class NII(NII_Math):
             #print(a,b,c)
             searched[a,b,c] = 1
             self_mask[a,b,c] = v
-            _add_idx(x,y,z,v)
+            _add_idx(x,y,z,v,d)
 
         from tqdm import tqdm
         for x,y,z in tqdm(zip(coords[0],coords[1],coords[2]),total=len(coords[0]),disable=not verbose,desc="Collecting Surface"):
-            _add_idx(x,y,z,self_mask[x,y,z])
+            _add_idx(x,y,z,self_mask[x,y,z],0)
         while len(search) != 0:
             search2 = search
             search = []
-            for x,y,z,v in tqdm(search2,disable=not verbose,desc="infect"):
-                _infect(x,y,z,v)
+            for x,y,z,v,d in tqdm(search2,disable=not verbose,desc="infect"):
+                _infect(x,y,z,v,d+1)
         self_mask[self_mask == 0] = self_mask_org[self_mask == 0]
         return self.set_array(self_mask,inplace=inplace)
 
@@ -1897,9 +1899,9 @@ class NII(NII_Math):
         if keep_label:
             seg_arr = seg_arr * self.get_seg_array()
         return self.set_array(seg_arr,inplace=inplace)
-    def extract_label_(self,label:int|Location|Sequence[int]|Sequence[Location], keep_label=False):
+    def extract_label_(self,label:int|Enum|Sequence[int]|Sequence[Enum], keep_label=False):
         return self.extract_label(label,keep_label,inplace=True)
-    def remove_labels(self,label:int|Location|Sequence[int]|Sequence[Location], inplace=False, verbose:logging=True, removed_to_label=0):
+    def remove_labels(self,label:int|Enum|Sequence[int]|Sequence[Enum], inplace=False, verbose:logging=True, removed_to_label=0):
         '''If this NII is a segmentation you can single out one label.'''
         assert label != 0, 'Zero label does not make sens.  This is the background'
         seg_arr = self.get_seg_array()
@@ -1912,7 +1914,7 @@ class NII(NII_Math):
             else:
                 seg_arr[seg_arr == l] = removed_to_label
         return self.set_array(seg_arr,inplace=inplace, verbose=verbose)
-    def remove_labels_(self,label:int|Location|Sequence[int]|Sequence[Location], verbose:logging=True):
+    def remove_labels_(self,label:int|Enum|Sequence[int]|Sequence[Enum], verbose:logging=True):
         return self.remove_labels(label,inplace=True,verbose=verbose)
     def apply_mask(self,mask:Self, inplace=False):
         assert mask.shape == self.shape, f"[def apply_mask] Mask and Shape are not equal: \nMask - {mask},\nSelf - {self})"
@@ -1921,9 +1923,16 @@ class NII(NII_Math):
         arr = self.get_array()
         return self.set_array(arr*seg_arr,inplace=inplace)
 
-    def unique(self,verbose:logging=False):
+    def unique(self,verbose:logging=False,crop=False):
         '''Returns all integer labels WITHOUT 0. Must be performed only on a segmentation nii'''
-        out = np_unique_withoutzero(self.get_seg_array())
+
+        arr = self.get_seg_array()
+        if crop:
+            try:
+                arr = arr[np_bbox_binary(arr)]
+            except Exception:
+                pass
+        out = np_unique_withoutzero(arr)
         log.print(out,verbose=verbose)
         return out
     def voxel_volume(self):
