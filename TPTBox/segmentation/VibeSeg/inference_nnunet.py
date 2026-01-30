@@ -170,12 +170,12 @@ def run_inference_on_file(
         nnunet_path,
     )
     if orientation is not None:
-        print("orientation", orientation, f"{orientation_ref=}") if verbose else None
+        print("orientation", orientation, f"from {input_nii[0].orientation}") if verbose else None
         input_nii = [i.reorient(orientation) for i in input_nii]
 
     if zoom is not None:
-        print("rescale", input_nii[0].orientation, f"{zoom=}") if verbose else None
-        input_nii = [i.rescale_(zoom, mode=mode) for i in input_nii]
+        print("rescale", f"{zoom=} from {input_nii[0].zoom}") if verbose else None
+        input_nii = [i.rescale_(zoom, mode=mode, verbose=True) for i in input_nii]
         print(input_nii)
     print("squash to float16") if verbose else None
     input_nii = [squash_so_it_fits_in_float16(i) for i in input_nii]
