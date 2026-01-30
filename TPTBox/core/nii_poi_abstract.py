@@ -57,7 +57,8 @@ class Has_Grid(Grid_Proxy):
 
     @property
     def shape_int(self):
-        assert self.shape is not None, "need shape information"
+        if self.shape is None:
+            return None
         return tuple(np.rint(list(self.shape)).astype(int).tolist())
 
     @property

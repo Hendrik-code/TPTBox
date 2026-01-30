@@ -208,6 +208,8 @@ def get_direction(d: DIRECTIONS, poi: POI, vert_id: int) -> np.ndarray:
     Note:
         Assumes the input `cords` array has shape (3, n), where n is the number of coordinates.
     """
+    if vert_id == 1:
+        vert_id = 2
     P, I, R = get_vert_direction_PIR(poi, vert_id, to_pir=False)  # noqa: N806
     if d == "P":
         return P

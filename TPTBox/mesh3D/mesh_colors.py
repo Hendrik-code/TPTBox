@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+from pathlib import Path
 
 import numpy as np
 
@@ -279,3 +280,15 @@ def get_color_by_label(label: int):
     if label not in _color_mapping_by_label:
         return _color_mapping_by_label[label % 50 + 1]
     return _color_mapping_by_label[label]
+
+
+def write_ctbl(path: str | Path = "ITK_ColorTable.ctbl"):
+    with open(path, "w") as f:
+        f.write("# Color table file for 3D Slicer\n")
+        f.write("# Name: ITK_ColorTable\n")
+        f.write("# Columns: Label Name R G B A\n\n")
+        f.write("0 Background 0 0 0 0\n")
+
+        for label, color in _color_mapping_by_label.items():
+            r, g, b = color.rgb.tolist()
+            f.write(f"{label} ITK_{label} {r} {g} {b} 255\n")
