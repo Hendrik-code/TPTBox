@@ -40,7 +40,11 @@ DIMENSIONS = 3
 
 
 def _flatten(vert_label):
-    return [item for sublist in vert_label for item in (sublist if isinstance(sublist, list) else [sublist])]  # type: ignore
+    return [
+        item.value if isinstance(item, Enum) else item
+        for sublist in vert_label
+        for item in (sublist if isinstance(sublist, list) else [sublist])
+    ]  # type: ignore
 
 
 class _Abstract_POI_Definition:
@@ -613,7 +617,7 @@ class Abstract_POI:
     def extract_vert_(self, *vert_label: int):
         return self.extract_vert(*vert_label, inplace=True)
 
-    def extract_region(self, *vert_label: int | list[int], inplace=False):
+    def extract_region(self, *vert_label: int | list[int] | Enum, inplace=False):
         # flatten list
         vert_label = _flatten(vert_label)
         vert_labels = tuple(vert_label)
