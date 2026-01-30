@@ -575,7 +575,7 @@ class POI(Abstract_POI, Has_Grid):
         return self.to_global().to_other(ref)
 
     def resample_from_to_(self, ref: Has_Grid):
-        return self._set_inplace(self.resample_from_to_(ref))
+        return self._set_inplace(self.resample_from_to(ref))
 
     def save(
         self,
@@ -740,6 +740,8 @@ class POI(Abstract_POI, Has_Grid):
             if isinstance(poi_obj, POI_Global):
                 poi_obj = poi_obj.resample_from_to(reference)
             else:
+                if poi_obj.orientation == ("U", "U", "U"):
+                    poi_obj.orientation = reference.orientation
                 if poi_obj.spacing is None:
                     poi_obj.spacing = reference.spacing
                 if poi_obj.rotation is None:

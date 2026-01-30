@@ -645,9 +645,14 @@ def np_compute_surface(arr: UINTARRAY, connectivity: int = 3, dilated_surface: b
     """
     assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
     if dilated_surface:
-        return np_dilate_msk(arr.copy(), n_pixel=1, connectivity=connectivity) - arr
+        dil = np_dilate_msk(arr.copy(), n_pixel=1, connectivity=connectivity)
+        dil[arr != 0] = 0  # remove all non-zero entries
+        return dil
     else:
-        return arr - np_erode_msk(arr.copy(), n_pixel=1, connectivity=connectivity)
+        ero = np_erode_msk(arr.copy(), n_pixel=1, connectivity=connectivity)
+        arr = arr.copy()
+        arr[ero != 0] = 0  # remove all non-zero entries
+        return arr
 
 
 def np_point_coordinates(
@@ -760,6 +765,7 @@ def np_filter_connected_components(
     min_volume: float = 0,
     max_volume: float | None = None,
     removed_to_label=0,
+    k_larges_global=False,
 ) -> UINTARRAY:
     """finds the largest k connected components in a given array (does NOT work with zero as label!)
 
@@ -769,7 +775,7 @@ def np_filter_connected_components(
         labels (int | list[int] | None, optional): Labels that the algorithm should be applied to. If none, applies on all labels found in arr. Defaults to None.
         connectivity: in range [1,3]. For 2D images, 2 and 3 is the same.
         return_original_labels (bool): If set to False, will label the components from 1 to k. Defaults to True
-
+        k_larges_global(bool): If true largest_k_components is filterd over all labels instead of each lable individualy
     Returns:
         np.ndarray: array with the largest k connected components
     """
@@ -787,6 +793,7 @@ def np_filter_connected_components(
     arr2[np.isin(arr2, labels, invert=True)] = 0  # type:ignore
 
     labels_out, n = _connected_components(arr2, connectivity=connectivity, return_N=True)
+    largest_k_components_org = largest_k_components
     if largest_k_components is None:
         largest_k_components = n
     assert largest_k_components is not None
@@ -796,8 +803,23 @@ def np_filter_connected_components(
     ]
     largest_k_components = min(largest_k_components, len(label_volume_pairs))
     label_volume_pairs.sort(key=lambda x: x[1], reverse=True)
-    preserve: list[int] = [x[0] for x in label_volume_pairs[:largest_k_components]]
 
+    if len(labels) == 1 or label_volume_pairs == largest_k_components or largest_k_components_org is None or k_larges_global:
+        preserve: list[int] = [x[0] for x in label_volume_pairs[:largest_k_components]]
+    else:
+        counter = dict.fromkeys(labels, 0)
+        preserve = []
+        for preserve_label, _ in label_volume_pairs:
+            idx = arr[labels_out == preserve_label].max()
+            if counter.get(idx, largest_k_components + 1) <= largest_k_components_org:
+                preserve.append(preserve_label)
+                counter[idx] += 1
+                # print("add perserve", idx)
+            if counter.get(idx, largest_k_components + 1) == largest_k_components_org:
+                del counter[idx]
+                # print("del perserve", idx)
+            if len(counter) == 0:
+                break
     cc_out = np.zeros(arr.shape, dtype=arr.dtype)
     i = 1
     for preserve_label in preserve:
@@ -969,7 +991,9 @@ def np_smooth_gaussian_labelwise(
     boundary_mode: str = "nearest",
     dilate_prior: int = 0,
     dilate_connectivity: int = 3,
+    dilate_channelwise: bool = False,
     smooth_background: bool = True,
+    background_threshold: float | None = None,
 ) -> UINTARRAY:
     """Smoothes selected labels in a segmentation mask using Gaussian filtering,
     while keeping other labels unaffected.
@@ -1007,10 +1031,7 @@ def np_smooth_gaussian_labelwise(
     if isinstance(label_to_smooth, int):
         label_to_smooth = [label_to_smooth]
 
-    for l in label_to_smooth:
-        assert l in sem_labels, f"You want to smooth label {l} but it is not present in the given segmentation mask"
-
-    if dilate_prior > 0:
+    if dilate_prior > 0 and not dilate_channelwise:
         arr = np_dilate_msk(
             arr,
             n_pixel=dilate_prior,
@@ -1023,6 +1044,13 @@ def np_smooth_gaussian_labelwise(
     sem_labels_plus_background.append(0)
     for l in sem_labels_plus_background[:-1]:
         arr_l = (arr == l).astype(float)
+        if dilate_prior > 0 and dilate_channelwise:
+            arr_l = np_dilate_msk(
+                arr_l,
+                n_pixel=dilate_prior,
+                label_ref=1,
+                connectivity=dilate_connectivity,
+            )
         if l in label_to_smooth:
             arr_l = gaussian_filter(
                 arr_l,
@@ -1052,6 +1080,9 @@ def np_smooth_gaussian_labelwise(
     arr_stack = np.stack(smoothed_arrs)
     seg_arr_smoothed = np.argmax(arr_stack, axis=0)
     seg_arr_s = seg_arr_smoothed.copy()
+
+    if background_threshold is not None:
+        seg_arr_smoothed[seg_arr_smoothed < background_threshold] = len(sem_labels_plus_background) - 1  # background label
 
     for idx, l in enumerate(sem_labels_plus_background):
         seg_arr_s[seg_arr_smoothed == idx] = l
@@ -1154,7 +1185,16 @@ def np_calc_boundary_mask(
     infect_list = []
 
     def infect(x, y, z):
-        if any([x < 0, y < 0, z < 0, x == boundary.shape[0], y == boundary.shape[1], z == boundary.shape[2]]):
+        if any(
+            [
+                x < 0,
+                y < 0,
+                z < 0,
+                x == boundary.shape[0],
+                y == boundary.shape[1],
+                z == boundary.shape[2],
+            ]
+        ):
             return
         if boundary[x, y, z] == 0:
             boundary[x, y, z] = 1
@@ -1297,7 +1337,6 @@ def np_fill_holes_global_with_majority_voting(arr: UINTARRAY, connectivity: int 
             cc_msk,
             label_mask=arr_c,
             dilate_pixel=1,
-            label_ref=1,
             inplace=False,
         )
         arr_c[seg_nii_new != 0] = seg_nii_new[seg_nii_new != 0]
@@ -1324,26 +1363,29 @@ def np_map_labels_based_on_majority_label_mask_overlap(
     Returns:
         arr: input array with all labels in labels relabeled
     """
-    arr_c = arr if inplace else arr.copy()
+    arr_cc = arr if inplace else arr.copy()
 
     labels = _to_labels(arr, label_ref)
 
-    label_list: list[int] = [l for l in np_unique(arr) if l in labels]
-    for l in label_list:
-        arr_l = np_extract_label(arr, l, inplace=False)
-        arr_ld = np_dilate_msk(arr_l.copy(), n_pixel=dilate_pixel, label_ref=1, connectivity=3) if dilate_pixel > 0 else arr_l
+    label_list: list[int] = [label for label in np_unique(arr) if label in labels]
 
-        mult = label_mask * arr_ld
+    for label in label_list:
+        arr_l = np_extract_label(arr, label, inplace=False)
+        arr_ld = np_dilate_msk(arr_l.copy(), n_pixel=dilate_pixel, label_ref=1, connectivity=3) if dilate_pixel > 0 else arr_l
+        # crop speed up by factor 6
+        crop = np_bbox_binary(arr_ld, px_dist=0, raise_error=False)
+
+        mult = label_mask[crop] * arr_ld[crop]
         label_ref, count = np.unique(mult, return_counts=True)
         if 0 in label_ref:
             label_ref = label_ref[1:]
             count = count[1:]
         try:
-            newlabel = label_ref[np.argmax(count)]
-        except ValueError:
-            newlabel = no_match_label
-        arr_c[arr_l != 0] = newlabel
-    return arr_c
+            new_label = label_ref[np.argmax(count)]
+        except ValueError:  # should never happen if called from np_fill_holes_global_with_majority_voting
+            new_label = no_match_label
+        arr_cc[arr_l != 0] = new_label
+    return arr_cc
 
 
 def _pad_to_parameters(

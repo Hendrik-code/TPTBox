@@ -52,7 +52,7 @@ class Logger_Interface(Protocol):
         """
         if verbose is None:
             verbose = getattr(self, "default_verbose", False)
-        if len(text) == 0 or text == [""] or text == "" or text is None:
+        if len(text) == 0 or text in ([""], "") or text is None:
             ignore_prefix = True
             string: str = ""
         else:
@@ -209,6 +209,9 @@ class Logger_Interface(Protocol):
         self.print(*text, end=end, ltype=Log_Type.WARNING, verbose=verbose, **qargs)
 
     def on_text(self, *text, end="\n", verbose: bool | None = None, **qargs):
+        self.print(*text, end=end, ltype=Log_Type.TEXT, verbose=verbose, **qargs)
+
+    def info(self, *text, end="\n", verbose: bool | None = None, **qargs):
         self.print(*text, end=end, ltype=Log_Type.TEXT, verbose=verbose, **qargs)
 
 

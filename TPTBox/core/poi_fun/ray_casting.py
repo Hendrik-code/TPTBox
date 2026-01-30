@@ -21,6 +21,71 @@ def unit_vector(vector):
     return vector / np.linalg.norm(vector)
 
 
+# @njit(fastmath=True)
+def trilinear_interpolate(volume, x, y, z):
+    xi, yi, zi = int(x), int(y), int(z)
+    if xi < 0 or yi < 0 or zi < 0 or xi >= volume.shape[0] - 1 or yi >= volume.shape[1] - 1 or zi >= volume.shape[2] - 1:
+        return 0.0
+
+    xd, yd, zd = x - xi, y - yi, z - zi
+    c000 = volume[xi, yi, zi]
+    c100 = volume[xi + 1, yi, zi]
+    c010 = volume[xi, yi + 1, zi]
+    c110 = volume[xi + 1, yi + 1, zi]
+    c001 = volume[xi, yi, zi + 1]
+    c101 = volume[xi + 1, yi, zi + 1]
+    c011 = volume[xi, yi + 1, zi + 1]
+    c111 = volume[xi + 1, yi + 1, zi + 1]
+
+    c00 = c000 * (1 - xd) + c100 * xd
+    c01 = c001 * (1 - xd) + c101 * xd
+    c10 = c010 * (1 - xd) + c110 * xd
+    c11 = c011 * (1 - xd) + c111 * xd
+    c0 = c00 * (1 - yd) + c10 * yd
+    c1 = c01 * (1 - yd) + c11 * yd
+    return c0 * (1 - zd) + c1 * zd
+
+
+# @njit(fastmath=True)
+def max_distance_ray_cast_convex_npfast(
+    region_array: np.ndarray,
+    start_coord: np.ndarray,
+    direction_vector: np.ndarray,
+    acc_delta=0.05,
+):
+    # Normalize direction
+    norm_vec = direction_vector / np.sqrt((direction_vector**2).sum())
+
+    # Quick exit if start point is outside
+    if trilinear_interpolate(region_array, *start_coord) <= 0.5:
+        return np.array(start_coord)
+
+    min_v = 0.0
+    max_v = np.sum(region_array.shape)
+    delta = max_v - min_v
+
+    while delta > acc_delta:
+        mid = 0.5 * (max_v + min_v)
+        x = start_coord[0] + norm_vec[0] * mid
+        y = start_coord[1] + norm_vec[1] * mid
+        z = start_coord[2] + norm_vec[2] * mid
+        val = trilinear_interpolate(region_array, x, y, z)
+        if val > 0.5:
+            min_v = mid
+        else:
+            max_v = mid
+        delta = max_v - min_v
+
+    dist = 0.5 * (min_v + max_v)
+    return np.array(
+        [
+            start_coord[0] + norm_vec[0] * dist,
+            start_coord[1] + norm_vec[1] * dist,
+            start_coord[2] + norm_vec[2] * dist,
+        ]
+    )
+
+
 def max_distance_ray_cast_convex(
     region: NII,
     start_coord: COORDINATE | np.ndarray,
