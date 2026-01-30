@@ -287,22 +287,26 @@ def _get_markup_lines(
 def get_desc(self: POI_Global, region, subregion):
     label = self.info.get("label_name", {}).get(str((region, subregion)))
     if label is None:
-        label = f"{region}-{subregion}"
+        label = str(subregion)
+        try:
+            label = self.level_two_info(subregion).name
+        except Exception:
+            label = str(subregion)
     try:
-        name = self.level_two_info(subregion).name
-    except Exception:
-        name = str(subregion)
-    try:
-        name2 = self.level_one_info(region).name
-        if "_ignore_level_one_info_range" in self.info:
-            try:
-                if region in self.info["_ignore_level_one_info_range"]:
-                    name2 = str(region)
-            except Exception:
-                pass
+        if region in self.info.get("label_group_name", {}):
+            name2 = self.info["label_group_name"][region]
+        else:
+            name2 = self.level_one_info(region).name
+            if "_ignore_level_one_info_range" in self.info:
+                try:
+                    if region in self.info["_ignore_level_one_info_range"]:
+                        name2 = str(region)
+                except Exception:
+                    pass
 
     except Exception:
         name2 = str(region)
+    name = name2
     return name, name2, label
 
 
@@ -410,7 +414,7 @@ def _save_mrk(
         "@schema": "https://raw.githubusercontent.com/slicer/slicer/master/Modules/Loadable/Markups/Resources/Schema/markups-schema-v1.0.3.json#",
         "markups": markups,
     }
-    print(markups[-1].get("display"))
+    # print(markups[-1].get("display"))
     filepath.unlink(missing_ok=True)
     with open(filepath, "w") as f:
         json.dump(mrk_data, f, indent=2)

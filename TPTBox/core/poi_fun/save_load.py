@@ -60,9 +60,10 @@ FORMAT_DOCKER = 0
 FORMAT_GRUBER = 1
 FORMAT_POI = 2
 FORMAT_GLOBAL = 3
+FORMAT_PLST = 4
 FORMAT_OLD_POI = 10
 
-format_key = {FORMAT_DOCKER: "docker", FORMAT_GRUBER: "guber", FORMAT_POI: "POI", FORMAT_GLOBAL: "POI_GLOBAL"}
+format_key = {FORMAT_DOCKER: "docker", FORMAT_GRUBER: "guber", FORMAT_POI: "POI", FORMAT_GLOBAL: "POI_GLOBAL", FORMAT_PLST: "POINT_LIST"}
 format_key2value = {value: key for key, value in format_key.items()}
 global_spacing_name_key2value = {"itk": True, "nib": False}
 global_spacing_name = {value: key for key, value in global_spacing_name_key2value.items()}
@@ -214,6 +215,7 @@ def _poi_to_dict_list(  # noqa: C901
             if vert_id not in temp_dict:
                 temp_dict[vert_id] = {}
             temp_dict[vert_id][str(subreg_id)] = str((float(x), float(y), float(z)))
+
         else:
             raise NotImplementedError(save_hint)
     if len(temp_dict) != 0:
@@ -224,6 +226,39 @@ def _poi_to_dict_list(  # noqa: C901
         else:
             dict_list.append(temp_dict)
     return dict_list, print_out
+
+
+def _open_file(ctd_path: Union[Path, str, bids_files.BIDS_FILE]) -> dict | list:
+    # BIDS JSON
+    if isinstance(ctd_path, bids_files.BIDS_FILE):
+        if "json" in ctd_path.file:
+            try:
+                return ctd_path.open_json()
+            except json.JSONDecodeError:
+                pass  # not JSON → continue
+            except OSError as e:
+                raise OSError(f"Could not open file: {ctd_path}") from e
+        elif "txt" in ctd_path.file:
+            return _load_landmark_txt(ctd_path.file["txt"])
+        else:
+            raise OSError(f"Could not open file: {ctd_path}, need a json or txt file") from e
+    # filesystem path
+    path = Path(ctd_path)  # type: ignore
+
+    # --- 1) try JSON ---
+    try:
+        with path.open("r") as f:
+            return json.load(f)
+    except json.JSONDecodeError:
+        pass  # not JSON → continue
+    except OSError as e:
+        raise OSError(f"Could not open file: {path}") from e
+
+    # --- 2) try landmark TXT ---
+    try:
+        return _load_landmark_txt(path)
+    except Exception as e:
+        raise ValueError(f"File {path} is neither valid JSON nor a supported landmark TXT format") from e
 
 
 ######### Load  #############
@@ -247,22 +282,17 @@ def load_poi(ctd_path: POI_Reference, verbose=True) -> POI | POI_Global:  # noqa
     """
     from TPTBox import POI, calc_poi_from_subreg_vert
 
-    ### Check Datatype ###
+    # already loaded
     if isinstance(ctd_path, POI):
         return ctd_path
-    elif isinstance(ctd_path, bids_files.BIDS_FILE):
-        dict_list: _Centroid_DictList = ctd_path.open_json()  # type: ignore
-    elif isinstance(ctd_path, (Path, str)):
-        with open(ctd_path) as json_data:
-            dict_list: _Centroid_DictList = json.load(json_data)
-            json_data.close()
-    elif isinstance(ctd_path, tuple):
+    if isinstance(ctd_path, tuple):
         vert = ctd_path[0]
         subreg = ctd_path[1]
         ids: list[int | Location] = ctd_path[2]  # type: ignore
         return calc_poi_from_subreg_vert(vert, subreg, subreg_id=ids)
-    else:
-        raise TypeError(f"{type(ctd_path)}\n{ctd_path}")
+
+    ### Check Datatype ###
+    dict_list = _open_file(ctd_path)
     ### New Spine_r has a dict instead of a dict list. ###
     if isinstance(dict_list, dict):
         if "markups" in dict_list:
@@ -278,23 +308,19 @@ def load_poi(ctd_path: POI_Reference, verbose=True) -> POI | POI_Global:  # noqa
     level_one_info = _register_lvl[dict_list[0].get("level_one_info", Vertebra_Instance.__name__)]
     level_two_info = _register_lvl[dict_list[0].get("level_two_info", Location.__name__)]
     info = {k: v for k, v in dict_list[0].items() if k not in ctd_info_blacklist}
-    if format_ == FORMAT_GLOBAL:
+    if format_ in (FORMAT_GLOBAL, FORMAT_PLST):
         from TPTBox import POI_Global
 
         centroids = POI_Descriptor()
         itk_coords = global_spacing_name_key2value[dict_list[0].get("coordinate_system", "nib")]
         _load_POI_centroids(dict_list, centroids, level_one_info, level_two_info)
-        return POI_Global(
-            centroids,
-            itk_coords=itk_coords,
-            level_one_info=level_one_info,
-            level_two_info=level_two_info,
-            info=info,
-        )
+        return POI_Global(centroids, itk_coords=itk_coords, level_one_info=level_one_info, level_two_info=level_two_info, info=info)
 
     ### Ours ###
-    assert "direction" in dict_list[0], f'File format error: first index must be a "Direction" but got {dict_list[0]}'
-    axcode: AX_CODES = tuple(dict_list[0]["direction"])  # type: ignore
+    assert "direction" in dict_list[0] or format_ in [FORMAT_PLST], (
+        f'File format error: first index must be a "Direction" but got {dict_list[0]}'
+    )
+    axcode: AX_CODES = tuple(dict_list[0].get("direction", ("U", "U", "U")))  # type: ignore
     zoom: ZOOMS = dict_list[0].get("zoom", None)  # type: ignore
     shape = dict_list[0].get("shape", None)  # type: ignore
     shape = tuple(shape) if shape is not None else None
@@ -305,7 +331,7 @@ def load_poi(ctd_path: POI_Reference, verbose=True) -> POI | POI_Global:  # noqa
     centroids = POI_Descriptor()
     if format_ in (FORMAT_DOCKER, FORMAT_GRUBER) or format_ is None:
         _load_docker_centroids(dict_list, centroids, format_)
-    elif format_ == FORMAT_POI:
+    elif format_ in (FORMAT_POI,):
         _load_POI_centroids(dict_list, centroids, level_one_info, level_two_info)
     else:
         raise NotImplementedError(format_)
@@ -480,6 +506,7 @@ def _load_mkr_POI(dict_mkr: dict):
     if dict_mkr.get("coordinateSystem") in ["LPS", "RAS"]:
         itk_coords = dict_mkr["coordinateSystem"] == "LPS"
     label_name = {}
+    label_group_name = {}
     for markup in dict_mkr["markups"]:
         if markup["type"] != "Fiducial":
             log.on_warning("skip unknown markup type:", markup["type"])
@@ -505,12 +532,16 @@ def _load_mkr_POI(dict_mkr: dict):
             idx: str = control_points.get("id", str(e))
 
             label = control_points.get("label", str(e))
-            # description = controlPoints.get("description", str(e))
-            # associatedNodeID = controlPoints.get("associatedNodeID", str(e))
             position = control_points["position"]
             # orientation = controlPoints.get("orientation", None)
             region, subregion = _get_poi_idx_from_text(idx, label, centroids)
             centroids[region, subregion] = tuple(position)
+
+            if region not in label_group_name:
+                description = control_points.get("description", region)
+                associatedNodeID = control_points.get("associatedNodeID", description)
+                label_group_name[region] = associatedNodeID
+
             label_name[str((region, subregion))] = label
     assert itk_coords is not None, "itk_coords not set"
     from TPTBox import POI_Global
@@ -520,4 +551,213 @@ def _load_mkr_POI(dict_mkr: dict):
         # TODO keep all display, locked etc info in the info dict
         poi.info["color"] = dict_mkr["display"]["color"]
     poi.info["label_name"] = label_name
+    poi.info["label_group_name"] = label_group_name
     return poi
+
+
+def _parse_coords(coord_str: str) -> list[float]:
+    """
+    Parse '(x, y, z)' → [x, y, z]
+    """
+    coord_str = coord_str.strip()
+
+    if not (coord_str.startswith("(") and coord_str.endswith(")")):
+        raise ValueError(f"Invalid coordinate format: {coord_str}")
+
+    values = coord_str[1:-1].split(",")
+
+    if len(values) != 3:
+        raise ValueError(f"Expected 3 coordinates, got {values}")
+
+    return [float(v.strip()) for v in values]
+
+
+def _parse_header_value(value: str):
+    """
+    Parse header values into numbers, lists, or nested lists if possible.
+
+    Examples:
+        "3.14" -> 3.14
+        "256 931 27" -> [256, 931, 27]
+        "[1, 2, 3]" -> [1, 2, 3]
+        "[[1, 0, 0], [0, 1, 0]]" -> [[1, 0, 0], [0, 1, 0]]
+        "-3.5e-12" -> -3.5e-12
+    """
+
+    value = value.strip()
+
+    # --- single number ---
+    try:
+        num = float(value)
+        return int(num) if num.is_integer() else num
+    except ValueError:
+        pass
+
+    # --- bracketed list ---
+    if value.startswith("[") and value.endswith("]"):
+        inner = value[1:-1].strip()
+        if not inner:
+            return []
+
+        items = []
+        depth = 0
+        token = ""
+
+        for ch in inner:
+            if ch == "[":
+                depth += 1
+            elif ch == "]":
+                depth -= 1
+
+            if ch == "," and depth == 0:
+                items.append(_parse_header_value(token))
+                token = ""
+            else:
+                token += ch
+
+        if token:
+            items.append(_parse_header_value(token))
+
+        return items
+
+    # --- space separated list ---
+    if " " in value:
+        parts = value.split()
+        parsed = []
+        for p in parts:
+            try:
+                num = float(p)
+                parsed.append(int(num) if num.is_integer() else num)
+            except ValueError:
+                return value  # mixed types → keep string
+        return parsed
+
+    # --- fallback ---
+    return value
+
+
+def _load_landmark_txt(path: Path):
+    header: dict = {
+        "format": format_key[FORMAT_PLST],
+        "coordinate_system": "nib",
+        "level_one_info": "Any",
+        "level_two_info": "Any",
+    }
+    points: dict = {}
+    label_group_name = {}
+    label_name = {}
+    label_group_id = 1
+    current_group: str | None = None
+
+    with path.open("r") as f:
+        for raw_line in f:
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            # split only once
+            if ":" not in line:
+                continue
+
+            key, value = line.split(":", 1)
+            key = key.strip()
+            value = value.strip()
+
+            # --- group header (e.g. "Femur proximal:") ---
+            if value == "":
+                current_group = key
+                points.setdefault(label_group_id, {})
+                label_group_name[current_group] = label_group_id
+                label_group_id += 1
+                continue
+
+            # --- file header ---
+            if current_group is None or "(" not in value:
+                header[key] = _parse_header_value(value)
+                continue
+
+            coords = _parse_coords(value)
+            id_ = label_group_name[current_group]
+            new_id = len(points[id_]) + 1
+            points[id_][new_id] = coords
+            label_name[str((id_, new_id))] = key
+    if len(label_name) != 0:
+        header["label_name"] = label_name
+    if len(label_group_name) != 0:
+        header["label_group_name"] = {v: k for k, v in label_group_name.items()}
+
+    return [header, points]
+
+
+if __name__ == "__main__":
+    from TPTBox import BIDS_FILE, NII, POI, Location, POI_Global, Vertebra_Instance, calc_poi_from_subreg_vert, to_nii
+
+    # nii = "/DATA/NAS/datasets_processed/CT_spine/dataset-myelom/rawdata/CTFU01051/ses-20130430/sub-CTFU01051_ses-20130430_sequ-2_ct.nii.gz"
+    # fam = "/DATA/NAS/datasets_processed/CT_spine/dataset-myelom/"
+    # poi = POI_Global.load("/DATA/NAS/tools/TPTBox/sub-CTFU01051_ses-20130430.txt")  # reference=BIDS_FILE(nii, fam).get_grid_info()
+    # poi.save_mrk(
+    #    "/DATA/NAS/datasets_processed/CT_spine/dataset-myelom/rawdata/CTFU01051/ses-20130430/sub-CTFU01051_ses-20130430_sequ-2_poi.json"
+    # )
+    #
+    #
+    r = Path("/DATA/NAS/datasets_processed/CT_spine/dataset-myelom/derivatives-spineps-Dataset612-v3/MM00100/ses-20180314")
+    vert = r / "sub-MM00100_ses-20180314_sequ-202_seg-vert-post-test_msk.nii.gz"
+    spine = r / "sub-MM00100_ses-20180314_sequ-202_mod-ct_seg-spine_msk.nii.gz"
+    first_class_citizen = r / "sub-MM00100_ses-20180314_sequ-202_mod-ct_seg-spine_msk.nii.gz.seg.nrrd"
+    second_class_citizen = r / "sub-MM00100_ses-20180314_sequ-202_mod-ct_seg-spine-2_msk.nii.gz.seg.nrrd"
+
+    to_nii(spine, True).save_nrrd(second_class_citizen)
+    # n = NII.load_nrrd(first_class_citizen, True)
+
+    n = NII.load_nrrd(second_class_citizen, True)
+    print(n.info)
+    print(n.unique())
+    # {
+    #    "encoding": "gzip",
+    #    "containedRepresentationNames": ["Binary labelmap", "Closed surface"],
+    #    "masterRepresentation": "Binary labelmap",
+    #    "referenceImageExtentOffset": [0, 0, 0],
+    #    "segments": [
+    #        {
+    #            "id": "Segment_41",
+    #            "color": [0.933333, 0.909804, 0.666667],
+    #            "colorAutoGenerated": False,
+    #            "labelValue": 41,
+    #            "layer": 0,
+    #            "name": "Segment_41",
+    #            "nameAutoGenerated": True,
+    #            "terminology": {
+    #                "contextName": "Segmentation category and type - 3D Slicer General Anatomy list",
+    #                "category": ["SCT", "85756007", "Tissue"],
+    #                "type": ["SCT", "85756007", "Tissue"],
+    #                "anatomicContextName": "Anatomic codes - DICOM master list",
+    #            },
+    #        }
+    #    ],
+    # }
+    # exit()
+    vert = to_nii(vert, True)
+    spine = to_nii(spine, True)
+    poi = calc_poi_from_subreg_vert(
+        vert,
+        spine,
+        subreg_id=[
+            *list(range(41, 51)),
+            100,
+            *list(range(81, 90)),
+            *list(range(101, 126)),
+            *list(range(127, 130)),
+        ],
+    ).to_global()
+    for v in [Vertebra_Instance.C5, Vertebra_Instance.T8, Vertebra_Instance.L4]:
+        subreg = spine * vert.extract_label(v)
+        subreg.save_nrrd(r / f"subreg_{v.name}.nrrd")
+
+        out = r / f"cms_{v.name}.json"
+        poi.extract_subregion(*list(range(41, 51)), 100).extract_region(v).save_mrk(out, split_by_subregion=True, glyphScale=3)
+        out = r / f"extrem_{v.name}.json"
+        poi.extract_subregion(*list(range(81, 90))).extract_region(v).save_mrk(out, split_by_subregion=True, glyphScale=3)
+        out = r / f"corpus_{v.name}.json"
+        poi.extract_subregion(*list(range(101, 125))).extract_region(v).save_mrk(out, split_by_subregion=True, glyphScale=3)
+        out = r / f"flavum_{v.name}.json"
+        poi.extract_subregion(125, 127).extract_region(v).save_mrk(out, split_by_subregion=True, glyphScale=3)

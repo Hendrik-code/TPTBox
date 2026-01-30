@@ -14,7 +14,6 @@ import nibabel as nib  # noqa: E402
 import numpy as np  # noqa: E402
 
 import TPTBox.core.bids_files as bids  # noqa: E402
-from TPTBox import Centroids  # noqa: E402
 from TPTBox.core.nii_wrapper import NII  # noqa: E402
 from TPTBox.core.poi import POI  # noqa: E402
 from TPTBox.core.vert_constants import AX_CODES  # noqa: E402
@@ -24,6 +23,15 @@ repeats = 20
 
 def get_tests_dir():
     return Path(__file__).parent
+
+
+def get_nii_paths_ct() -> tuple[Path, Path, Path]:
+    tests_path = get_tests_dir()
+    ct_path = tests_path.joinpath("sample_ct")
+    ct = ct_path.joinpath("sub-ct_label-22_ct.nii.gz")
+    subreg = ct_path.joinpath("sub-ct_seg-subreg_label-22_msk.nii.gz")
+    vert = ct_path.joinpath("sub-ct_seg-vert_label-22_msk.nii.gz")
+    return ct, subreg, vert
 
 
 def get_test_ct() -> tuple[NII, NII, NII, int]:

@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from nibabel.nifti1 import Nifti1Image
 
 
-def nifti_to_ants(nib_image: Nifti1Image):
+def nifti_to_ants(nib_image: Nifti1Image, **args):
     """
     Convert a Nifti image to an ANTsPy image.
 
@@ -23,6 +23,10 @@ def nifti_to_ants(nib_image: Nifti1Image):
     ants_image : ants.ANTsImage
         The converted ANTs image.
     """
+    try:
+        return ants.utils.from_nibabel_nifti(nib_image, **args)
+    except Exception:
+        pass
     ndim = nib_image.ndim
 
     if ndim < 3:
@@ -107,6 +111,10 @@ def ants_to_nifti(img, header=None) -> Nifti1Image:
     img : Nifti1Image
         The converted Nifti image.
     """
+    try:
+        return ants.utils.to_nibabel_nifti(img, header=header)
+    except Exception:
+        pass
     from nibabel.nifti1 import Nifti1Image
 
     affine = get_ras_affine_from_ants(img)
