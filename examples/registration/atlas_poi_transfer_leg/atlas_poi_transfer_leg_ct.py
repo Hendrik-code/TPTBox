@@ -43,7 +43,7 @@ ABBREVIATION_TO_ENUM = {
     "TRMP": (Full_Body_Instance.femur_right, Lower_Body.TROCHLEAR_RIDGE_MEDIAL_POINT),
     "TRLP": (Full_Body_Instance.femur_right, Lower_Body.TROCHLEAR_RIDGE_LATERAL_POINT),
     "TGCP": (Full_Body_Instance.femur_right, Lower_Body.TROCHLEA_GROOVE_CENTRAL_POINT),
-    "FHC": (Full_Body_Instance.femur_right, Lower_Body.HIP_CENTER),
+    "FHC": (Full_Body_Instance.femur_right, Lower_Body.PELVIS_CENTER),
     "FNC": (Full_Body_Instance.femur_right, Lower_Body.NECK_CENTER),
     "TGT": (Full_Body_Instance.femur_right, Lower_Body.TIP_OF_GREATER_TROCHANTER),
     "FLCP": (Full_Body_Instance.femur_right, Lower_Body.LATERAL_CONDYLE_POSTERIOR),
