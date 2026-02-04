@@ -359,13 +359,7 @@ def _save_mrk(
     if add_points:
         # Create list of control points
         for region, subregion, coords in poi.centroids.items():
-            key = _get_key(
-                region,
-                subregion,
-                split_by_region,
-                split_by_subregion,
-                main_key=main_key,
-            )
+            key = _get_key(region, subregion, split_by_region, split_by_subregion, main_key=main_key)
             name, name2, label = get_desc(poi, region, subregion)
             if key not in list_markups:
                 list_markups[key] = _make_default_markup(
@@ -376,40 +370,15 @@ def _save_mrk(
                     display=_get_display_dict(
                         display,
                         selectedColor=_get_markup_color(
-                            {"color": color},
-                            region,
-                            subregion,
-                            split_by_region=split_by_subregion,
-                            split_by_subregion=split_by_subregion,
+                            {"color": color}, region, subregion, split_by_region=split_by_subregion, split_by_subregion=split_by_subregion
                         ),
                         **addendum,
                     ),
                 )
-            list_markups[key]["controlPoints"].append(
-                _get_control_point(
-                    {},
-                    coords,
-                    f"{region}-{subregion}",
-                    label,
-                    name,
-                    name2,
-                )
-            )
+            list_markups[key]["controlPoints"].append(_get_control_point({}, coords, f"{region}-{subregion}", label, name, name2))
     markups = list(list_markups.values())
 
-    [
-        markups.append(
-            _get_markup_lines(
-                line,
-                poi,
-                coordinate_system,
-                split_by_region,
-                split_by_subregion,
-                display,
-            )
-        )
-        for line in add_lines
-    ]
+    [markups.append(_get_markup_lines(line, poi, coordinate_system, split_by_region, split_by_subregion, display)) for line in add_lines]
     mrk_data = {
         "@schema": "https://raw.githubusercontent.com/slicer/slicer/master/Modules/Loadable/Markups/Resources/Schema/markups-schema-v1.0.3.json#",
         "markups": markups,
