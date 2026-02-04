@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import pickle
 from copy import deepcopy
+from datetime import date
 from pathlib import Path
 
 import numpy as np
@@ -152,7 +153,54 @@ def clean_dicom_data(dcm_data) -> dict:
     for tag in ["00291010", "00291020"]:
         if tag in py_dict and "InlineBinary" in py_dict[tag]:
             del py_dict[tag]["InlineBinary"]
+    py_dict = replace_birthdate_with_age(py_dict)
     return py_dict
+
+
+def replace_birthdate_with_age(d):
+    try:
+        # DICOM tags
+        BIRTH_TAG = "00100030"  # PatientBirthDate
+        STUDY_DATE_TAG = "00080020"  # StudyDate
+        AGE_TAG = "00101010"  # PatientAge
+
+        birth_str = d.get(BIRTH_TAG, {}).get("Value", [None])[0]
+        study_str = d.get(STUDY_DATE_TAG, {}).get("Value", [None])[0]
+
+        if not birth_str:
+            return d  # no birth date, nothing to do
+
+        # Parse birth date safely
+        try:
+            year = int(birth_str[:4])
+            month = int(birth_str[4:6]) if len(birth_str) >= 6 and birth_str[4:6] != "00" else 6
+            day = int(birth_str[6:8]) if len(birth_str) == 8 and birth_str[6:8] != "00" else 15
+            birth_date = date(year, month, day)
+        except Exception:
+            return d  # invalid date format, skip
+
+        # Reference date (study date or today)
+        try:
+            ref_date = date(
+                int(study_str[:4]),
+                int(study_str[4:6]) if study_str[4:6] != "00" else 6,
+                int(study_str[6:8]) if study_str[6:8] != "00" else 15,
+            )
+        except Exception:
+            ref_date = date.today()
+
+        # Compute integer age
+        age = ref_date.year - birth_date.year - ((ref_date.month, ref_date.day) < (birth_date.month, birth_date.day))
+
+        # Replace PatientBirthDate with PatientAge
+        d.pop(BIRTH_TAG, None)
+        d[AGE_TAG] = {
+            "vr": "AS",  # Age String
+            "Value": [f"{age:03d}Y"],  # DICOM age format (e.g. '034Y')
+        }
+    except Exception:
+        pass
+    return d
 
 
 def get_json_from_dicom(data: list[pydicom.FileDataset] | pydicom.FileDataset):

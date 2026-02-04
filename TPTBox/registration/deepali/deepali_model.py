@@ -6,7 +6,7 @@ import pickle
 import time
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Literal, Optional, Self, Union
+from typing import Literal, Union
 
 import torch
 import torch.optim
@@ -15,16 +15,18 @@ from deepali.core import Axes, PathStr
 from deepali.core import Grid as Deepali_Grid
 from deepali.data import Image as deepaliImage
 from deepali.modules import TransformImage
-from deepali.spatial import (
-    SpatialTransform,
-)
+from deepali.spatial import SpatialTransform
+from typing_extensions import Self
 
 from TPTBox import NII, POI, Image_Reference, to_nii
 from TPTBox.core.compat import zip_strict
 from TPTBox.core.internal.deep_learning_utils import DEVICES, get_device
 from TPTBox.core.nii_poi_abstract import Grid as TPTBox_Grid
 from TPTBox.core.nii_poi_abstract import Has_Grid
-from TPTBox.registration.deepali.deepali_trainer import LOSS, DeepaliPairwiseImageTrainer
+from TPTBox.registration.deepali.deepali_trainer import (
+    LOSS,
+    DeepaliPairwiseImageTrainer,
+)
 
 
 def center_of_mass(tensor):
@@ -173,8 +175,9 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         fixed_mask: Image_Reference | None = None,
         moving_mask: Image_Reference | None = None,
         # normalize
-        normalize_strategy: Literal["auto", "CT", "MRI"]
-        | None = "auto",  # Override on_normalize for finer normalization schema or normalize before and set to None. auto: [min,max] -> [0,1]; None: Do noting
+        normalize_strategy: (
+            Literal["auto", "CT", "MRI"] | None
+        ) = "auto",  # Override on_normalize for finer normalization schema or normalize before and set to None. auto: [min,max] -> [0,1]; None: Do noting
         # Pyramid
         pyramid_levels: int | None = None,  # 1/None = no pyramid; int: number of stacks, tuple from to (0 is finest)
         finest_level: int = 0,
@@ -188,11 +191,12 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         transform_init: PathStr | None = None,  # reload initial flowfield from file
         optim_name="Adam",  # Optimizer name defined in torch.optim. or override on_optimizer finer control
         lr: float | Sequence[float] = 0.01,  # Learning rate
+        lr_end_factor: float | None = None,  # if set, will use a LinearLR scheduler to reduce the learning rate to this factor * lr
         optim_args=None,  # args of Optimizer with out lr
         smooth_grad=0.0,
         verbose=99,
         max_steps: int | Sequence[int] = 250,  # Early stopping.  override on_converged finer control
-        max_history: int | None = None,
+        max_history: int | None = 100,
         min_value=0.0,  # Early stopping.  override on_converged finer control
         min_delta: float | Sequence[float] = 0.0,  # Early stopping.  override on_converged finer control
         loss_terms: list[LOSS | str] | dict[str, LOSS] | dict[str, str] | dict[str, tuple[str, dict]] | None = None,
@@ -245,6 +249,7 @@ class General_Registration(DeepaliPairwiseImageTrainer):
             transform_init=transform_init,
             optim_name=optim_name,
             lr=lr,
+            lr_end_factor=lr_end_factor,
             optim_args=optim_args,
             smooth_grad=smooth_grad,
             verbose=verbose,

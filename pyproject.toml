@@ -12,7 +12,7 @@ readme = "README.md"
 packages = [{ include = "TPTBox" }]
 
 [tool.poetry.dependencies]
-python = "^3.9 || ^3.10 || ^3.11 || ^3.12"
+python = "^3.9 || ^3.10 || ^3.11 || ^3.12 || ^3.13 || ^3.14"
 pathlib = "*"
 nibabel = "^5.2.0"
 numpy = "^1.26.3"
@@ -29,17 +29,19 @@ tqdm = "*"
 joblib = "*"
 scikit-learn = "*"
 antspyx = "0.4.2"
+pynrrd = "*"
 #hf-deepali = "*"
+requests = "*"
 
-[tool.poetry.dev-dependencies]
+[tool.poetry.group.dev.dependencies]
 pytest = ">=8.1.1"
 vtk = "*"
 pre-commit = "*"
 pyvista = "^0.43.2"
 coverage = ">=7.0.1"
 pytest-mock = "^3.6.0"
-
-
+exceptiongroup = { version = "^1.2", python = "<3.11" }
+tomli = {version = "*", python = "<3.11" }
 
 [build-system]
 requires = ["poetry-core>=1.0.0", "poetry-dynamic-versioning>=1.0.0,<2.0.0"]
@@ -129,6 +131,8 @@ select = [
 
 
 ignore = [
+    "C901",
+    "RUF059",
     "RUF100",
     "F401",
     "BLE001",
@@ -157,12 +161,11 @@ ignore = [
     "B905", # strict= in zip
     "UP007", # Union and "|" python 3.9
     "PLC0415", # import-outside-top-level
-]
+    ]
 
 # Allow fix for all enabled rules (when `--fix`) is provided.
 fixable = ["ALL"]
 unfixable = []
-ignore-init-module-imports = true
 extend-safe-fixes = ["RUF015", "C419", "C408", "B006"]
 #unnecessary-iterable-allocation-for-first-element = true
 
@@ -174,7 +177,23 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 # Flag errors (`C901`) whenever the complexity level exceeds 5.
 max-complexity = 20
 
-
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "def __repr__",
+    "except",
+    "warnings.warn",
+    "print\\(f?\"\\[!\\].*",
+    "def __str__(self):",
+    "def __hash__(self) -> int:",
+    "assert ",
+    "if TYPE_CHECKING: ",
+    "raise "
+]
+omit = [
+    "TPTBox/test/speedtest/*",
+]
 [tool.ruff.format]
 # Like Black, use double quotes for strings.
 quote-style = "double"

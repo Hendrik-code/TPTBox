@@ -35,7 +35,7 @@ from deepali.spatial import (
 from torch import Tensor
 from torch.nn import Module
 from torch.optim import Optimizer
-from torch.optim.lr_scheduler import LRScheduler
+from torch.optim.lr_scheduler import LinearLR, LRScheduler
 from torch.utils.hooks import RemovableHandle
 
 from ._hooks import normalize_grad_hook, print_eval_loss_hook_tqdm, print_step_loss_hook_tqdm, smooth_grad_hook
@@ -82,8 +82,9 @@ class DeepaliPairwiseImageTrainer:
         source_mask: Union[Image, PathStr] | None = None,
         target_mask: Union[Image, PathStr] | None = None,
         # normalize
-        normalize_strategy: Literal["auto", "CT", "MRI"]
-        | None = "auto",  # Override on_normalize for finer normalization schema or normalize before and set to None. auto: [min,max] -> [0,1]; None: Do noting
+        normalize_strategy: (
+            Literal["auto", "CT", "MRI"] | None
+        ) = "auto",  # Override on_normalize for finer normalization schema or normalize before and set to None. auto: [min,max] -> [0,1]; None: Do noting
         # Pyramid
         pyramid_levels: int | None = None,  # 1/None = no pyramid; int: number of stacks, tuple from to (0 is finest)
         finest_level: int = 0,
@@ -97,11 +98,12 @@ class DeepaliPairwiseImageTrainer:
         transform_init: PathStr | None = None,  # reload initial flowfield from file
         optim_name="Adam",  # Optimizer name defined in torch.optim. or override on_optimizer finer control
         lr: float | Sequence[float] = 0.01,  # Learning rate
+        lr_end_factor: float | None = None,  # if set, will use a LinearLR scheduler to reduce the learning rate to this factor * lr
         optim_args=None,  # args of Optimizer with out lr
         smooth_grad=0.0,
         verbose=0,
         max_steps: int | Sequence[int] = 250,  # Early stopping.  override on_converged finer control
-        max_history: int | None = None,
+        max_history: int | None = 100,  # Used for on_converged. look at the last n sample to compute the convergence
         min_value=0.0,  # Early stopping.  override on_converged finer control
         min_delta: float | Sequence[float] = 0.0,  # Early stopping.  override on_converged finer control
         loss_terms: list[LOSS | str] | dict[str, LOSS] | dict[str, str] | dict[str, tuple[str, dict]] | None = None,
@@ -190,6 +192,7 @@ class DeepaliPairwiseImageTrainer:
         self.model_init = transform_init
         self.optim_name = optim_name
         self.lr = lr if not isinstance(lr, (Sequence)) else lr[::-1]
+        self.lr_end_factor = lr_end_factor
         self.optim_args = optim_args
         self.max_steps = max_steps if not isinstance(max_steps, (Sequence)) else max_steps[::-1]
         self.max_history = max_history
@@ -197,6 +200,32 @@ class DeepaliPairwiseImageTrainer:
         self.min_delta = min_delta if not isinstance(min_delta, (Sequence)) else min_delta[::-1]
         self.verbose = verbose
         self.loss_terms, self.weights = parse_loss(loss_terms, weights)
+
+        self.pyramid_levels = pyramid_levels
+        self.finest_level = finest_level
+        self.coarsest_level = coarsest_level
+        self.dims = dims
+        self.pyramid_finest_spacing = pyramid_finest_spacing
+        self.pyramid_min_size = pyramid_min_size
+        self._load_all(source, target, source_seg, target_seg, source_mask, target_mask)
+
+        self.source_pset = source_pset
+        self.target_pset = target_pset
+        self.source_landmarks = source_landmarks
+        self.target_landmarks = target_landmarks
+        self.smooth_grad = smooth_grad
+        self._eval_hooks = OrderedDict()
+        self._step_hooks = OrderedDict()
+
+    def _load_all(
+        self,
+        source,
+        target,
+        source_seg,
+        target_seg,
+        source_mask=None,
+        target_mask=None,
+    ):
         # reading images
         self.source = self._read(source)
         self.target = self._read(target)
@@ -208,9 +237,15 @@ class DeepaliPairwiseImageTrainer:
         # normalize
         self.source, self.target = self.on_normalize(self.source, self.target)
         # Pyramid
-
         self.source_pyramid, self.target_pyramid = self.make_pyramid(
-            self.source, self.target, pyramid_levels, finest_level, coarsest_level, dims, pyramid_finest_spacing, pyramid_min_size
+            self.source,
+            self.target,
+            self.pyramid_levels,
+            self.finest_level,
+            self.coarsest_level,
+            self.dims,
+            self.pyramid_finest_spacing,
+            self.pyramid_min_size,
         )
         if source_seg is not None or target_seg is not None:
             with torch.no_grad():
@@ -222,7 +257,16 @@ class DeepaliPairwiseImageTrainer:
                 u = [a for a in u if a != 0]
                 # Build a mapping from original label -> index (starting from 1)
                 mapping = {int(label.item()): idx for idx, label in enumerate(u, 1)}
+                num_classes = len(mapping) + 1  # Add 1 for background or assume no 0
 
+                u2 = torch.unique(self.source_seg_org.tensor())
+                u2 = u2.detach().cpu()
+                u2 = [a for a in u2 if a != 0]
+                for idx in u2:
+                    idx = int(idx.item())  # noqa: PLW2901
+                    if idx not in mapping:
+                        print("Warning no matching idx found:", idx)
+                        mapping[idx] = 0
                 # Remap the segmentation labels according to mapping
                 source_remapped = self.source_seg_org.tensor().clone()
                 target_remapped = self.target_seg_org.tensor().clone()
@@ -231,8 +275,7 @@ class DeepaliPairwiseImageTrainer:
                     target_remapped[self.target_seg_org.tensor() == orig_label] = new_label
 
                 # Convert to one-hot if needed (optional)
-                num_classes = len(mapping) + 1  # Add 1 for background or assume no 0
-                print(f"Found {num_classes=}, {source_remapped.unique()}, {target_remapped.unique()}")
+                print(f"Found {num_classes=}, {source_remapped.unique()}, {target_remapped.unique()}; internal mapping: {mapping}")
                 one_hot_source = (
                     (torch.nn.functional.one_hot(source_remapped.long(), num_classes).to(self._dtype).to(self.device))
                     .permute(0, 4, 1, 2, 3)
@@ -262,12 +305,12 @@ class DeepaliPairwiseImageTrainer:
             self.source_pyramid_seg, self.target_pyramid_seg = self.make_pyramid(
                 self.source_seg,
                 self.target_seg,
-                pyramid_levels,
-                finest_level,
-                coarsest_level,
-                dims,
-                pyramid_finest_spacing,
-                pyramid_min_size,
+                self.pyramid_levels,
+                self.finest_level,
+                self.coarsest_level,
+                self.dims,
+                self.pyramid_finest_spacing,
+                self.pyramid_min_size,
             )
             print("make_pyramid seg end", self.source_seg.dtype)
         else:
@@ -275,14 +318,6 @@ class DeepaliPairwiseImageTrainer:
             self.target_seg = None
             self.source_pyramid_seg = None
             self.target_pyramid_seg = None
-
-        self.source_pset = source_pset
-        self.target_pset = target_pset
-        self.source_landmarks = source_landmarks
-        self.target_landmarks = target_landmarks
-        self.smooth_grad = smooth_grad
-        self._eval_hooks = OrderedDict()
-        self._step_hooks = OrderedDict()
 
     def on_normalize(self, source: Image, target: Image):
         return normalize_img(source, self.normalize_strategy), normalize_img(target, self.normalize_strategy)
@@ -353,7 +388,12 @@ class DeepaliPairwiseImageTrainer:
     def on_make_transform(self, transform_name, grid, groups=1, **model_args):
         return new_spatial_transform(transform_name, grid, groups=groups, **model_args)
 
-    def on_optimizer(self, grid_transform: SequentialTransform, level) -> tuple[Optimizer, LRScheduler | None]:
+    def on_optimizer(
+        self,
+        grid_transform: SequentialTransform,
+        level,
+        lr_end_factor: float | None,
+    ) -> tuple[Optimizer, LRScheduler | None]:
         name = self.optim_name
         cls = getattr(torch.optim, name, None)
         if cls is None:
@@ -362,7 +402,18 @@ class DeepaliPairwiseImageTrainer:
             raise TypeError(f"Requested type '{name}' is not a subclass of torch.optim.Optimizer")
         kwargs = self.optim_args
         kwargs["lr"] = self.lr[level] if isinstance(self.lr, (list, tuple)) else self.lr
-        return cls(grid_transform.parameters(), **kwargs), None
+
+        optimizer = cls(grid_transform.parameters(), **kwargs)
+        lr_sq = None
+        if lr_end_factor is not None and lr_end_factor > 0 and lr_end_factor < 1.0:
+            lr_sq = LinearLR(  # type: ignore
+                optimizer,
+                start_factor=1.0,
+                end_factor=lr_end_factor,
+                total_iters=self.max_steps[level] if isinstance(self.max_steps, (list, tuple)) else self.max_steps,
+            )
+
+        return optimizer, lr_sq
 
     def on_converged(self, level) -> bool:
         r"""Check convergence criteria."""
@@ -463,9 +514,7 @@ class DeepaliPairwiseImageTrainer:
             else:
                 mask = None
             for name, term in self.loss_pairwise_image_terms2.items():
-                losses[name] = term(  # DICE
-                    moved_data.unsqueeze(0), target_data_seg.unsqueeze(0), mask=mask
-                )
+                losses[name] = term(moved_data.unsqueeze(0), target_data_seg.unsqueeze(0), mask=mask)  # DICE
             result["source"] = moved_data
             result["target"] = target_data
             result["mask"] = mask
@@ -587,7 +636,7 @@ class DeepaliPairwiseImageTrainer:
         elif not isinstance(grid_transform, CompositeTransform):
             raise TypeError("PairwiseImageRegistrationLoss() 'transform' must be of type CompositeTransform")
         grid_transform = grid_transform.to(self.device)
-        opt, lr_sq = self.on_optimizer(grid_transform, level)
+        opt, lr_sq = self.on_optimizer(grid_transform, level, self.lr_end_factor)
         self.optimizer = opt
         if isinstance(self.max_steps, int):
             max_steps = self.max_steps
@@ -610,7 +659,7 @@ class DeepaliPairwiseImageTrainer:
 
     def on_split_losses(self):
         misc_excl = set()
-        self.loss_terms = {a: l.to(self.device) for a, l in self.loss_terms.items()}
+        # self.loss_terms = {a: l.to(self.device) for a, l in self.loss_terms.items()}
         from TPTBox.registration.ridged_intensity.affine_deepali import (  # noqa: PLC0415
             PairwiseSegImageLoss,
         )
