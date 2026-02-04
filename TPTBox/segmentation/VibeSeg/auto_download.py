@@ -25,8 +25,8 @@ from typing import Any
 from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
-WEIGHTS_URL_ = "https://github.com/robert-graf/TotalVibeSegmentator/releases/download/v1.0.0/"
-env_name = "TOTALVIBE_WEIGHTS_PATH"
+WEIGHTS_URL_ = "https://github.com/robert-graf/VibeSegmentator/releases/download/v1.0.0/"
+env_name = "VIBESEG_WEIGHTS_PATH"
 
 
 def get_weights_dir(idx, model_path: Path | None = None) -> Path:
@@ -35,7 +35,7 @@ def get_weights_dir(idx, model_path: Path | None = None) -> Path:
     elif model_path is not None and model_path.exists():
         weights_dir = model_path
     else:
-        assert Path(__file__).parent.name == "TotalVibeSeg", Path(__file__).parent
+        assert Path(__file__).parent.name == "VibeSeg", Path(__file__).parent
 
         weights_dir = Path(__file__).parent.parent / "nnUNet/nnUNet_results"
 

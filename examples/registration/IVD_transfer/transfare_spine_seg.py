@@ -277,7 +277,7 @@ def _remove_LWS6_and_5(ref):
 
 
 def _get_template(vert: NII):
-    from TPTBox.segmentation.TotalVibeSeg.auto_download import _download
+    from TPTBox.segmentation.VibeSeg.auto_download import _download
 
     tmp = Path(os.path.join(gettempdir(), "spine-templates"))
     tmp.mkdir(exist_ok=True)
