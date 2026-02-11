@@ -7,12 +7,12 @@ from TPTBox import NII, POI
 from TPTBox.core.internal.deep_learning_utils import DEVICES
 from TPTBox.core.poi import calc_centroids
 from TPTBox.core.poi_fun.poi_global import POI_Global
+from TPTBox.registration._ridged_points.point_registration import Point_Registration
 from TPTBox.registration.deformable.deformable_reg import Deformable_Registration
 from TPTBox.registration.ridged_intensity.affine_deepali import Tether_Seg
-from TPTBox.registration.ridged_points.point_registration import Point_Registration
 
 
-class Register_Multi_Seg:
+class Template_Registration:
     """
     Class to perform multi-stage registration between two multi-label segmentations, including optional
     landmark (point-of-interest, POI) alignment and deformable registration. If not provided they will be computed on the fly.
@@ -32,8 +32,10 @@ class Register_Multi_Seg:
 
     def __init__(  # noqa: C901
         self,
-        target: NII,
-        atlas: NII,
+        target_seg: NII,
+        atlas_seg: NII,
+        target_img: NII | None = None,
+        atlas_img: NII | None = None,
         poi_cms: POI | None = None,
         same_side: bool = True,
         verbose=99,
@@ -52,15 +54,17 @@ class Register_Multi_Seg:
         cms_ids: list | None = None,
         poi_target_cms: POI | None = None,
         max_history=100,
-        change_after_point_reg=lambda x, y: (x, y),
+        change_after_point_reg=lambda x, y, z, w: (x, y, z, w),
         **args,
     ):
         """
         Initialize a multi-stage registration pipeline from an atlas to a target image.
 
         Args:
-            target (NII): Target image with segmentation (e.g., from a subject).
-            atlas (NII): Atlas image with segmentation (e.g., a reference or template).
+            target (NII): Target image segmentation (e.g., from a subject).
+            atlas (NII): Atlas image segmentation (e.g., a reference or template).
+            target_img (NII): Target image if None the segmentation is used as an image.
+            atlas_img (NII): Atlas image if None the segmentation is used as an image.
             poi_cms (POI | None): POI centroids of the atlas, used for initial point registration.
             same_side (bool): Whether atlas and target represent the same body side.
             verbose (int): Verbosity level for logging.
@@ -90,21 +94,28 @@ class Register_Multi_Seg:
                 "Tether": Tether_Seg(delta=5),
             }
 
-        assert target.seg, target.seg
-        assert atlas.seg
-        target = target.copy()
-        atlas = atlas.copy()
+        assert target_seg.seg, target_seg.seg
+        assert atlas_seg.seg
+        target_seg = target_seg.copy()
+        atlas_seg = atlas_seg.copy()
+        if target_img is not None:
+            target_img = target_img.resample_from_to(target_seg)
+        if atlas_img is not None:
+            atlas_img = atlas_img.resample_from_to(target_seg)
         self.same_side = same_side
-        self.target_grid_org = target.to_gird()
-        self.atlas_org = atlas.to_gird()
+        self.target_grid_org = target_seg.to_gird()
+        self.atlas_org = atlas_seg.to_gird()
         if not same_side:
-            axis = target.get_axis("R")
+            axis = target_seg.get_axis("R")
             if axis == 0:
-                target = target.set_array(target.get_array()[::-1]).copy()
+                target_seg = target_seg.set_array(target_seg.get_array()[::-1]).copy()
+                target_img = target_img.set_array(target_seg.get_array()[::-1]).copy() if target_img is not None else None
             elif axis == 1:
-                target = target.set_array(target.get_array()[:, ::-1]).copy()
+                target_seg = target_seg.set_array(target_seg.get_array()[:, ::-1]).copy()
+                target_img = target_img.set_array(target_seg.get_array()[:, ::-1]).copy() if target_img is not None else None
             elif axis == 2:
-                target = target.set_array(target.get_array()[:, :, ::-1]).copy()
+                target_seg = target_seg.set_array(target_seg.get_array()[:, :, ::-1]).copy()
+                target_img = target_img.set_array(target_seg.get_array()[:, :, ::-1]).copy() if target_img is not None else None
             else:
                 raise ValueError(axis)
             if poi_target_cms is not None:
@@ -118,60 +129,102 @@ class Register_Multi_Seg:
                         poi_target_cms[k1, k2] = (x, y, poi_target_cms.shape[2] - 1 - z)
         if crop:
             print("crop")
-            crop = 50
-            t_crop = (target).compute_crop(0, crop)
-            target = target.apply_crop(t_crop)
-            if atlas.is_segmentation_in_border():
-                atlas = atlas.apply_pad(((1, 1), (1, 1), (1, 1)))
-            for i in range(10):  # 1000,
-                if i != 0:
-                    target = target.apply_pad(((25, 25), (25, 25), (25, 25)))
-                    crop += 50
-                t_crop = (target).compute_crop(0, crop)  # if the angel is to different we need a larger crop...
-                target_ = target.apply_crop(t_crop)
-                # Point Registration
-                print("calc_centroids")
-                if poi_target_cms is None:
-                    x = target_.extract_label(cms_ids, keep_label=True) if cms_ids else target_
-                    poi_target = calc_centroids(x, second_stage=40, bar=True)  # TODO REMOVE
-                else:
-                    poi_target = poi_target_cms.resample_from_to(target_)
-                if poi_cms is None:
-                    x = atlas.extract_label(cms_ids, keep_label=True) if cms_ids else atlas
-                    poi_cms = calc_centroids(x, second_stage=40, bar=True)  # This will be needlessly computed all the time
-                if not poi_cms.assert_affine(atlas, raise_error=False):
-                    poi_cms = poi_cms.resample_from_to(atlas)
-                self.reg_point = Point_Registration(poi_target, poi_cms)
-                atlas_reg = self.reg_point.transform_nii(atlas)
-                if atlas_reg.is_segmentation_in_border():
-                    print("atlas_reg does touch the border")
-                else:
-                    target = target_
-                    break
-        else:
-            target_ = target
-            if poi_target_cms is None:
-                x = target_.extract_label(cms_ids, keep_label=True) if cms_ids else target_
-                poi_target = calc_centroids(x, second_stage=40, bar=True)  # TODO REMOVE
-            else:
-                poi_target = poi_target_cms.resample_from_to(target_)
-            self.reg_point = Point_Registration(poi_target, poi_cms)
-            atlas_reg = self.reg_point.transform_nii(atlas)
 
-        target = target_
+            crop_pad_size = 50
+            _step = 50
+            _max_iter = 10
+
+            resize_mode = "crop"
+            resize_param: tuple | None = None
+            target_tmp = target_seg
+
+            if atlas_seg.is_segmentation_in_border():
+                atlas_seg = atlas_seg.apply_pad(((1, 1), (1, 1), (1, 1)))
+
+            for i in range(_max_iter):
+                if resize_mode == "crop":
+                    if i != 0:
+                        crop_pad_size += _step
+
+                    # --- try crop first ---
+                    t_crop = target_seg.compute_crop(0, crop_pad_size)
+                    cropped = target_seg.apply_crop(t_crop)
+
+                    if any(c < o for c, o in zip(cropped.shape, target_seg.shape)):
+                        resize_mode = "crop"
+                        resize_param = t_crop
+                        target_tmp = cropped
+                    else:
+                        # --- fallback to padding ---
+                        crop_pad_size = 0
+                        target_tmp = target_seg
+                        resize_mode = "pad"
+                else:
+                    if i != 0:
+                        crop_pad_size += _step // 2
+                    t_pad = tuple((crop_pad_size, crop_pad_size) for _ in range(3))
+                    resize_param = t_pad
+                    target_tmp = target_seg.apply_pad(t_pad)
+
+                # --- Point registration ---
+                print(f"iter {i}: using {resize_mode} ({crop_pad_size})")
+
+                if poi_target_cms is None:
+                    x = target_tmp.extract_label(cms_ids, keep_label=True) if cms_ids else target_tmp
+                    poi_target = calc_centroids(x, second_stage=40, bar=True)
+                else:
+                    poi_target = poi_target_cms.resample_from_to(target_tmp)
+
+                if poi_cms is None:
+                    x = atlas_seg.extract_label(cms_ids, keep_label=True) if cms_ids else atlas_seg
+                    poi_cms = calc_centroids(x, second_stage=40, bar=True)
+
+                if not poi_cms.assert_affine(atlas_seg, raise_error=False):
+                    poi_cms = poi_cms.resample_from_to(atlas_seg)
+
+                self.reg_point = Point_Registration(poi_target, poi_cms)
+                atlas_reg = self.reg_point.transform_nii(atlas_seg)
+
+                if not atlas_reg.is_segmentation_in_border():
+                    print("registration ok")
+                    break
+                else:
+                    print("atlas_reg touches border → expanding")
+
+            # --- FINAL STEP: apply once to original target ---
+            if resize_mode == "crop":
+                target_seg = target_seg.apply_crop(resize_param)
+                target_img = target_img.apply_crop(resize_param) if target_img is not None else None
+            elif resize_mode == "pad":
+                target_seg = target_seg.apply_pad(resize_param)
+                target_img = target_img.apply_pad(resize_param) if target_img is not None else None
+
+        if poi_target_cms is None:
+            x = target_seg.extract_label(cms_ids, keep_label=True) if cms_ids else target_seg
+            poi_target = calc_centroids(x, second_stage=40, bar=True)  # TODO REMOVE
+        else:
+            poi_target = poi_target_cms.resample_from_to(target_seg)
+        if poi_cms is None:
+            x = atlas_seg.extract_label(cms_ids, keep_label=True) if cms_ids else atlas_seg
+            poi_cms = calc_centroids(x, second_stage=40, bar=True)
+        if not poi_cms.assert_affine(atlas_seg, raise_error=False):
+            poi_cms = poi_cms.resample_from_to(atlas_seg)
+        self.reg_point = Point_Registration(poi_target, poi_cms)
+        atlas_reg = self.reg_point.transform_nii(atlas_seg)
+
         if crop:
-            self.crop = (target + atlas_reg).compute_crop(0, 5)
-            target = target.apply_crop(self.crop)
+            self.crop = (target_seg + atlas_reg).compute_crop(0, 5)
+            target_seg = target_seg.apply_crop(self.crop)
             atlas_reg = atlas_reg.apply_crop(self.crop)
         else:
             self.crop = None
 
-        self.target_grid = target.to_gird()
-        target, atlas_reg = change_after_point_reg(target, atlas_reg)
+        self.target_grid = target_seg.to_gird()
+        target_seg, atlas_reg, target_img, atlas_img = change_after_point_reg(target_seg, atlas_reg, target_img, atlas_img)
         self.reg_deform = Deformable_Registration(
-            target,
-            atlas_reg,
-            target.copy(),
+            target_seg if target_img is None else target_img,
+            atlas_reg if atlas_img is None else atlas_img,
+            target_seg.copy(),
             atlas_reg.copy(),
             loss_terms=loss_terms,
             weights=weights,
@@ -259,7 +312,7 @@ class Register_Multi_Seg:
         ) = x
         return self
 
-    def transform_nii(self, nii_atlas: NII):
+    def transform_nii(self, nii_atlas: NII, allow_only_same_grid_as_moving=True):
         """
         Apply both rigid and deformable registration to a new NII object.
 
@@ -269,7 +322,8 @@ class Register_Multi_Seg:
         Returns:
             NII: Transformed image aligned with the original target image.
         """
-        nii_atlas = self.reg_point.transform_nii(nii_atlas)
+
+        nii_atlas = self.reg_point.transform_nii(nii_atlas, allow_only_same_grid_as_moving=allow_only_same_grid_as_moving)
         nii_atlas = nii_atlas.apply_crop(self.crop)
         nii_reg = self.reg_deform.transform_nii(nii_atlas)
         if nii_reg.seg:

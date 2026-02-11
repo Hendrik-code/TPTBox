@@ -787,9 +787,11 @@ class NII(NII_Math):
             s = s.apply_crop(tuple(crop),inplace=inplace)
         return s.apply_pad(padding,inplace=inplace,mode=mode)
 
-    def apply_pad(self,padd:Sequence[tuple[int|None,int]],mode:MODES="constant",inplace = False,verbose:logging=True):
+    def apply_pad(self,padd:Sequence[tuple[int|None,int]]|None,mode:MODES="constant",inplace = False,verbose:logging=True):
         #TODO add other modes
         #TODO add testcases and options for modes
+        if padd is None:
+            return self if inplace else self.copy()
         transform = np.eye(self.dims+1, dtype=int)
         assert len(padd) == self.dims
         for i, (before,_) in enumerate(padd):
