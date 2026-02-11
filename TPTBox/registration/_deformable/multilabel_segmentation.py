@@ -7,9 +7,9 @@ from TPTBox import NII, POI
 from TPTBox.core.internal.deep_learning_utils import DEVICES
 from TPTBox.core.poi import calc_centroids
 from TPTBox.core.poi_fun.poi_global import POI_Global
+from TPTBox.registration._deformable.deformable_reg import Deformable_Registration
+from TPTBox.registration._ridged_intensity.affine_deepali import Tether_Seg
 from TPTBox.registration._ridged_points.point_registration import Point_Registration
-from TPTBox.registration.deformable.deformable_reg import Deformable_Registration
-from TPTBox.registration.ridged_intensity.affine_deepali import Tether_Seg
 
 
 class Template_Registration:

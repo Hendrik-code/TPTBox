@@ -22,8 +22,8 @@ from tqdm import tqdm
 
 from TPTBox import Image_Reference
 from TPTBox.core.internal.deep_learning_utils import DEVICES, get_device
-from TPTBox.registration.deepali.deepali_model import General_Registration
-from TPTBox.registration.deepali.deepali_trainer import PairwiseImageLoss
+from TPTBox.registration._deepali.deepali_model import General_Registration
+from TPTBox.registration._deepali.deepali_trainer import PairwiseImageLoss
 
 
 class PairwiseSegImageLoss(Module, metaclass=ABCMeta):
