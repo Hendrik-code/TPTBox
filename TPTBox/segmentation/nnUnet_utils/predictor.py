@@ -17,6 +17,7 @@ from nnunetv2.utilities.label_handling.label_handling import determine_num_input
 from torch._dynamo import OptimizedModule
 from tqdm import tqdm
 
+from TPTBox import Print_Logger
 from TPTBox.core.compat import zip_strict
 from TPTBox.segmentation.nnUnet_utils.data_iterators import PreprocessAdapterFromNpy
 from TPTBox.segmentation.nnUnet_utils.export_prediction import convert_predicted_logits_to_segmentation_with_correct_shape
@@ -74,6 +75,7 @@ class nnUNetPredictor:
         self.use_mirroring = use_mirroring
         if device.type == "cuda":
             device = torch.device(type="cuda", index=cuda_id)  # set the desired GPU with CUDA_VISIBLE_DEVICES!
+        self.do_not_use_half_precision = device.type in ["cpu", "mps"]  # float16 not supported by cpu
         if device.type != "cuda" and perform_everything_on_gpu:
             print("perform_everything_on_gpu=True is only supported for cuda devices! Setting this to False")
             perform_everything_on_gpu = False
@@ -239,8 +241,13 @@ class nnUNetPredictor:
                     self.network.load_state_dict(params)  # type: ignore
                 else:
                     self.network._orig_mod.load_state_dict(params)
-                if self.device.type == "cuda":
-                    self.network.cuda()  # type: ignore
+                if self.device.type == "cuda" and not torch.cuda.is_available():
+                    Print_Logger().on_warning(
+                        "No CUDA device. If you have a CUDA-able GPU (Nvidia), reinstall pytorch with cuda or for non-cuda devices use ddevice=cpu or ddevice=mps"
+                    )
+                if self.device.type == "mps" and not (hasattr(torch.backends, "mps") and torch.backends.mps.is_available()):
+                    Print_Logger().on_warning("No MPS device found. Use ddevice=cpu or ddevice=mps")
+                self.network.to(self.device)
                 self.network.eval()  # type: ignore
                 self.loaded_networks.append(self.network)
         # print(type(self.loaded_networks[0]))
@@ -342,7 +349,7 @@ class nnUNetPredictor:
             # CPU version
             if prediction is None:
                 try:
-                    print("FALL BACK CPU")
+                    print("Run on CPU")
                     for idx, params in enumerate(self.list_of_parameters):
                         network = None
                         if self.loaded_networks is not None:
@@ -421,6 +428,8 @@ class nnUNetPredictor:
         return slicers
 
     def _internal_maybe_mirror_and_predict(self, x: torch.Tensor, network) -> torch.Tensor:
+        if self.do_not_use_half_precision:
+            x = x.float()
         # USED
         mirror_axes = self.allowed_mirroring_axes if self.use_mirroring else None
         prediction = network(x)

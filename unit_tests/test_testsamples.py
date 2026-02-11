@@ -197,7 +197,7 @@ class Test_test_samples(unittest.TestCase):
         except Exception:
             return
 
-        from TPTBox.registration.deformable.deformable_reg import Deformable_Registration
+        from TPTBox.registration._deformable.deformable_reg import Deformable_Registration
 
         test_save = get_tests_dir() / f"deformation_{dim}.pkl"
         mri, subreg_nii, vert_nii, label = get_test_mri()

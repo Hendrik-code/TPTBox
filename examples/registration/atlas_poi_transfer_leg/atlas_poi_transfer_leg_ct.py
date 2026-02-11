@@ -23,11 +23,11 @@ from TPTBox.core.poi import POI
 from TPTBox.core.poi_fun.poi_abstract import POI_Descriptor
 from TPTBox.core.vert_constants import Full_Body_Instance, Lower_Body
 from TPTBox.logger.log_file import No_Logger
-from TPTBox.registration.deformable.deformable_reg import Deformable_Registration
-from TPTBox.registration.ridged_intensity.affine_deepali import Tether
+from TPTBox.registration._deformable.deformable_reg import Deformable_Registration
+from TPTBox.registration._ridged_intensity.affine_deepali import Tether
 
 # from TPTBox.registration.deformable.deformable_reg_old import Deformable_Registration as Deformable_Registration_old
-from TPTBox.registration.ridged_points import Point_Registration
+from TPTBox.registration._ridged_points import Point_Registration
 
 logger = No_Logger()
 ABBREVIATION_TO_ENUM = {
