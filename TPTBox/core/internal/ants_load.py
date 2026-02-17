@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import ants
 import numpy as np
 
 if TYPE_CHECKING:
@@ -23,6 +22,8 @@ def nifti_to_ants(nib_image: Nifti1Image, **args):
     ants_image : ants.ANTsImage
         The converted ANTs image.
     """
+    import ants
+
     try:
         return ants.utils.from_nibabel_nifti(nib_image, **args)
     except Exception:
@@ -111,6 +112,8 @@ def ants_to_nifti(img, header=None) -> Nifti1Image:
     img : Nifti1Image
         The converted Nifti image.
     """
+    import ants
+
     try:
         return ants.utils.to_nibabel_nifti(img, header=header)
     except Exception:
@@ -131,6 +134,7 @@ from_nibabel = nifti_to_ants
 to_nibabel = ants_to_nifti
 
 if __name__ == "__main__":
+    import ants
     import nibabel as nib
 
     fn = ants.get_ants_data("mni")
