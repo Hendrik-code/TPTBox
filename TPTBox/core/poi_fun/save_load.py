@@ -241,7 +241,7 @@ def _open_file(ctd_path: Union[Path, str, bids_files.BIDS_FILE]) -> dict | list:
         elif "txt" in ctd_path.file:
             return _load_landmark_txt(ctd_path.file["txt"])
         else:
-            raise OSError(f"Could not open file: {ctd_path}, need a json or txt file") from e
+            raise OSError(f"Could not open file: {ctd_path}, need a json or txt file")
     # filesystem path
     path = Path(ctd_path)  # type: ignore
 

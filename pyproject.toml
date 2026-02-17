@@ -55,6 +55,7 @@ enable = true
 [tool.ruff]
 namespace-packages = ["datagen"]
 exclude = [
+    "*.ipynb",
     ".bzr",
     ".direnv",
     ".eggs",
