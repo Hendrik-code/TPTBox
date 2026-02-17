@@ -180,8 +180,7 @@ def _get_markup_color(
     if isinstance(color, np.ndarray):
         color = color.tolist()
     assert isinstance(color, list), (color, type(color))
-    if max(color) > 2:
-        color = [float(c) / 255.0 for c in color]
+    color = [float(c) / 255.0 for c in color] if max(color) > 2 else [float(c) for c in color]
     return color
 
 
@@ -260,11 +259,11 @@ def _get_markup_lines(
     key_points = definition.get("key_points")
     region, subregion = key_points[0]
     color = _get_markup_color(definition, region, subregion, split_by_region, split_by_subregion)
-    display = _get_display_dict(display | definition.get("display", {}), selectedColor=color)
+    display = _get_display_dict(display | definition.get("display", {}), selectedColor=color, color=color, activeColor=color)
 
     controlPoints = []
     for region, subregion in key_points:
-        name, name2 = get_desc(poi, region, subregion)
+        name, name2, label = get_desc(poi, region, subregion)
         controlPoints.append(
             _get_control_point(
                 definition.get("controlPoint", {}),

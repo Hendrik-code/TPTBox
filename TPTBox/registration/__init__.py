@@ -19,6 +19,7 @@ except Exception:
 __all__ = [
     "General_Registration",
     "Point_Registration",
+    "Rigid_Elements_Registration",
     "ridged_points_from_poi",
     "ridged_points_from_subreg_vert",
 ]

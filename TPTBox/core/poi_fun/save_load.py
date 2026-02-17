@@ -241,7 +241,7 @@ def _open_file(ctd_path: Union[Path, str, bids_files.BIDS_FILE]) -> dict | list:
         elif "txt" in ctd_path.file:
             return _load_landmark_txt(ctd_path.file["txt"])
         else:
-            raise OSError(f"Could not open file: {ctd_path}, need a json or txt file") from e
+            raise OSError(f"Could not open file: {ctd_path}, need a json or txt file")
     # filesystem path
     path = Path(ctd_path)  # type: ignore
 
@@ -314,6 +314,7 @@ def load_poi(ctd_path: POI_Reference, verbose=True) -> POI | POI_Global:  # noqa
         centroids = POI_Descriptor()
         itk_coords = global_spacing_name_key2value[dict_list[0].get("coordinate_system", "nib")]
         _load_POI_centroids(dict_list, centroids, level_one_info, level_two_info)
+
         return POI_Global(centroids, itk_coords=itk_coords, level_one_info=level_one_info, level_two_info=level_two_info, info=info)
 
     ### Ours ###
@@ -648,7 +649,6 @@ def _load_landmark_txt(path: Path):
     label_name = {}
     label_group_id = 1
     current_group: str | None = None
-
     with path.open("r") as f:
         for raw_line in f:
             line = raw_line.strip()
@@ -690,7 +690,7 @@ def _load_landmark_txt(path: Path):
 
 
 if __name__ == "__main__":
-    from TPTBox import BIDS_FILE, NII, POI, Location, POI_Global, Vertebra_Instance, calc_poi_from_subreg_vert, to_nii
+    from TPTBox import NII, POI, Location, POI_Global, Vertebra_Instance, calc_poi_from_subreg_vert, to_nii
 
     # nii = "/DATA/NAS/datasets_processed/CT_spine/dataset-myelom/rawdata/CTFU01051/ses-20130430/sub-CTFU01051_ses-20130430_sequ-2_ct.nii.gz"
     # fam = "/DATA/NAS/datasets_processed/CT_spine/dataset-myelom/"

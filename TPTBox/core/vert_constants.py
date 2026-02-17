@@ -649,6 +649,62 @@ class Lower_Body(Abstract_lvl):
     # Fibula
     LATERAL_MALLEOLUS = 32
 
+    @classmethod
+    def get_mapping(cls):
+        return _ABBREVIATION_TO_ENUM
+
+
+_ABBREVIATION_TO_ENUM = {
+    # Patella
+    "PPP": (Full_Body_Instance.patella_right, Lower_Body.PATELLA_PROXIMAL_POLE),
+    "PDP": (Full_Body_Instance.patella_right, Lower_Body.PATELLA_DISTAL_POLE),
+    "PMP": (Full_Body_Instance.patella_right, Lower_Body.PATELLA_MEDIAL_POLE),
+    "PLP": (Full_Body_Instance.patella_right, Lower_Body.PATELLA_LATERAL_POLE),
+    "PRPP": (Full_Body_Instance.patella_right, Lower_Body.PATELLA_RIDGE_PROXIMAL_POLE),
+    "PRDP": (Full_Body_Instance.patella_right, Lower_Body.PATELLA_RIDGE_DISTAL_POLE),
+    "PRHP": (Full_Body_Instance.patella_right, Lower_Body.PATELLA_RIDGE_HIGH_POINT),
+    # Femur
+    "TRMP": (Full_Body_Instance.femur_right, Lower_Body.TROCHLEAR_RIDGE_MEDIAL_POINT),
+    "TRLP": (Full_Body_Instance.femur_right, Lower_Body.TROCHLEAR_RIDGE_LATERAL_POINT),
+    "TGCP": (Full_Body_Instance.femur_right, Lower_Body.TROCHLEA_GROOVE_CENTRAL_POINT),
+    "FHC": (Full_Body_Instance.femur_right, Lower_Body.PELVIS_CENTER),
+    "FNC": (Full_Body_Instance.femur_right, Lower_Body.NECK_CENTER),
+    "TGT": (Full_Body_Instance.femur_right, Lower_Body.TIP_OF_GREATER_TROCHANTER),
+    "FLCP": (Full_Body_Instance.femur_right, Lower_Body.LATERAL_CONDYLE_POSTERIOR),
+    "FLCPC": (
+        Full_Body_Instance.femur_right,
+        Lower_Body.LATERAL_CONDYLE_POSTERIOR_CRANIAL,
+    ),
+    "FMCP": (Full_Body_Instance.femur_right, Lower_Body.MEDIAL_CONDYLE_POSTERIOR),
+    "FMCPC": (
+        Full_Body_Instance.femur_right,
+        Lower_Body.MEDIAL_CONDYLE_POSTERIOR_CRANIAL,
+    ),
+    "FLCD": (Full_Body_Instance.femur_right, Lower_Body.LATERAL_CONDYLE_DISTAL),
+    "FMCD": (Full_Body_Instance.femur_right, Lower_Body.MEDIAL_CONDYLE_DISTAL),
+    "FNP": (Full_Body_Instance.femur_right, Lower_Body.NOTCH_POINT),
+    "FAAP": (Full_Body_Instance.femur_right, Lower_Body.ANATOMICAL_AXIS_PROXIMAL),
+    "FADP": (Full_Body_Instance.femur_right, Lower_Body.ANATOMICAL_AXIS_DISTAL),
+    # Tibia
+    "TKC": (Full_Body_Instance.tibia_right, Lower_Body.KNEE_CENTER),
+    "TMIT": (Full_Body_Instance.tibia_right, Lower_Body.MEDIAL_INTERCONDYLAR_TUBERCLE),
+    "TLIT": (Full_Body_Instance.tibia_right, Lower_Body.LATERAL_INTERCONDYLAR_TUBERCLE),
+    "TMCP": (Full_Body_Instance.tibia_right, Lower_Body.MEDIAL_CONDYLE_POSTERIOR),
+    "TLCP": (Full_Body_Instance.tibia_right, Lower_Body.LATERAL_CONDYLE_POSTERIOR),
+    "TMCA": (Full_Body_Instance.tibia_right, Lower_Body.MEDIAL_CONDYLE_ANTERIOR),
+    "TLCA": (Full_Body_Instance.tibia_right, Lower_Body.LATERAL_CONDYLE_ANTERIOR),
+    "TMCM": (Full_Body_Instance.tibia_right, Lower_Body.MEDIAL_CONDYLE_MEDIAL),
+    "TLCL": (Full_Body_Instance.tibia_right, Lower_Body.LATERAL_CONDYLE_LATERAL),
+    "TAC": (Full_Body_Instance.tibia_right, Lower_Body.ANKLE_CENTER),
+    "TMM": (Full_Body_Instance.tibia_right, Lower_Body.MEDIAL_MALLEOLUS),
+    "TAAP": (Full_Body_Instance.tibia_right, Lower_Body.ANATOMICAL_AXIS_PROXIMAL),
+    "TADP": (Full_Body_Instance.tibia_right, Lower_Body.ANATOMICAL_AXIS_DISTAL),
+    "TGPP": (Full_Body_Instance.tibia_right, Lower_Body.TGPP),
+    "TTP": (Full_Body_Instance.tibia_right, Lower_Body.TTP),
+    # Fibula
+    "FLM": (Full_Body_Instance.fibula_right, Lower_Body.LATERAL_MALLEOLUS),
+}
+
 
 class Vertebra_Instance(Abstract_lvl):
     def __new__(cls, *args):
