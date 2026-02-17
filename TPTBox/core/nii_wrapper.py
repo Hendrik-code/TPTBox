@@ -323,7 +323,7 @@ class NII(NII_Math):
                 if arr.dtype.fields is not None:  # structured dtype (RGB)
                     self._arr = np.stack([arr[name] for name in arr.dtype.names], axis=-1)
                 else:
-                    raise np.exceptions.DTypePromotionError(f"The DTypes <class '{self.nii.dataobj.dtype}'> do not have a common numerical DType. {np.asarray(self.nii.dataobj)}") #self.nii.dataobj
+                    raise np.exceptions.DTypePromotionError(f"The DTypes <class '{self.nii.dataobj.dtype}'> do not have a common numerical DType. {np.asarray(self.nii.dataobj)}") from None
 
             self._aff = self.nii.affine
             self._header:Nifti1Header = self.nii.header # type: ignore
