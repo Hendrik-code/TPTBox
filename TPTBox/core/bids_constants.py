@@ -4,6 +4,7 @@ from __future__ import annotations
 
 formats = [
     "ct",
+    "cta",
     "dixon",
     "T2c",
     "T1c",
@@ -163,7 +164,7 @@ formats = [
     "labels",
 ]
 # https://bids-specification.readthedocs.io/en/stable/appendices/entity-table.html
-formats_relaxed = [*formats, "t2", "t1", "t2c", "t1c", "cta", "mr", "snapshot", "t1dixon", "dwi"]
+formats_relaxed = [*formats, "t2", "t1", "t2c", "t1c", "mr", "snapshot", "t1dixon", "dwi", "ctb"]
 # Recommended writing style: T1c, T2c; This list is not official and can be extended.
 
 modalities = {

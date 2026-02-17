@@ -190,8 +190,8 @@ class Full_Body_Instance_Vibe(Abstract_lvl):
     clavicula_right = 47
     femur_left = 48
     femur_right = 49
-    hip_left = 50
-    hip_right = 51
+    pelvis_left = 50
+    pelvis_right = 51
     spinal_cord = 52
     gluteus_maximus_left = 53
     gluteus_maximus_right = 54
