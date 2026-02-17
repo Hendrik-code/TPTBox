@@ -184,11 +184,15 @@ class NII_Math(NII_Proxy,Has_Grid):
             where=where.get_array().astype(bool)
 
         return np.mean(self.get_array(),axis=axis,keepdims=keepdims,where=where,**qargs)
-    def median(self,axis = None,keepdims=False,where = np._NoValue, **qargs)->float:  # type: ignore
+    def median(self, axis=None, keepdims=False,  **qargs):  # type: ignore
+        arr = self.get_array()
+        return np.median(arr, axis=axis, keepdims=keepdims, **qargs)
+
+    def std(self,axis = None,keepdims=False,where = np._NoValue, **qargs)->float:  # type: ignore
         if hasattr(where,"get_array"):
             where=where.get_array().astype(bool)
 
-        return np.median(self.get_array(),axis=axis,keepdims=keepdims,where=where,**qargs)
+        return np.std(self.get_array(),axis=axis,keepdims=keepdims,where=where,**qargs)
     def threshold(self,threshold=0.5, inplace=False):
         arr = self.get_array()
         arr2 = arr.copy()
