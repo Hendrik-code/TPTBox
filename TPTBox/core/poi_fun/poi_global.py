@@ -169,10 +169,12 @@ class POI_Global(Abstract_POI):
     @classmethod
     def load(cls, poi: poi.POI_Reference, itk_coords: bool | None = None) -> Self:
         poi_obj = load_poi(poi)
+
         if not poi_obj.is_global:
             poi_obj = poi_obj.to_global(itk_coords if itk_coords is not None else False)  # type: ignore
         if itk_coords is not None:
             assert itk_coords == poi_obj.itk_coords, "not implemented swichting to/from itk_coords to nii "
+
         return poi_obj  # type: ignore
 
     def save(

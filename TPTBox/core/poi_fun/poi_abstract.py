@@ -13,7 +13,6 @@ from scipy import interpolate
 from typing_extensions import Self
 
 from TPTBox.core import vert_constants
-from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.vert_constants import COORDINATE, POI_DICT, Abstract_lvl, Any, Location, Vertebra_Instance, log, log_file, logging
 
 POI_ID = Union[
@@ -186,7 +185,10 @@ class POI_Descriptor(AbstractSet, MutableMapping):
 
     def __getitem__(self, key: POI_ID) -> COORDINATE:
         region, subregion = unpack_poi_id(key, self.definition)
-        return self.pois[region][subregion]
+        try:
+            return self.pois[region][subregion]
+        except KeyError:
+            raise KeyError(region, subregion)  # noqa: B904
 
     def get(self, key: POI_ID):
         return np.array(self[key])
