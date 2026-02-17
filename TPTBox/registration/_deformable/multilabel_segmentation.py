@@ -101,7 +101,7 @@ class Template_Registration:
         if target_img is not None:
             target_img = target_img.resample_from_to(target_seg)
         if atlas_img is not None:
-            atlas_img = atlas_img.resample_from_to(target_seg)
+            atlas_img = atlas_img.resample_from_to(atlas_seg)
         self.same_side = same_side
         self.target_grid_org = target_seg.to_gird()
         self.atlas_org = atlas_seg.to_gird()
@@ -109,13 +109,13 @@ class Template_Registration:
             axis = target_seg.get_axis("R")
             if axis == 0:
                 target_seg = target_seg.set_array(target_seg.get_array()[::-1]).copy()
-                target_img = target_img.set_array(target_seg.get_array()[::-1]).copy() if target_img is not None else None
+                target_img = target_img.set_array(target_img.get_array()[::-1]).copy() if target_img is not None else None
             elif axis == 1:
                 target_seg = target_seg.set_array(target_seg.get_array()[:, ::-1]).copy()
-                target_img = target_img.set_array(target_seg.get_array()[:, ::-1]).copy() if target_img is not None else None
+                target_img = target_img.set_array(target_img.get_array()[:, ::-1]).copy() if target_img is not None else None
             elif axis == 2:
                 target_seg = target_seg.set_array(target_seg.get_array()[:, :, ::-1]).copy()
-                target_img = target_img.set_array(target_seg.get_array()[:, :, ::-1]).copy() if target_img is not None else None
+                target_img = target_img.set_array(target_img.get_array()[:, :, ::-1]).copy() if target_img is not None else None
             else:
                 raise ValueError(axis)
             if poi_target_cms is not None:
@@ -127,6 +127,16 @@ class Template_Registration:
                         poi_target_cms[k1, k2] = (x, poi_target_cms.shape[1] - 1 - y, z)
                     elif axis == 2:
                         poi_target_cms[k1, k2] = (x, y, poi_target_cms.shape[2] - 1 - z)
+        if poi_target_cms is None:
+            x = target_seg.extract_label(cms_ids, keep_label=True) if cms_ids else target_seg
+            poi_target = calc_centroids(x, second_stage=40, bar=True)  # TODO REMOVE
+        else:
+            poi_target = poi_target_cms.resample_from_to(target_seg)
+        if poi_cms is None:
+            x = atlas_seg.extract_label(cms_ids, keep_label=True) if cms_ids else atlas_seg
+            poi_cms = calc_centroids(x, second_stage=40, bar=True)
+        if not poi_cms.assert_affine(atlas_seg, raise_error=False):
+            poi_cms = poi_cms.resample_from_to(atlas_seg)
         if crop:
             print("crop")
 
@@ -138,8 +148,7 @@ class Template_Registration:
             resize_param: tuple | None = None
             target_tmp = target_seg
 
-            if atlas_seg.is_segmentation_in_border():
-                atlas_seg = atlas_seg.apply_pad(((1, 1), (1, 1), (1, 1)))
+            atlas_seg_ = atlas_seg.apply_pad(((1, 1), (1, 1), (1, 1))) if atlas_seg.is_segmentation_in_border() else atlas_seg
 
             for i in range(_max_iter):
                 if resize_mode == "crop":
@@ -169,21 +178,17 @@ class Template_Registration:
                 # --- Point registration ---
                 print(f"iter {i}: using {resize_mode} ({crop_pad_size})")
 
-                if poi_target_cms is None:
-                    x = target_tmp.extract_label(cms_ids, keep_label=True) if cms_ids else target_tmp
-                    poi_target = calc_centroids(x, second_stage=40, bar=True)
-                else:
-                    poi_target = poi_target_cms.resample_from_to(target_tmp)
+                poi_target = poi_target.resample_from_to(target_tmp)
 
                 if poi_cms is None:
-                    x = atlas_seg.extract_label(cms_ids, keep_label=True) if cms_ids else atlas_seg
+                    x = atlas_seg_.extract_label(cms_ids, keep_label=True) if cms_ids else atlas_seg_
                     poi_cms = calc_centroids(x, second_stage=40, bar=True)
 
-                if not poi_cms.assert_affine(atlas_seg, raise_error=False):
-                    poi_cms = poi_cms.resample_from_to(atlas_seg)
+                if not poi_cms.assert_affine(atlas_seg_, raise_error=False):
+                    poi_cms = poi_cms.resample_from_to(atlas_seg_)
 
                 self.reg_point = Point_Registration(poi_target, poi_cms)
-                atlas_reg = self.reg_point.transform_nii(atlas_seg)
+                atlas_reg = self.reg_point.transform_nii(atlas_seg_)
 
                 if not atlas_reg.is_segmentation_in_border():
                     print("registration ok")
@@ -199,31 +204,24 @@ class Template_Registration:
                 target_seg = target_seg.apply_pad(resize_param)
                 target_img = target_img.apply_pad(resize_param) if target_img is not None else None
 
-        if poi_target_cms is None:
-            x = target_seg.extract_label(cms_ids, keep_label=True) if cms_ids else target_seg
-            poi_target = calc_centroids(x, second_stage=40, bar=True)  # TODO REMOVE
-        else:
-            poi_target = poi_target_cms.resample_from_to(target_seg)
-        if poi_cms is None:
-            x = atlas_seg.extract_label(cms_ids, keep_label=True) if cms_ids else atlas_seg
-            poi_cms = calc_centroids(x, second_stage=40, bar=True)
-        if not poi_cms.assert_affine(atlas_seg, raise_error=False):
-            poi_cms = poi_cms.resample_from_to(atlas_seg)
-        self.reg_point = Point_Registration(poi_target, poi_cms)
+        self.reg_point = Point_Registration(poi_target.resample_from_to(target_seg), poi_cms.resample_from_to(atlas_seg))
         atlas_reg = self.reg_point.transform_nii(atlas_seg)
+        atlas_img_reg = self.reg_point.transform_nii(atlas_img) if atlas_img is not None else None
 
         if crop:
             self.crop = (target_seg + atlas_reg).compute_crop(0, 5)
             target_seg = target_seg.apply_crop(self.crop)
+            target_img = target_img.apply_crop(self.crop) if target_img is not None else None
             atlas_reg = atlas_reg.apply_crop(self.crop)
+            atlas_img_reg = atlas_img_reg.apply_crop(self.crop) if atlas_img_reg is not None else None
         else:
             self.crop = None
 
         self.target_grid = target_seg.to_gird()
-        target_seg, atlas_reg, target_img, atlas_img = change_after_point_reg(target_seg, atlas_reg, target_img, atlas_img)
+        target_seg, atlas_reg, target_img, atlas_img_reg = change_after_point_reg(target_seg, atlas_reg, target_img, atlas_img_reg)
         self.reg_deform = Deformable_Registration(
             target_seg if target_img is None else target_img,
-            atlas_reg if atlas_img is None else atlas_img,
+            atlas_reg if atlas_img_reg is None else atlas_img_reg,
             target_seg.copy(),
             atlas_reg.copy(),
             loss_terms=loss_terms,
