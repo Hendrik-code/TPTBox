@@ -308,13 +308,22 @@ class NII(NII_Math):
         try:
             if self.__unpacked:
                 return
-            if not self._checked_dtype or self.seg:
-                dtype = _check_if_nifty_is_lying_about_its_dtype(self)
-                #print("unpack-nii",f"{self.seg=}",dtype)
-                self._checked_dtype = True
-                self._arr = np.asanyarray(self.nii.dataobj, dtype=dtype).copy()
-            else:
-                self._arr = np.asanyarray(self.nii.dataobj, dtype=self.nii.dataobj.dtype).copy() #type: ignore
+            try:
+                #if arr.dtype.fields is not None:  # structured dtype (RGB)
+                #    arr = np.stack([arr[name] for name in arr.dtype.names], axis=-1)
+                if not self._checked_dtype or self.seg:
+                    dtype = _check_if_nifty_is_lying_about_its_dtype(self)
+                    #print("unpack-nii",f"{self.seg=}",dtype)
+                    self._checked_dtype = True
+                    self._arr = np.asanyarray(self.nii.dataobj, dtype=dtype).copy()
+                else:
+                    self._arr = np.asanyarray(self.nii.dataobj, dtype=self.nii.dataobj.dtype).copy() #type: ignore
+            except np.exceptions.DTypePromotionError:
+                arr = np.asarray(self.nii.dataobj)
+                if arr.dtype.fields is not None:  # structured dtype (RGB)
+                    self._arr = np.stack([arr[name] for name in arr.dtype.names], axis=-1)
+                else:
+                    raise np.exceptions.DTypePromotionError(f"The DTypes <class '{self.nii.dataobj.dtype}'> do not have a common numerical DType. {np.asarray(self.nii.dataobj)}") #self.nii.dataobj
 
             self._aff = self.nii.affine
             self._header:Nifti1Header = self.nii.header # type: ignore
@@ -778,9 +787,11 @@ class NII(NII_Math):
             s = s.apply_crop(tuple(crop),inplace=inplace)
         return s.apply_pad(padding,inplace=inplace,mode=mode)
 
-    def apply_pad(self,padd:Sequence[tuple[int|None,int]],mode:MODES="constant",inplace = False,verbose:logging=True):
+    def apply_pad(self,padd:Sequence[tuple[int|None,int]]|None,mode:MODES="constant",inplace = False,verbose:logging=True):
         #TODO add other modes
         #TODO add testcases and options for modes
+        if padd is None:
+            return self if inplace else self.copy()
         transform = np.eye(self.dims+1, dtype=int)
         assert len(padd) == self.dims
         for i, (before,_) in enumerate(padd):

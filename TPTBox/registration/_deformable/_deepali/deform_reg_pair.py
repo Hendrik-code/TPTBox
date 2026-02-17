@@ -26,10 +26,10 @@ from torch import Tensor
 from torch.nn import Module
 
 from TPTBox.core.nii_wrapper import NII, to_nii
-from TPTBox.registration.deformable._deepali.engine import RegistrationEngine
-from TPTBox.registration.deformable._deepali.hooks import RegistrationEvalHook, RegistrationStepHook, normalize_grad_hook, smooth_grad_hook
-from TPTBox.registration.deformable._deepali.optim import new_optimizer
-from TPTBox.registration.deformable._deepali.registration_losses import PairwiseImageRegistrationLoss, RegistrationResult
+from TPTBox.registration._deformable._deepali.engine import RegistrationEngine
+from TPTBox.registration._deformable._deepali.hooks import RegistrationEvalHook, RegistrationStepHook, normalize_grad_hook, smooth_grad_hook
+from TPTBox.registration._deformable._deepali.optim import new_optimizer
+from TPTBox.registration._deformable._deepali.registration_losses import PairwiseImageRegistrationLoss, RegistrationResult
 
 
 def get_device_config(config: dict[str, Any], device: str | torch.device | None = None) -> torch.device:
