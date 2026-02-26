@@ -135,7 +135,6 @@ def run_inference_on_file(
         orientation = ds_info["orientation"]
 
     zoom = None
-    orientation_ref = None
     og_nii = input_nii[0].copy()
 
     try:

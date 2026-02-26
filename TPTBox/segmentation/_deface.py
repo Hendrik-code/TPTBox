@@ -41,7 +41,7 @@ def _extend_mask_anterior(mask: NII, n: int) -> NII:
     m = mask.copy()
     arr = m.extract_label(1).get_array()
 
-    # Axis corresponding to Anterior–Posterior
+    # Axis corresponding to Anterior-Posterior
     axis = m.get_axis("A")
 
     # Orientation: +1 index is "A" or "P"
@@ -159,7 +159,6 @@ if __name__ == "__main__":
     from TPTBox.mesh3D.snapshot3D import make_snapshot3D_parallel
 
     make_snapshot3D_parallel(msk, snps, ["A", "R", "S"])
-    exit()
 
     snps = []
     msk = []
