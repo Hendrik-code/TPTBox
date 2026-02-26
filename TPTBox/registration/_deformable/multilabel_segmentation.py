@@ -187,11 +187,11 @@ class Template_Registration:
                 if not poi_cms.assert_affine(atlas_seg_, raise_error=False):
                     poi_cms = poi_cms.resample_from_to(atlas_seg_)
 
-                self.reg_point = Point_Registration(poi_target, poi_cms)
+                self.reg_point = Point_Registration(poi_target, poi_cms, verbose=False)
                 atlas_reg = self.reg_point.transform_nii(atlas_seg_)
 
                 if not atlas_reg.is_segmentation_in_border():
-                    print("registration ok")
+                    print("point registration ok")
                     break
                 else:
                     print("atlas_reg touches border → expanding")
