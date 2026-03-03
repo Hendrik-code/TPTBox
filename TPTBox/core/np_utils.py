@@ -471,7 +471,7 @@ def np_calc_crop_around_centerpoint(
     arr: np.ndarray,
     cutout_size: tuple[int, ...],
     pad_to_size: Sequence[int] | np.ndarray | int = 0,
-) -> tuple[np.ndarray, tuple, tuple]:
+) -> tuple[np.ndarray, tuple[slice, slice, slice], tuple]:
     """
 
     Args:
