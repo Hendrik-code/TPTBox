@@ -988,7 +988,7 @@ class BIDS_FILE:
         except KeyError as e:
             raise ValueError(f"nii.gz not present. Found only {self.file.keys()}\t{self.file}\n\n{self}") from e
 
-    def get_grid_info(self, add_gird_info_to_json=True):
+    def get_grid_info(self, add_grid_info_to_json=True):
         """returns the Grid info. It looks up if this info is in json. If not it loads the File, computes the Grid and saves it in the json"""
         from TPTBox.core.dicom.dicom_extract import _add_grid_info_to_json
         from TPTBox.core.nii_poi_abstract import Grid
@@ -998,7 +998,7 @@ class BIDS_FILE:
             return None
         if not self.has_json():
             self.file["json"] = Path(str(nii_file).split(".")[0] + ".json")
-        return Grid(**_add_grid_info_to_json(nii_file, self.file["json"], add=add_gird_info_to_json)["grid"])
+        return Grid(**_add_grid_info_to_json(nii_file, self.file["json"], add=add_grid_info_to_json)["grid"])
 
     def get_nii_file(self) -> Path:  # type: ignore
         for key in _supported_nii_files:
