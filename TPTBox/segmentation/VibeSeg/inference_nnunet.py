@@ -97,7 +97,7 @@ def run_inference_on_file(
         ds_info = json.load(f)
     inference_config = Path(nnunet_path, "inference_config.json")
     if inference_config.exists():
-        with open() as f:
+        with open(inference_config) as f:
             ds_info2 = json.load(f)
             if "model_expected_orientation" in ds_info2:
                 ds_info["orientation"] = ds_info2["model_expected_orientation"]
