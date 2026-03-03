@@ -660,7 +660,7 @@ class DeepaliPairwiseImageTrainer:
     def on_split_losses(self):
         misc_excl = set()
         # self.loss_terms = {a: l.to(self.device) for a, l in self.loss_terms.items()}
-        from TPTBox.registration.ridged_intensity.affine_deepali import (  # noqa: PLC0415
+        from TPTBox.registration._ridged_intensity.affine_deepali import (  # noqa: PLC0415
             PairwiseSegImageLoss,
         )
 

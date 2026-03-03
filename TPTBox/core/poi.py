@@ -740,6 +740,8 @@ class POI(Abstract_POI, Has_Grid):
             if isinstance(poi_obj, POI_Global):
                 poi_obj = poi_obj.resample_from_to(reference)
             else:
+                if poi_obj.orientation == ("U", "U", "U"):
+                    poi_obj.orientation = reference.orientation
                 if poi_obj.spacing is None:
                     poi_obj.spacing = reference.spacing
                 if poi_obj.rotation is None:

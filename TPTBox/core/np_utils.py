@@ -1185,7 +1185,16 @@ def np_calc_boundary_mask(
     infect_list = []
 
     def infect(x, y, z):
-        if any([x < 0, y < 0, z < 0, x == boundary.shape[0], y == boundary.shape[1], z == boundary.shape[2]]):
+        if any(
+            [
+                x < 0,
+                y < 0,
+                z < 0,
+                x == boundary.shape[0],
+                y == boundary.shape[1],
+                z == boundary.shape[2],
+            ]
+        ):
             return
         if boundary[x, y, z] == 0:
             boundary[x, y, z] = 1
@@ -1328,7 +1337,6 @@ def np_fill_holes_global_with_majority_voting(arr: UINTARRAY, connectivity: int 
             cc_msk,
             label_mask=arr_c,
             dilate_pixel=1,
-            label_ref=1,
             inplace=False,
         )
         arr_c[seg_nii_new != 0] = seg_nii_new[seg_nii_new != 0]
@@ -1355,26 +1363,29 @@ def np_map_labels_based_on_majority_label_mask_overlap(
     Returns:
         arr: input array with all labels in labels relabeled
     """
-    arr_c = arr if inplace else arr.copy()
+    arr_cc = arr if inplace else arr.copy()
 
     labels = _to_labels(arr, label_ref)
 
-    label_list: list[int] = [l for l in np_unique(arr) if l in labels]
-    for l in label_list:
-        arr_l = np_extract_label(arr, l, inplace=False)
-        arr_ld = np_dilate_msk(arr_l.copy(), n_pixel=dilate_pixel, label_ref=1, connectivity=3) if dilate_pixel > 0 else arr_l
+    label_list: list[int] = [label for label in np_unique(arr) if label in labels]
 
-        mult = label_mask * arr_ld
+    for label in label_list:
+        arr_l = np_extract_label(arr, label, inplace=False)
+        arr_ld = np_dilate_msk(arr_l.copy(), n_pixel=dilate_pixel, label_ref=1, connectivity=3) if dilate_pixel > 0 else arr_l
+        # crop speed up by factor 6
+        crop = np_bbox_binary(arr_ld, px_dist=0, raise_error=False)
+
+        mult = label_mask[crop] * arr_ld[crop]
         label_ref, count = np.unique(mult, return_counts=True)
         if 0 in label_ref:
             label_ref = label_ref[1:]
             count = count[1:]
         try:
-            newlabel = label_ref[np.argmax(count)]
-        except ValueError:
-            newlabel = no_match_label
-        arr_c[arr_l != 0] = newlabel
-    return arr_c
+            new_label = label_ref[np.argmax(count)]
+        except ValueError:  # should never happen if called from np_fill_holes_global_with_majority_voting
+            new_label = no_match_label
+        arr_cc[arr_l != 0] = new_label
+    return arr_cc
 
 
 def _pad_to_parameters(

@@ -20,8 +20,8 @@ from TPTBox import NII, POI, Image_Reference, Location, calc_poi_from_subreg_ver
 from TPTBox.core.compat import zip_strict
 from TPTBox.core.internal.deep_learning_utils import DEVICES, get_device
 from TPTBox.core.nii_poi_abstract import Has_Grid
-from TPTBox.registration.ridged_intensity.affine_deepali import Rigid_Registration_with_Tether
-from TPTBox.registration.ridged_points import Point_Registration
+from TPTBox.registration._ridged_intensity.affine_deepali import Rigid_Registration_with_Tether
+from TPTBox.registration._ridged_points import Point_Registration
 
 
 def not_exist_or_is_younger_than(path: Path | str, other_path: Path | str | None):

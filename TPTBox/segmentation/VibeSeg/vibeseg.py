@@ -95,7 +95,7 @@ def run_vibeseg(
 ):
     return run_inference_on_file(
         dataset_id,
-        [to_nii(i)],
+        [to_nii(i)] if not isinstance(i, (list, tuple)) else [to_nii(j) for j in i],
         out_file=out_seg,
         override=override,
         gpu=gpu,

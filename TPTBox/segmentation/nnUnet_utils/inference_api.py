@@ -92,7 +92,7 @@ def load_inf_model(
     check_name = "checkpoint_final.pth"  # if not allow_non_final else "checkpoint_best.pth"
     try:
         predictor.initialize_from_trained_model_folder(str(model_folder), checkpoint_name=check_name, use_folds=use_folds)
-    except Exception as e:
+    except FileNotFoundError as e:
         if allow_non_final:
             try:
                 predictor.initialize_from_trained_model_folder(
