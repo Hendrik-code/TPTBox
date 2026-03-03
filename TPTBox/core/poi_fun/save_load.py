@@ -640,7 +640,7 @@ def _parse_header_value(value: str):
 def _load_landmark_txt(path: Path):
     header: dict = {
         "format": format_key[FORMAT_PLST],
-        "coordinate_system": "itk",
+        "coordinate_system": "nib",
         "level_one_info": "Any",
         "level_two_info": "Any",
     }
