@@ -310,7 +310,7 @@ class Has_Grid(Grid_Proxy):
         # Final conclusion and possible raising of AssertionError
         has_errors = len(found_errors) > 0
         if raise_error and has_errors:
-            raise AssertionError(f"{text}; assert_affine failed with {found_errors}")
+            raise AssertionError(f"{text} assert_affine failed with {found_errors}")
 
         return not has_errors
 
