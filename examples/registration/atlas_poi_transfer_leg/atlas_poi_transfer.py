@@ -14,10 +14,10 @@ from TPTBox.core.nii_wrapper import NII
 from TPTBox.core.poi import POI
 from TPTBox.core.vert_constants import Full_Body_Instance, Lower_Body
 from TPTBox.logger.log_file import No_Logger
-from TPTBox.registration.deformable.deformable_reg import Deformable_Registration
+from TPTBox.registration._deformable.deformable_reg import Deformable_Registration
 
 # from TPTBox.registration.deformable.deformable_reg_old import Deformable_Registration as Deformable_Registration_old
-from TPTBox.registration.ridged_points import Point_Registration
+from TPTBox.registration._ridged_points import Point_Registration
 
 default_setting = {
     "loss": {"config": {"be": {"stride": 1, "name": "BSplineBending"}, "seg": {"name": "MSE"}}, "weights": {"be": 0.0001, "seg": 1}},

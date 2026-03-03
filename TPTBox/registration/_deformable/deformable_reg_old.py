@@ -26,8 +26,8 @@ from TPTBox.core.compat import zip_strict
 from TPTBox.core.internal.deep_learning_utils import DEVICES, get_device
 from TPTBox.core.nii_poi_abstract import Grid as TPTBox_Grid
 from TPTBox.core.nii_poi_abstract import Has_Grid
-from TPTBox.registration.deepali.deepali_model import LOSS, General_Registration
-from TPTBox.registration.deformable._deepali import deform_reg_pair
+from TPTBox.registration._deepali.deepali_model import LOSS, General_Registration
+from TPTBox.registration._deformable._deepali import deform_reg_pair
 
 cuda = device("cuda")
 

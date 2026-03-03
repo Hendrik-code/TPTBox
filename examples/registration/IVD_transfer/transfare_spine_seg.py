@@ -19,10 +19,10 @@ from TPTBox import POI, Image_Reference, POI_Global, Vertebra_Instance, calc_cen
 from TPTBox.core.internal.deep_learning_utils import DEVICES
 from TPTBox.core.nii_wrapper import NII
 from TPTBox.core.poi import POI
-from TPTBox.registration.deformable.deformable_reg import Deformable_Registration
+from TPTBox.registration._deformable.deformable_reg import Deformable_Registration
 
 # from TPTBox.registration.deformable.deformable_reg_old import Deformable_Registration as Deformable_Registration_old
-from TPTBox.registration.ridged_points import Point_Registration
+from TPTBox.registration._ridged_points import Point_Registration
 from TPTBox.spine.snapshot2D import Snapshot_Frame, create_snapshot
 
 

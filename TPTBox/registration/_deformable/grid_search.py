@@ -30,8 +30,8 @@ from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMe
 from tqdm import tqdm
 
 from TPTBox.core.nii_wrapper import to_nii
-from TPTBox.registration.deformable._deepali.metrics import NMILOSS, calculate_jacobian_metrics, dice
-from TPTBox.registration.deformable.deformable_reg import Deformable_Registration, Image_Reference, _load_config
+from TPTBox.registration._deformable._deepali.metrics import NMILOSS, calculate_jacobian_metrics, dice
+from TPTBox.registration._deformable.deformable_reg import Deformable_Registration, Image_Reference, _load_config
 
 
 @dataclass

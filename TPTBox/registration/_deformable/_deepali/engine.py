@@ -14,8 +14,8 @@ from torch import Tensor
 from torch.optim import Optimizer
 from torch.utils.hooks import RemovableHandle
 
-from TPTBox.registration.deformable._deepali.optim import slope_of_least_squares_fit
-from TPTBox.registration.deformable._deepali.registration_losses import RegistrationLoss, RegistrationResult
+from TPTBox.registration._deformable._deepali.optim import slope_of_least_squares_fit
+from TPTBox.registration._deformable._deepali.registration_losses import RegistrationLoss, RegistrationResult
 
 PROFILING = False
 

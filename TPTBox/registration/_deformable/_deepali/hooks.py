@@ -7,7 +7,7 @@ from deepali.core import functional as deepali_functional
 from deepali.core.kernels import gaussian1d
 from deepali.spatial import is_linear_transform
 
-from TPTBox.registration.deformable._deepali.engine import RegistrationEngine, RegistrationResult
+from TPTBox.registration._deformable._deepali.engine import RegistrationEngine, RegistrationResult
 
 RegistrationEvalHook = Callable[[RegistrationEngine, int, int, RegistrationResult], None]
 RegistrationStepHook = Callable[[RegistrationEngine, int, int, float], None]

@@ -222,7 +222,7 @@ def extract_keys_from_json(  # noqa: C901
             keys["acq"] = to_nii(dcm_data_l).get_plane(1)
         else:
             keys["acq"] = get_plane_dicom(dcm_data_l, 1)
-        keys["part"] = dixon_mapping.get(_get("ProtocolName", "NO-PART").split("_")[-1], None)
+        keys["part"] = dixon_mapping.get(_get("ProtocolName", "NO-PART").split("_")[-1])
 
         sequ = _get("SeriesNumber", None)
         if sequ is None:

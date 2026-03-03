@@ -180,8 +180,7 @@ def _get_markup_color(
     if isinstance(color, np.ndarray):
         color = color.tolist()
     assert isinstance(color, list), (color, type(color))
-    if max(color) > 2:
-        color = [float(c) / 255.0 for c in color]
+    color = [float(c) / 255.0 for c in color] if max(color) > 2 else [float(c) for c in color]
     return color
 
 
@@ -260,11 +259,11 @@ def _get_markup_lines(
     key_points = definition.get("key_points")
     region, subregion = key_points[0]
     color = _get_markup_color(definition, region, subregion, split_by_region, split_by_subregion)
-    display = _get_display_dict(display | definition.get("display", {}), selectedColor=color)
+    display = _get_display_dict(display | definition.get("display", {}), selectedColor=color, color=color, activeColor=color)
 
     controlPoints = []
     for region, subregion in key_points:
-        name, name2 = get_desc(poi, region, subregion)
+        name, name2, label = get_desc(poi, region, subregion)
         controlPoints.append(
             _get_control_point(
                 definition.get("controlPoint", {}),
@@ -287,22 +286,26 @@ def _get_markup_lines(
 def get_desc(self: POI_Global, region, subregion):
     label = self.info.get("label_name", {}).get(str((region, subregion)))
     if label is None:
-        label = f"{region}-{subregion}"
+        label = str(subregion)
+        try:
+            label = self.level_two_info(subregion).name
+        except Exception:
+            label = str(subregion)
     try:
-        name = self.level_two_info(subregion).name
-    except Exception:
-        name = str(subregion)
-    try:
-        name2 = self.level_one_info(region).name
-        if "_ignore_level_one_info_range" in self.info:
-            try:
-                if region in self.info["_ignore_level_one_info_range"]:
-                    name2 = str(region)
-            except Exception:
-                pass
+        if region in self.info.get("label_group_name", {}):
+            name2 = self.info["label_group_name"][region]
+        else:
+            name2 = self.level_one_info(region).name
+            if "_ignore_level_one_info_range" in self.info:
+                try:
+                    if region in self.info["_ignore_level_one_info_range"]:
+                        name2 = str(region)
+                except Exception:
+                    pass
 
     except Exception:
         name2 = str(region)
+    name = name2
     return name, name2, label
 
 
@@ -355,13 +358,7 @@ def _save_mrk(
     if add_points:
         # Create list of control points
         for region, subregion, coords in poi.centroids.items():
-            key = _get_key(
-                region,
-                subregion,
-                split_by_region,
-                split_by_subregion,
-                main_key=main_key,
-            )
+            key = _get_key(region, subregion, split_by_region, split_by_subregion, main_key=main_key)
             name, name2, label = get_desc(poi, region, subregion)
             if key not in list_markups:
                 list_markups[key] = _make_default_markup(
@@ -372,40 +369,15 @@ def _save_mrk(
                     display=_get_display_dict(
                         display,
                         selectedColor=_get_markup_color(
-                            {"color": color},
-                            region,
-                            subregion,
-                            split_by_region=split_by_subregion,
-                            split_by_subregion=split_by_subregion,
+                            {"color": color}, region, subregion, split_by_region=split_by_subregion, split_by_subregion=split_by_subregion
                         ),
                         **addendum,
                     ),
                 )
-            list_markups[key]["controlPoints"].append(
-                _get_control_point(
-                    {},
-                    coords,
-                    f"{region}-{subregion}",
-                    label,
-                    name,
-                    name2,
-                )
-            )
+            list_markups[key]["controlPoints"].append(_get_control_point({}, coords, f"{region}-{subregion}", label, name, name2))
     markups = list(list_markups.values())
 
-    [
-        markups.append(
-            _get_markup_lines(
-                line,
-                poi,
-                coordinate_system,
-                split_by_region,
-                split_by_subregion,
-                display,
-            )
-        )
-        for line in add_lines
-    ]
+    [markups.append(_get_markup_lines(line, poi, coordinate_system, split_by_region, split_by_subregion, display)) for line in add_lines]
     mrk_data = {
         "@schema": "https://raw.githubusercontent.com/slicer/slicer/master/Modules/Loadable/Markups/Resources/Schema/markups-schema-v1.0.3.json#",
         "markups": markups,
