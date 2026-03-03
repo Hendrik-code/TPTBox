@@ -188,7 +188,7 @@ class POI_Descriptor(AbstractSet, MutableMapping):
         try:
             return self.pois[region][subregion]
         except KeyError:
-            raise KeyError(region, subregion)  # noqa: B904
+            raise KeyError(region, subregion, "not in", list(self.keys()))  # noqa: B904
 
     def get(self, key: POI_ID):
         return np.array(self[key])
