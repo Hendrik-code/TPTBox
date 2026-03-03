@@ -197,7 +197,7 @@ def _get_sub_array_by_direction(d: DIRECTIONS, cords: np.ndarray) -> np.ndarray:
         never_called(d)
 
 
-def get_direction(d: DIRECTIONS, poi: POI, vert_id: int) -> np.ndarray:
+def get_direction(d: DIRECTIONS, poi: POI, vert_id: int, verbose=True) -> np.ndarray:
     """Get the sub-array of coordinates along a specified direction.
     cords must be in PIR direction
     Returns:
@@ -208,6 +208,9 @@ def get_direction(d: DIRECTIONS, poi: POI, vert_id: int) -> np.ndarray:
     Note:
         Assumes the input `cords` array has shape (3, n), where n is the number of coordinates.
     """
+    if vert_id == 1:
+        _log.on_warning("C1 has no direction computation use C2 as direction", verbose=verbose)
+        vert_id = 2
     P, I, R = get_vert_direction_PIR(poi, vert_id, to_pir=False)  # noqa: N806
     if d == "P":
         return P

@@ -12,7 +12,7 @@ from torch import device
 
 from TPTBox import Image_Reference
 from TPTBox.core.internal.deep_learning_utils import DEVICES
-from TPTBox.registration.deepali.deepali_model import LOSS, General_Registration
+from TPTBox.registration._deepali.deepali_model import LOSS, General_Registration
 
 cuda = device("cuda")
 

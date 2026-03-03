@@ -55,6 +55,7 @@ enable = true
 [tool.ruff]
 namespace-packages = ["datagen"]
 exclude = [
+    "*.ipynb",
     ".bzr",
     ".direnv",
     ".eggs",
@@ -158,6 +159,8 @@ ignore = [
     "F811",
     "N803",
     "N806",
+    "FURB171", 
+    "PLW0108",
     "B905", # strict= in zip
     "UP007", # Union and "|" python 3.9
     "PLC0415", # import-outside-top-level

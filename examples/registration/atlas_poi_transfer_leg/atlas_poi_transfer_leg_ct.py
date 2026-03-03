@@ -23,11 +23,11 @@ from TPTBox.core.poi import POI
 from TPTBox.core.poi_fun.poi_abstract import POI_Descriptor
 from TPTBox.core.vert_constants import Full_Body_Instance, Lower_Body
 from TPTBox.logger.log_file import No_Logger
-from TPTBox.registration.deformable.deformable_reg import Deformable_Registration
-from TPTBox.registration.ridged_intensity.affine_deepali import Tether
+from TPTBox.registration._deformable.deformable_reg import Deformable_Registration
+from TPTBox.registration._ridged_intensity.affine_deepali import Tether
 
 # from TPTBox.registration.deformable.deformable_reg_old import Deformable_Registration as Deformable_Registration_old
-from TPTBox.registration.ridged_points import Point_Registration
+from TPTBox.registration._ridged_points import Point_Registration
 
 logger = No_Logger()
 ABBREVIATION_TO_ENUM = {
@@ -43,7 +43,7 @@ ABBREVIATION_TO_ENUM = {
     "TRMP": (Full_Body_Instance.femur_right, Lower_Body.TROCHLEAR_RIDGE_MEDIAL_POINT),
     "TRLP": (Full_Body_Instance.femur_right, Lower_Body.TROCHLEAR_RIDGE_LATERAL_POINT),
     "TGCP": (Full_Body_Instance.femur_right, Lower_Body.TROCHLEA_GROOVE_CENTRAL_POINT),
-    "FHC": (Full_Body_Instance.femur_right, Lower_Body.HIP_CENTER),
+    "FHC": (Full_Body_Instance.femur_right, Lower_Body.PELVIS_CENTER),
     "FNC": (Full_Body_Instance.femur_right, Lower_Body.NECK_CENTER),
     "TGT": (Full_Body_Instance.femur_right, Lower_Body.TIP_OF_GREATER_TROCHANTER),
     "FLCP": (Full_Body_Instance.femur_right, Lower_Body.LATERAL_CONDYLE_POSTERIOR),

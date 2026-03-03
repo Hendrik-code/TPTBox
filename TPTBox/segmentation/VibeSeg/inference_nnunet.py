@@ -65,7 +65,7 @@ def run_inference_on_file(
     mode="nearest",
     padd: int = 0,
     ddevice: Literal["cpu", "cuda", "mps"] = "cuda",
-    _model_path=None,
+    model_path=None,
     step_size=0.5,
     memory_base=5000,  # Base memory in MB, default is 5GB
     memory_factor=160,  # prod(shape)*memory_factor / 1000, 160 ~> 30 GB
@@ -73,9 +73,10 @@ def run_inference_on_file(
     wait_till_gpu_percent_is_free=0.1,
     verbose=True,
 ) -> tuple[Image_Reference, np.ndarray | None]:
-    if _model_path is not None:
-        _model_path = Path(_model_path)
-        model_path = _model_path / "nnUNet_results"
+    if model_path is not None:
+        model_path = Path(model_path)
+        if model_path.name != "nnUNet_results":
+            model_path = model_path / "nnUNet_results"
         assert model_path.exists(), model_path
     else:
         model_path = _model_path_
@@ -110,7 +111,7 @@ def run_inference_on_file(
         ds_info = json.load(f)
     inference_config = Path(nnunet_path, "inference_config.json")
     if inference_config.exists():
-        with open() as f:
+        with open(inference_config) as f:
             ds_info2 = json.load(f)
             if "model_expected_orientation" in ds_info2:
                 ds_info["orientation"] = ds_info2["model_expected_orientation"]
@@ -135,7 +136,6 @@ def run_inference_on_file(
         orientation = ds_info["orientation"]
 
     zoom = None
-    orientation_ref = None
     og_nii = input_nii[0].copy()
 
     try:
@@ -170,12 +170,12 @@ def run_inference_on_file(
         nnunet_path,
     )
     if orientation is not None:
-        print("orientation", orientation, f"{orientation_ref=}") if verbose else None
+        print("orientation", orientation, f"from {input_nii[0].orientation}") if verbose else None
         input_nii = [i.reorient(orientation) for i in input_nii]
 
     if zoom is not None:
-        print("rescale", input_nii[0].orientation, f"{zoom=}") if verbose else None
-        input_nii = [i.rescale_(zoom, mode=mode) for i in input_nii]
+        print("rescale", f"{zoom=} from {input_nii[0].zoom}") if verbose else None
+        input_nii = [i.rescale_(zoom, mode=mode, verbose=True) for i in input_nii]
         print(input_nii)
     print("squash to float16") if verbose else None
     input_nii = [squash_so_it_fits_in_float16(i) for i in input_nii]
