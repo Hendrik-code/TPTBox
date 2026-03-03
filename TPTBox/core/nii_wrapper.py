@@ -1925,8 +1925,8 @@ class NII(NII_Math):
             else:
                 seg_arr[seg_arr == l] = removed_to_label
         return self.set_array(seg_arr,inplace=inplace, verbose=verbose)
-    def remove_labels_(self,label:int|Enum|Sequence[int]|Sequence[Enum], verbose:logging=True):
-        return self.remove_labels(label,inplace=True,verbose=verbose)
+    def remove_labels_(self,label:int|Enum|Sequence[int]|Sequence[Enum],removed_to_label=0, verbose:logging=True):
+        return self.remove_labels(label,inplace=True,removed_to_label=removed_to_label,verbose=verbose)
     def apply_mask(self,mask:Self, inplace=False):
         assert mask.shape == self.shape, f"[def apply_mask] Mask and Shape are not equal: \nMask - {mask},\nSelf - {self})"
         seg_arr = mask.get_seg_array()
