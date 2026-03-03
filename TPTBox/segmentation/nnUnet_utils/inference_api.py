@@ -35,7 +35,7 @@ def load_inf_model(
     memory_base=5000,  # Base memory in MB, default is 5GB
     memory_factor=160,  # prod(shape)*memory_factor / 1000, 160 ~> 30 GB
     memory_max=160000,  # in MB, default is 160GB
-    wait_till_gpu_percent_is_free=0.3
+    wait_till_gpu_percent_is_free=0.3,
 ) -> nnUNetPredictor:
     """Loads the Nako-Segmentor Model Predictor
 
@@ -87,7 +87,7 @@ def load_inf_model(
         memory_base=memory_base,
         memory_factor=memory_factor,
         memory_max=memory_max,
-        wait_till_gpu_percent_is_free=wait_till_gpu_percent_is_free
+        wait_till_gpu_percent_is_free=wait_till_gpu_percent_is_free,
     )
     check_name = "checkpoint_final.pth"  # if not allow_non_final else "checkpoint_best.pth"
     try:
