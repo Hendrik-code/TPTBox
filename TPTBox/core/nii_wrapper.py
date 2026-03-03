@@ -1528,7 +1528,9 @@ class NII(NII_Math):
         Returns:
         - bool: True if the segmentation is within the defined voxel tolerance of the border, False otherwise.
         """
-        slices = self.compute_crop(minimum,dist=0,use_mm=use_mm)
+        slices = self.compute_crop(minimum,dist=0,use_mm=use_mm,raise_error=False)
+        if slices is None:
+            return False
         shp = self.shape
         seg_at_border = False
         for d in range(3):
