@@ -33,7 +33,7 @@ formats = [
     "MP2RAG",
     "MPM",
     "MT",
-    "MT",
+    "MTS",
     "T1map",
     "T2map",
     "T2starmap",
@@ -298,6 +298,7 @@ entities = {
     # Run is used when the file collides with an other. Run gets a increasing number
     ## Official
     "Acquisition": "acq",
+    "Split": "split",
     # sag, ax, iso usw. and In case different sequences are used to record the same modality (for example, RARE and FLASH for T1w)
     # Examples: sag, sag-RARE, RARE
     "Task": "task",
@@ -334,7 +335,6 @@ entities = {
     # Single class segmentation
     "Label": "label",
     # Others (never used)
-    "Split": "split",
     "Density": "den",
     "version": "version",
     "Description": "desc",
