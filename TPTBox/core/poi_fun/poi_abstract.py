@@ -435,7 +435,7 @@ class Abstract_POI:
 
     def sort(self, inplace=True, order_dict: dict | None = None) -> Self:
         """Sort vertebra dictionary by sorting_list"""
-        if self.level_one_info is not None:
+        if self.level_one_info is not None and self.level_one_info != Any:
             order_dict = self.level_one_info.order_dict()
         poi = self.centroids._sort(inplace=inplace, order_dict=order_dict)
         if inplace:
