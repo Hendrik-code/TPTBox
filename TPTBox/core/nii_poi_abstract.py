@@ -305,8 +305,8 @@ class Has_Grid(Grid_Proxy):
 
         # Print errors
         for err in found_errors:
-            text = f"{text}; {err}" if text else f"{err}"
-            log.print(f"{text}", ltype=Log_Type.FAIL, verbose=verbose)
+            text2 = f"{text}; {err}" if text else f"{err}"
+            log.print(f"{text2}", ltype=Log_Type.FAIL, verbose=verbose)
         # Final conclusion and possible raising of AssertionError
         has_errors = len(found_errors) > 0
         if raise_error and has_errors:
