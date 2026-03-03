@@ -243,7 +243,7 @@ def test_name_conflict(json_ob, file):
     return False
 
 
-def save_json(json_ob, file, check_exist=False):
+def save_json(json_ob, file, check_exist=False, override=True):
     """
     recieves a json object and a path and saves the object as a json file
     """
@@ -257,8 +257,9 @@ def save_json(json_ob, file, check_exist=False):
 
     if check_exist and test_name_conflict(json_ob, file):
         raise FileExistsError(file)
-    if Path(file).exists():
+    if Path(file).exists() and not override:
         return True
+    Print_Logger().on_save("save json with grid info", file)
     with open(file, "w") as file_handel:
         json.dump(json_ob, file_handel, indent=4, default=convert)
     return False

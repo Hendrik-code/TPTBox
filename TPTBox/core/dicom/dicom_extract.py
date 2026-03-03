@@ -316,11 +316,12 @@ def _from_dicom_to_nii(
     return nii_path if suc else None
 
 
-def _add_grid_info_to_json(nii_path: Path | str, simp_json: Path | str, force_update=False):
-    nii = NII.load(nii_path, False)
+def _add_grid_info_to_json(nii_path: Path | str, simp_json: Path | str, force_update=False, add=True):
     json_dict = load_json(simp_json) if Path(simp_json).exists() else {}
     if "grid" in json_dict and not force_update:
         return json_dict
+    print("Read Grid info", Path(simp_json).exists(), "grid" in json_dict)
+    nii = NII.load(nii_path, False)
     gird = {
         "shape": nii.shape,
         "spacing": nii.spacing,
@@ -330,7 +331,7 @@ def _add_grid_info_to_json(nii_path: Path | str, simp_json: Path | str, force_up
         "dims": nii.get_num_dims(),
     }
     json_dict["grid"] = gird
-    save_json(json_dict, simp_json)
+    save_json(json_dict, simp_json, override=add)
     return json_dict
 
 

@@ -184,7 +184,7 @@ class Test_Centroids(unittest.TestCase):
 
 class Test_Registation(unittest.TestCase):
     def test_reg(self):
-        from TPTBox.registration.ridged_points.point_registration import ridged_points_from_poi
+        from TPTBox.registration._ridged_points.point_registration import ridged_points_from_poi
 
         for _ in range(repeats):
             msk, cent, order, sizes = get_nii(num_point=random.randint(4, 7))

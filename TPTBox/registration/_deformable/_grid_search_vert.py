@@ -5,8 +5,8 @@ import numpy as np
 from TPTBox import POI, Image_Reference, calc_centroids, calc_poi_from_two_segs
 from TPTBox.core.nii_wrapper import NII, to_nii
 from TPTBox.core.poi_fun.ray_casting import calculate_pca_normal_np
-from TPTBox.registration.deformable.deformable_reg import Deformable_Registration
-from TPTBox.registration.ridged_points import ridged_points_from_poi
+from TPTBox.registration._deformable.deformable_reg import Deformable_Registration
+from TPTBox.registration._ridged_points import ridged_points_from_poi
 
 setting = {
     "loss": {"config": {"be": {"stride": 1, "name": "BSplineBending"}, "seg": {"name": "MSE"}}, "weights": {"be": 0.001, "seg": 1}},
