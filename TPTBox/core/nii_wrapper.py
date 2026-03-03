@@ -468,6 +468,9 @@ class NII(NII_Math):
         if self.__unpacked:
             return self._arr.dtype # type: ignore
         return self.nii.dataobj.dtype #type: ignore
+    @dtype.setter
+    def dtype(self, dtype:type):
+        self.set_dtype_(dtype)
     @property
     def header(self) -> Nifti1Header:
         if self.__unpacked:
@@ -488,6 +491,9 @@ class NII(NII_Math):
     def orientation(self) -> AX_CODES:
         ort = nio.io_orientation(self.affine)
         return nio.ornt2axcodes(ort) # type: ignore
+    @orientation.setter
+    def orientation(self, value: AX_CODES):
+        self.reorient_(value, verbose=False)
     @property
     def dims(self)->int:
         self._unpack()
@@ -503,6 +509,9 @@ class NII(NII_Math):
             z = z[:n]
         #assert len(z) == 3,z
         return z # type: ignore
+    @zoom.setter
+    def zoom(self, value: tuple[float, float, float]):
+        self.rescale_(value, verbose=False)
 
     @property
     def origin(self) -> tuple[float, float, float]:
@@ -536,10 +545,6 @@ class NII(NII_Math):
         a = np.array(self.direction)
         a[:len(a)//3*2]*=-1
         return a.tolist()
-
-    @orientation.setter
-    def orientation(self, value: AX_CODES):
-        self.reorient_(value, verbose=False)
 
 
     def split_4D_image_to_3D(self):
