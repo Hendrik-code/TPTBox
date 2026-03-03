@@ -1096,6 +1096,22 @@ class BIDS_FILE:
             base36 = chars[i] + base36
         return base36[:length]
 
+    def get_identifier(self, sequence_splitting_keys: list[str]) -> str:
+        """Generates an identifier for the BIDS_FILE based on subject and splitting keys
+
+        Args:
+            sequence_splitting_keys (list[str]): list of keys to use for splitting
+        """
+        if "sub" not in self.info:
+            print(f"family_id, no sub-key, got {self.info}")
+            identifier = "sub-404"
+        else:
+            identifier = "sub-" + self.info["sub"]
+        for s in self.info.keys():
+            if s in sequence_splitting_keys:
+                identifier += "_" + s + "-" + self.info[s]
+        return identifier
+
 
 class Searchquery:
     def __init__(self, subj: Subject_Container, flatten=False) -> None:
@@ -1456,15 +1472,16 @@ class BIDS_Family:
 
     def get_identifier(self):
         first_e = self.data_dict[next(iter(self.data_dict.keys()))][0]
-        if "sub" not in first_e.info:
-            print(f"family_id, no sub-key, got {first_e.info} and data_dict {list(self.data_dict.keys())}")
-            identifier = "sub-404"
-        else:
-            identifier = "sub-" + first_e.info["sub"]
-        for s in first_e.info.keys():
-            if s in self.sequence_splitting_keys:
-                identifier += "_" + s + "-" + first_e.info[s]
-        return identifier
+        return first_e.get_identifier(self.sequence_splitting_keys)
+        # if "sub" not in first_e.info:
+        #    print(f"family_id, no sub-key, got {first_e.info} and data_dict {list(self.data_dict.keys())}")
+        #    identifier = "sub-404"
+        # else:
+        #    identifier = "sub-" + first_e.info["sub"]
+        # for s in first_e.info.keys():
+        #    if s in self.sequence_splitting_keys:
+        #        identifier += "_" + s + "-" + first_e.info[s]
+        # return identifier
 
     def items(self):
         return self.data_dict.items()
