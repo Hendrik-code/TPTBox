@@ -916,10 +916,10 @@ def calc_poi_from_subreg_vert(
     save_buffer_file=False,  # used by wrapper  # noqa: ARG001
     decimals=2,
     subreg_id: int | Abstract_lvl | Sequence[int | Abstract_lvl] | Sequence[Abstract_lvl] | Sequence[int] = 50,
-    verbose: logging = True,
+    verbose: logging = False,
     extend_to: POI | None = None,
     # use_vertebra_special_action=True,
-    _vert_ids=None,
+    _vert_ids: list[int] | None = None,
     _print_phases=False,
     _orientation_version=0,
 ) -> POI:
@@ -1056,6 +1056,7 @@ def calc_poi_from_subreg_vert(
             subreg_msk,
             _vert_ids=_vert_ids,
             log=log,
+            verbose=verbose,
             _orientation_version=_orientation_version,
         )
     extend_to.apply_crop_reverse(crop, org_shape, inplace=True)
