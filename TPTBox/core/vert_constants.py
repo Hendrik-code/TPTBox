@@ -647,8 +647,8 @@ class Full_Body_Instance(Abstract_lvl):
             Full_Body_Instance.phalanges_right.value: 72,
             Full_Body_Instance.phalanges_left.value: 72,
             Full_Body_Instance.trachea.value: 16,
-            Full_Body_Instance.lung_right.value: 910,
-            Full_Body_Instance.lung_left.value: 910,
+            Full_Body_Instance.lung_right.value: 73,
+            Full_Body_Instance.lung_left.value: 73,
             Full_Body_Instance.heart.value: 24,
             Full_Body_Instance.spleen.value: 1,
             Full_Body_Instance.kidney_right.value: 2,
@@ -1196,3 +1196,12 @@ vert_directions = [
 ]
 
 conversion_poi2text = {k: v for v, k in conversion_poi.items()}
+
+
+list_of_all_enums = [
+    Location,
+    Vertebra_Instance,
+    Lower_Body,
+    Full_Body_Instance,
+    Full_Body_Instance_Vibe,
+]
