@@ -1749,6 +1749,9 @@ class NII(NII_Math):
     def save(self,file:str|Path,make_parents=True,verbose:logging=True, dtype = None):
         if make_parents:
             Path(file).parent.mkdir(0o777,exist_ok=True,parents=True)
+        if str(file).endswith(".nrrd"):
+            return self.save_nrrd(file,verbose=verbose)
+
         arr = self.get_array() if not self.seg else self.get_seg_array()
         if isinstance(arr,np.floating) and self.seg:
             self.set_dtype_("smallest_uint")
@@ -1762,7 +1765,6 @@ class NII(NII_Math):
             # 1 means Scanner coordinate system
             # 2 means align (to something) coordinate system
             out.header["qform_code"] = 2 if self.seg else 1
-
         nib.save(out, file) #type: ignore
         log.print(f"Save {file} as {out.get_data_dtype()}",verbose=verbose,ltype=Log_Type.SAVE)
 
@@ -1785,7 +1787,6 @@ class NII(NII_Math):
             raise ImportError("The `pynrrd` package is required but not installed. Install it with `pip install pynrrd`." ) from None
         if isinstance(file, bids_files.BIDS_FILE):
             file = file.file['nrrd']
-
         from TPTBox.core.internal.slicer_nrrd import save_slicer_nrrd
         save_slicer_nrrd(self,file,make_parents=make_parents,verbose=verbose,**args)
 
