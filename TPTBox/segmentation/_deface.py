@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 
 from TPTBox import BIDS_FILE, BIDS_Global_info, Image_Reference, to_nii
-from TPTBox.core.nii_wrapper import NII
+from TPTBox.core.nii_wrapper import DIRECTIONS, NII
 from TPTBox.segmentation.VibeSeg.inference_nnunet import run_inference_on_file, run_VibeSeg
 
 
@@ -21,7 +21,7 @@ def _compute_deface_mask_cta(ct_img: Image_Reference, outpath: str | Path | None
     return run_VibeSeg(ct_img, out_path=outpath, dataset_id=1, keep_size=False, override=override, gpu=gpu, **args)
 
 
-def _extend_mask_anterior(mask: NII, n: int) -> NII:
+def _extend_mask(mask: NII, n: int, direction: DIRECTIONS = "A") -> NII:
     """
     Extend a binary mask n voxels further in anterior (A) direction.
 
@@ -42,7 +42,7 @@ def _extend_mask_anterior(mask: NII, n: int) -> NII:
     arr = m.extract_label(1).get_array()
 
     # Axis corresponding to Anterior-Posterior
-    axis = m.get_axis("A")
+    axis = m.get_axis(direction)
 
     # Orientation: +1 index is "A" or "P"
     # Typically values are ("A","P") or ("P","A")
@@ -55,7 +55,7 @@ def _extend_mask_anterior(mask: NII, n: int) -> NII:
 
     coords = idx[axis]
 
-    if ori == "A":
+    if ori == direction:
         anterior_idx = coords.max()
         slicer = [slice(None)] * arr.ndim
         slicer[axis] = slice(0, 1)
@@ -103,7 +103,7 @@ def compute_deface_mask_cta(
     f2[ct > -600] = 0
     f2 = f2.filter_connected_components(max_count_component=1, keep_label=True)
 
-    mask = _extend_mask_anterior(f2, 4)
+    mask = _extend_mask(f2, 4)
     mask[face_org == 1] = 2
 
     m2 = mask.extract_label(1)

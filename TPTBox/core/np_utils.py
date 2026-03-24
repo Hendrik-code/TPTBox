@@ -20,6 +20,7 @@ from numpy.typing import NDArray
 from scipy.ndimage import (
     binary_erosion,
     center_of_mass,
+    distance_transform_edt,
     gaussian_filter,
     generate_binary_structure,
 )
@@ -312,6 +313,50 @@ def np_dice(seg: np.ndarray, gt: np.ndarray, binary_compare: bool = False, label
     if np.isnan(dice):
         return 1.0
     return dice
+
+
+def np_dilate_msk_euclid(arr: np.ndarray, n_pixel: int = 3, use_crop=True, labels=None, mask=None):
+    """
+    Fast approximate dilation:
+    - expands segmentation by k voxels
+    - assigns new voxels to nearest label
+    """
+    if use_crop:
+        arr_bin = arr.copy()
+        if labels is not None:
+            arr_bin[np.isin(arr_bin, labels, invert=True)] = 0
+        crop = np_bbox_binary(arr_bin, px_dist=1 + n_pixel, raise_error=False)
+        arrc = arr[crop]
+    else:
+        arrc = arr
+        if labels is not None:
+            arrc = arrc.copy()
+            arrc[np.isin(arr_bin, labels, invert=True)] = 0
+    if mask is not None:
+        mask[mask != 0] = 1
+        if use_crop:
+            mask = mask[crop]
+    foreground = arrc > 0
+
+    # distance + nearest label indices
+    dist, indices = distance_transform_edt(~foreground, return_indices=True)
+
+    # copy original
+    out = arrc.copy()
+
+    # mask of voxels within dilation range
+    dist_mask = (dist <= n_pixel) & (~foreground)
+
+    # assign nearest label
+    nearest_labels = arrc[tuple(indices)]
+    out[dist_mask] = nearest_labels[dist_mask]
+    if mask is not None:
+        out[mask == 0] = 0
+    if use_crop:
+        arr[crop][out != 0] = out[out != 0]
+        return arr
+    arr[out != 0] = out[out != 0]
+    return arr
 
 
 def np_dilate_msk(

@@ -65,17 +65,22 @@ def run_inference_on_file(
     mode="nearest",
     padd: int = 0,
     ddevice: Literal["cpu", "cuda", "mps"] = "cuda",
-    _model_path=None,
+    model_path=None,
     step_size=0.5,
     memory_base=5000,  # Base memory in MB, default is 5GB
     memory_factor=160,  # prod(shape)*memory_factor / 1000, 160 ~> 30 GB
     memory_max=160000,  # in MB, default is 160GB
     wait_till_gpu_percent_is_free=0.1,
     verbose=True,
+    auto_download=False,
+    _no_ResEnc=False,
 ) -> tuple[Image_Reference, np.ndarray | None]:
-    if _model_path is not None:
-        _model_path = Path(_model_path)
-        model_path = _model_path / "nnUNet_results"
+    if model_path is None:
+        auto_download = True
+    if model_path is not None:
+        model_path = Path(model_path)
+        if model_path.name != "nnUNet_results":
+            model_path = model_path / "nnUNet_results"
         assert model_path.exists(), model_path
     else:
         model_path = _model_path_
@@ -88,11 +93,18 @@ def run_inference_on_file(
     )
 
     if isinstance(idx, int):
-        download_weights(idx, model_path)
+        if auto_download:
+            download_weights(idx, model_path)
         try:
+            if _no_ResEnc:
+                raise StopIteration()  # noqa: TRY301
             nnunet_path = next(next(iter(model_path.glob(f"*{idx:03}*"))).glob("*__nnUNet*ResEnc*"))
-        except StopIteration:
-            nnunet_path = next(next(iter(model_path.glob(f"*{idx:03}*"))).glob("*__nnUNetPlans*"))
+        except StopIteration as e:
+            try:
+                nnunet_path = next(next(iter(model_path.glob(f"*{idx:03}*"))).glob("*__nnUNetPlans*"))
+            except StopIteration:
+                print(model_path, (f"*{idx:03}*"))
+                raise e from None
     else:
         nnunet_path = Path(idx)
     assert nnunet_path.exists(), nnunet_path
@@ -110,12 +122,14 @@ def run_inference_on_file(
         ds_info = json.load(f)
     inference_config = Path(nnunet_path, "inference_config.json")
     if inference_config.exists():
-        with open() as f:
+        with open(inference_config) as f:
             ds_info2 = json.load(f)
             if "model_expected_orientation" in ds_info2:
                 ds_info["orientation"] = ds_info2["model_expected_orientation"]
             if "resolution_range" in ds_info2:
                 ds_info["resolution_range"] = ds_info2["resolution_range"]
+            if "labels" in ds_info2:
+                ds_info["labels_mapping"] = ds_info2["labels"]
 
     nnunet = load_inf_model(
         nnunet_path,
@@ -196,6 +210,39 @@ def run_inference_on_file(
         seg_nii.resample_from_to_(og_nii, mode=mode)
     if fill_holes:
         seg_nii.fill_holes_()
+    if "labels_mapping" in ds_info:
+        from TPTBox.core.vert_constants import list_of_all_enums
+
+        mapping_ = ds_info["labels_mapping"]
+        unknown_strings = {"max": seg_nii.max() + 1, "Intervertebral_Disc": 100}
+        mapping = {}
+
+        def to_int(a: str):
+            global idx
+            if a in unknown_strings:
+                return unknown_strings[a]
+            try:
+                return int(a)
+            except Exception:
+                print("no int")
+
+            for enum_ in list_of_all_enums:
+                try:
+                    return enum_[a].value
+                except Exception:
+                    print("no ", enum_)
+            unknown_strings[a] = unknown_strings["max"]
+            unknown_strings["max"] += 1
+            if unknown_strings["max"] == 100:
+                unknown_strings["max"] += 1
+
+            return unknown_strings[a]
+
+        for k, v in mapping_.items():
+            mapping[to_int(k)] = to_int(v)
+        print(f"{unknown_strings}")
+        print(f"{mapping=}")
+        seg_nii.map_labels_(mapping)
     if out_file is not None and (not Path(out_file).exists() or override):
         seg_nii.save(out_file)
     del nnunet
