@@ -32,6 +32,7 @@ from TPTBox.core.np_utils import (
     np_connected_components,
     np_connected_components_per_label,
     np_dilate_msk,
+    np_dilate_msk_euclid,
     np_erode_msk,
     np_extract_label,
     np_fill_holes,
@@ -901,6 +902,8 @@ class NII(NII_Math):
         Returns:
             NII:
         """        ''''''
+        if to_vox_map is None:
+            return self if inplace else self.copy()
         c_val = self.get_c_val(c_val)
         if isinstance(to_vox_map,Has_Grid):
             mapping = to_vox_map.to_gird()
@@ -914,6 +917,8 @@ class NII(NII_Math):
         if order is None:
             order = 0 if self.seg else 3
         nii = _resample_from_to(self, mapping,order=order, mode=mode,align_corners=align_corners)
+        
+            
         if inplace:
             self.nii = nii
             return self
@@ -1236,7 +1241,35 @@ class NII(NII_Math):
 
     def erode_msk_(self, n_pixel:int = 5, labels: LABEL_REFERENCE = None, connectivity: int=3, verbose:logging=True,border_value=0,use_crop=True,ignore_direction:DIRECTIONS|int|None=None):
         return self.erode_msk(n_pixel=n_pixel, labels=labels, connectivity=connectivity, inplace=True, verbose=verbose,border_value=border_value,use_crop=use_crop,ignore_direction=ignore_direction)
+    def dilate_msk_euclid(self, n_pixel: int = 5, labels: LABEL_REFERENCE = None,mask: Self | None = None, inplace=False, verbose:logging=True,use_crop=True):
+        """
+        euclidean Dilates (in voxel space) a segmentation mask by the specified number.
 
+        Args:
+            n_pixel (int, optional): The number of voxels to dilate the mask by. Defaults to 5.
+            labels (list[int], optional): Labels that should be dilated. If None, will dilate all labels (not including zero!)
+            mask (NII, optional): If set, after each iteration, will zero out everything based on this mask
+            inplace (bool, optional): Whether to modify the mask in place or return a new object. Defaults to False.
+            verbose (bool, optional): Whether to print a message indicating that the mask was dilated. Defaults to True.
+            use_crop: speed up computation by cropping and un-cropping the segmentation. Minor overhead if the segmentation fills most of the image
+        Returns:
+            NII: The dilated mask.
+
+        Notes:
+            The method uses euclidean dilation to dilate the mask by the specified number of voxels.
+            For n_pixel=1 dilate_msk_euclid and dilate_msk/connectivity=1 are equivalent. 
+            This will algorithm runtime is independent of n_pixel and len(labels) unlike dilate_msk
+
+        """
+        assert self.seg
+        log.print("dilate mask",end='\r',verbose=verbose)
+        msk_i_data = self.get_seg_array()
+        mask_ = mask.get_seg_array() if mask is not None else None
+        out = np_dilate_msk_euclid(arr=msk_i_data, n_pixel=n_pixel,labels=labels,use_crop=use_crop,mask=mask_)
+        out = out.astype(self.dtype)
+        log.print("Mask euclidean dilated by", n_pixel, "voxels",verbose=verbose)
+        
+        return self.set_array(out,inplace=inplace)
     def dilate_msk(self, n_pixel: int = 5, labels: LABEL_REFERENCE = None, connectivity: int = 3, mask: Self | None = None, inplace=False, verbose:logging=True,use_crop=True, ignore_direction:DIRECTIONS|int|None=None):
         """
         Dilates the binary segmentation mask by the specified number of voxels.
