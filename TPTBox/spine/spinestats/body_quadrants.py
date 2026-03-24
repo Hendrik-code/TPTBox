@@ -13,6 +13,7 @@ def make_quadrants(
     poi_buffer: str | Path | None = None,
     vert_ids: list[int] | None = None,
     mask_ids=(49, 50, 52),
+    erode=0,
 ):
     """
     Subdivide vertebral body masks into anatomically oriented 3×3×3 regions.
@@ -103,8 +104,12 @@ def make_quadrants(
         buffer_file=poi_buffer,
     )
     out_nii = vert_nii * 0
+    mask_nii = spine_nii.extract_label(mask_ids)
+    if erode != 0:
+        mask_nii = mask_nii.erode_msk(erode)
+
     for v_id in vert_nii.unique() if vert_ids is None else vert_ids:
-        v21 = vert_nii.extract_label(v_id) * spine_nii.extract_label(mask_ids)
+        v21 = vert_nii.extract_label(v_id) * mask_nii
         try:
             # POIs
             center = np.array(poi[v_id, Location.Vertebra_Corpus])
