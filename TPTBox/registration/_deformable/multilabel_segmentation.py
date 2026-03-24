@@ -308,6 +308,7 @@ class Template_Registration:
             self.target_grid,
             self.crop,
         ) = x
+
         return self
 
     def transform_nii(self, nii_atlas: NII, allow_only_same_grid_as_moving=True):
@@ -377,3 +378,52 @@ class Template_Registration:
             else:
                 raise ValueError(axis)
         return poi_reg_flip
+
+    def transform_poi_inverse(self, poi_target: POI_Global | POI):
+        """
+        Transform POIs from target space back into atlas space.
+
+        Args:
+            poi_target (POI_Global | POI): POIs defined in target space.
+
+        Returns:
+            POI: POIs mapped back into atlas space.
+        """
+
+        poi = poi_target.copy()
+
+        # --- undo left/right flip if needed ---
+        if not self.same_side:
+            poi_flip = poi.make_empty_POI()
+            axis = poi.get_axis("R")
+
+            for k1, k2, (x, y, z) in poi.copy().items():
+                if axis == 0:
+                    poi_flip[k1, k2] = (poi.shape[0] - 1 - x, y, z)
+                elif axis == 1:
+                    poi_flip[k1, k2] = (x, poi.shape[1] - 1 - y, z)
+                elif axis == 2:
+                    poi_flip[k1, k2] = (x, y, poi.shape[2] - 1 - z)
+                else:
+                    raise ValueError(axis)
+
+            poi = poi_flip
+
+        # --- resample into deformable registration grid ---
+        poi = poi.resample_from_to(self.target_grid)
+
+        # --- inverse deformable registration ---
+        reg_deform_inv = self.reg_deform.inverse()
+        poi = reg_deform_inv.transform_poi(poi)
+
+        # --- undo crop ---
+        # if self.crop is not None:
+        #    poi = poi.apply_crop_inverse(self.crop)
+
+        # --- inverse rigid point registration ---
+        poi = self.reg_point.transform_poi_inverse(poi, allow_only_same_grid_as_moving=False)
+
+        # --- back to atlas grid ---
+        poi = poi.resample_from_to(self.atlas_org)
+
+        return poi
