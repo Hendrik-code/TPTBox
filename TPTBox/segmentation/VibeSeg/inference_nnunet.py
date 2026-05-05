@@ -216,7 +216,7 @@ def run_inference_on_file(
         mapping = {}
 
         def to_int(a: str, k: None | int = None):
-            global idx
+            global idx  # noqa: PLW0602
             if a in unknown_strings:
                 return unknown_strings[a]
             try:
