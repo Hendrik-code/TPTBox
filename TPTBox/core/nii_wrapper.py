@@ -35,6 +35,7 @@ from TPTBox.core.np_utils import (
     np_dilate_msk,
     np_dilate_msk_euclid,
     np_erode_msk,
+    np_erode_msk_euclid,
     np_extract_label,
     np_fill_holes,
     np_fill_holes_global_with_majority_voting,
@@ -790,30 +791,52 @@ class NII(NII_Math):
             s = s.apply_crop(tuple(crop),inplace=inplace)
         return s.apply_pad(padding,inplace=inplace,mode=mode)
 
-    def apply_pad(self,padd:Sequence[tuple[int|None,int]]|None,mode:MODES="constant",inplace = False,verbose:logging=True):
+
+    def apply_pad(
+        self,
+        padd: Sequence[tuple[int | None, int | None]] | int | None,
+        mode: MODES = "constant",
+        inplace=False,
+        verbose: logging = True
+        ):
         #TODO add other modes
         #TODO add testcases and options for modes
-        if padd is None:
+        if padd is None or padd == 0:
             return self if inplace else self.copy()
-        transform = np.eye(self.dims+1, dtype=int)
-        assert len(padd) == self.dims
-        for i, (before,_) in enumerate(padd):
-            #transform[i, i] = pad_slice.step if pad_slice.step is not None else 1
-            transform[i, 3] = -before  if before is not None else 0
 
-        while len(padd) < len(self.shape):
-            padd = (*tuple(padd), (0, 0))
-        affine = self.affine.dot(transform)
+        if isinstance(padd, (int, float)):
+            padd = int(padd)
+            padd = ((padd, padd),) * self.dims
+
+        assert len(padd) == self.dims
+
+        # Replace None with 0
+        padd = tuple((b or 0, a or 0) for b, a in padd)
+
+        # Extend for non-spatial dims
+        padd = padd + ((0, 0),) * (len(self.shape) - len(padd))
+
+        # Build affine transform
+        transform = np.eye(self.dims + 1, dtype=float)
+        for i, (before, _) in enumerate(padd[:self.dims]):
+            transform[i, -1] = -before
+
+        affine = self.affine @ transform
+
         args = {}
         if mode == "constant":
-            args["constant_values"]=self.get_c_val()
-        log.print(f"Padd {padd}; {mode=}, {args}",verbose=verbose)
-        arr = np.pad(self.get_array(),padd,mode=mode,**args) # type: ignore
+            args["constant_values"] = self.get_c_val()
 
-        nii:_unpacked_nii = (arr,affine,self.header)
+        log.print(f"Padd {padd}; {mode=}, {args}", verbose=verbose)
+
+        arr = np.pad(self.get_array(), padd, mode=mode, **args)
+
+        nii = (arr, affine, self.header)
+
         if inplace:
             self.nii = nii
             return self
+
         return self.copy(nii)
 
     def rescale_and_reorient(self, axcodes_to=None, voxel_spacing=(-1, -1, -1), verbose:logging=True, inplace=False,c_val:float|None=None,mode:MODES='nearest'):
@@ -1165,6 +1188,20 @@ class NII(NII_Math):
     def to_simpleITK(self):
         from TPTBox.core.sitk_utils import nii_to_sitk
         return nii_to_sitk(self)
+    @classmethod
+    def from_deepali(cls, img,seg=False):
+        try:
+            from deepali.data import Image as deepaliImage
+        except Exception:
+            log.print_error()
+            log.on_fail("run 'pip install hf-deepali' to install deepali")
+            raise
+        img_ : deepaliImage =img
+        grid = cls.from_deepali_grid(img_.grid())
+
+        arr = img_.data.squeeze().cpu().detach().numpy()
+        arr = np.transpose(arr, axes=tuple(reversed(range(arr.ndim))))
+        return  NII((nib.Nifti1Image(arr,grid.affine)),seg=seg)
 
     def to_deepali(self,align_corners: bool = True,dtype=None,device:device|str = "cpu"):
         import torch
@@ -1243,6 +1280,53 @@ class NII(NII_Math):
 
     def erode_msk_(self, n_pixel:int = 5, labels: LABEL_REFERENCE = None, connectivity: int=3, verbose:logging=True,border_value=0,use_crop=True,ignore_direction:DIRECTIONS|int|None=None):
         return self.erode_msk(n_pixel=n_pixel, labels=labels, connectivity=connectivity, inplace=True, verbose=verbose,border_value=border_value,use_crop=use_crop,ignore_direction=ignore_direction)
+    def erode_msk_euclid(
+        self,
+        n_pixel: int = 5,
+        labels: LABEL_REFERENCE = None,
+        mask: Self | None = None,
+        inplace=False,
+        verbose: logging = True,
+        use_crop=True
+    ):
+        """
+        Euclidean erodes (in voxel space) a segmentation mask by the specified number.
+
+        Args:
+            n_pixel (int, optional): The number of voxels to erode the mask by. Defaults to 5.
+            labels (list[int], optional): Labels that should be eroded. If None, will erode all labels (not including zero!).
+            mask (NII, optional): If set, after operation, will zero out everything based on this mask.
+            inplace (bool, optional): Whether to modify the mask in place or return a new object. Defaults to False.
+            verbose (bool, optional): Whether to print a message. Defaults to True.
+            use_crop: Speed up computation by cropping/un-cropping.
+
+        Returns:
+            NII: The eroded mask.
+
+        Notes:
+            Uses Euclidean distance transform inside the foreground.
+            Runtime is independent of n_pixel and len(labels).
+            For n_pixel=1 this is similar to connectivity=1 erosion.
+        """
+        assert self.seg
+        log.print("erode mask", end="\r", verbose=verbose)
+
+        msk_i_data = self.get_seg_array()
+        mask_ = mask.get_seg_array() if mask is not None else None
+
+        out = np_erode_msk_euclid(
+            arr=msk_i_data,
+            n_pixel=n_pixel,
+            labels=labels,
+            use_crop=use_crop,
+            mask=mask_
+        )
+
+        out = out.astype(self.dtype)
+
+        log.print("Mask euclidean eroded by", n_pixel, "voxels", verbose=verbose)
+
+        return self.set_array(out, inplace=inplace)
     def dilate_msk_euclid(self, n_pixel: int = 5, labels: LABEL_REFERENCE = None,mask: Self | None = None, inplace=False, verbose:logging=True,use_crop=True):
         """
         euclidean Dilates (in voxel space) a segmentation mask by the specified number.
@@ -1259,7 +1343,7 @@ class NII(NII_Math):
 
         Notes:
             The method uses euclidean dilation to dilate the mask by the specified number of voxels.
-            For n_pixel=1 dilate_msk_euclid and dilate_msk/connectivity=1 are equivalent. 
+            For n_pixel=1 dilate_msk_euclid and dilate_msk/connectivity=1 are equivalent.
             This will algorithm runtime is independent of n_pixel and len(labels) unlike dilate_msk
 
         """
@@ -1895,7 +1979,7 @@ class NII(NII_Math):
 
     def to_stl(
         self: NII,
-        label: int = 1,
+        label: int,
         out_path: Path | dict[int, Path] | None = None,
         bb: tuple | None = None,
         to_world: bool = True,
@@ -1955,7 +2039,10 @@ class NII(NII_Math):
         # Prepare binary mask
         seg_arr = np.pad(seg.clamp(0, 1).get_array(), 1)
         # Marching cubes (voxel coordinates)
-        verts, faces, normals, values = marching_cubes(seg_arr, gradient_direction="ascent", step_size=1)
+        try:
+            verts, faces, normals, values = marching_cubes(seg_arr, gradient_direction="ascent", step_size=1)
+        except RuntimeError as e:
+            raise RuntimeError(str(e),f"{label=}, {self.unique()}, {out_path=}") from None
         # Remove padding offset (since we padded by 1 voxel)
         verts -= 1
         # Apply bounding box offset (still voxel space)
@@ -1983,6 +2070,7 @@ class NII(NII_Math):
                 elif number_path:
                     out_path.with_name(f"{out_path.stem}_{label}.stl")
                 log.on_save(f"Saving STL to {out_path}")
+                out_path.parent.mkdir(exist_ok=True)
                 cube.save(str(out_path))
 
         if include_normals:
