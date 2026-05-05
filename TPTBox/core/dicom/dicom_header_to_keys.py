@@ -46,6 +46,8 @@ map_series_description_to_file_format_default = {
     "t2w?_fse.*": "T2w",
     ".*t1w?_tse.*": "T1w",
     ".*t1w?_vibe_tra.*": "vibe",
+    ".*Durchleuchtung.*": "fluroscopy",
+    ".*fluroscopy.*": "fluroscopy",
     ".*scout": "localizer",
     "localizer": "localizer",
     ".*pilot.*": "localizer",
@@ -267,21 +269,33 @@ def extract_keys_from_json(  # noqa: C901
         if modality == "ct":
             mri_format = "ct"
         elif modality == "xa":  # Angiography
+            biplane = False
             if "BIPLANE A" in image_type or "SINGLE A" in image_type:
                 keys["acq"] = "A"
+                biplane = True
             elif "BIPLANE B" in image_type or "SINGLE B" in image_type:
                 keys["acq"] = "B"
+                biplane = True
+            derived = "DERIVED" in image_type
+            series_description = _get("SeriesDescription", " ").lower()  # "SeriesDescription": "Durchleuchtung - gespeichert",
             monitor = _get("PositionerMotion", " ").lower()
             # ftv = _get("FrameTimeVector", None).lower()
             monitor = _get("PositionerMotion", " ").lower()
             tag = _get("DerivationDescription", " ").lower()
+            # "ImagerPixelSpacing"
+            # FrameTimeVector = _get("DerivationDescription", [])
             # ftv is not None
-            if tag == "subtraction":
+            if "durchleuchtung" in series_description or "fluroscopy" in series_description:
+                mri_format = "fluroscopy"
+            elif tag == "subtraction":
                 mri_format = "DSA" if monitor == "static" and "VOLUME" not in image_type and "RECON" not in image_type else "subtraction"
             elif "3DRA_PROP" in image_type:
                 mri_format = "3DRA"
             elif monitor == "dynamic" or "VOLUME" in image_type or "RECON" in image_type or "3DRA_PROP" in image_type:
                 mri_format = "DSA3D"
+            elif biplane and derived and "VOLUME" not in image_type and "RECON" not in image_type:
+                ##len(FrameTimeVector) >= 1 and (monitor == "static" and "VOLUME" not in image_type and "RECON" not in image_type)
+                mri_format = "DSA"
             else:
                 mri_format = "XA"
         elif modality == "mr":
