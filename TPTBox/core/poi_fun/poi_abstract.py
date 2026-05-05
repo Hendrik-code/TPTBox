@@ -524,7 +524,7 @@ class Abstract_POI:
     def __getitem__(self, key: POI_ID) -> COORDINATE:
         return tuple(self.centroids[key])
 
-    def __setitem__(self, key: POI_ID, value: tuple[float, float, float] | Sequence[float]):
+    def __setitem__(self, key: POI_ID, value: tuple[float, float, float] | Sequence[float] | np.ndarray):
         if len(value) != DIMENSIONS:
             raise ValueError(value)
         self.centroids[key] = tuple(value)

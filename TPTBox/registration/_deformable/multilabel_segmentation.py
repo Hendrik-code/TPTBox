@@ -157,7 +157,7 @@ class Template_Registration:
 
                     # --- try crop first ---
                     t_crop = target_seg.compute_crop(0, crop_pad_size)
-                    cropped = target_seg.apply_crop(t_crop)
+                    cropped = target_seg.apply_crop(t_crop).apply_pad(crop_pad_size - 50 // 4)
 
                     if any(c < o for c, o in zip(cropped.shape, target_seg.shape)):
                         resize_mode = "crop"
@@ -165,7 +165,7 @@ class Template_Registration:
                         target_tmp = cropped
                     else:
                         # --- fallback to padding ---
-                        crop_pad_size = 0
+                        crop_pad_size = crop_pad_size // 2
                         target_tmp = target_seg
                         resize_mode = "pad"
                 else:
@@ -311,7 +311,7 @@ class Template_Registration:
 
         return self
 
-    def transform_nii(self, nii_atlas: NII, allow_only_same_grid_as_moving=True):
+    def transform_nii(self, nii_atlas: NII, allow_only_same_grid_as_moving=True, only_rigid=False):
         """
         Apply both rigid and deformable registration to a new NII object.
 
@@ -323,6 +323,9 @@ class Template_Registration:
         """
 
         nii_atlas = self.reg_point.transform_nii(nii_atlas, allow_only_same_grid_as_moving=allow_only_same_grid_as_moving)
+        if only_rigid:
+            return nii_atlas
+
         nii_atlas = nii_atlas.apply_crop(self.crop)
         nii_reg = self.reg_deform.transform_nii(nii_atlas)
         if nii_reg.seg:
