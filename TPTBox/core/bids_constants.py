@@ -64,6 +64,7 @@ formats = [
     "FLASH",
     "VF",
     "defacemas",
+    "fluroscopy",
     "dw",
     "TB1TFL",
     "TB1RFM",

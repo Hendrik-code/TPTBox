@@ -167,6 +167,23 @@ class Point_Registration:
             poi = poi.resample_from_to(output_space)
         return poi
 
+    def transform_poi_inverse(self, poi_moving: POI, allow_only_same_grid_as_moving=True, output_space=None):
+        # output_space: POI | NII | None = None,
+        if allow_only_same_grid_as_moving:
+            text = "input image must be in the same space as moving.  If you sure that this input is in same space as the moving image you can turn of 'only_allow_grid_as_moving'"
+            poi_moving.assert_affine(self.out_poi, text=text)
+        move_l = []
+        keys = []
+        out = dict(zip_strict(keys, move_l))
+
+        for key, key2, (x, y, z) in poi_moving.items():
+            out[key, key2] = self.transform_cord_inverse((x, y, z))
+
+        poi = self.out_poi.make_empty_POI(out)
+        if output_space is not None:
+            poi = poi.resample_from_to(output_space)
+        return poi
+
     def transform_cord(self, cord: tuple[float, ...], out: sitk.Image | None = None):
         if out is None:
             out = self._img_fixed
