@@ -654,7 +654,7 @@ class POI(Abstract_POI, Has_Grid):
             sphere_mask = ((gx * zoom[0]) ** 2 + (gy * zoom[1]) ** 2 + (gz * zoom[2]) ** 2) <= radius**2
 
             for region, subregion, (x, y, z) in self.items():
-                x, y, z = int(round(x)), int(round(y)), int(round(z))
+                x, y, z = round(x), round(y), round(z)  # noqa: PLW2901
 
                 # image bounds
                 x0 = max(x - rx, 0)
