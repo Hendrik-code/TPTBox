@@ -434,6 +434,21 @@ class Full_Body_Instance(Abstract_lvl):
         ]
 
     @classmethod
+    def feet(cls):
+        return [
+            Full_Body_Instance.talus_right,
+            Full_Body_Instance.talus_left,
+            Full_Body_Instance.calcaneus_right,
+            Full_Body_Instance.calcaneus_left,
+            Full_Body_Instance.tarsals_right,
+            Full_Body_Instance.tarsals_left,
+            Full_Body_Instance.metatarsals_right,
+            Full_Body_Instance.metatarsals_left,
+            Full_Body_Instance.phalanges_right,
+            Full_Body_Instance.phalanges_left,
+        ]
+
+    @classmethod
     def lung_system(cls):
         return [
             Full_Body_Instance.trachea,
@@ -1017,7 +1032,7 @@ class Location(Abstract_lvl):
     Inferior_Articular_Right = 48
     Vertebra_Corpus_border = 49  # actual corpus body
     Vertebra_Corpus = 50
-    Dens_axis = 51  # TODO Unused. Should be in C2
+    Dens_axis = 51  # only in C2 and CT but not MRI
     Vertebral_Body_Endplate_Superior = 52
     Vertebral_Body_Endplate_Inferior = 53
     # Articulate_Process_Facet_Joint (Used anywhere?)
