@@ -315,6 +315,53 @@ def np_dice(seg: np.ndarray, gt: np.ndarray, binary_compare: bool = False, label
     return dice
 
 
+def np_erode_msk_euclid(arr: np.ndarray, n_pixel: int = 3, use_crop=True, labels=None, mask=None):
+    """
+    Fast approximate erosion:
+    - shrinks segmentation by k voxels
+    - removes voxels close to background
+    """
+    if use_crop:
+        arr_bin = arr.copy()
+        if labels is not None:
+            arr_bin[np.isin(arr_bin, labels, invert=True)] = 0
+        crop = np_bbox_binary(arr_bin, px_dist=1 + n_pixel, raise_error=False)
+        arrc = arr[crop]
+    else:
+        arrc = arr
+        if labels is not None:
+            arrc = arrc.copy()
+            arrc[np.isin(arrc, labels, invert=True)] = 0
+
+    if mask is not None:
+        mask = mask.copy()
+        mask[mask != 0] = 1
+        if use_crop:
+            mask = mask[crop]
+
+    foreground = arrc > 0
+
+    # distance inside foreground to nearest background
+    dist = distance_transform_edt(foreground)
+
+    # copy original
+    out = arrc.copy()
+
+    # remove voxels within erosion distance
+    erode_mask = (dist <= n_pixel) & foreground
+    out[erode_mask] = 0
+
+    if mask is not None:
+        out[mask == 0] = 0
+
+    if use_crop:
+        arr[crop][arrc != 0] = out[arrc != 0]
+        return arr
+
+    arr[arrc != 0] = out[arrc != 0]
+    return arr
+
+
 def np_dilate_msk_euclid(arr: np.ndarray, n_pixel: int = 3, use_crop=True, labels=None, mask=None):
     """
     Fast approximate dilation:
