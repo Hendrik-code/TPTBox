@@ -130,6 +130,8 @@ def save_poi(
             return float(o)
         if isinstance(o, np.ndarray):
             return o.tolist()
+        if isinstance(o, Path):
+            return str(o.absolute())
         raise TypeError(type(o))
 
     with open(out_path, "w") as f:

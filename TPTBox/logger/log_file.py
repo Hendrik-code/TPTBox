@@ -187,6 +187,9 @@ class Logger_Interface(Protocol):
     def on_fail(self, *text, end="\n", verbose: bool | None = None, **qargs):
         self.print(*text, end=end, ltype=Log_Type.FAIL, verbose=verbose, **qargs)
 
+    def error(self, *text, end="\n", verbose: bool | None = None, **qargs):
+        self.print(*text, end=end, ltype=Log_Type.FAIL, verbose=verbose, **qargs)
+
     def on_log(self, *text, end="\n", verbose: bool | None = None, **qargs):
         self.print(*text, end=end, ltype=Log_Type.LOG, verbose=verbose, **qargs)
 
@@ -206,6 +209,9 @@ class Logger_Interface(Protocol):
         self.print(*text, end=end, ltype=Log_Type.NEUTRAL, verbose=verbose, **qargs)
 
     def on_warning(self, *text, end="\n", verbose: bool | None = None, **qargs):
+        self.print(*text, end=end, ltype=Log_Type.WARNING, verbose=verbose, **qargs)
+
+    def warning(self, *text, end="\n", verbose: bool | None = None, **qargs):
         self.print(*text, end=end, ltype=Log_Type.WARNING, verbose=verbose, **qargs)
 
     def on_text(self, *text, end="\n", verbose: bool | None = None, **qargs):
