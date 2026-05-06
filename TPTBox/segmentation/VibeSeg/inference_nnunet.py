@@ -5,7 +5,6 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Literal
-from warnings import warn
 
 import numpy as np
 import torch
@@ -18,7 +17,7 @@ out_base = Path(__file__).parent.parent / "nnUNet/"
 _model_path_ = out_base / "nnUNet_results"
 
 
-def get_ds_info(idx, _model_path: str | Path | None = None, exit_one_fail=True) -> dict:
+def get_ds_info(idx, _model_path: str | Path | None = None, exit_one_fail=True, logger=logger) -> dict:
     if _model_path is not None:
         _model_path = Path(_model_path)
         model_path = _model_path / "nnUNet_results"
@@ -32,7 +31,7 @@ def get_ds_info(idx, _model_path: str | Path | None = None, exit_one_fail=True) 
             nnunet_path = next(next(iter(model_path.glob(f"*{idx}*"))).glob("*__nnUNet*ResEnc*"))
         except StopIteration:
             if exit_one_fail:
-                Print_Logger().print(f"Please add Dataset {idx} to {model_path}", Log_Type.FAIL)
+                logger.print(f"Please add Dataset {idx} to {model_path}", Log_Type.FAIL)
                 model_path.mkdir(exist_ok=True, parents=True)
                 sys.exit()
             else:
@@ -72,7 +71,12 @@ def run_inference_on_file(
     memory_max=160000,  # in MB, default is 160GB
     wait_till_gpu_percent_is_free=0.1,
     verbose=True,
+    auto_download=False,
+    _key_ResEnc="__nnUNet*ResEnc",
+    logger=logger,
 ) -> tuple[Image_Reference, np.ndarray | None]:
+    if model_path is None:
+        auto_download = True
     if model_path is not None:
         model_path = Path(model_path)
         if model_path.name != "nnUNet_results":
@@ -89,11 +93,16 @@ def run_inference_on_file(
     )
 
     if isinstance(idx, int):
-        download_weights(idx, model_path)
+        if auto_download:
+            download_weights(idx, model_path)
         try:
-            nnunet_path = next(next(iter(model_path.glob(f"*{idx:03}*"))).glob("*__nnUNet*ResEnc*"))
-        except StopIteration:
-            nnunet_path = next(next(iter(model_path.glob(f"*{idx:03}*"))).glob("*__nnUNetPlans*"))
+            nnunet_path = next(next(iter(model_path.glob(f"*{idx:03}*"))).glob(f"*{_key_ResEnc}*"))
+        except StopIteration as e:
+            try:
+                nnunet_path = next(next(iter(model_path.glob(f"*{idx:03}*"))).glob("*__nnUNetPlans*"))
+            except StopIteration:
+                logger.on_fail(model_path, (f"*{idx:03}*"))
+                raise e from None
     else:
         nnunet_path = Path(idx)
     assert nnunet_path.exists(), nnunet_path
@@ -104,7 +113,7 @@ def run_inference_on_file(
     # if idx in _unets:
     #    nnunet = _unets[idx]
     # else:
-    print("load model", nnunet_path, "; folds", folds) if verbose else None
+    logger.print("load model", nnunet_path, "; folds", folds) if verbose else None
     with open(Path(nnunet_path, "plans.json")) as f:
         plans_info = json.load(f)
     with open(Path(nnunet_path, "dataset.json")) as f:
@@ -117,6 +126,8 @@ def run_inference_on_file(
                 ds_info["orientation"] = ds_info2["model_expected_orientation"]
             if "resolution_range" in ds_info2:
                 ds_info["resolution_range"] = ds_info2["resolution_range"]
+            if "labels" in ds_info2:
+                ds_info["labels_mapping"] = ds_info2["labels"]
 
     nnunet = load_inf_model(
         nnunet_path,
@@ -170,14 +181,14 @@ def run_inference_on_file(
         nnunet_path,
     )
     if orientation is not None:
-        print("orientation", orientation, f"from {input_nii[0].orientation}") if verbose else None
+        logger.print("orientation", orientation, f"from {input_nii[0].orientation}") if verbose else None
         input_nii = [i.reorient(orientation) for i in input_nii]
 
     if zoom is not None:
-        print("rescale", f"{zoom=} from {input_nii[0].zoom}") if verbose else None
+        logger.print("rescale", f"{zoom=} from {input_nii[0].zoom}") if verbose else None
         input_nii = [i.rescale_(zoom, mode=mode, verbose=True) for i in input_nii]
-        print(input_nii)
-    print("squash to float16") if verbose else None
+        logger.print(input_nii)
+    logger.print("squash to float16") if verbose else None
     input_nii = [squash_so_it_fits_in_float16(i) for i in input_nii]
 
     if crop:
@@ -197,6 +208,44 @@ def run_inference_on_file(
         seg_nii.resample_from_to_(og_nii, mode=mode)
     if fill_holes:
         seg_nii.fill_holes_()
+    if "labels_mapping" in ds_info:
+        from TPTBox.core.vert_constants import list_of_all_enums
+
+        mapping_ = ds_info["labels_mapping"]
+        unknown_strings: dict[str, int] = {"max": seg_nii.max() + 1, "Intervertebral_Disc": 100}
+        mapping = {}
+
+        def to_int(a: str, k: None | int = None):
+            if a in unknown_strings:
+                return unknown_strings[a]
+            try:
+                return int(a)
+            except Exception:
+                pass
+
+            for enum_ in list_of_all_enums:
+                try:
+                    return enum_[a].value
+                except Exception:
+                    print("no ", enum_)
+            if k is not None and k not in unknown_strings.values():
+                return k
+            unknown_strings[a] = unknown_strings["max"]
+            unknown_strings["max"] += 1
+            if unknown_strings["max"] == 100:
+                unknown_strings["max"] += 1
+
+            return unknown_strings[a]
+
+        for k, v in mapping_.items():
+            key = to_int(k)
+            value = to_int(v, key)
+            if k != value:
+                mapping[k] = value
+            unknown_strings[v] = value
+        logger.print(f"{unknown_strings}")
+        logger.print(f"{mapping=}")
+        seg_nii.map_labels_(mapping)
     if out_file is not None and (not Path(out_file).exists() or override):
         seg_nii.save(out_file)
     del nnunet
@@ -222,6 +271,7 @@ def run_VibeSeg(
     max_folds: int | None = None,
     _model_path=None,
     step_size=0.5,
+    logger: Print_Logger = logger,
     **_kargs,
 ):
     if isinstance(out_path, str):
@@ -248,12 +298,12 @@ def run_VibeSeg(
             return
     else:
         weights_dir = download_weights(dataset_id)
-        print("to", weights_dir)
+        logger.print("to", weights_dir)
     selected_gpu = gpu
     if gpu is None:
         gpu = "auto"  # type: ignore
     logger.print("run", f"{dataset_id=}, {gpu=}", Log_Type.STAGE)
-    ds_info = get_ds_info(dataset_id)
+    ds_info = get_ds_info(dataset_id, logger=logger)
     orientation = ds_info.get("orientation", ("R", "A", "S"))
     if not isinstance(img, Sequence) or isinstance(img, str):
         img = [img]
@@ -264,7 +314,7 @@ def run_VibeSeg(
         in_niis = [to_nii(i) for i in img]  # type: ignore
     in_niis = [i.resample_from_to_(in_niis[0]) if i.shape != in_niis[0].shape else i for i in in_niis]
     if (in_niis[0].affine == np.eye(4)).all():
-        warn(
+        logger.on_warning(
             "Your affine matrix is the identity. Make sure that the spacing and orientation is correct. For NAKO VIBE it should be 1.40625 mm for R/L and A/P and 3 mm S/I. For UKBB R/L and A/P should be around 2.2 mm",
             stacklevel=3,
         )
@@ -281,5 +331,6 @@ def run_VibeSeg(
         crop=crop,
         max_folds=max_folds,
         step_size=step_size,
+        logger=logger,
         **_kargs,
     )[0]

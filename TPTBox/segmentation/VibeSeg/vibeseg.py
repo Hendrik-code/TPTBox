@@ -89,7 +89,7 @@ def run_vibeseg(
     gpu=0,
     ddevice: Literal["cpu", "cuda", "mps"] = "cuda",
     dataset_id=100,
-    padd=0,
+    padd=5,
     keep_size=False,  # Keep size of the model Segmentation
     **args,
 ):
@@ -109,10 +109,22 @@ def run_vibeseg(
 def run_nnunet(
     i: list[Image_Reference],
     out_seg: str | Path,
+    *,
     override=False,
     gpu=0,
     ddevice: Literal["cpu", "cuda", "mps"] = "cuda",
     dataset_id=80,
+    model_path: str | Path | None = None,
+    auto_download=False,  # set to True if model_path is None
+    keep_size=False,
+    fill_holes=False,
+    logits=False,
+    mapping=None,
+    crop=False,
+    max_folds=None,
+    mode="nearest",
+    padd: int = 0,
+    key_ResEnc="__nnUNet*ResEnc",
     **args,
 ):
     run_inference_on_file(
@@ -122,6 +134,17 @@ def run_nnunet(
         override=override,
         gpu=gpu,
         ddevice=ddevice,
+        model_path=model_path,
+        auto_download=auto_download,
+        keep_size=keep_size,
+        fill_holes=fill_holes,
+        logits=logits,
+        mapping=mapping,
+        crop=crop,
+        max_folds=max_folds,
+        mode=mode,
+        padd=padd,
+        _key_ResEnc=key_ResEnc,
         **args,
     )
 

@@ -157,7 +157,7 @@ class Template_Registration:
 
                     # --- try crop first ---
                     t_crop = target_seg.compute_crop(0, crop_pad_size)
-                    cropped = target_seg.apply_crop(t_crop)
+                    cropped = target_seg.apply_crop(t_crop).apply_pad(crop_pad_size - 50 // 4)
 
                     if any(c < o for c, o in zip(cropped.shape, target_seg.shape)):
                         resize_mode = "crop"
@@ -165,7 +165,7 @@ class Template_Registration:
                         target_tmp = cropped
                     else:
                         # --- fallback to padding ---
-                        crop_pad_size = 0
+                        crop_pad_size = crop_pad_size // 2
                         target_tmp = target_seg
                         resize_mode = "pad"
                 else:
@@ -308,9 +308,10 @@ class Template_Registration:
             self.target_grid,
             self.crop,
         ) = x
+
         return self
 
-    def transform_nii(self, nii_atlas: NII, allow_only_same_grid_as_moving=True):
+    def transform_nii(self, nii_atlas: NII, allow_only_same_grid_as_moving=True, only_rigid=False):
         """
         Apply both rigid and deformable registration to a new NII object.
 
@@ -322,6 +323,9 @@ class Template_Registration:
         """
 
         nii_atlas = self.reg_point.transform_nii(nii_atlas, allow_only_same_grid_as_moving=allow_only_same_grid_as_moving)
+        if only_rigid:
+            return nii_atlas
+
         nii_atlas = nii_atlas.apply_crop(self.crop)
         nii_reg = self.reg_deform.transform_nii(nii_atlas)
         if nii_reg.seg:
@@ -377,3 +381,52 @@ class Template_Registration:
             else:
                 raise ValueError(axis)
         return poi_reg_flip
+
+    def transform_poi_inverse(self, poi_target: POI_Global | POI):
+        """
+        Transform POIs from target space back into atlas space.
+
+        Args:
+            poi_target (POI_Global | POI): POIs defined in target space.
+
+        Returns:
+            POI: POIs mapped back into atlas space.
+        """
+
+        poi = poi_target.copy()
+
+        # --- undo left/right flip if needed ---
+        if not self.same_side:
+            poi_flip = poi.make_empty_POI()
+            axis = poi.get_axis("R")
+
+            for k1, k2, (x, y, z) in poi.copy().items():
+                if axis == 0:
+                    poi_flip[k1, k2] = (poi.shape[0] - 1 - x, y, z)
+                elif axis == 1:
+                    poi_flip[k1, k2] = (x, poi.shape[1] - 1 - y, z)
+                elif axis == 2:
+                    poi_flip[k1, k2] = (x, y, poi.shape[2] - 1 - z)
+                else:
+                    raise ValueError(axis)
+
+            poi = poi_flip
+
+        # --- resample into deformable registration grid ---
+        poi = poi.resample_from_to(self.target_grid)
+
+        # --- inverse deformable registration ---
+        reg_deform_inv = self.reg_deform.inverse()
+        poi = reg_deform_inv.transform_poi(poi)
+
+        # --- undo crop ---
+        # if self.crop is not None:
+        #    poi = poi.apply_crop_inverse(self.crop)
+
+        # --- inverse rigid point registration ---
+        poi = self.reg_point.transform_poi_inverse(poi, allow_only_same_grid_as_moving=False)
+
+        # --- back to atlas grid ---
+        poi = poi.resample_from_to(self.atlas_org)
+
+        return poi

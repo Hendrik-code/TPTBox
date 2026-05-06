@@ -20,6 +20,7 @@ from numpy.typing import NDArray
 from scipy.ndimage import (
     binary_erosion,
     center_of_mass,
+    distance_transform_edt,
     gaussian_filter,
     generate_binary_structure,
 )
@@ -314,6 +315,97 @@ def np_dice(seg: np.ndarray, gt: np.ndarray, binary_compare: bool = False, label
     return dice
 
 
+def np_erode_msk_euclid(arr: np.ndarray, n_pixel: int = 3, use_crop=True, labels=None, mask=None):
+    """
+    Fast approximate erosion:
+    - shrinks segmentation by k voxels
+    - removes voxels close to background
+    """
+    if use_crop:
+        arr_bin = arr.copy()
+        if labels is not None:
+            arr_bin[np.isin(arr_bin, labels, invert=True)] = 0
+        crop = np_bbox_binary(arr_bin, px_dist=1 + n_pixel, raise_error=False)
+        arrc = arr[crop]
+    else:
+        arrc = arr
+        if labels is not None:
+            arrc = arrc.copy()
+            arrc[np.isin(arrc, labels, invert=True)] = 0
+
+    if mask is not None:
+        mask = mask.copy()
+        mask[mask != 0] = 1
+        if use_crop:
+            mask = mask[crop]
+
+    foreground = arrc > 0
+
+    # distance inside foreground to nearest background
+    dist = distance_transform_edt(foreground)
+
+    # copy original
+    out = arrc.copy()
+
+    # remove voxels within erosion distance
+    erode_mask = (dist <= n_pixel) & foreground
+    out[erode_mask] = 0
+
+    if mask is not None:
+        out[mask == 0] = 0
+
+    if use_crop:
+        arr[crop][arrc != 0] = out[arrc != 0]
+        return arr
+
+    arr[arrc != 0] = out[arrc != 0]
+    return arr
+
+
+def np_dilate_msk_euclid(arr: np.ndarray, n_pixel: int = 3, use_crop=True, labels=None, mask=None):
+    """
+    Fast approximate dilation:
+    - expands segmentation by k voxels
+    - assigns new voxels to nearest label
+    """
+    if use_crop:
+        arr_bin = arr.copy()
+        if labels is not None:
+            arr_bin[np.isin(arr_bin, labels, invert=True)] = 0
+        crop = np_bbox_binary(arr_bin, px_dist=1 + n_pixel, raise_error=False)
+        arrc = arr[crop]
+    else:
+        arrc = arr
+        if labels is not None:
+            arrc = arrc.copy()
+            arrc[np.isin(arr_bin, labels, invert=True)] = 0
+    if mask is not None:
+        mask[mask != 0] = 1
+        if use_crop:
+            mask = mask[crop]
+    foreground = arrc > 0
+
+    # distance + nearest label indices
+    dist, indices = distance_transform_edt(~foreground, return_indices=True)
+
+    # copy original
+    out = arrc.copy()
+
+    # mask of voxels within dilation range
+    dist_mask = (dist <= n_pixel) & (~foreground)
+
+    # assign nearest label
+    nearest_labels = arrc[tuple(indices)]
+    out[dist_mask] = nearest_labels[dist_mask]
+    if mask is not None:
+        out[mask == 0] = 0
+    if use_crop:
+        arr[crop][out != 0] = out[out != 0]
+        return arr
+    arr[out != 0] = out[out != 0]
+    return arr
+
+
 def np_dilate_msk(
     arr: np.ndarray,
     label_ref: LABEL_REFERENCE = None,
@@ -506,16 +598,8 @@ def np_calc_crop_around_centerpoint(
 
     cutout_coords_slices = tuple([slice(cutout_coords[i], cutout_coords[i + 1]) for i in range(0, n_dim * 2, 2)])
     arr_cut = arr[cutout_coords_slices]
-    arr_cut = np.pad(
-        arr_cut,
-        tuple(padding),
-    )
-    return (
-        arr_cut,
-        cutout_coords_slices,
-        tuple(padding),
-        # tuple([slice(padding[i][0], padding[i][1]) for i in range(n_dim)]),
-    )
+    arr_cut = np.pad(arr_cut, tuple(padding))
+    return (arr_cut, cutout_coords_slices, tuple(padding))
 
 
 def np_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 0, raise_error=True) -> tuple[slice, ...]:

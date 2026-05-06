@@ -130,6 +130,8 @@ def save_poi(
             return float(o)
         if isinstance(o, np.ndarray):
             return o.tolist()
+        if isinstance(o, Path):
+            return str(o.absolute())
         raise TypeError(type(o))
 
     with open(out_path, "w") as f:
@@ -252,6 +254,8 @@ def _open_file(ctd_path: Union[Path, str, bids_files.BIDS_FILE]) -> dict | list:
     except json.JSONDecodeError:
         pass  # not JSON → continue
     except OSError as e:
+        raise OSError(f"Could not open file: {path}") from e
+    except UnicodeDecodeError as e:
         raise OSError(f"Could not open file: {path}") from e
 
     # --- 2) try landmark TXT ---
