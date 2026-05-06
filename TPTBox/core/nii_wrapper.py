@@ -4,6 +4,7 @@ import math
 import traceback
 import warnings
 import zlib
+from collections import deque
 from collections.abc import Sequence
 from enum import Enum
 from math import ceil, floor
@@ -937,6 +938,34 @@ class NII(NII_Math):
         if isinstance(mapping,Has_Grid) and mapping.assert_affine(self,raise_error=False,origin_tolerance=0.000001,error_tolerance=0.000001,shape_tolerance=0):
             log.print(f"resample_from_to skipped; already in space: {self}",verbose=verbose)
             return self if inplace else self.copy()
+
+            #m1 = mapping.make_empty_POI().reorient(self.orientation)
+            #if m1.assert_affine(self,raise_error=False,origin_tolerance=0.000001,error_tolerance=0.000001,shape_tolerance=0):
+            #    log.print(f"resample_from_to only need reorientation; {self.orientation}",verbose=verbose)
+            #    return self.reorient(mapping.orientation,inplace=inplace)
+            #if self.orientation == mapping.orientation and self.zoom == mapping.zoom:
+            #    shift = (np.array(self.origin) - np.array(m1.origin)) / np.array(m1.zoom)
+            #    if np.allclose(shift, np.round(shift), atol=1e-6):
+            #        self = self.reorient(mapping.orientation,inplace=inplace)  # noqa: PLW0642
+            #        shift = (np.array(self.origin) - np.array(mapping.origin)) / np.array(mapping.zoom)
+            #        shift = np.round(shift).astype(int)
+            #        src_shape = np.array(mapping.shape)
+            #        dst_shape = np.array(self.shape)
+            #        # padding before = how much dst starts before src
+            #        pad_before = np.maximum(-shift, 0)
+            #
+            #        # where src ends inside dst
+            #        src_end_in_dst = shift + src_shape
+            #        # padding after = remaining dst size after src
+            #        pad_after = np.maximum(dst_shape - src_end_in_dst, 0)
+            #        pad = tuple((int(b), int(a)) for b, a in zip(pad_before, pad_after))
+            #        ret = self.apply_pad(pad, mode=mode)
+            #
+            #        log.print(f"resample_from_to only needs padding/cropping {pad}, ",verbose=verbose,)
+            #        ret.assert_affine(mapping,raise_error=False,origin_tolerance=0.000001,error_tolerance=0.000001,shape_tolerance=0)
+            #        return ret
+
+
         assert mapping is not None
         log.print(f"resample_from_to: {self} to {mapping}",verbose=verbose)
         if order is None:
@@ -1729,7 +1758,7 @@ class NII(NII_Math):
     ):
         return self.truncate_labels_beyond_reference_(idx,not_beyond,fill,axis,inclusion,inplace=inplace)
 
-    def infect(self: NII, reference_mask: NII, inplace=False,verbose=True,axis:int|str|None=None,max_depth=None):
+    def infect(self: NII, reference_mask: NII, inplace=False,verbose=True,axis:int|str|None=None,max_depth=None, _do_crop=True):
         """
         Expands labels from self_mask into regions of reference_mask == 1 via breadth-first diffusion.
 
@@ -1742,8 +1771,14 @@ class NII(NII_Math):
             ndarray: Updated label mask.
         """
         self.assert_affine(reference_mask)
-        self_mask = self.compute_surface_mask().get_seg_array().copy()
-        self_mask_org = self.get_seg_array().copy()
+        if _do_crop:
+            crop = reference_mask.compute_crop(0,5)
+            s = self.apply_crop(crop)
+            reference_mask = reference_mask.apply_crop(crop)
+        else:
+            s = self
+        self_mask = s.compute_surface_mask().get_seg_array().copy()
+        self_mask_org = s.get_seg_array().copy()
         ref_mask = np.clip(reference_mask.get_seg_array(), 0, 1)
         ref_mask[self_mask_org != 0] = 0
         searched = np.clip(self_mask,0,1).astype(np.uint8)
@@ -1763,13 +1798,14 @@ class NII(NII_Math):
             else:
                 raise NotImplementedError(axis)
 
-        search = []
+        search = deque()
         coords = np.where(self_mask != 0)
         def _add_idx(x,y,z,v,d):
             for x1,y1,z1 in kernel:
                 a = x+x1
                 b = y+y1
                 c = z+z1
+
                 if a < 0 or b < 0 or c < 0:
                     continue
                 if a >= self_mask.shape[0] or b >= self_mask.shape[1] or c >= self_mask.shape[2]:
@@ -1782,28 +1818,37 @@ class NII(NII_Math):
         def _infect(a,b,c,v,d):
             if d-1 == max_depth:
                 return
-            if searched[a,b,c] != 0:
+            if searched[x,y,z] != 0:
                 return
-            if ref_mask[a,b,c] == 0:
+            if ref_mask[x,y,z] == 0:
                 return
             #print(a,b,c)
             searched[a,b,c] = 1
             self_mask[a,b,c] = v
-            _add_idx(x,y,z,v,d)
+            _add_idx(a,b,c,v,d)
 
         from tqdm import tqdm
         for x,y,z in tqdm(zip(coords[0],coords[1],coords[2]),total=len(coords[0]),disable=not verbose,desc="Collecting Surface"):
             _add_idx(x,y,z,self_mask[x,y,z],0)
         while len(search) != 0:
             search2 = search
-            search = []
-            for x,y,z,v,d in tqdm(search2,disable=not verbose,desc="infect"):
+            search = deque()
+            for _ in tqdm(range(len(search2)),disable=not verbose,desc="infect"):
+                x,y,z,v,d = search2.popleft()
                 _infect(x,y,z,v,d+1)
         self_mask[self_mask == 0] = self_mask_org[self_mask == 0]
+        if _do_crop:
+            if inplace:
+                self[crop] = self_mask
+                return self
+            else:
+                arr = self.get_array()
+                arr[crop] = self_mask
+                self_mask = arr
         return self.set_array(self_mask,inplace=inplace)
 
-    def infect_(self: NII, reference_mask: NII,verbose=True,axis:int|str|None=None):
-        return self.infect(reference_mask, inplace=True,verbose=verbose,axis=axis)
+    def infect_(self: NII, reference_mask: NII,verbose=True,axis:int|str|None=None,_do_crop=True):
+        return self.infect(reference_mask, inplace=True,verbose=verbose,axis=axis,_do_crop=_do_crop)
 
     def map_labels(self, label_map:LABEL_MAP , verbose:logging=True, inplace=False):
         """

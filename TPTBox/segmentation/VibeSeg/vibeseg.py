@@ -124,6 +124,7 @@ def run_nnunet(
     max_folds=None,
     mode="nearest",
     padd: int = 0,
+    key_ResEnc="__nnUNet*ResEnc",
     **args,
 ):
     run_inference_on_file(
@@ -143,6 +144,7 @@ def run_nnunet(
         max_folds=max_folds,
         mode=mode,
         padd=padd,
+        _key_ResEnc=key_ResEnc,
         **args,
     )
 

@@ -598,16 +598,8 @@ def np_calc_crop_around_centerpoint(
 
     cutout_coords_slices = tuple([slice(cutout_coords[i], cutout_coords[i + 1]) for i in range(0, n_dim * 2, 2)])
     arr_cut = arr[cutout_coords_slices]
-    arr_cut = np.pad(
-        arr_cut,
-        tuple(padding),
-    )
-    return (
-        arr_cut,
-        cutout_coords_slices,
-        tuple(padding),
-        # tuple([slice(padding[i][0], padding[i][1]) for i in range(n_dim)]),
-    )
+    arr_cut = np.pad(arr_cut, tuple(padding))
+    return (arr_cut, cutout_coords_slices, tuple(padding))
 
 
 def np_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 0, raise_error=True) -> tuple[slice, ...]:
