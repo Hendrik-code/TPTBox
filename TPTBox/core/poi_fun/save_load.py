@@ -255,6 +255,8 @@ def _open_file(ctd_path: Union[Path, str, bids_files.BIDS_FILE]) -> dict | list:
         pass  # not JSON → continue
     except OSError as e:
         raise OSError(f"Could not open file: {path}") from e
+    except UnicodeDecodeError as e:
+        raise OSError(f"Could not open file: {path}") from e
 
     # --- 2) try landmark TXT ---
     try:
