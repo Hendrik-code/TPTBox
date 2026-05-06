@@ -420,17 +420,9 @@ class POI(Abstract_POI, Has_Grid):
         """
         ctd_arr = np.transpose(np.asarray(list(self.centroids.values())))
         v_list = list(self.centroids.keys())
-        if ctd_arr.shape[0] == 0:
-            log.print(
-                "No pois present",
-                verbose=verbose if not isinstance(verbose, bool) else True,
-                ltype=Log_Type.WARNING,
-            )
-            return self if inplace else self.copy()
 
         ornt_fr = nio.axcodes2ornt(self.orientation)  # original poi orientation
         ornt_to = nio.axcodes2ornt(axcodes_to)
-
         if (ornt_fr == ornt_to).all():
             log.print("ctd is already rotated to image with ", axcodes_to, verbose=verbose)
             return self if inplace else self.copy()
@@ -446,17 +438,21 @@ class POI(Abstract_POI, Has_Grid):
             shape = _shape
         assert shape is not None, "Require shape information for flipping dimensions. Set self.shape or use reorient_to"
         shp = np.asarray(shape)
-        ctd_arr[perm] = ctd_arr.copy()
-        for ax in trans:
-            if ax[1] == -1:
-                size = shp[ax[0]]
-                ctd_arr[ax[0]] = np.around(size - ctd_arr[ax[0]], decimals) - 1
-        points = POI_Descriptor()
-        ctd_arr = np.transpose(ctd_arr).tolist()
-        for v, point in zip_strict(v_list, ctd_arr):
-            points[v] = tuple(point)
+        if ctd_arr.shape[0] == 0:
+            log.print("No pois present", verbose=verbose, ltype=Log_Type.WARNING)
+            points = self.centroids if inplace else self.centroids.copy()
+        else:
+            ctd_arr[perm] = ctd_arr.copy()
+            for ax in trans:
+                if ax[1] == -1:
+                    size = shp[ax[0]]
+                    ctd_arr[ax[0]] = np.around(size - ctd_arr[ax[0]], decimals) - 1
+            points = POI_Descriptor()
+            ctd_arr = np.transpose(ctd_arr).tolist()
+            for v, point in zip_strict(v_list, ctd_arr):
+                points[v] = tuple(point)
 
-        log.print("[*] Centroids reoriented from", nio.ornt2axcodes(ornt_fr), "to", axcodes_to, verbose=verbose)
+            log.print("[*] Centroids reoriented from", nio.ornt2axcodes(ornt_fr), "to", axcodes_to, verbose=verbose)
         if self.zoom is not None:
             zoom_i = np.array(self.zoom)
             zoom_i[perm] = zoom_i.copy()
@@ -643,16 +639,47 @@ class POI(Abstract_POI, Has_Grid):
         from math import ceil, floor
 
         if sphere:
-            from tqdm import tqdm
+            zoom = np.asarray(self.zoom)
 
-            for region, subregion, (x, y, z) in tqdm(self.items(), total=len(self)):
-                coords = np.ogrid[: self.shape[0], : self.shape[1], : self.shape[2]]
-                zoom = self.zoom
-                distance = np.sqrt(
-                    ((coords[0] - int(x)) * zoom[0]) ** 2 + ((coords[1] - int(y)) * zoom[1]) ** 2 + ((coords[2] - int(z)) * zoom[2]) ** 2
-                )
-                arr += np.asarray(region * (distance <= s / 2), dtype=np.uint16)
-                arr2 += np.asarray(subregion * (distance <= s / 2), dtype=np.uint16)
+            # sphere radius in mm
+            radius = s / 2
+
+            # kernel size in voxels
+            rx = int(np.ceil(radius / zoom[0]))
+            ry = int(np.ceil(radius / zoom[1]))
+            rz = int(np.ceil(radius / zoom[2]))
+
+            # create local sphere kernel ONCE
+            gx, gy, gz = np.ogrid[-rx : rx + 1, -ry : ry + 1, -rz : rz + 1]
+            sphere_mask = ((gx * zoom[0]) ** 2 + (gy * zoom[1]) ** 2 + (gz * zoom[2]) ** 2) <= radius**2
+
+            for region, subregion, (x, y, z) in self.items():
+                x, y, z = round(x), round(y), round(z)  # noqa: PLW2901
+
+                # image bounds
+                x0 = max(x - rx, 0)
+                x1 = min(x + rx + 1, self.shape[0])
+
+                y0 = max(y - ry, 0)
+                y1 = min(y + ry + 1, self.shape[1])
+
+                z0 = max(z - rz, 0)
+                z1 = min(z + rz + 1, self.shape[2])
+
+                # kernel bounds
+                kx0 = x0 - (x - rx)
+                kx1 = kx0 + (x1 - x0)
+
+                ky0 = y0 - (y - ry)
+                ky1 = ky0 + (y1 - y0)
+
+                kz0 = z0 - (z - rz)
+                kz1 = kz0 + (z1 - z0)
+
+                local_mask = sphere_mask[kx0:kx1, ky0:ky1, kz0:kz1]
+
+                arr[x0:x1, y0:y1, z0:z1][local_mask] = region
+                arr2[x0:x1, y0:y1, z0:z1][local_mask] = subregion
         else:
             for region, subregion, (x, y, z) in self.items():
                 arr[
@@ -966,7 +993,10 @@ def calc_poi_from_subreg_vert(
     if _vert_ids is None:
         _vert_ids = vert_msk.unique()
 
-    from TPTBox.core.poi_fun.vertebra_pois_non_centroids import add_prerequisites, compute_non_centroid_pois  # noqa: PLC0415
+    from TPTBox.core.poi_fun.vertebra_pois_non_centroids import (  # noqa: PLC0415
+        add_prerequisites,
+        compute_non_centroid_pois,
+    )
 
     subreg_id = add_prerequisites(_int2loc(subreg_id if isinstance(subreg_id, Sequence) else [subreg_id]))  # type: ignore
 
