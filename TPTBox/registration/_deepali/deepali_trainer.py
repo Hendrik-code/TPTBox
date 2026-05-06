@@ -466,7 +466,8 @@ class DeepaliPairwiseImageTrainer:
             w = weights.get(name, 1.0)
             if isinstance(w, (list, tuple)):
                 w = w[level]
-
+            if torch.isnan(value):
+                value = torch.zeros_like(value)  # noqa: PLW2901
             if not isinstance(w, str):
                 value = w * value  # noqa: PLW2901
             loss += value.sum()
@@ -488,6 +489,7 @@ class DeepaliPairwiseImageTrainer:
         # Transform target grid points
         x = target.grid().coords(device=target_data.device).unsqueeze(0)  # grid_points
         y: Tensor = grid_transform(x)
+        del x
         assert len(self.loss_terms) != 0, "No losses defined"
         ### Sum of pairwise image dissimilarity terms ###
         if self.loss_pairwise_image_terms:
@@ -496,13 +498,15 @@ class DeepaliPairwiseImageTrainer:
                 # TODO this is from the reference implantation but is need way to much GPU...
                 moved_mask = self._sample_image(y, self.source_mask)
                 mask = overlap_mask(moved_mask, self.target_mask)
+            elif self.target_mask is not None:
+                mask = self.target_mask.float()
             else:
                 mask = None
             for name, term in self.loss_pairwise_image_terms.items():
                 losses[name] = term(moved_data, target_data, mask=mask)
-            result["source"] = moved_data
-            result["target"] = target_data
-            result["mask"] = mask
+            del moved_data
+            del target_data
+            del mask
         if self.loss_pairwise_image_terms2:
             assert source_image_seg is not None, "Source image segmentation is required"
             moved_data: torch.Tensor = self._sample_image(y, source_image_seg.tensor())
@@ -510,14 +514,17 @@ class DeepaliPairwiseImageTrainer:
             if self.source_mask is not None and self.target_mask is not None:
                 # TODO this is from the reference implantation but is need way to much GPU...
                 moved_mask = self._sample_image(y, self.source_mask)
-                mask = overlap_mask(moved_mask, self.target_mask)
+                mask = overlap_mask(moved_mask, self.target_mask).unsqueeze(0)
+            elif self.target_mask is not None:
+                mask = self.target_mask.unsqueeze(0).float()  # Masked MSE needs float32, or it becomes 0 or NaN
             else:
                 mask = None
             for name, term in self.loss_pairwise_image_terms2.items():
                 losses[name] = term(moved_data.unsqueeze(0), target_data_seg.unsqueeze(0), mask=mask)  # DICE
-            result["source"] = moved_data
-            result["target"] = target_data
-            result["mask"] = mask
+            del moved_data
+            del target_data_seg
+            del mask
+        del y
         ## Sum of pairwise point set distance terms
         if self.loss_dist_terms:
             if self.source_pset is None:
@@ -546,7 +553,7 @@ class DeepaliPairwiseImageTrainer:
                 if buf.requires_grad:
                     var = name.rsplit(".", 1)[-1]
                     variables[var].append(buf)
-            variables["w"] = [U.move_dim(y - x, -1, 1)]
+            variables["w"] = [U.move_dim(y - x, -1, 1)]  # noqa: F821
             for name, term in self.disp_terms.items():
                 match = RE_TERM_VAR.match(name)
                 if match:
@@ -564,6 +571,7 @@ class DeepaliPairwiseImageTrainer:
                 for buf in bufs:
                     value += term(buf)
                 losses[name] = value
+                del variables
         ### Sum of free-form deformation loss terms ###
         for name, term in self.loss_bspline_terms.items():
             value = torch.tensor(0, dtype=torch.float, device=self.device)
@@ -614,10 +622,11 @@ class DeepaliPairwiseImageTrainer:
             with torch.no_grad():
                 for hook in self._eval_hooks.values():
                     hook(self, num_steps, 1, result)
+
         with torch.no_grad():
             for hook in self._step_hooks.values():
                 hook(self, num_steps, 1, loss.item())
-        return loss
+        return loss.detach().cpu()
 
     def _run_level(
         self,
@@ -926,6 +935,6 @@ class DeepaliPairwiseImageTrainer:
             if self.verbose > 3:
                 print(f"Registered images in {timer() - start_reg:.3f}s")
             if self.verbose > 0:
-                print()
+                print(" !")
             self.target_mask = target_mask
             return grid_transform

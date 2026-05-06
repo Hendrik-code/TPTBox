@@ -234,7 +234,7 @@ class General_Registration(DeepaliPairwiseImageTrainer):
             source_landmarks=source_landmarks,
             target_landmarks=target_landmarks,
             device=device,
-            target_mask=to_nii(fixed_mask, True).to_deepali() if fixed_mask is not None else None,
+            target_mask=to_nii(fixed_mask, True).resample_from_to(fix, verbose=False).to_deepali() if fixed_mask is not None else None,
             source_mask=to_nii(moving_mask, True).to_deepali() if moving_mask is not None else None,
             normalize_strategy=normalize_strategy,
             pyramid_levels=pyramid_levels,

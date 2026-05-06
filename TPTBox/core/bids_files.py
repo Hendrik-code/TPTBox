@@ -632,16 +632,20 @@ class BIDS_FILE:
             p = Path(path + "." + key)
             value.rename(p)
 
-    def symlink_files(self, path: Path | str, ending=".nii.gz"):
+    def symlink_files(self, path: Path | str, ending=".nii.gz", exist_ok=False):
         ending = ending if ending[0] == "." else "." + ending
         path = str(path)
         assert path.endswith(ending), f"set 'ending' to the part after the '.'\n {path} does not end with {ending}"
         path = path.replace(ending, "")
         for key, value in self.file.items():
             p = Path(path + "." + key)
+
             if os.path.islink(p):
                 assert Path(os.readlink(p)) == value, f"{p} exists"
                 continue
+            if exist_ok and p.exists():
+                continue
+
             os.symlink(value, p)
 
     def get_path_decomposed(self, file_type=None) -> tuple[Path, str, str, str]:

@@ -93,13 +93,13 @@ def compute_deface_mask_cta(
         outpath = ct_img.get_changed_path("nii.gz", "msk", parent="derivatives-defacing", info={"seg": "defacting-2", "mod": ct_img.format})
     if outpath is not None and not override and outpath.exists():
         return outpath
-    tight_mask = compute_deface_mask_cta(ct_img, None, override=override, gpu=gpu, **args)
+    tight_mask = _compute_deface_mask_cta(ct_img, None, override=override, gpu=gpu, **args)
     ct = to_nii(ct_img, False)
     face = to_nii(tight_mask, True).resample_from_to(ct)
     if not partially_defaced:
         face = face.filter_connected_components(max_count_component=1, keep_label=True)
     face_org = face.copy()
-    f2 = face.dilate_msk(6).smooth_gaussian_labelwise(1, 5)
+    f2 = face.dilate_msk(3).smooth_gaussian_labelwise(1, 5)
     f2[ct > -600] = 0
     f2 = f2.filter_connected_components(max_count_component=1, keep_label=True)
 
@@ -108,7 +108,7 @@ def compute_deface_mask_cta(
 
     m2 = mask.extract_label(1)
     mask = mask.clamp(0, 1).fill_holes(1, "S")
-    mask *= mask.clamp(0, 1).erode_msk(4)
+    mask *= mask.clamp(0, 1).erode_msk(2)
     mask[m2 * mask] = 1
     if outpath is not None:
         mask.save(outpath)

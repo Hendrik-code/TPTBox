@@ -434,6 +434,21 @@ class Full_Body_Instance(Abstract_lvl):
         ]
 
     @classmethod
+    def feet(cls):
+        return [
+            Full_Body_Instance.talus_right,
+            Full_Body_Instance.talus_left,
+            Full_Body_Instance.calcaneus_right,
+            Full_Body_Instance.calcaneus_left,
+            Full_Body_Instance.tarsals_right,
+            Full_Body_Instance.tarsals_left,
+            Full_Body_Instance.metatarsals_right,
+            Full_Body_Instance.metatarsals_left,
+            Full_Body_Instance.phalanges_right,
+            Full_Body_Instance.phalanges_left,
+        ]
+
+    @classmethod
     def lung_system(cls):
         return [
             Full_Body_Instance.trachea,
@@ -647,8 +662,8 @@ class Full_Body_Instance(Abstract_lvl):
             Full_Body_Instance.phalanges_right.value: 72,
             Full_Body_Instance.phalanges_left.value: 72,
             Full_Body_Instance.trachea.value: 16,
-            Full_Body_Instance.lung_right.value: 910,
-            Full_Body_Instance.lung_left.value: 910,
+            Full_Body_Instance.lung_right.value: 73,
+            Full_Body_Instance.lung_left.value: 73,
             Full_Body_Instance.heart.value: 24,
             Full_Body_Instance.spleen.value: 1,
             Full_Body_Instance.kidney_right.value: 2,
@@ -1017,7 +1032,7 @@ class Location(Abstract_lvl):
     Inferior_Articular_Right = 48
     Vertebra_Corpus_border = 49  # actual corpus body
     Vertebra_Corpus = 50
-    Dens_axis = 51  # TODO Unused. Should be in C2
+    Dens_axis = 51  # only in C2 and CT but not MRI
     Vertebral_Body_Endplate_Superior = 52
     Vertebral_Body_Endplate_Inferior = 53
     # Articulate_Process_Facet_Joint (Used anywhere?)
@@ -1196,3 +1211,12 @@ vert_directions = [
 ]
 
 conversion_poi2text = {k: v for v, k in conversion_poi.items()}
+
+
+list_of_all_enums = [
+    Location,
+    Vertebra_Instance,
+    Lower_Body,
+    Full_Body_Instance,
+    Full_Body_Instance_Vibe,
+]

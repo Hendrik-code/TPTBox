@@ -79,6 +79,14 @@ class Deformable_Registration(General_Registration):
     ):
         if transform_args is None:
             transform_args = {"stride": [stride, stride, stride], "transpose": False}
+        if "transpose" in transform_args and transform_name in [
+            "StationaryVelocityFieldTransform",
+            "SVF",
+            "SVField",
+            "DenseVectorFieldTransform",
+        ]:
+            transform_args.pop("transpose")
+
         if loss_terms is None:
             loss_terms = {
                 "be": BSplineBending(stride=1),
