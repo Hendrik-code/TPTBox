@@ -42,7 +42,7 @@ scipy = [
 
 scikit-image = [
   { version = ">=0.22,<0.23", python = "<3.11" },
-  { version = ">=0.24,<0.27", python = ">=3.11" }
+  { version = ">=0.24", python = ">=3.11" }
 ]
 
 [tool.poetry.group.dev.dependencies]
