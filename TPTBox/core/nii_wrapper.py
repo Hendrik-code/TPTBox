@@ -799,9 +799,7 @@ class NII(NII_Math):
         mode: MODES = "constant",
         inplace=False,
         verbose: logging = True
-        ):
-        #TODO add other modes
-        #TODO add testcases and options for modes
+    ):
         if padd is None or padd == 0:
             return self if inplace else self.copy()
 
@@ -824,13 +822,36 @@ class NII(NII_Math):
 
         affine = self.affine @ transform
 
+        arr = self.get_array()
+
+        # ---- 1. CROPPING (negative padding) ----
+        slices = []
+
+        for i, (before, after) in enumerate(padd[:self.dims]):
+            start = max(0, -before)
+            end = arr.shape[i] - max(0, -after)
+            slices.append(slice(start, end))
+
+        # keep non-spatial dims unchanged
+        slices += [slice(None)] * (arr.ndim - self.dims)
+
+        arr = arr[tuple(slices)]
+
+        # ---- 2. PADDING (positive only) ----
+        padd_positive = tuple(
+            (max(0, b), max(0, a)) for b, a in padd
+        )
+
         args = {}
         if mode == "constant":
             args["constant_values"] = self.get_c_val()
 
+        if mode == "nearest":
+            mode = "edge"
+
         log.print(f"Padd {padd}; {mode=}, {args}", verbose=verbose)
 
-        arr = np.pad(self.get_array(), padd, mode=mode, **args)
+        arr = np.pad(arr, padd_positive, mode=mode, **args)
 
         nii = (arr, affine, self.header)
 
@@ -935,35 +956,38 @@ class NII(NII_Math):
             mapping = to_vox_map.to_gird()
         else:
             mapping = to_vox_map if isinstance(to_vox_map, tuple) else to_nii_optional(to_vox_map, seg=self.seg, default=to_vox_map)
-        if isinstance(mapping,Has_Grid) and mapping.assert_affine(self,raise_error=False,origin_tolerance=0.000001,error_tolerance=0.000001,shape_tolerance=0):
-            log.print(f"resample_from_to skipped; already in space: {self}",verbose=verbose)
-            return self if inplace else self.copy()
+        if isinstance(mapping,Has_Grid):
+            if mapping.assert_affine(self,raise_error=False,origin_tolerance=0.000001,error_tolerance=0.000001,shape_tolerance=0):
+                log.print(f"resample_from_to skipped; already in space: {self}",verbose=verbose)
+                return self if inplace else self.copy()
 
-            #m1 = mapping.make_empty_POI().reorient(self.orientation)
-            #if m1.assert_affine(self,raise_error=False,origin_tolerance=0.000001,error_tolerance=0.000001,shape_tolerance=0):
-            #    log.print(f"resample_from_to only need reorientation; {self.orientation}",verbose=verbose)
-            #    return self.reorient(mapping.orientation,inplace=inplace)
-            #if self.orientation == mapping.orientation and self.zoom == mapping.zoom:
-            #    shift = (np.array(self.origin) - np.array(m1.origin)) / np.array(m1.zoom)
-            #    if np.allclose(shift, np.round(shift), atol=1e-6):
-            #        self = self.reorient(mapping.orientation,inplace=inplace)  # noqa: PLW0642
-            #        shift = (np.array(self.origin) - np.array(mapping.origin)) / np.array(mapping.zoom)
-            #        shift = np.round(shift).astype(int)
-            #        src_shape = np.array(mapping.shape)
-            #        dst_shape = np.array(self.shape)
-            #        # padding before = how much dst starts before src
-            #        pad_before = np.maximum(-shift, 0)
-            #
-            #        # where src ends inside dst
-            #        src_end_in_dst = shift + src_shape
-            #        # padding after = remaining dst size after src
-            #        pad_after = np.maximum(dst_shape - src_end_in_dst, 0)
-            #        pad = tuple((int(b), int(a)) for b, a in zip(pad_before, pad_after))
-            #        ret = self.apply_pad(pad, mode=mode)
-            #
-            #        log.print(f"resample_from_to only needs padding/cropping {pad}, ",verbose=verbose,)
-            #        ret.assert_affine(mapping,raise_error=False,origin_tolerance=0.000001,error_tolerance=0.000001,shape_tolerance=0)
-            #        return ret
+            m1 = mapping if mapping.orientation == self.orientation else mapping.make_empty_POI().reorient(self.orientation)
+            if m1.assert_affine(self,raise_error=False,origin_tolerance=0.00001,error_tolerance=0.00001,shape_tolerance=0):
+                log.print(f"resample_from_to only need reorientation; {self.orientation}",verbose=verbose)
+                ret = self.reorient(mapping.orientation,inplace=inplace)
+                ret.affine = mapping.affine #remove floating point error
+                return ret
+            if self.orientation == mapping.orientation and np.allclose(self.zoom , mapping.zoom, atol=1e-6):
+                shift = (np.array(self.origin) - np.array(m1.origin)) / np.array(m1.zoom)
+                if np.allclose(shift, np.round(shift), atol=1e-6):
+                    s = self.reorient(mapping.orientation,inplace=inplace)  # noqa: PLW0642
+                    shift = (np.array(self.origin) - np.array(mapping.origin)) / np.array(mapping.zoom)
+                    shift = np.round(shift).astype(int)
+                    dst_shape = np.array(mapping.shape)
+                    src_shape = np.array(s.shape)
+                    # padding before = how much dst starts before src
+                    pad_before = shift
+                    # padding after = remaining dst size after src
+                    pad_after = dst_shape-shift-src_shape
+                    pad = tuple((int(b), int(a)) for b, a in zip(pad_before, pad_after))
+                    ret = s.apply_pad(pad, mode=mode,)
+
+                    #TODO SET raise_error=False before committing
+                    valid = ret.assert_affine(mapping,raise_error=True,origin_tolerance=0.0001,error_tolerance=0.0001,shape_tolerance=0)
+                    if valid:
+                        log.print(f"resample_from_to only needs padding/cropping {pad}",verbose=verbose)
+                        ret.affine = mapping.affine #remove floating point error
+                        return ret
 
 
         assert mapping is not None
