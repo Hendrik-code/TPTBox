@@ -1050,7 +1050,7 @@ def np_fill_holes(
         else:
             assert 0 <= slice_wise_dim <= arr.ndim - 1, f"slice_wise_dim needs to be in range [0, {arr.ndim - 1}]"
             filled = np.swapaxes(arr_lc.copy(), 0, slice_wise_dim)
-            filled = np.stack([_fill(x) for x in filled])
+            filled = np.stack([_fill(x).astype(arr.dtype) for x in filled])
             filled = np.swapaxes(filled, 0, slice_wise_dim)
         filled[filled != 0] = l
         if use_crop:
