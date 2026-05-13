@@ -944,7 +944,7 @@ def np_get_connected_components_center_of_mass(
         connectivity=connectivity,
         label_ref=label,
     )
-    coms = list(np_center_of_mass(subreg_cc[label]).values())
+    coms = list(np_center_of_mass(subreg_cc[label]).values()) if label in subreg_cc else None
 
     if sort_by_axis is not None:
         coms.sort(key=lambda a: a[sort_by_axis])
