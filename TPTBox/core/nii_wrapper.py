@@ -985,7 +985,7 @@ class NII(NII_Math):
                     # padding after = remaining dst size after src
                     pad_after = dst_shape-shift-src_shape
                     pad = tuple((int(b), int(a)) for b, a in zip(pad_before, pad_after))
-                    ret = s.apply_pad(pad, mode=mode,)
+                    ret = s.apply_pad(pad, mode=mode,inplace=inplace)
 
                     #TODO SET raise_error=False before committing
                     valid = ret.assert_affine(mapping,raise_error=True,origin_tolerance=0.0001,error_tolerance=0.0001,shape_tolerance=0)
