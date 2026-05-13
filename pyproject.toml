@@ -23,7 +23,6 @@ connected-components-3d = "^3.12.3"
 tqdm = "*"
 joblib = "*"
 scikit-learn = "*"
-antspyx = "0.4.2"
 pynrrd = "*"
 requests = "*"
 
