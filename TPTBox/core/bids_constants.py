@@ -34,7 +34,7 @@ formats = [
     "MP2RAG",
     "MPM",
     "MT",
-    "MT",
+    "MTS",
     "T1map",
     "T2map",
     "T2starmap",
