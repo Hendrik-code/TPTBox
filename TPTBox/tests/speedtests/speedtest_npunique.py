@@ -13,6 +13,7 @@ if __name__ == "__main__":
         np_bbox_binary,
         np_bounding_boxes,
         np_center_of_mass,
+        np_is_empty,
         np_map_labels,
         np_unique,
         np_unique_withoutzero,
@@ -33,7 +34,7 @@ if __name__ == "__main__":
     speed_test(
         repeats=50,
         get_input_func=get_nii_array,
-        functions=[np_unique, np.unique],
+        functions=[np_unique, np.unique, np_is_empty, np.max],
         assert_equal_function=lambda x, y: True,  # np.all([x[i] == y[i] for i in range(len(x))]),  # noqa: ARG005
         # np.all([x[i] == y[i] for i in range(len(x))])
     )

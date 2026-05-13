@@ -19,7 +19,7 @@ except Exception:
 
 
 class TestAnts(unittest.TestCase):
-    @unittest.skipIf(not has_ants, "requires spineps to be installed")
+    @unittest.skipIf(not has_ants, "requires ants to be installed")
     def test_segmentation_CT(self):
         """Test round-trip for Segmentation.seg.nrrd."""
         ct, subreg, vert = get_nii_paths_ct()
