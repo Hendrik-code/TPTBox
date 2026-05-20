@@ -23,7 +23,7 @@ def unit_vector(vector):
 
 # @njit(fastmath=True)
 def trilinear_interpolate(volume, x, y, z):
-    xi, yi, zi = int(x), int(y), int(z)
+    xi, yi, zi = np.floor(x).astype(int), np.floor(y).astype(int), np.floor(z).astype(int)
     if xi < 0 or yi < 0 or zi < 0 or xi >= volume.shape[0] - 1 or yi >= volume.shape[1] - 1 or zi >= volume.shape[2] - 1:
         return 0.0
 
@@ -51,7 +51,7 @@ def max_distance_ray_cast_convex_npfast(
     region_array: np.ndarray,
     start_coord: np.ndarray,
     direction_vector: np.ndarray,
-    acc_delta=0.05,
+    acc_delta=0.00005,
 ):
     # Normalize direction
     norm_vec = direction_vector / np.sqrt((direction_vector**2).sum())
@@ -70,6 +70,7 @@ def max_distance_ray_cast_convex_npfast(
         y = start_coord[1] + norm_vec[1] * mid
         z = start_coord[2] + norm_vec[2] * mid
         val = trilinear_interpolate(region_array, x, y, z)
+        print(f"Raycast check at distance {mid:.2f}: value={val:.4f}")
         if val > 0.5:
             min_v = mid
         else:
@@ -84,6 +85,64 @@ def max_distance_ray_cast_convex_npfast(
             start_coord[2] + norm_vec[2] * dist,
         ]
     )
+
+
+def max_distance_ray_cast_convex_np(
+    region: np.ndarray,
+    start_coord: COORDINATE | np.ndarray,
+    direction_vector: np.ndarray,
+    acc_delta: float = 0.00005,
+    max_v: int | None = None,
+):
+    """
+    Computes the maximum distance a ray can travel inside a convex region before exiting.
+
+    Parameters:
+    region (NII): The region of interest as a 3D NIfTI image.
+    start_coord (COORDINATE | np.ndarray): The starting coordinate of the ray.
+    direction_vector (np.ndarray): The direction vector of the ray.
+    acc_delta (float, optional): The accuracy threshold for bisection search. Default is 0.00005.
+
+    Returns:
+    np.ndarray: The exit coordinate of the ray within the region.
+    """
+    start_point_np = np.asarray(start_coord)
+    if start_point_np is None:
+        return None
+
+    """Convex assumption!"""
+    # Compute a normal vector, that defines the plane direction
+    normal_vector = np.asarray(direction_vector)
+    normal_vector = normal_vector / norm(normal_vector)
+    # Create a function to interpolate within the mask array
+    interpolator = RegularGridInterpolator([np.arange(region.shape[i]) for i in range(3)], region)
+
+    def is_inside(distance):
+        coords = [start_point_np[i] + normal_vector[i] * distance for i in [0, 1, 2]]
+        if any(i < 0 for i in coords):
+            return 0
+        if any(coords[i] > region.shape[i] - 1 for i in range(len(coords))):
+            return 0
+        # Evaluate the mask value at the interpolated coordinates
+        mask_value = interpolator(coords)
+        return mask_value > 0.5
+
+    if not is_inside(0):
+        return start_point_np
+    count = 0
+    min_v = 0
+    if max_v is None:
+        max_v = sum(region.shape)
+    delta = max_v * 2
+    while acc_delta < delta:
+        bisection = (max_v - min_v) / 2 + min_v
+        if is_inside(bisection):
+            min_v = bisection
+        else:
+            max_v = bisection
+        delta = max_v - min_v
+        count += 1
+    return start_point_np + normal_vector * ((min_v + max_v) / 2)
 
 
 def max_distance_ray_cast_convex(
