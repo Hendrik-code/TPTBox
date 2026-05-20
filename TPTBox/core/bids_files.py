@@ -687,7 +687,7 @@ class BIDS_FILE:
         auto_add_run_id=False,
         additional_folder: str | None = None,
         dataset_path: str | None = None,
-        make_parent=True,
+        make_parent=False,
         non_strict_mode=False,
     ):
         ds = dataset_path if dataset_path is not None else self.get_path_decomposed()[0]

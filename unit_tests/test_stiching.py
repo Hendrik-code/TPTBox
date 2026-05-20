@@ -78,7 +78,7 @@ class TestStitchingFunction(unittest.TestCase):
         store_ramp=False,
         verbose=False,
         min_value=0,
-        bias_field=True,
+        bias_field=False,
         crop_to_bias_field=False,
         crop_empty=False,
         histogram=None,

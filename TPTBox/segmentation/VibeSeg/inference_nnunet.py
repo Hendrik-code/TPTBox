@@ -227,7 +227,7 @@ def run_inference_on_file(
                 try:
                     return enum_[a].value
                 except Exception:
-                    print("no ", enum_)
+                    pass
             if k is not None and k not in unknown_strings.values():
                 return k
             unknown_strings[a] = unknown_strings["max"]
@@ -247,7 +247,7 @@ def run_inference_on_file(
         logger.print(f"{mapping=}")
         seg_nii.map_labels_(mapping)
     if out_file is not None and (not Path(out_file).exists() or override):
-        seg_nii.save(out_file)
+        seg_nii.set_dtype("smallest_uint").save(out_file)
     del nnunet
 
     torch.cuda.empty_cache()
