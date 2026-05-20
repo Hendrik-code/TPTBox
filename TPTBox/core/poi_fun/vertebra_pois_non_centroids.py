@@ -236,6 +236,7 @@ Strategy_Computed_Before(L.Spinal_Cord,L.Vertebra_Disc,L.Vertebra_Corpus,L.Dens_
 Strategy_Computed_Before(L.Spinal_Canal,L.Vertebra_Corpus)
 Strategy_Computed_Before(L.Vertebra_Disc_Inferior,L.Vertebra_Disc_Inferior)
 
+
 # fmt: on
 def compute_non_centroid_pois(  # noqa: C901
     poi: POI,
@@ -244,6 +245,7 @@ def compute_non_centroid_pois(  # noqa: C901
     subreg: NII,
     _vert_ids: Sequence[int] | None = None,
     log: Logger_Interface = _log,
+    verbose: bool | None = True,
     _orientation_version=0,
 ):
     if _vert_ids is None:
@@ -254,7 +256,7 @@ def compute_non_centroid_pois(  # noqa: C901
     assert 52 not in poi.keys_region()
 
     if Location.Vertebra_Direction_Inferior in locations:
-        log.on_text("Compute Vertebra DIRECTIONS")
+        log.on_text("Compute Vertebra DIRECTIONS", verbose=verbose)
         ### Calc vertebra direction; We always need them, so we just compute them. ###
         sub_regions = poi.keys_subregion()
         if any(a.value not in sub_regions for a in vert_directions):
@@ -268,7 +270,7 @@ def compute_non_centroid_pois(  # noqa: C901
         set(locations),
         key=lambda x: all_poi_functions[x.value].prority() if x.value in all_poi_functions else x.value,
     )  # type: ignore
-    log.on_text("Calc pois from subregion id", {l.name for l in locations})
+    log.on_text("Calc pois from subregion id", {l.name for l in locations}, verbose=verbose)
     ### DENSE ###
     if Location.Dens_axis in locations and 2 in _vert_ids and (2, Location.Dens_axis.value) not in poi:
         a = subreg * vert.extract_label(2)

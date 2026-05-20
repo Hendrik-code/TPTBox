@@ -279,6 +279,8 @@ def extract_keys_from_json(  # noqa: C901
         found = False
         if modality == "ct":
             mri_format = "ct"
+        elif modality.lower() == "pt":
+            mri_format = "pet"
         elif modality == "xa":  # Angiography
             biplane = False
             if "BIPLANE A" in image_type or "SINGLE A" in image_type:

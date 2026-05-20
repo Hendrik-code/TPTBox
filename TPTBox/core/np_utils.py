@@ -563,7 +563,7 @@ def np_calc_crop_around_centerpoint(
     arr: np.ndarray,
     cutout_size: tuple[int, ...],
     pad_to_size: Sequence[int] | np.ndarray | int = 0,
-) -> tuple[np.ndarray, tuple, tuple]:
+) -> tuple[np.ndarray, tuple[slice, slice, slice], tuple]:
     """
 
     Args:
@@ -944,7 +944,7 @@ def np_get_connected_components_center_of_mass(
         connectivity=connectivity,
         label_ref=label,
     )
-    coms = list(np_center_of_mass(subreg_cc[label]).values())
+    coms = list(np_center_of_mass(subreg_cc[label]).values()) if label in subreg_cc else None
 
     if sort_by_axis is not None:
         coms.sort(key=lambda a: a[sort_by_axis])
@@ -1050,7 +1050,7 @@ def np_fill_holes(
         else:
             assert 0 <= slice_wise_dim <= arr.ndim - 1, f"slice_wise_dim needs to be in range [0, {arr.ndim - 1}]"
             filled = np.swapaxes(arr_lc.copy(), 0, slice_wise_dim)
-            filled = np.stack([_fill(x) for x in filled])
+            filled = np.stack([_fill(x).astype(arr.dtype) for x in filled])
             filled = np.swapaxes(filled, 0, slice_wise_dim)
         filled[filled != 0] = l
         if use_crop:

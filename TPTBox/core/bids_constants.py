@@ -34,7 +34,7 @@ formats = [
     "MP2RAG",
     "MPM",
     "MT",
-    "MT",
+    "MTS",
     "T1map",
     "T2map",
     "T2starmap",
@@ -164,6 +164,7 @@ formats = [
     "difference",
     "labels",
     "report",
+    "pet",
 ]
 # https://bids-specification.readthedocs.io/en/stable/appendices/entity-table.html
 formats_relaxed = [*formats, "t2", "t1", "t2c", "t1c", "mr", "snapshot", "t1dixon", "dwi", "ctb"]
