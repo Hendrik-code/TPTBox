@@ -985,7 +985,7 @@ class NII(NII_Math):
                     # padding after = remaining dst size after src
                     pad_after = dst_shape-shift-src_shape
                     pad = tuple((int(b), int(a)) for b, a in zip(pad_before, pad_after))
-                    ret = s.apply_pad(pad, mode=mode,inplace=inplace)
+                    ret = s.apply_pad(pad, mode=mode,inplace=inplace,verbose=verbose)
 
                     #TODO SET raise_error=False before committing
                     valid = ret.assert_affine(mapping,raise_error=True,origin_tolerance=0.0001,error_tolerance=0.0001,shape_tolerance=0)
@@ -1801,7 +1801,7 @@ class NII(NII_Math):
         """
         self.assert_affine(reference_mask)
         if _do_crop:
-            crop = reference_mask.compute_crop(0,5)
+            crop = reference_mask.compute_crop(0,5,raise_error=False)
             s = self.apply_crop(crop)
             reference_mask = reference_mask.apply_crop(crop)
         else:
