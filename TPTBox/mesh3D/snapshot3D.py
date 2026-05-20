@@ -243,7 +243,7 @@ def _set_input(
     return vtk_object
 
 
-def _contour_from_roi_smooth(data, affine=None, color: np.ndarray | list = _red, opacity=1, smoothing=0):
+def _contour_from_roi_smooth(data: np.ndarray, affine=None, color: np.ndarray | list = _red, opacity=1, smoothing=0):
     """Generates surface actor from a binary ROI.
     Code from dipy, but added awesome smoothing!
 
@@ -274,10 +274,8 @@ def _contour_from_roi_smooth(data, affine=None, color: np.ndarray | list = _red,
     else:
         nb_components = 1
 
-    data = (data > 0) * 1
-    vol = np.interp(data, xp=[data.min(), data.max()], fp=[0, 255])
-    vol = vol.astype("uint8")
-
+    vol = data.astype("uint8") * 255
+    assert data.max() <= 1, np.unique(data)
     im = vtk.vtkImageData()
     if major_version <= 5:
         im.SetScalarTypeToUnsignedChar()  # type: ignore
@@ -291,12 +289,10 @@ def _contour_from_roi_smooth(data, affine=None, color: np.ndarray | list = _red,
         im.SetNumberOfScalarComponents(nb_components)  # type: ignore
     else:
         im.AllocateScalars(vtk.VTK_UNSIGNED_CHAR, nb_components)
-
-    # copy data
     vol = np.swapaxes(vol, 0, 2)
-    vol = np.ascontiguousarray(vol)
+    # vol = np.ascontiguousarray(vol) # already is
 
-    vol = vol.ravel() if nb_components == 1 else np.reshape(vol, [np.prod(vol.shape[:3]), vol.shape[3]])
+    vol = vol.reshape(-1) if nb_components == 1 else np.reshape(vol, [np.prod(vol.shape[:3]), vol.shape[3]])
 
     uchar_array = numpy_support.numpy_to_vtk(vol, deep=0)
     im.GetPointData().SetScalars(uchar_array)
