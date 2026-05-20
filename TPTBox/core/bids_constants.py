@@ -163,6 +163,7 @@ formats = [
     "localizer",
     "difference",
     "labels",
+    "report",
 ]
 # https://bids-specification.readthedocs.io/en/stable/appendices/entity-table.html
 formats_relaxed = [*formats, "t2", "t1", "t2c", "t1c", "mr", "snapshot", "t1dixon", "dwi", "ctb"]
@@ -221,7 +222,7 @@ modalities = {
     "OPT": "Ophthalmic Tomography",
     "OPV": "Ophthalmic Visual Field",
     "OSS": "Optical Surface Scan",
-    "OT": "Other ",
+    "OT": "Other",
     "PLAN": "Plan",
     "PR": "Presentation State",
     "PT": "Positron emission tomography (PET)",
