@@ -190,7 +190,68 @@ def dicom_to_nifti_multiframe(ds, nii_path):
     return nii_path
 
 
-def _convert_to_nifti(dicom_out_path, nii_path):
+def _export_pdf_from_dicom(dcm_path, out_pdf):
+    assert len(dcm_path) == 1, dcm_path
+    ds = dcm_path[0]
+
+    # verify modality / SOP class
+    if ds.Modality.upper() != "PDF":
+        raise ValueError("Not a PDF DICOM")
+
+    if "EncapsulatedDocument" not in ds:
+        raise ValueError("No embedded PDF found")
+
+    pdf_bytes = ds.EncapsulatedDocument
+
+    out_pdf = Path(out_pdf)
+    out_pdf.write_bytes(pdf_bytes)
+
+
+def _collect_text(ds, txt_lines: list[str] | None = None):
+    if txt_lines is None:
+        txt_lines = []
+
+    def _help_collect_text(content_sequence, level: int = 0):
+        for item in content_sequence:
+            prefix = "  " * level
+
+            concept = ""
+
+            if hasattr(item, "ConceptNameCodeSequence"):
+                try:
+                    concept = item.ConceptNameCodeSequence[0].CodeMeaning
+                except Exception:
+                    pass
+
+            value = None
+
+            for attr in ["TextValue", "CodeMeaning", "NumericValue"]:
+                if hasattr(item, attr):
+                    value = getattr(item, attr)
+                    break
+
+            if concept or value is not None:
+                txt_lines.append(f"{prefix}{concept}: {value}")
+
+            if hasattr(item, "ContentSequence"):
+                _help_collect_text(
+                    item.ContentSequence,
+                    level + 1,
+                )
+
+    if hasattr(ds, "ContentSequence"):
+        _help_collect_text(ds.ContentSequence)
+    return txt_lines
+
+
+def _extract_txt_from_dicom(dcm_path, out_txt):
+    lines = []
+    for p in dcm_path:
+        lines = _collect_text(p, lines)
+    Path(out_txt).write_text("\n".join(lines))
+
+
+def _extract_nii_from_dicom(dicom_out_path, nii_path):
     """
     Convert DICOM files to NIfTI format and handle common conversion errors.
 
@@ -206,6 +267,7 @@ def _convert_to_nifti(dicom_out_path, nii_path):
         FunctionTimedOut: Raised if the DICOM-to-NIfTI conversion times out.
         ValueError: Raised for generic validation failures.
     """
+
     try:
         if isinstance(dicom_out_path, list):
             try:
@@ -217,6 +279,7 @@ def _convert_to_nifti(dicom_out_path, nii_path):
                     return True
             except Exception as e:
                 logger.on_debug("Multi-Frame DICOM did not work:", e)
+            ## The PDF dicom lands here
             convert_dicom.dicom_array_to_nifti(dicom_out_path, nii_path, True)
         else:
             # func_timeout(10, dicom2nifti.dicom_series_to_nifti, (dicom_out_path, nii_path, True))
@@ -246,6 +309,9 @@ def _convert_to_nifti(dicom_out_path, nii_path):
         logger.print_error()
 
         return False
+    except Exception:
+        print(nii_path)
+
     return True
 
 
@@ -264,7 +330,7 @@ def _get_paths(
 ):
     if keys is None:
         keys = {}
-    (mri_format, keys) = extract_keys_from_json(
+    (mri_format, keys, ending) = extract_keys_from_json(
         simp_json,
         dcm_data_l,
         use_session,
@@ -277,7 +343,7 @@ def _get_paths(
     json_file_name, json_bids_name = _generate_bids_path(
         dataset_nifti_dir, keys, mri_format, simp_json, make_subject_chunks=make_subject_chunks, parent=parent
     )
-    nii_path = str(json_file_name).replace(".json", "") + ".nii.gz"
+    nii_path = str(json_file_name).replace(".json", "") + ending
     return json_file_name, json_bids_name, nii_path
 
 
@@ -364,11 +430,17 @@ def _from_dicom_to_nii(
     if exist and Path(nii_path).exists():
         logger.print("already exists:", json_file_name, ltype=Log_Type.STRANGE, verbose=verbose)
         return nii_path
-    suc = _convert_to_nifti(dcm_data_l, nii_path)
+    add_grid = False
+    if nii_path.endswith(".pdf"):
+        _export_pdf_from_dicom(dcm_data_l, nii_path)
+    elif nii_path.endswith(".txt"):
+        _extract_txt_from_dicom(dcm_data_l, nii_path)
+    else:
+        add_grid = _extract_nii_from_dicom(dcm_data_l, nii_path)
 
-    if suc:
+    if add_grid:
         _add_grid_info_to_json(nii_path, json_file_name)
-    return nii_path if suc else None
+    return nii_path if add_grid else None
 
 
 def _add_grid_info_to_json(nii_path: Path | str, simp_json: Path | str, force_update=False, add=True):
