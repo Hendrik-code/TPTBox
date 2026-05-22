@@ -13,7 +13,6 @@ from scipy import interpolate
 from typing_extensions import Self
 
 from TPTBox.core import vert_constants
-from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.vert_constants import COORDINATE, POI_DICT, Abstract_lvl, Any, Location, Vertebra_Instance, log, log_file, logging
 
 POI_ID = Union[
@@ -37,6 +36,14 @@ MAPPING = Union[
 ]
 
 DIMENSIONS = 3
+
+
+def _flatten(vert_label):
+    return [
+        item.value if isinstance(item, Enum) else item
+        for sublist in vert_label
+        for item in (sublist if isinstance(sublist, list) else [sublist])
+    ]  # type: ignore
 
 
 class _Abstract_POI_Definition:
@@ -107,6 +114,8 @@ class POI_Descriptor(AbstractSet, MutableMapping):
         self.definition = definition
         self._len: int | None = None
 
+    __hash__ = None  # explicitly mark as unhashable
+
     def __set_name__(self, owner, name):
         self._name = "_" + name
 
@@ -176,7 +185,10 @@ class POI_Descriptor(AbstractSet, MutableMapping):
 
     def __getitem__(self, key: POI_ID) -> COORDINATE:
         region, subregion = unpack_poi_id(key, self.definition)
-        return self.pois[region][subregion]
+        try:
+            return self.pois[region][subregion]
+        except KeyError:
+            raise KeyError(region, subregion, "not in", list(self.keys()))  # noqa: B904
 
     def get(self, key: POI_ID):
         return np.array(self[key])
@@ -225,6 +237,7 @@ class POI_Descriptor(AbstractSet, MutableMapping):
             raise
 
     def str_to_int_list(self, *keys: int | str, subregion=False):
+        keys = _flatten(keys)
         out: list[int] = []
         for k in keys:
             if isinstance(k, str):
@@ -428,7 +441,7 @@ class Abstract_POI:
 
     def sort(self, inplace=True, order_dict: dict | None = None) -> Self:
         """Sort vertebra dictionary by sorting_list"""
-        if self.level_one_info is not None:
+        if self.level_one_info is not None and self.level_one_info != Any:
             order_dict = self.level_one_info.order_dict()
         poi = self.centroids._sort(inplace=inplace, order_dict=order_dict)
         if inplace:
@@ -511,7 +524,7 @@ class Abstract_POI:
     def __getitem__(self, key: POI_ID) -> COORDINATE:
         return tuple(self.centroids[key])
 
-    def __setitem__(self, key: POI_ID, value: tuple[float, float, float] | Sequence[float]):
+    def __setitem__(self, key: POI_ID, value: tuple[float, float, float] | Sequence[float] | np.ndarray):
         if len(value) != DIMENSIONS:
             raise ValueError(value)
         self.centroids[key] = tuple(value)
@@ -582,6 +595,8 @@ class Abstract_POI:
         return obj
 
     def extract_subregion(self, *location: Abstract_lvl | int, inplace=False):
+        location = _flatten(location)
+
         location_values = tuple(l if isinstance(l, int) else l.value for l in location)
         extracted_centroids = POI_Descriptor()
         for x1, x2, y in self.centroids.items():
@@ -604,7 +619,9 @@ class Abstract_POI:
     def extract_vert_(self, *vert_label: int):
         return self.extract_vert(*vert_label, inplace=True)
 
-    def extract_region(self, *vert_label: int, inplace=False):
+    def extract_region(self, *vert_label: int | list[int] | Enum, inplace=False):
+        # flatten list
+        vert_label = _flatten(vert_label)
         vert_labels = tuple(vert_label)
         extracted_centroids = POI_Descriptor()
         for x1, x2, y in self.centroids.items():

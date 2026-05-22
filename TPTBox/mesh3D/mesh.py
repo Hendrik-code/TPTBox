@@ -31,14 +31,17 @@ class Mesh3D:
     def save(self, filepath: str | Path, mode: MeshOutputType = MeshOutputType.PLY, verbose: logging = True):
         filepath = str(filepath)
         if not filepath.endswith(mode.value):
-            filepath += mode.value
+            filepath += "." + mode.value
 
         filepath = Path(filepath)
-        if not filepath.exists():
-            raise FileNotFoundError(filepath)
+        if not filepath.parent.exists():
+            raise FileNotFoundError(filepath.parent)
 
         if mode == MeshOutputType.PLY:
-            self.mesh.export_obj(filepath)
+            try:
+                self.mesh.export_obj(filepath)
+            except AttributeError:
+                self.mesh.save(filepath)
         else:
             raise NotImplementedError(f"save with mode {mode}")
         log.print(f"Saved mesh: {filepath}", Log_Type.SAVE, verbose=verbose)
@@ -60,6 +63,18 @@ class Mesh3D:
 
         pl.add_mesh(self.mesh)
         pl.show()
+
+    def save_to_html(self, file_output: str | Path):
+        pv.start_xvfb()
+        pl = pv.Plotter()
+        pl.set_background("black", top=None)
+        pl.add_axes()
+        pv.global_theme.axes.show = True
+        pv.global_theme.edge_color = "white"
+        pv.global_theme.interactive = True
+
+        pl.add_mesh(self.mesh)
+        pl.export_html(file_output)
 
 
 class SegmentationMesh(Mesh3D):

@@ -1,6 +1,7 @@
 """
 This script assumes that there are aligned Sagittal data and poorly aligned axial data.
 """
+
 from __future__ import annotations
 
 import pickle
@@ -10,7 +11,7 @@ import nibabel as nib
 
 from TPTBox import NII, BIDS_Global_info, No_Logger, to_nii
 from TPTBox.core.bids_files import Subject_Container
-from TPTBox.registration.ridged_intensity.register import only_change_affine, registrate_nipy
+from TPTBox.registration._ridged_intensity.register import only_change_affine, registrate_nipy
 from TPTBox.stitching import stitching
 
 

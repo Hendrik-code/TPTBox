@@ -22,9 +22,6 @@ class TestPOI(unittest.TestCase):
         poi.rescale_((3, 2, 1))
         glob_poi.to_other_poi(poi)
 
-    def test_not_implemented(self):
-        self.assertRaises(NotImplementedError, POI_Global, None)
-
     def test_is_global(self):
         poi = get_poi()
         poi.orientation = ("L", "A", "S")

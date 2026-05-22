@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import sys
 import typing
 from collections.abc import Sequence
@@ -185,28 +186,40 @@ def Buffered_BIDS_Global_info(
 
                 age = today - file_mod_time
                 if age.days >= int(max_age_days):
-                    print(
-                        "[ ] Delete Buffer - to old:",
-                        (folder / buffer_name),
-                        f"{' ':20}",
-                    ) if verbose else None
+                    (
+                        print(
+                            "[ ] Delete Buffer - to old:",
+                            (folder / buffer_name),
+                            f"{' ':20}",
+                        )
+                        if verbose
+                        else None
+                    )
                     (folder / buffer_name).unlink()
             if (folder / buffer_name).exists() and parent not in recompute_parents:
                 with open((folder / buffer_name), "rb") as b:
                     l = pickle.load(b)
-                    print(
-                        f"[{len(l):8}] Read Buffer:",
-                        (folder / buffer_name),
-                        f"{' ':20}",
-                    ) if verbose else None
+                    (
+                        print(
+                            f"[{len(l):8}] Read Buffer:",
+                            (folder / buffer_name),
+                            f"{' ':20}",
+                        )
+                        if verbose
+                        else None
+                    )
                     files[dataset] += l
             else:
-                print(
-                    f"[{_cont:8}] Create new Buffer:",
-                    (folder / buffer_name),
-                    f"{' ':20}",
-                    end="\r",
-                ) if verbose else None
+                (
+                    print(
+                        f"[{_cont:8}] Create new Buffer:",
+                        (folder / buffer_name),
+                        f"{' ':20}",
+                        end="\r",
+                    )
+                    if verbose
+                    else None
+                )
                 files[dataset] += save_buffer((folder), buffer_name)
     if filter_file is not None:
         files: dict[Path | str, list[Path]] = {d: [g for g in f if filter_file(g)] for d, f in files.items()}
@@ -352,16 +365,24 @@ class BIDS_Global_info:
         if subject not in self.subjects:
             self.subjects[subject] = Subject_Container(subject, self.sequence_splitting_keys)
         self.count_file += 1
-        print(
-            f"Found: {subject}, total file keys {(self.count_file)},  total subjects = {len(self.subjects)}    ",
-            end="\r",
-        ) if self.verbose else None
+        (
+            print(
+                f"Found: {subject}, total file keys {(self.count_file)},  total subjects = {len(self.subjects)}    ",
+                end="\r",
+            )
+            if self.verbose
+            else None
+        )
         self.subjects[subject].add(bids)
 
-    def enumerate_subjects(self, sort=False) -> list[tuple[str, Subject_Container]]:
+    def enumerate_subjects(self, sort=False, shuffle=False) -> list[tuple[str, Subject_Container]]:
         # TODO Enumerate should put out numbers...
         if sort:
             return sorted(self.subjects.items())
+        if shuffle:
+            s = list(self.subjects.items())
+            random.shuffle(s)
+            return s
         return self.subjects.items()  # type: ignore
 
     def iter_subjects(self, sort=False) -> list[tuple[str, Subject_Container]]:
@@ -611,16 +632,20 @@ class BIDS_FILE:
             p = Path(path + "." + key)
             value.rename(p)
 
-    def symlink_files(self, path: Path | str, ending=".nii.gz"):
+    def symlink_files(self, path: Path | str, ending=".nii.gz", exist_ok=False):
         ending = ending if ending[0] == "." else "." + ending
         path = str(path)
         assert path.endswith(ending), f"set 'ending' to the part after the '.'\n {path} does not end with {ending}"
         path = path.replace(ending, "")
         for key, value in self.file.items():
             p = Path(path + "." + key)
+
             if os.path.islink(p):
                 assert Path(os.readlink(p)) == value, f"{p} exists"
                 continue
+            if exist_ok and p.exists():
+                continue
+
             os.symlink(value, p)
 
     def get_path_decomposed(self, file_type=None) -> tuple[Path, str, str, str]:
@@ -641,6 +666,13 @@ class BIDS_FILE:
     def bids_format(self):
         return self.format
 
+    @property
+    def mod(self):
+        mod = self.bids_format
+        if mod == "msk":
+            return self.get("mod")
+        return mod
+
     def get_parent(self, file_type=None):
         return self.get_path_decomposed(file_type)[1]
 
@@ -655,7 +687,7 @@ class BIDS_FILE:
         auto_add_run_id=False,
         additional_folder: str | None = None,
         dataset_path: str | None = None,
-        make_parent=True,
+        make_parent=False,
         non_strict_mode=False,
     ):
         ds = dataset_path if dataset_path is not None else self.get_path_decomposed()[0]
@@ -686,7 +718,7 @@ class BIDS_FILE:
         from_info=False,
         auto_add_run_id=False,
         additional_folder: str | None = None,
-        dataset_path: str | None = None,
+        dataset_path: str | Path | None = None,
         make_parent=False,
         no_sorting_mode: bool = False,
         non_strict_mode: bool = False,
@@ -724,6 +756,9 @@ class BIDS_FILE:
             info = {}
         if non_strict_mode and not self.BIDS_key.startswith("sub"):
             info["sub"] = self.BIDS_key.replace("_", "-").replace(".", "-")
+        else:
+            # replace _ with - in all info
+            self.info = {k: v.replace("_", "-") for k, v in self.info.items()}
         if isinstance(file_type, str) and file_type.startswith("."):
             file_type = file_type[1:]
         path = self.insert_info_into_path(path)
@@ -769,7 +804,8 @@ class BIDS_FILE:
                 if key in same_info:
                     continue
                 if value is not None:
-                    assert validate_entities(key, value, f"..._{key}-{value}_...", True)
+                    if not non_strict_mode:
+                        assert validate_entities(key, value, f"..._{key}-{value}_...", True), f"..._{key}-{value}_..."
                     final_info[key] = value
                 # file_name += f"{key}-{value}_"
             # sort by order
@@ -956,7 +992,8 @@ class BIDS_FILE:
         except KeyError as e:
             raise ValueError(f"nii.gz not present. Found only {self.file.keys()}\t{self.file}\n\n{self}") from e
 
-    def get_grid_info(self):
+    def get_grid_info(self, add_grid_info_to_json=True):
+        """returns the Grid info. It looks up if this info is in json. If not it loads the File, computes the Grid and saves it in the json"""
         from TPTBox.core.dicom.dicom_extract import _add_grid_info_to_json
         from TPTBox.core.nii_poi_abstract import Grid
 
@@ -965,7 +1002,7 @@ class BIDS_FILE:
             return None
         if not self.has_json():
             self.file["json"] = Path(str(nii_file).split(".")[0] + ".json")
-        return Grid(**_add_grid_info_to_json(nii_file, self.file["json"])["grid"])
+        return Grid(**_add_grid_info_to_json(nii_file, self.file["json"], add=add_grid_info_to_json)["grid"])
 
     def get_nii_file(self) -> Path:  # type: ignore
         for key in _supported_nii_files:
@@ -1070,6 +1107,22 @@ class BIDS_FILE:
             num, i = divmod(num, 36)
             base36 = chars[i] + base36
         return base36[:length]
+
+    def get_identifier(self, sequence_splitting_keys: list[str]) -> str:
+        """Generates an identifier for the BIDS_FILE based on subject and splitting keys
+
+        Args:
+            sequence_splitting_keys (list[str]): list of keys to use for splitting
+        """
+        if "sub" not in self.info:
+            print(f"family_id, no sub-key, got {self.info}")
+            identifier = "sub-404"
+        else:
+            identifier = "sub-" + self.info["sub"]
+        for s in self.info.keys():
+            if s in sequence_splitting_keys:
+                identifier += "_" + s + "-" + self.info[s]
+        return identifier
 
 
 class Searchquery:
@@ -1188,7 +1241,7 @@ class Searchquery:
             return self.filter_format(lambda x: x in filter_fun)
         return self.filter("format", filter_fun=filter_fun, required=True)
 
-    def filter_filetype(self, filter_fun: str | typing.Callable[[str | object], bool], required=True):
+    def filter_filetype(self, filter_fun: list[str] | str | typing.Callable[[str | object], bool], required=True):
         return self.filter("filetype", filter_fun=filter_fun, required=required)
 
     def filter_non_existence(
@@ -1431,15 +1484,16 @@ class BIDS_Family:
 
     def get_identifier(self):
         first_e = self.data_dict[next(iter(self.data_dict.keys()))][0]
-        if "sub" not in first_e.info:
-            print(f"family_id, no sub-key, got {first_e.info} and data_dict {list(self.data_dict.keys())}")
-            identifier = "sub-404"
-        else:
-            identifier = "sub-" + first_e.info["sub"]
-        for s in first_e.info.keys():
-            if s in self.sequence_splitting_keys:
-                identifier += "_" + s + "-" + first_e.info[s]
-        return identifier
+        return first_e.get_identifier(self.sequence_splitting_keys)
+        # if "sub" not in first_e.info:
+        #    print(f"family_id, no sub-key, got {first_e.info} and data_dict {list(self.data_dict.keys())}")
+        #    identifier = "sub-404"
+        # else:
+        #    identifier = "sub-" + first_e.info["sub"]
+        # for s in first_e.info.keys():
+        #    if s in self.sequence_splitting_keys:
+        #        identifier += "_" + s + "-" + first_e.info[s]
+        # return identifier
 
     def items(self):
         return self.data_dict.items()
