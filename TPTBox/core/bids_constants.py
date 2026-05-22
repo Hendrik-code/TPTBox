@@ -308,6 +308,7 @@ entities = {
     "Hemisphere": "hemi",  # [L,R]
     "Sample": "sample",  # such as tissue, primary cell or cell-free sample.
     # Sub recordings - Use when necessary.
+    "Split": "split",  # Never use, legacy. Is applied inconsistently by other datasets.
     ## Contrast
     "Contrast enhancement phase": "ce",
     "Tracer": "trc",  # use ce before this one.
@@ -337,7 +338,6 @@ entities = {
     # Single class segmentation
     "Label": "label",
     # Others (never used)
-    "Split": "split",  # Never use, legacy. Is applied inconsistently by other datasets.
     "Density": "den",
     "version": "version",
     "Description": "desc",
