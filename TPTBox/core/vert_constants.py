@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import typing
 from collections.abc import Sequence
 from enum import Enum
 from typing import TYPE_CHECKING, Literal, NoReturn, Union
@@ -141,6 +140,159 @@ class Any(Abstract_lvl):
         return int(s)
 
 
+class Full_Body_Instance_Vibe(Abstract_lvl):
+    spleen = 1
+    kidney_right = 2
+    kidney_left = 3
+    gallbladder = 4
+    liver = 5
+    stomach = 6
+    pancreas = 7
+    adrenal_gland_right = 8
+    adrenal_gland_left = 9
+    lung_upper_lobe_left = 10
+    lung_lower_lobe_left = 11
+    lung_upper_lobe_right = 12
+    lung_middle_lobe_right = 13
+    lung_lower_lobe_right = 14
+    esophagus = 15
+    trachea = 16
+    thyroid_gland = 17
+    intestine = 18
+    duodenum = 19
+    unused = 20
+    urinary_bladder = 21
+    prostate = 22
+    sacrum = 23
+    heart = 24
+    aorta = 25
+    pulmonary_vein = 26
+    brachiocephalic_trunk = 27
+    subclavian_artery_right = 28
+    subclavian_artery_left = 29
+    common_carotid_artery_right = 30
+    common_carotid_artery_left = 31
+    brachiocephalic_vein_left = 32
+    brachiocephalic_vein_right = 33
+    atrial_appendage_left = 34
+    superior_vena_cava = 35
+    inferior_vena_cava = 36
+    portal_vein_and_splenic_vein = 37
+    iliac_artery_left = 38
+    iliac_artery_right = 39
+    iliac_vena_left = 40
+    iliac_vena_right = 41
+    humerus_left = 42
+    humerus_right = 43
+    scapula_left = 44
+    scapula_right = 45
+    clavicula_left = 46
+    clavicula_right = 47
+    femur_left = 48
+    femur_right = 49
+    pelvis_left = 50
+    pelvis_right = 51
+    spinal_cord = 52
+    gluteus_maximus_left = 53
+    gluteus_maximus_right = 54
+    gluteus_medius_left = 55
+    gluteus_medius_right = 56
+    gluteus_minimus_left = 57
+    gluteus_minimus_right = 58
+    autochthon_left = 59
+    autochthon_right = 60
+    iliopsoas_left = 61
+    iliopsoas_right = 62
+    sternum = 63
+    costal_cartilages = 64
+    subcutaneous_fat = 65
+    muscle = 66
+    inner_fat = 67
+    IVD = 68
+    vertebra_body = 69
+    vertebra_posterior_elements = 70
+    spinal_channel = 71
+    bone_other = 72
+
+    @classmethod
+    def get_Full_Body_Instance_mapping(cls):
+        return {
+            Full_Body_Instance.spleen.value: cls.spleen.value,  # spleen
+            Full_Body_Instance.kidney_right.value: cls.kidney_right.value,  # kidney_right
+            Full_Body_Instance.kidney_left.value: cls.kidney_left.value,  # kidney_left
+            Full_Body_Instance.gallbladder.value: cls.gallbladder.value,  # gallbladder
+            Full_Body_Instance.liver.value: cls.liver.value,  # liver
+            Full_Body_Instance.stomach.value: cls.stomach.value,  # stomach
+            Full_Body_Instance.pancreas.value: cls.pancreas.value,  # pancreas
+            Full_Body_Instance.adrenal_gland_right.value: cls.adrenal_gland_right.value,  # adrenal_gland_right
+            Full_Body_Instance.adrenal_gland_left.value: cls.adrenal_gland_left.value,  # adrenal_gland_left
+            Full_Body_Instance.lung_left.value: cls.lung_upper_lobe_left.value,  # lung_upper_lobe_left
+            Full_Body_Instance.lung_left.value: cls.lung_lower_lobe_left.value,  # lung_lower_lobe_left
+            Full_Body_Instance.lung_right.value: cls.lung_upper_lobe_right.value,  # lung_upper_lobe_right
+            Full_Body_Instance.lung_right.value: cls.lung_middle_lobe_right.value,  # lung_middle_lobe_right
+            Full_Body_Instance.lung_right.value: cls.lung_lower_lobe_right.value,  # lung_lower_lobe_right
+            Full_Body_Instance.esophagus.value: cls.esophagus.value,  # esophagus
+            Full_Body_Instance.trachea.value: cls.trachea.value,  # trachea
+            Full_Body_Instance.thyroid_gland_right.value: cls.thyroid_gland.value,  # thyroid_gland
+            Full_Body_Instance.intestine.value: cls.intestine.value,  # intestine
+            Full_Body_Instance.doudenum.value: cls.duodenum.value,  # duodenum
+            Full_Body_Instance.rib_right.value: cls.unused.value,  # unused
+            Full_Body_Instance.urinary_bladder.value: cls.urinary_bladder.value,  # urinary_bladder
+            Full_Body_Instance.prostate.value: cls.prostate.value,  # prostate
+            Full_Body_Instance.sacrum.value: cls.sacrum.value,  # sacrum
+            Full_Body_Instance.heart.value: cls.heart.value,  # heart
+            Full_Body_Instance.aorta.value: cls.aorta.value,  # aorta
+            Full_Body_Instance.pulmonary_vein.value: cls.pulmonary_vein.value,  # pulmonary_vein
+            Full_Body_Instance.brachiocephalic_trunk.value: cls.brachiocephalic_trunk.value,  # brachiocephalic_trunk
+            Full_Body_Instance.subclavian_artery_right.value: cls.subclavian_artery_right.value,  # subclavian_artery_right
+            Full_Body_Instance.subclavian_artery_left.value: cls.subclavian_artery_left.value,  # subclavian_artery_left
+            Full_Body_Instance.common_carotid_artery_right.value: cls.common_carotid_artery_right.value,  # common_carotid_artery_right
+            Full_Body_Instance.common_carotid_artery_left.value: cls.common_carotid_artery_left.value,  # common_carotid_artery_left
+            Full_Body_Instance.brachiocephalic_vein_left.value: cls.brachiocephalic_vein_left.value,  # brachiocephalic_vein_left
+            Full_Body_Instance.brachiocephalic_vein_right.value: cls.brachiocephalic_vein_right.value,  # brachiocephalic_vein_right
+            Full_Body_Instance.atrial_appendage_left.value: cls.atrial_appendage_left.value,  # atrial_appendage_left
+            Full_Body_Instance.superior_vena_cava.value: cls.superior_vena_cava.value,  # superior_vena_cava
+            Full_Body_Instance.inferior_vena_cava.value: cls.inferior_vena_cava.value,  # inferior_vena_cava
+            Full_Body_Instance.portal_vein_and_splenic_vein.value: cls.portal_vein_and_splenic_vein.value,  # portal_vein_and_splenic_vein
+            Full_Body_Instance.iliac_artery_left.value: cls.iliac_artery_left.value,  # iliac_artery_left
+            Full_Body_Instance.iliac_artery_right.value: cls.iliac_artery_right.value,  # iliac_artery_right
+            Full_Body_Instance.iliac_vena_left.value: cls.iliac_vena_left.value,  # iliac_vena_left
+            Full_Body_Instance.iliac_vena_right.value: cls.iliac_vena_right.value,  # iliac_vena_right
+            Full_Body_Instance.humerus_left.value: cls.humerus_left.value,  # humerus_left
+            Full_Body_Instance.humerus_right.value: cls.humerus_right.value,  # humerus_right
+            Full_Body_Instance.scapula_left.value: cls.scapula_left.value,  # scapula_left
+            Full_Body_Instance.scapula_right.value: cls.scapula_right.value,  # scapula_right
+            Full_Body_Instance.clavicula_left.value: cls.clavicula_left.value,  # clavicula_left
+            Full_Body_Instance.clavicula_right.value: cls.clavicula_right.value,  # clavicula_right
+            Full_Body_Instance.femur_left.value: cls.femur_left.value,  # femur_left
+            Full_Body_Instance.femur_right.value: cls.femur_right.value,  # femur_right
+            Full_Body_Instance.pelvis_left.value: cls.hip_left.value,  # hip_left
+            Full_Body_Instance.pelvis_right.value: cls.hip_right.value,  # hip_right
+            Full_Body_Instance.channel.value: cls.spinal_cord.value,  # spinal_cord
+            Full_Body_Instance.gluteus_maximus_left.value: cls.gluteus_maximus_left.value,  # gluteus_maximus_left
+            Full_Body_Instance.gluteus_maximus_right.value: cls.gluteus_maximus_right.value,  # gluteus_maximus_right
+            Full_Body_Instance.gluteus_medius_left.value: cls.gluteus_medius_left.value,  #  gluteus_medius_left
+            Full_Body_Instance.gluteus_medius_right.value: cls.gluteus_medius_right.value,  #  gluteus_medius_right
+            Full_Body_Instance.gluteus_minimus_left.value: cls.gluteus_minimus_left.value,  # gluteus_minimus_left
+            Full_Body_Instance.gluteus_minimus_right.value: cls.gluteus_minimus_right.value,  # gluteus_minimus_right
+            Full_Body_Instance.autochthon_left.value: cls.autochthon_left.value,  # autochthon_left
+            Full_Body_Instance.autochthon_right.value: cls.autochthon_right.value,  # autochthon_right
+            Full_Body_Instance.iliopsoas_left.value: cls.iliopsoas_left.value,  # iliopsoas_left
+            Full_Body_Instance.iliopsoas_right.value: cls.iliopsoas_right.value,  # iliopsoas_right
+            Full_Body_Instance.sternum.value: cls.sternum.value,  # sternum
+            Full_Body_Instance.costal_cartilage.value: cls.costal_cartilages.value,  # costal_cartilages
+            Full_Body_Instance.subcutaneous_fat.value: cls.subcutaneous_fat.value,  # subcutaneous_fat
+            Full_Body_Instance.muscle_other.value: cls.muscle.value,  # muscle
+            Full_Body_Instance.inner_fat.value: cls.inner_fat.value,  # inner_fat
+            Full_Body_Instance.ivd.value: cls.IVD.value,  # IVD
+            Full_Body_Instance.vert_body.value: cls.vertebra_body.value,  # vertebra_body
+            Full_Body_Instance.vert_post.value: cls.vertebra_posterior_elements.value,  # vertebra_posterior_elements
+            Full_Body_Instance.channel.value: cls.spinal_channel.value,  # spinal_channel
+            Full_Body_Instance.ignore.value: cls.bone_other.value,  # bone_other
+            100: Full_Body_Instance.ignore.value,
+        }
+
+
 class Full_Body_Instance(Abstract_lvl):
     skull = 1
     clavicula_right = 2
@@ -149,8 +301,12 @@ class Full_Body_Instance(Abstract_lvl):
     scapula_left = 103
     humerus_right = 4
     humerus_left = 104
-    hand_rest_right = 5
-    hand_rest_left = 105
+    hand_right = 5
+    hand_left = 105
+    radius_right = 60
+    radius_left = 160
+    ulna_right = 61
+    ulna_left = 161
     sternum = 6
     costal_cartilage = 7
     rib_right = 8
@@ -158,8 +314,8 @@ class Full_Body_Instance(Abstract_lvl):
     vert_body = 9
     vert_post = 10
     sacrum = 11
-    hip_right = 12
-    hip_left = 112
+    pelvis_right = 12
+    pelvis_left = 112
     femur_right = 13
     femur_left = 113
     patella_right = 14
@@ -230,6 +386,335 @@ class Full_Body_Instance(Abstract_lvl):
     subcutaneous_fat = 57
     muscle_other = 58
     inner_fat = 59
+    ignore = 63
+
+    @classmethod
+    def bone(cls):
+        return [
+            Full_Body_Instance.skull,
+            Full_Body_Instance.clavicula_right,
+            Full_Body_Instance.clavicula_left,
+            Full_Body_Instance.scapula_right,
+            Full_Body_Instance.scapula_left,
+            Full_Body_Instance.humerus_right,
+            Full_Body_Instance.humerus_left,
+            Full_Body_Instance.hand_right,
+            Full_Body_Instance.hand_left,
+            Full_Body_Instance.radius_right,
+            Full_Body_Instance.radius_left,
+            Full_Body_Instance.ulna_right,
+            Full_Body_Instance.ulna_left,
+            Full_Body_Instance.sternum,
+            Full_Body_Instance.costal_cartilage,
+            Full_Body_Instance.rib_right,
+            Full_Body_Instance.rib_left,
+            Full_Body_Instance.vert_body,
+            Full_Body_Instance.vert_post,
+            Full_Body_Instance.sacrum,
+            Full_Body_Instance.pelvis_right,
+            Full_Body_Instance.pelvis_left,
+            Full_Body_Instance.femur_right,
+            Full_Body_Instance.femur_left,
+            Full_Body_Instance.patella_right,
+            Full_Body_Instance.patella_left,
+            Full_Body_Instance.tibia_right,
+            Full_Body_Instance.tibia_left,
+            Full_Body_Instance.fibula_right,
+            Full_Body_Instance.fibula_left,
+            Full_Body_Instance.talus_right,
+            Full_Body_Instance.talus_left,
+            Full_Body_Instance.calcaneus_right,
+            Full_Body_Instance.calcaneus_left,
+            Full_Body_Instance.tarsals_right,
+            Full_Body_Instance.tarsals_left,
+            Full_Body_Instance.metatarsals_right,
+            Full_Body_Instance.metatarsals_left,
+            Full_Body_Instance.phalanges_right,
+            Full_Body_Instance.phalanges_left,
+        ]
+
+    @classmethod
+    def feet(cls):
+        return [
+            Full_Body_Instance.talus_right,
+            Full_Body_Instance.talus_left,
+            Full_Body_Instance.calcaneus_right,
+            Full_Body_Instance.calcaneus_left,
+            Full_Body_Instance.tarsals_right,
+            Full_Body_Instance.tarsals_left,
+            Full_Body_Instance.metatarsals_right,
+            Full_Body_Instance.metatarsals_left,
+            Full_Body_Instance.phalanges_right,
+            Full_Body_Instance.phalanges_left,
+        ]
+
+    @classmethod
+    def lung_system(cls):
+        return [
+            Full_Body_Instance.trachea,
+            Full_Body_Instance.lung_right,
+            Full_Body_Instance.lung_left,
+        ]
+
+    @classmethod
+    def organs(cls):
+        return [
+            Full_Body_Instance.heart,
+            Full_Body_Instance.kidney_right,
+            Full_Body_Instance.kidney_left,
+            Full_Body_Instance.liver,
+            Full_Body_Instance.gallbladder,
+            Full_Body_Instance.adrenal_gland_right,
+            Full_Body_Instance.adrenal_gland_left,
+            Full_Body_Instance.thyroid_gland_right,
+            Full_Body_Instance.thyroid_gland_left,
+            Full_Body_Instance.urinary_bladder,
+            Full_Body_Instance.prostate,
+        ]
+
+    @classmethod
+    def digestion(cls):
+        return [
+            Full_Body_Instance.stomach,
+            Full_Body_Instance.pancreas,
+            Full_Body_Instance.esophagus,
+            Full_Body_Instance.doudenum,
+            Full_Body_Instance.intestine,
+        ]
+
+    @classmethod
+    def vessels(cls):
+        return [
+            Full_Body_Instance.aorta,
+            Full_Body_Instance.pulmonary_vein,
+            Full_Body_Instance.brachiocephalic_trunk,
+            Full_Body_Instance.subclavian_artery_right,
+            Full_Body_Instance.subclavian_artery_left,
+            Full_Body_Instance.common_carotid_artery_right,
+            Full_Body_Instance.common_carotid_artery_left,
+            Full_Body_Instance.brachiocephalic_vein_right,
+            Full_Body_Instance.brachiocephalic_vein_left,
+            Full_Body_Instance.atrial_appendage_left,
+            Full_Body_Instance.superior_vena_cava,
+            Full_Body_Instance.inferior_vena_cava,
+            Full_Body_Instance.iliac_artery_right,
+            Full_Body_Instance.iliac_artery_left,
+            Full_Body_Instance.portal_vein_and_splenic_vein,
+            Full_Body_Instance.iliac_vena_right,
+            Full_Body_Instance.iliac_vena_left,
+        ]
+
+    @classmethod
+    def full_spine(cls):
+        return [
+            Full_Body_Instance.channel,
+            Full_Body_Instance.ivd,
+            Full_Body_Instance.vert_body,
+            Full_Body_Instance.vert_post,
+            Full_Body_Instance.sacrum,
+        ]
+
+    @classmethod
+    def muscle(cls):
+        return [
+            Full_Body_Instance.gluteus_maximus_right,
+            Full_Body_Instance.gluteus_maximus_left,
+            Full_Body_Instance.gluteus_medius_right,
+            Full_Body_Instance.gluteus_medius_left,
+            Full_Body_Instance.gluteus_minimus_right,
+            Full_Body_Instance.gluteus_minimus_left,
+            Full_Body_Instance.autochthon_right,
+            Full_Body_Instance.autochthon_left,
+            Full_Body_Instance.iliopsoas_right,
+            Full_Body_Instance.iliopsoas_left,
+        ]
+
+    @classmethod
+    def body_comp(cls):
+        return [
+            Full_Body_Instance.subcutaneous_fat,
+            Full_Body_Instance.muscle_other,
+            Full_Body_Instance.inner_fat,
+            *Full_Body_Instance.muscle(),
+        ]
+
+    @classmethod
+    def get_VIBESeg_mapping(cls):
+        return {
+            1: Full_Body_Instance.spleen.value,  # spleen
+            2: Full_Body_Instance.kidney_right.value,  # kidney_right
+            3: Full_Body_Instance.kidney_left.value,  # kidney_left
+            4: Full_Body_Instance.gallbladder.value,  # gallbladder
+            5: Full_Body_Instance.liver.value,  # liver
+            6: Full_Body_Instance.stomach.value,  # stomach
+            7: Full_Body_Instance.pancreas.value,  # pancreas
+            8: Full_Body_Instance.adrenal_gland_right.value,  # adrenal_gland_right
+            9: Full_Body_Instance.adrenal_gland_left.value,  # adrenal_gland_left
+            10: Full_Body_Instance.lung_left.value,  # lung_upper_lobe_left
+            11: Full_Body_Instance.lung_left.value,  # lung_lower_lobe_left
+            12: Full_Body_Instance.lung_right.value,  # lung_upper_lobe_right
+            13: Full_Body_Instance.lung_right.value,  # lung_middle_lobe_right
+            14: Full_Body_Instance.lung_right.value,  # lung_lower_lobe_right
+            15: Full_Body_Instance.esophagus.value,  # esophagus
+            16: Full_Body_Instance.trachea.value,  # trachea
+            17: Full_Body_Instance.thyroid_gland_right.value,  # thyroid_gland
+            18: Full_Body_Instance.intestine.value,  # intestine
+            19: Full_Body_Instance.doudenum.value,  # duodenum
+            20: Full_Body_Instance.rib_right.value,  # unused
+            21: Full_Body_Instance.urinary_bladder.value,  # urinary_bladder
+            22: Full_Body_Instance.prostate.value,  # prostate
+            23: Full_Body_Instance.sacrum.value,  # sacrum
+            24: Full_Body_Instance.heart.value,  # heart
+            25: Full_Body_Instance.aorta.value,  # aorta
+            26: Full_Body_Instance.pulmonary_vein.value,  # pulmonary_vein
+            27: Full_Body_Instance.brachiocephalic_trunk.value,  # brachiocephalic_trunk
+            28: Full_Body_Instance.subclavian_artery_right.value,  # subclavian_artery_right
+            29: Full_Body_Instance.subclavian_artery_left.value,  # subclavian_artery_left
+            30: Full_Body_Instance.common_carotid_artery_right.value,  # common_carotid_artery_right
+            31: Full_Body_Instance.common_carotid_artery_left.value,  # common_carotid_artery_left
+            32: Full_Body_Instance.brachiocephalic_vein_left.value,  # brachiocephalic_vein_left
+            33: Full_Body_Instance.brachiocephalic_vein_right.value,  # brachiocephalic_vein_right
+            34: Full_Body_Instance.atrial_appendage_left.value,  # atrial_appendage_left
+            35: Full_Body_Instance.superior_vena_cava.value,  # superior_vena_cava
+            36: Full_Body_Instance.inferior_vena_cava.value,  # inferior_vena_cava
+            37: Full_Body_Instance.portal_vein_and_splenic_vein.value,  # portal_vein_and_splenic_vein
+            38: Full_Body_Instance.iliac_artery_left.value,  # iliac_artery_left
+            39: Full_Body_Instance.iliac_artery_right.value,  # iliac_artery_right
+            40: Full_Body_Instance.iliac_vena_left.value,  # iliac_vena_left
+            41: Full_Body_Instance.iliac_vena_right.value,  # iliac_vena_right
+            42: Full_Body_Instance.humerus_left.value,  # humerus_left
+            43: Full_Body_Instance.humerus_right.value,  # humerus_right
+            44: Full_Body_Instance.scapula_left.value,  # scapula_left
+            45: Full_Body_Instance.scapula_right.value,  # scapula_right
+            46: Full_Body_Instance.clavicula_left.value,  # clavicula_left
+            47: Full_Body_Instance.clavicula_right.value,  # clavicula_right
+            48: Full_Body_Instance.femur_left.value,  # femur_left
+            49: Full_Body_Instance.femur_right.value,  # femur_right
+            50: Full_Body_Instance.pelvis_left.value,  # hip_left
+            51: Full_Body_Instance.pelvis_right.value,  # hip_right
+            52: Full_Body_Instance.channel.value,  # spinal_cord
+            53: Full_Body_Instance.gluteus_maximus_left.value,  # gluteus_maximus_left
+            54: Full_Body_Instance.gluteus_maximus_right.value,  # gluteus_maximus_right
+            55: Full_Body_Instance.gluteus_medius_left.value,  #  gluteus_medius_left
+            56: Full_Body_Instance.gluteus_medius_right.value,  #  gluteus_medius_right
+            57: Full_Body_Instance.gluteus_minimus_left.value,  # gluteus_minimus_left
+            58: Full_Body_Instance.gluteus_minimus_right.value,  # gluteus_minimus_right
+            59: Full_Body_Instance.autochthon_left.value,  # autochthon_left
+            60: Full_Body_Instance.autochthon_right.value,  # autochthon_right
+            61: Full_Body_Instance.iliopsoas_left.value,  # iliopsoas_left
+            62: Full_Body_Instance.iliopsoas_right.value,  # iliopsoas_right
+            63: Full_Body_Instance.sternum.value,  # sternum
+            64: Full_Body_Instance.costal_cartilage.value,  # costal_cartilages
+            65: Full_Body_Instance.subcutaneous_fat.value,  # subcutaneous_fat
+            66: Full_Body_Instance.muscle_other.value,  # muscle
+            67: Full_Body_Instance.inner_fat.value,  # inner_fat
+            68: Full_Body_Instance.ivd.value,  # IVD
+            69: Full_Body_Instance.vert_body.value,  # vertebra_body
+            70: Full_Body_Instance.vert_post.value,  # vertebra_posterior_elements
+            71: Full_Body_Instance.channel.value,  # spinal_channel
+            72: Full_Body_Instance.ignore.value,  # bone_other
+            73: 0,
+            77: 0,  # Negative
+            100: Full_Body_Instance.ignore.value,
+        }
+
+    @classmethod
+    def get_to_VIBESeg(cls):
+        return {
+            Full_Body_Instance.skull.value: 0,
+            Full_Body_Instance.clavicula_right.value: 47,
+            Full_Body_Instance.clavicula_left.value: 46,
+            Full_Body_Instance.scapula_right.value: 45,
+            Full_Body_Instance.scapula_left.value: 44,
+            Full_Body_Instance.humerus_right.value: 43,
+            Full_Body_Instance.humerus_left.value: 42,
+            Full_Body_Instance.hand_right.value: 72,
+            Full_Body_Instance.hand_left.value: 72,
+            Full_Body_Instance.radius_right.value: 72,
+            Full_Body_Instance.radius_left.value: 72,
+            Full_Body_Instance.ulna_right.value: 72,
+            Full_Body_Instance.ulna_left.value: 72,
+            Full_Body_Instance.sternum.value: 63,
+            Full_Body_Instance.costal_cartilage.value: 64,
+            Full_Body_Instance.rib_right.value: 20,
+            Full_Body_Instance.rib_left.value: 20,
+            Full_Body_Instance.vert_body.value: 69,
+            Full_Body_Instance.vert_post.value: 70,
+            Full_Body_Instance.sacrum.value: 23,
+            Full_Body_Instance.pelvis_right.value: 51,
+            Full_Body_Instance.pelvis_left.value: 50,
+            Full_Body_Instance.femur_right.value: 49,
+            Full_Body_Instance.femur_left.value: 48,
+            Full_Body_Instance.patella_right.value: 72,
+            Full_Body_Instance.patella_left.value: 72,
+            Full_Body_Instance.tibia_right.value: 72,
+            Full_Body_Instance.tibia_left.value: 72,
+            Full_Body_Instance.fibula_right.value: 72,
+            Full_Body_Instance.fibula_left.value: 72,
+            Full_Body_Instance.talus_right.value: 72,
+            Full_Body_Instance.talus_left.value: 72,
+            Full_Body_Instance.calcaneus_right.value: 72,
+            Full_Body_Instance.calcaneus_left.value: 72,
+            Full_Body_Instance.tarsals_right.value: 72,
+            Full_Body_Instance.tarsals_left.value: 72,
+            Full_Body_Instance.metatarsals_right.value: 72,
+            Full_Body_Instance.metatarsals_left.value: 72,
+            Full_Body_Instance.phalanges_right.value: 72,
+            Full_Body_Instance.phalanges_left.value: 72,
+            Full_Body_Instance.trachea.value: 16,
+            Full_Body_Instance.lung_right.value: 73,
+            Full_Body_Instance.lung_left.value: 73,
+            Full_Body_Instance.heart.value: 24,
+            Full_Body_Instance.spleen.value: 1,
+            Full_Body_Instance.kidney_right.value: 2,
+            Full_Body_Instance.kidney_left.value: 3,
+            Full_Body_Instance.liver.value: 5,
+            Full_Body_Instance.gallbladder.value: 4,
+            Full_Body_Instance.ivd.value: 68,
+            Full_Body_Instance.stomach.value: 6,
+            Full_Body_Instance.pancreas.value: 7,
+            Full_Body_Instance.adrenal_gland_right.value: 8,
+            Full_Body_Instance.adrenal_gland_left.value: 9,
+            Full_Body_Instance.esophagus.value: 15,
+            Full_Body_Instance.thyroid_gland_right.value: 17,
+            Full_Body_Instance.thyroid_gland_left.value: 17,
+            Full_Body_Instance.doudenum.value: 19,
+            Full_Body_Instance.intestine.value: 18,
+            Full_Body_Instance.urinary_bladder.value: 21,
+            Full_Body_Instance.prostate.value: 22,
+            Full_Body_Instance.channel.value: 71,  # 52
+            Full_Body_Instance.aorta.value: 25,
+            Full_Body_Instance.pulmonary_vein.value: 26,
+            Full_Body_Instance.brachiocephalic_trunk.value: 27,
+            Full_Body_Instance.subclavian_artery_right.value: 28,
+            Full_Body_Instance.subclavian_artery_left.value: 29,
+            Full_Body_Instance.common_carotid_artery_right.value: 30,
+            Full_Body_Instance.common_carotid_artery_left.value: 31,
+            Full_Body_Instance.brachiocephalic_vein_right.value: 33,
+            Full_Body_Instance.brachiocephalic_vein_left.value: 32,
+            Full_Body_Instance.atrial_appendage_left.value: 34,
+            Full_Body_Instance.superior_vena_cava.value: 35,
+            Full_Body_Instance.inferior_vena_cava.value: 36,
+            Full_Body_Instance.iliac_artery_right.value: 39,
+            Full_Body_Instance.iliac_artery_left.value: 38,
+            Full_Body_Instance.portal_vein_and_splenic_vein.value: 37,
+            Full_Body_Instance.iliac_vena_right.value: 41,
+            Full_Body_Instance.iliac_vena_left.value: 40,
+            Full_Body_Instance.gluteus_maximus_right.value: 54,
+            Full_Body_Instance.gluteus_maximus_left.value: 53,
+            Full_Body_Instance.gluteus_medius_right.value: 56,
+            Full_Body_Instance.gluteus_medius_left.value: 55,
+            Full_Body_Instance.gluteus_minimus_right.value: 58,
+            Full_Body_Instance.gluteus_minimus_left.value: 57,
+            Full_Body_Instance.autochthon_right.value: 60,
+            Full_Body_Instance.autochthon_left.value: 59,
+            Full_Body_Instance.iliopsoas_right.value: 62,
+            Full_Body_Instance.iliopsoas_left.value: 61,
+            Full_Body_Instance.subcutaneous_fat.value: 65,
+            Full_Body_Instance.muscle_other.value: 66,
+            Full_Body_Instance.inner_fat.value: 67,
+            Full_Body_Instance.ignore.value: 73,
+        }
 
 
 class Lower_Body(Abstract_lvl):
@@ -248,7 +733,7 @@ class Lower_Body(Abstract_lvl):
     TROCHLEA_GROOVE_CENTRAL_POINT = 10
 
     # Femur
-    HIP_CENTER = 11
+    PELVIS_CENTER = 11
     NECK_CENTER = 12
     TIP_OF_GREATER_TROCHANTER = 13
     LATERAL_CONDYLE_POSTERIOR = 14
@@ -277,6 +762,62 @@ class Lower_Body(Abstract_lvl):
     # Fibula
     LATERAL_MALLEOLUS = 32
 
+    @classmethod
+    def get_mapping(cls):
+        return _ABBREVIATION_TO_ENUM
+
+
+_ABBREVIATION_TO_ENUM = {
+    # Patella
+    "PPP": (Full_Body_Instance.patella_right, Lower_Body.PATELLA_PROXIMAL_POLE),
+    "PDP": (Full_Body_Instance.patella_right, Lower_Body.PATELLA_DISTAL_POLE),
+    "PMP": (Full_Body_Instance.patella_right, Lower_Body.PATELLA_MEDIAL_POLE),
+    "PLP": (Full_Body_Instance.patella_right, Lower_Body.PATELLA_LATERAL_POLE),
+    "PRPP": (Full_Body_Instance.patella_right, Lower_Body.PATELLA_RIDGE_PROXIMAL_POLE),
+    "PRDP": (Full_Body_Instance.patella_right, Lower_Body.PATELLA_RIDGE_DISTAL_POLE),
+    "PRHP": (Full_Body_Instance.patella_right, Lower_Body.PATELLA_RIDGE_HIGH_POINT),
+    # Femur
+    "TRMP": (Full_Body_Instance.femur_right, Lower_Body.TROCHLEAR_RIDGE_MEDIAL_POINT),
+    "TRLP": (Full_Body_Instance.femur_right, Lower_Body.TROCHLEAR_RIDGE_LATERAL_POINT),
+    "TGCP": (Full_Body_Instance.femur_right, Lower_Body.TROCHLEA_GROOVE_CENTRAL_POINT),
+    "FHC": (Full_Body_Instance.femur_right, Lower_Body.PELVIS_CENTER),
+    "FNC": (Full_Body_Instance.femur_right, Lower_Body.NECK_CENTER),
+    "TGT": (Full_Body_Instance.femur_right, Lower_Body.TIP_OF_GREATER_TROCHANTER),
+    "FLCP": (Full_Body_Instance.femur_right, Lower_Body.LATERAL_CONDYLE_POSTERIOR),
+    "FLCPC": (
+        Full_Body_Instance.femur_right,
+        Lower_Body.LATERAL_CONDYLE_POSTERIOR_CRANIAL,
+    ),
+    "FMCP": (Full_Body_Instance.femur_right, Lower_Body.MEDIAL_CONDYLE_POSTERIOR),
+    "FMCPC": (
+        Full_Body_Instance.femur_right,
+        Lower_Body.MEDIAL_CONDYLE_POSTERIOR_CRANIAL,
+    ),
+    "FLCD": (Full_Body_Instance.femur_right, Lower_Body.LATERAL_CONDYLE_DISTAL),
+    "FMCD": (Full_Body_Instance.femur_right, Lower_Body.MEDIAL_CONDYLE_DISTAL),
+    "FNP": (Full_Body_Instance.femur_right, Lower_Body.NOTCH_POINT),
+    "FAAP": (Full_Body_Instance.femur_right, Lower_Body.ANATOMICAL_AXIS_PROXIMAL),
+    "FADP": (Full_Body_Instance.femur_right, Lower_Body.ANATOMICAL_AXIS_DISTAL),
+    # Tibia
+    "TKC": (Full_Body_Instance.tibia_right, Lower_Body.KNEE_CENTER),
+    "TMIT": (Full_Body_Instance.tibia_right, Lower_Body.MEDIAL_INTERCONDYLAR_TUBERCLE),
+    "TLIT": (Full_Body_Instance.tibia_right, Lower_Body.LATERAL_INTERCONDYLAR_TUBERCLE),
+    "TMCP": (Full_Body_Instance.tibia_right, Lower_Body.MEDIAL_CONDYLE_POSTERIOR),
+    "TLCP": (Full_Body_Instance.tibia_right, Lower_Body.LATERAL_CONDYLE_POSTERIOR),
+    "TMCA": (Full_Body_Instance.tibia_right, Lower_Body.MEDIAL_CONDYLE_ANTERIOR),
+    "TLCA": (Full_Body_Instance.tibia_right, Lower_Body.LATERAL_CONDYLE_ANTERIOR),
+    "TMCM": (Full_Body_Instance.tibia_right, Lower_Body.MEDIAL_CONDYLE_MEDIAL),
+    "TLCL": (Full_Body_Instance.tibia_right, Lower_Body.LATERAL_CONDYLE_LATERAL),
+    "TAC": (Full_Body_Instance.tibia_right, Lower_Body.ANKLE_CENTER),
+    "TMM": (Full_Body_Instance.tibia_right, Lower_Body.MEDIAL_MALLEOLUS),
+    "TAAP": (Full_Body_Instance.tibia_right, Lower_Body.ANATOMICAL_AXIS_PROXIMAL),
+    "TADP": (Full_Body_Instance.tibia_right, Lower_Body.ANATOMICAL_AXIS_DISTAL),
+    "TGPP": (Full_Body_Instance.tibia_right, Lower_Body.TGPP),
+    "TTP": (Full_Body_Instance.tibia_right, Lower_Body.TTP),
+    # Fibula
+    "FLM": (Full_Body_Instance.fibula_right, Lower_Body.LATERAL_MALLEOLUS),
+}
+
 
 class Vertebra_Instance(Abstract_lvl):
     def __new__(cls, *args):
@@ -293,10 +834,13 @@ class Vertebra_Instance(Abstract_lvl):
         self._rib = None
         self._ivd = None
         self._endplate = None
+        self.has_rib = has_rib
         if has_rib:
             self._rib = (
                 vertebra_label + VERTEBRA_INSTANCE_RIB_LABEL_OFFSET if vertebra_label != 28 else 21 + VERTEBRA_INSTANCE_RIB_LABEL_OFFSET
             )
+            # 40 - 8 + 21 = 53 = rib for T13
+            # 52 rib for L1
         if has_ivd:
             self._ivd = vertebra_label + VERTEBRA_INSTANCE_IVD_LABEL_OFFSET
             self._endplate = vertebra_label + VERTEBRA_INSTANCE_ENDPLATE_LABEL_OFFSET
@@ -357,7 +901,21 @@ class Vertebra_Instance(Abstract_lvl):
 
     @classmethod
     def thoracic(cls):
-        return (cls.T1, cls.T2, cls.T3, cls.T4, cls.T5, cls.T6, cls.T7, cls.T8, cls.T9, cls.T10, cls.T11, cls.T12, cls.T13)
+        return (
+            cls.T1,
+            cls.T2,
+            cls.T3,
+            cls.T4,
+            cls.T5,
+            cls.T6,
+            cls.T7,
+            cls.T8,
+            cls.T9,
+            cls.T10,
+            cls.T11,
+            cls.T12,
+            cls.T13,
+        )
 
     @classmethod
     def lumbar(cls):
@@ -398,7 +956,7 @@ class Vertebra_Instance(Abstract_lvl):
     C3 = 3
     C4 = 4
     C5 = 5
-    C6 = 6
+    C6 = 6, True, True
     C7 = 7, True, True
     T1 = 8, True, True
     T2 = 9, True, True
@@ -474,7 +1032,7 @@ class Location(Abstract_lvl):
     Inferior_Articular_Right = 48
     Vertebra_Corpus_border = 49  # actual corpus body
     Vertebra_Corpus = 50
-    Dens_axis = 51  # TODO Unused. Should be in C2
+    Dens_axis = 51  # only in C2 and CT but not MRI
     Vertebral_Body_Endplate_Superior = 52
     Vertebral_Body_Endplate_Inferior = 53
     # Articulate_Process_Facet_Joint (Used anywhere?)
@@ -653,3 +1211,12 @@ vert_directions = [
 ]
 
 conversion_poi2text = {k: v for v, k in conversion_poi.items()}
+
+
+list_of_all_enums = [
+    Location,
+    Vertebra_Instance,
+    Lower_Body,
+    Full_Body_Instance,
+    Full_Body_Instance_Vibe,
+]

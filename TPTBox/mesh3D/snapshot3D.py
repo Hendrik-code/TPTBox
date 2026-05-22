@@ -34,9 +34,11 @@ def make_snapshot3D(
     ids_list: list[Sequence[int]] | None = None,
     smoothing=20,
     resolution: float | None = None,
-    width_factor=1.0,
+    width_factor: float = 1.0,
+    scale_factor: int = 1,
     verbose=True,
     crop=True,
+    png_magnify=1,
 ) -> Image.Image:
     """
     Generate a 3D snapshot from a medical image and save it to the specified output path.
@@ -76,11 +78,11 @@ def make_snapshot3D(
     if output_path is None:
         t = NamedTemporaryFile(suffix="_snap3D.png")  # noqa: SIM115
         output_path = str(t.name)
-    Path(output_path).parent.mkdir(exist_ok=True)
+    Path(output_path).parent.mkdir(exist_ok=True, parents=True)
     nii = to_nii_seg(img)
     if crop:
         try:
-            nii.apply_crop_(nii.compute_crop())
+            nii.apply_crop_(nii.compute_crop(dist=2))
         except ValueError:
             pass
     if resolution is None:
@@ -98,19 +100,32 @@ def make_snapshot3D(
         ids_list = ids_list2
 
     # TOP : ("A", "I", "R")
-    nii = nii.reorient(("A", "S", "L")).rescale_((resolution, resolution, resolution))
+    nii = nii.reorient(("A", "S", "L")).rescale_((resolution, resolution, resolution), mode="constant")
     width = int(max(nii.shape[0], nii.shape[2]) * width_factor)
-    window_size = (width * len(ids_list), nii.shape[1])
+    window_size = (width * len(ids_list) * png_magnify, nii.shape[1] * png_magnify)
     with Xvfb():
         scene = window.Scene()
-        show_m = window.ShowManager(scene, size=window_size, reset_camera=False)
+        show_m = window.ShowManager(scene=scene, size=window_size, reset_camera=False, png_magnify=png_magnify)
         show_m.initialize()
         for i, ids in enumerate(ids_list):
             x = width * i
-            _plot_sub_seg(scene, nii.extract_label(ids, keep_label=True), x, 0, smoothing, view[i % len(view)])
+            _plot_sub_seg(
+                scene,
+                nii.extract_label(ids, keep_label=True),
+                x,
+                0,
+                smoothing,
+                view[i % len(view)],
+            )
         scene.projection(proj_type="parallel")
         scene.reset_camera_tight(margin_factor=1.02)
-        window.record(scene, size=window_size, out_path=output_path, reset_camera=False)
+        window.record(
+            scene=scene,
+            size=window_size,
+            out_path=output_path,
+            reset_camera=False,
+            magnification=scale_factor,
+        )
         scene.clear()
     if not is_tmp:
         logger.on_save("Save Snapshot3D:", output_path, verbose=verbose)
@@ -120,29 +135,38 @@ def make_snapshot3D(
     return out_img
 
 
-def make_sub_snapshot_parallel(
-    imgs: list[Path],
-    output_paths: list[Image_Reference],
-    orientation: VIEW | list[VIEW] = "A",
+def make_snapshot3D_parallel(
+    imgs: list[Image_Reference],
+    output_paths: list[Path | str],
+    view: VIEW | list[VIEW] = "A",
     ids_list: list[Sequence[int]] | None = None,
     smoothing=20,
-    resolution=2,
+    resolution: float = 1,
     cpus=10,
     width_factor=1.0,
+    png_magnify=1,
+    scale_factor: int = 1,
+    override=True,
+    crop=True,
 ):
     ress = []
     with Pool(cpus) as p:  # type: ignore
         for out_path, img in zip_strict(output_paths, imgs):
+            if not override and Path(out_path).exists():
+                continue
             res = p.apply_async(
                 make_snapshot3D,
                 kwds={
                     "output_path": out_path,
                     "img": img,
-                    "view": orientation,
+                    "view": view,
                     "ids_list": ids_list,
                     "smoothing": smoothing,
                     "resolution": resolution,
                     "width_factor": width_factor,
+                    "png_magnify": png_magnify,
+                    "crop": crop,
+                    "scale_factor": scale_factor,
                 },
             )
             ress.append(res)
@@ -150,6 +174,9 @@ def make_sub_snapshot_parallel(
             res.get()
         p.close()
         p.join()
+
+
+make_sub_snapshot_parallel = make_snapshot3D_parallel
 
 
 def _plot_sub_seg(scene: window.Scene, nii: NII, x, y, smoothing, orientation: VIEW):
@@ -174,11 +201,27 @@ def _plot_sub_seg(scene: window.Scene, nii: NII, x, y, smoothing, orientation: V
         raise NotImplementedError()
     for idx in nii.unique():
         color = get_color_by_label(idx)
-        cont_actor = _plot_mask(nii.extract_label(idx), affine, x, y, smoothing=smoothing, color=color, opacity=1)
+        cont_actor = _plot_mask(
+            nii.extract_label(idx),
+            affine,
+            x,
+            y,
+            smoothing=smoothing,
+            color=color,
+            opacity=1,
+        )
         scene.add(cont_actor)
 
 
-def _plot_mask(nii: NII, affine, x_current, y_current, smoothing=10, color: list | np.ndarray = _red, opacity=1):
+def _plot_mask(
+    nii: NII,
+    affine,
+    x_current,
+    y_current,
+    smoothing=10,
+    color: list | np.ndarray = _red,
+    opacity=1,
+):
     mask = nii.get_seg_array()
     cont_actor = _contour_from_roi_smooth(mask, affine=affine, color=color, opacity=opacity, smoothing=smoothing)
     cont_actor.SetPosition(x_current, y_current, 0)
@@ -200,7 +243,7 @@ def _set_input(
     return vtk_object
 
 
-def _contour_from_roi_smooth(data, affine=None, color: np.ndarray | list = _red, opacity=1, smoothing=0):
+def _contour_from_roi_smooth(data: np.ndarray, affine=None, color: np.ndarray | list = _red, opacity=1, smoothing=0):
     """Generates surface actor from a binary ROI.
     Code from dipy, but added awesome smoothing!
 
@@ -231,10 +274,8 @@ def _contour_from_roi_smooth(data, affine=None, color: np.ndarray | list = _red,
     else:
         nb_components = 1
 
-    data = (data > 0) * 1
-    vol = np.interp(data, xp=[data.min(), data.max()], fp=[0, 255])
-    vol = vol.astype("uint8")
-
+    vol = data.astype("uint8") * 255
+    assert data.max() <= 1, np.unique(data)
     im = vtk.vtkImageData()
     if major_version <= 5:
         im.SetScalarTypeToUnsignedChar()  # type: ignore
@@ -248,12 +289,10 @@ def _contour_from_roi_smooth(data, affine=None, color: np.ndarray | list = _red,
         im.SetNumberOfScalarComponents(nb_components)  # type: ignore
     else:
         im.AllocateScalars(vtk.VTK_UNSIGNED_CHAR, nb_components)
-
-    # copy data
     vol = np.swapaxes(vol, 0, 2)
-    vol = np.ascontiguousarray(vol)
+    # vol = np.ascontiguousarray(vol) # already is
 
-    vol = vol.ravel() if nb_components == 1 else np.reshape(vol, [np.prod(vol.shape[:3]), vol.shape[3]])
+    vol = vol.reshape(-1) if nb_components == 1 else np.reshape(vol, [np.prod(vol.shape[:3]), vol.shape[3]])
 
     uchar_array = numpy_support.numpy_to_vtk(vol, deep=0)
     im.GetPointData().SetScalars(uchar_array)

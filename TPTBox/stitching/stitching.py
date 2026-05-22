@@ -324,6 +324,7 @@ def main(  # noqa: C901
     is_segmentation: bool = False,
     dtype: type | str = float,
     save=True,
+    ramp_path=None,
 ):
     np.set_printoptions(precision=2, floatmode="fixed")
     if is_segmentation:
@@ -529,7 +530,8 @@ def main(  # noqa: C901
             occupancy_arr = occupancy_arr[ex_slice]
         assert output is not None
         nii_occ = set_array(nii_out, occupancy_arr)
-        output = output.replace(".nii.gz", "_ramps.nii.gz")
+        nii_occ.set_data_dtype(np.int8)
+        output = output.replace(".nii.gz", "_ramps.nii.gz").replace("_msk_", "_") if ramp_path is None else ramp_path
         if save:
             nib.save(nii_occ, output)  # type: ignore
             print("Saved ", output) if verbose else None

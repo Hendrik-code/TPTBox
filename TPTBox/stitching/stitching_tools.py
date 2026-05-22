@@ -11,7 +11,7 @@ logger = No_Logger()
 
 
 def stitching(
-    bids_files: list[BIDS_FILE | NII | str | Path],
+    bids_files: list[BIDS_FILE | NII | str | Path] | list,
     out: BIDS_FILE | str | Path,
     is_seg=False,
     is_ct: bool = False,
@@ -22,6 +22,7 @@ def stitching(
     dtype: type = float,
     match_histogram=False,
     store_ramp=False,
+    ramp_path=None,
 ):
     out = str(out.file["nii.gz"]) if isinstance(out, BIDS_FILE) else str(out)
     files = [to_nii(bf).nii for bf in bids_files]
@@ -37,6 +38,7 @@ def stitching(
         kick_out_fully_integrated_images=kick_out_fully_integrated_images,
         is_segmentation=is_seg,
         dtype=dtype,
+        ramp_path=ramp_path,
     )
 
 

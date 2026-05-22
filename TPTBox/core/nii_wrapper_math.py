@@ -9,6 +9,8 @@ from skimage.metrics import peak_signal_noise_ratio as psnr
 from skimage.metrics import structural_similarity as ssim
 from typing_extensions import Self
 
+from TPTBox.core.np_utils import np_dice
+
 from .nii_poi_abstract import Has_Grid
 
 # fmt: off
@@ -22,6 +24,8 @@ if TYPE_CHECKING:
         def get_array(self) -> np.ndarray:
             ...
         def set_array(self,arr:np.ndarray,inplace=False,verbose=True)->Self:
+            ...
+        def get_seg_array(self) -> np.ndarray:
             ...
         @property
         def shape(self) -> tuple[int, int, int]:
@@ -38,18 +42,22 @@ if TYPE_CHECKING:
             ...
         def get_c_val(self)->int:
             ...
+        def unique(self)->list[int]:
+            ...
     C = Union[NII, Number, np.ndarray]
 else:
     class NII_Proxy:
         pass
     C = Union[Self,Number,np.ndarray]
+
 class NII_Math(NII_Proxy,Has_Grid):
+    __hash__ = None  # type: ignore # explicitly mark as unhashable
     def _binary_opt(self, other:C, opt,inplace = False)-> Self:
         if isinstance(other,NII_Math):
             other = other.get_array()
         return self.set_array(opt(self.get_array(),other),inplace=inplace,verbose=False)
-    def _uni_opt(self, opt,inplace = False)-> Self:
-        return self.set_array(opt(self.get_array()),inplace=inplace,verbose=False)
+    def _uni_opt(self, opt,inplace = False,**args)-> Self:
+        return self.set_array(opt(self.get_array(),**args),inplace=inplace,verbose=False)
     def __add__(self,p2):
         return self._binary_opt(p2,operator.add)
     def __radd__(self,p2):
@@ -73,12 +81,20 @@ class NII_Math(NII_Proxy,Has_Grid):
     def __rshift__(self,p2):
         return self._binary_opt(p2,operator.rshift)
     def __and__(self,p2):
-        return self._binary_opt(p2,operator.add)
+        if not np.issubdtype(self.get_array().dtype, np.integer):
+            raise TypeError("Bitwise operations require integer arrays")
+        return self._binary_opt(p2,operator.and_)
     def __or__(self,p2):
+        if not np.issubdtype(self.get_array().dtype, np.integer):
+            raise TypeError("Bitwise operations require integer arrays")
         return self._binary_opt(p2,operator.or_)
     def __xor__(self,p2):
+        if not np.issubdtype(self.get_array().dtype, np.integer):
+            raise TypeError("Bitwise operations require integer arrays")
         return self._binary_opt(p2,operator.xor)
     def __invert__(self):
+        if not np.issubdtype(self.get_array().dtype, np.integer):
+            raise TypeError("Bitwise operations require integer arrays")
         return self._uni_opt(operator.invert)
 
     def __lt__(self,p2):
@@ -117,7 +133,7 @@ class NII_Math(NII_Proxy,Has_Grid):
         return self._uni_opt(operator.abs)
 
     def __round__(self, decimals=0):
-        return self._uni_opt(np.round)
+        return self._uni_opt(np.round,decimals=decimals)
     def round(self,decimals):
         return self.__round__(decimals=decimals)
     def __floor__(self):
@@ -168,11 +184,15 @@ class NII_Math(NII_Proxy,Has_Grid):
             where=where.get_array().astype(bool)
 
         return np.mean(self.get_array(),axis=axis,keepdims=keepdims,where=where,**qargs)
-    def median(self,axis = None,keepdims=False,where = np._NoValue, **qargs)->float:  # type: ignore
+    def median(self, axis=None, keepdims=False,  **qargs):  # type: ignore
+        arr = self.get_array()
+        return np.median(arr, axis=axis, keepdims=keepdims, **qargs)
+
+    def std(self,axis = None,keepdims=False,where = np._NoValue, **qargs)->float:  # type: ignore
         if hasattr(where,"get_array"):
             where=where.get_array().astype(bool)
 
-        return np.median(self.get_array(),axis=axis,keepdims=keepdims,where=where,**qargs)
+        return np.std(self.get_array(),axis=axis,keepdims=keepdims,where=where,**qargs)
     def threshold(self,threshold=0.5, inplace=False):
         arr = self.get_array()
         arr2 = arr.copy()
@@ -208,7 +228,18 @@ class NII_Math(NII_Proxy,Has_Grid):
         img_2[img_2<=0] = 0
         ssim_value = psnr(img_1, img_2,data_range=img_1.max() - img_1.min())
         return ssim_value
-
+    def dice(self,nii: NII_Proxy,bar=True)->dict[int,float]:
+        out:dict[int,float] = {}
+        gt = self.get_seg_array()
+        pred = nii.get_seg_array()
+        s = set(self.unique()+nii.unique())
+        if bar:
+            from tqdm import tqdm
+            s = tqdm(s,desc="dice")
+        for lbl in s:
+            out[lbl] = np_dice(pred,gt,label=lbl)
+            #print(out[lbl])
+        return out
 
     def betti_numbers(self: NII,verbose=False) -> dict[int, tuple[int, int, int]]: # type: ignore
         """
