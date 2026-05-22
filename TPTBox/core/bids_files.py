@@ -1481,15 +1481,6 @@ class BIDS_Family:
     def get_identifier(self):
         first_e = self.data_dict[next(iter(self.data_dict.keys()))][0]
         return first_e.get_identifier(self.sequence_splitting_keys)
-        # if "sub" not in first_e.info:
-        #    print(f"family_id, no sub-key, got {first_e.info} and data_dict {list(self.data_dict.keys())}")
-        #    identifier = "sub-404"
-        # else:
-        #    identifier = "sub-" + first_e.info["sub"]
-        # for s in first_e.info.keys():
-        #    if s in self.sequence_splitting_keys:
-        #        identifier += "_" + s + "-" + first_e.info[s]
-        # return identifier
 
     def items(self):
         return self.data_dict.items()
