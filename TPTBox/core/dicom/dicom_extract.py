@@ -462,7 +462,7 @@ def _add_grid_info_to_json(nii_path: Path | str, simp_json: Path | str, force_up
     return json_dict
 
 
-def _find_all_files(dcm_dirs: Path | list[Path]):
+def _find_all_files(dcm_dirs: Path | list[Path],verbose=False):
     """
     Recursively find all DICOM directories or files in the given paths.
 
@@ -472,6 +472,9 @@ def _find_all_files(dcm_dirs: Path | list[Path]):
     Yields:
         Path: Paths to directories or individual DICOM files found during the search.
     """
+    if verbose:
+        logger.on_neutral("Start file searching")
+        i = 0
     yield dcm_dirs
     dcm_dirs = dcm_dirs if isinstance(dcm_dirs, list) else [dcm_dirs]
     for dcm_dir in dcm_dirs:
@@ -480,9 +483,15 @@ def _find_all_files(dcm_dirs: Path | list[Path]):
                 file = ""
                 for file in files:
                     if Path(file).is_file():  # str(file).endswith(".dcm") or str(file).endswith(".ima")
+                        if verbose:
+                            logger.on_neutral("File ",i,end="\r")
+                            i += 1
                         yield Path(root, file).absolute().parent
                         break
                     else:
+                        if verbose:
+                            logger.on_neutral("File ",i,end="\r")
+                            i += 1
                         yield Path(root, file)
                 # if "." not in str(file):
                 #    yield Path(root, file).absolute().parent
@@ -678,7 +687,7 @@ def extract_dicom_folder(
         convert_dicom.settings.disable_validate_slice_increment()
     outs = {}
 
-    for p in _find_all_files(dicom_folder):
+    for p in _find_all_files(dicom_folder,verbose=verbose):
         dicom_path = p
 
         if str(dicom_path).endswith(".pkl"):
@@ -743,6 +752,7 @@ if __name__ == "__main__":
         extract_dicom_folder(
             p, Path("/media/data/robert/datasets", "dataset-Durchleuchtung222"), False, False, validate_slice_increment=False
         )
+
 
     sys.exit()
     # s = "/home/robert/Downloads/bein/dataset-oberschenkel/rawdata/sub-1-3-46-670589-11-2889201787-2305829596-303261238-2367429497/mr/sub-1-3-46-670589-11-2889201787-2305829596-303261238-2367429497_sequ-406_mr.nii.gz"
