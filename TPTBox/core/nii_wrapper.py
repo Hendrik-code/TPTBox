@@ -239,6 +239,11 @@ class NII(NII_Math):
 
 
     @classmethod
+    def from_numpy(cls, arr: np.ndarray, affine: np.ndarray, seg=False, c_val=None, desc:str|None=None, info=None):
+        nii = nib.nifti1.Nifti1Image(arr,affine)
+        return NII(nii=nii, seg=seg, c_val=c_val, desc=desc, info=info)
+
+    @classmethod
     def load(cls, path: Image_Reference, seg, c_val=None)-> Self:
         nii= to_nii(path,seg)
         if seg:
