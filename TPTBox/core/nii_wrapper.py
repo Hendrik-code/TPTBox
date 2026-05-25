@@ -987,8 +987,7 @@ class NII(NII_Math):
                     pad = tuple((int(b), int(a)) for b, a in zip(pad_before, pad_after))
                     ret = s.apply_pad(pad, mode=mode,inplace=inplace,verbose=verbose)
 
-                    #TODO SET raise_error=False before committing
-                    valid = ret.assert_affine(mapping,raise_error=True,origin_tolerance=0.0001,error_tolerance=0.0001,shape_tolerance=0)
+                    valid = ret.assert_affine(mapping,raise_error=False,origin_tolerance=0.0001,error_tolerance=0.0001,shape_tolerance=0)
                     if valid:
                         log.print(f"resample_from_to only needs padding/cropping {pad}",verbose=verbose)
                         ret.affine = mapping.affine #remove floating point error
