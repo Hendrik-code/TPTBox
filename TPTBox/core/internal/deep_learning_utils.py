@@ -7,7 +7,21 @@ from TPTBox.core.vert_constants import never_called
 DEVICES = Literal["cpu", "cuda", "mps"]
 
 
-def get_device(ddevice: DEVICES, gpu_id: int):
+def get_device(ddevice: DEVICES, gpu_id: int) -> torch.device:
+    """Construct a :class:`torch.device` from a device type string and GPU index.
+
+    Args:
+        ddevice: Target device type — one of ``"cpu"``, ``"cuda"``, or
+            ``"mps"``.
+        gpu_id: CUDA device index (only used when ``ddevice`` is ``"cuda"``).
+
+    Returns:
+        A :class:`torch.device` configured for the requested backend.
+
+    Raises:
+        AssertionError: Via :func:`~TPTBox.core.vert_constants.never_called`
+            when ``ddevice`` is not one of the recognised values.
+    """
     if ddevice == "cpu":
         # import multiprocessing
 

@@ -1,6 +1,4 @@
-"""
-This script assumes that there are aligned Sagittal data and poorly aligned axial data.
-"""
+"""This script assumes that there are aligned Sagittal data and poorly aligned axial data."""
 
 from __future__ import annotations
 
@@ -15,7 +13,28 @@ from TPTBox.registration._ridged_intensity.register import only_change_affine, r
 from TPTBox.stitching import stitching
 
 
-def register_ax_and_stich_both(sub: Subject_Container, out_folder, buffer_path, verbose_stitching=True):
+def register_ax_and_stich_both(
+    sub: Subject_Container, out_folder: str | Path, buffer_path: str | Path, verbose_stitching: bool = True
+) -> dict:
+    """Register axial acquisitions to a sagittal reference and stitch all chunks.
+
+    For each session found in the subject, the function:
+        1. Stitches all sagittal chunks into a single volume.
+        2. Rigidly registers each axial chunk to the stitched sagittal volume.
+        3. Stitches the registered axial volumes.
+        4. Propagates the transforms to spinal-cord and lesion segmentations.
+
+    Args:
+        sub: BIDS subject container providing query access to the subject's files.
+        out_folder: Destination folder for stitched output files.
+        buffer_path: Path to the pickle file used for caching rigid transforms
+            between runs.
+        verbose_stitching: Pass verbosity flag to the stitching routine.
+
+    Returns:
+        A dictionary mapping each axial NIfTI path to its computed rigid
+        transform, suitable for merging into the persistent registration buffer.
+    """
     with open(buffer_path, "rb") as f:
         registration_buffer = pickle.load(f) if Path(buffer_path).exists() else {}
     new_reg_buffer = {}
@@ -124,18 +143,37 @@ def register_ax_and_stich_both(sub: Subject_Container, out_folder, buffer_path, 
     return new_reg_buffer
 
 
-def save_registration_buffer(buffers: dict | list[dict], registration_buffer, buffer_path):
+def save_registration_buffer(buffers: dict | list[dict], registration_buffer: dict, buffer_path: str | Path) -> None:
+    """Merge new transform dicts into the global registration buffer and persist it.
+
+    Args:
+        buffers: One or more dicts mapping file paths to rigid transforms that
+            were computed in the current run.
+        registration_buffer: The existing global buffer dict to update in-place.
+        buffer_path: Path to the pickle file where the updated buffer is saved.
+    """
     if not isinstance(buffers, list):
         buffers = [buffers]
     assert buffers is not None
     for new_buffer in buffers:
-        for key, value in new_buffer.items():
-            registration_buffer[key] = value
+        registration_buffer.update(new_buffer)
     with open(buffer_path, "wb") as x:
         pickle.dump(registration_buffer, x)
 
 
-def run(root="/media/data/robert/datasets/dataset-McGinnes/", out_folder="rawdata_new", n_jobs=1, chunks=16):
+def run(
+    root: str = "/media/data/robert/datasets/dataset-McGinnes/", out_folder: str = "rawdata_new", n_jobs: int = 1, chunks: int = 16
+) -> None:
+    """Run the full axial-to-sagittal registration pipeline over a BIDS dataset.
+
+    Args:
+        root: Root directory of the BIDS dataset.
+        out_folder: Sub-folder name relative to ``root`` where stitched outputs
+            are written.
+        n_jobs: Number of parallel jobs. Set to ``1`` to run serially.
+        chunks: Batch size when ``n_jobs > 1`` (number of subjects processed
+            per parallel batch before the buffer is flushed to disk).
+    """
     bgi = BIDS_Global_info([root], parents=["rawdata"])
     registration_buffer = {}
     buffer_path = Path(root, "registration_affines.pkl")

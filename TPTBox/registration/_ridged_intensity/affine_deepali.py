@@ -59,9 +59,9 @@ class Tether_single(PairwiseImageLoss):
 
 
 def center_of_mass_cc(tensor: torch.Tensor) -> torch.Tensor:
-    """
-    Computes the center of mass for each channel in a (B, C, X, Y, Z) tensor.
-    Returns a tensor of shape (B, C, 3) containing the (x, y, z) coordinates per channel.
+    """Compute the centre of mass for each channel in a ``(B, C, X, Y, Z)`` tensor.
+
+    Returns a tensor of shape ``(B, C, 3)`` with ``(x, y, z)`` coordinates per channel.
     """
     dtype = tensor.dtype
     B, C, *spatial_shape = tensor.shape
@@ -169,12 +169,9 @@ class Tether(PairwiseImageLoss):
 
 
 def subsample_coords(coords: torch.Tensor, k: int) -> torch.Tensor:
-    """
-    If `coords` has more than `k` rows, return a random subset of size `k`;
-    otherwise return `coords` unchanged.
+    """Return a random subset of ``k`` rows from ``coords``, or the full tensor if it has ≤ ``k`` rows.
 
-    Uses sampling *without* replacement (`torch.randperm`), so every
-    coordinate appears at most once.  Works entirely on-device.
+    Samples without replacement via ``torch.randperm``; works entirely on-device.
     """
     n = coords.size(0)
     if n <= k:
@@ -201,8 +198,7 @@ class DISTANCE_to_TARGET(PairwiseImageLoss):
         target: torch.Tensor,
         mask: torch.Tensor | None = None,  # noqa: ARG002
     ) -> torch.Tensor:
-        """
-        Chamfer-style distance loss for mis-labelled voxels.
+        """Chamfer-style distance loss for mis-labelled voxels.
 
         Parameters
         ----------
@@ -215,7 +211,7 @@ class DISTANCE_to_TARGET(PairwiseImageLoss):
             back to integer labels. Set to 1 if `source` and `target` are already
             integer encoded.
 
-        Returns
+        Returns:
         -------
         torch.Tensor  scalar
             The mean distance (in voxel units) from every wrongly predicted voxel

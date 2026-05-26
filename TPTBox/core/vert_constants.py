@@ -1,3 +1,29 @@
+"""Vertebra constants, enumerations, and label-mapping utilities for TPTBox.
+
+Vertebra numbering convention
+------------------------------
+Integer label IDs follow the TPTBox spine segmentation scheme:
+
+- **Cervical** (C1–C7):   labels 1–7
+- **Thoracic** (T1–T12):  labels 8–19;  T13 is label 28
+- **Lumbar**   (L1–L6):   labels 20–25
+- **Sacrum**   (S1):      label 26;  S2–S6: labels 29–33;  Coccyx: label 27
+
+Associated structures use fixed offsets from the vertebra label:
+
+- **Rib**:      label + 32  (``VERTEBRA_INSTANCE_RIB_LABEL_OFFSET = 40 - 8``)
+- **IVD**:      label + 100 (``VERTEBRA_INSTANCE_IVD_LABEL_OFFSET``)
+- **Endplate**: label + 200 (``VERTEBRA_INSTANCE_ENDPLATE_LABEL_OFFSET``)
+
+Key exports
+-----------
+- :class:`Vertebra_Instance` — IntEnum of all vertebra instances with rib/IVD helpers.
+- :class:`Location`          — IntEnum of vertebra subregion labels (POI types).
+- :data:`v_name2idx`         — ``dict[str, int]`` mapping name (e.g. ``"L1"``) → label.
+- :data:`v_idx2name`         — ``dict[int, str]`` mapping label → name.
+- :data:`v_idx_order`        — List of label IDs in anatomical cranio-caudal order.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -58,11 +84,12 @@ _same_direction: dict[DIRECTIONS, DIRECTIONS] = {
 
 
 def never_called(args: NoReturn) -> NoReturn:  # noqa: ARG001
+    """Raise ``NotImplementedError``; used to mark branches that should be unreachable."""
     raise NotImplementedError()
 
 
 class Sentinel:
-    pass
+    """Unique sentinel object used as a default argument to distinguish *not provided* from ``None``."""
 
 
 # get range of all ribs
@@ -78,19 +105,29 @@ _register_lvl = {}
 
 
 class Abstract_lvl(Enum):
+    """Base class for all TPTBox label-level enumerations.
+
+    Subclasses are automatically registered in the global ``_register_lvl`` dict
+    so that cross-enum name resolution works.  Override :meth:`save_as_name` to
+    control whether values are serialised as human-readable names or raw integers.
+    """
+
     def __init_subclass__(cls, **kwargs):
         _register_lvl[str(cls.__name__)] = cls
 
     @classmethod
     def save_as_name(cls) -> bool:
+        """Return True if enum members should be saved using their name rather than their integer value."""
         return True
 
     @classmethod
     def order_dict(cls) -> dict[int, int]:
+        """Return a mapping from enum value to sort position; empty dict means natural integer order."""
         return {}  # Default integer order
 
     @classmethod
     def _get_name(cls, i: int, no_raise=True) -> str:
+        """Resolve an integer label to its enum name (or raw string if not found)."""
         if cls.save_as_name():
             try:
                 return cls(i).name
@@ -101,6 +138,7 @@ class Abstract_lvl(Enum):
 
     @classmethod
     def _get_id(cls, s: str | int, no_raise=True) -> int:
+        """Resolve a name or integer to its integer enum value."""
         if isinstance(s, int):
             return s
         try:
@@ -115,19 +153,29 @@ class Abstract_lvl(Enum):
 
 
 class Any(Abstract_lvl):
+    """Wildcard label-level that resolves names by searching all registered enums.
+
+    Unlike :class:`Abstract_lvl`, ``Any`` does not save member names — values are
+    always serialised as plain integers.  Name resolution for :meth:`_get_id` tries
+    every registered enum class until a match is found.
+    """
+
     def __init_subclass__(cls, **kwargs):
         _register_lvl[str(cls.__name__)] = cls
 
     @classmethod
     def save_as_name(cls) -> bool:
+        """Always returns False; values are serialised as integers."""
         return False
 
     @classmethod
     def _get_name(cls, i: int, no_raise=True) -> str:  # noqa: ARG003
+        """Return the string representation of integer ``i`` without enum lookup."""
         return str(i)
 
     @classmethod
     def _get_id(cls, s: str | int, no_raise=True) -> int:  # noqa: ARG003
+        """Resolve ``s`` by searching all registered enum classes; falls back to ``int(s)``."""
         self_name = str(cls.__name__)
         for n, cl in _register_lvl.items():
             if n == self_name:
@@ -141,6 +189,14 @@ class Any(Abstract_lvl):
 
 
 class Full_Body_Instance_Vibe(Abstract_lvl):
+    """Enum of whole-body anatomy labels in the VIBESeg segmentation scheme.
+
+    Similar to :class:`Full_Body_Instance` but uses a different numbering that
+    matches the VIBESeg model output.  Provides a class method
+    :meth:`get_Full_Body_Instance_mapping` to convert from
+    :class:`Full_Body_Instance` labels.
+    """
+
     spleen = 1
     kidney_right = 2
     kidney_left = 3
@@ -215,7 +271,8 @@ class Full_Body_Instance_Vibe(Abstract_lvl):
     bone_other = 72
 
     @classmethod
-    def get_Full_Body_Instance_mapping(cls):
+    def get_Full_Body_Instance_mapping(cls) -> dict[int, int]:
+        """Return a mapping from ``Full_Body_Instance`` label values to ``Full_Body_Instance_Vibe`` label values."""
         return {
             Full_Body_Instance.spleen.value: cls.spleen.value,  # spleen
             Full_Body_Instance.kidney_right.value: cls.kidney_right.value,  # kidney_right
@@ -294,6 +351,13 @@ class Full_Body_Instance_Vibe(Abstract_lvl):
 
 
 class Full_Body_Instance(Abstract_lvl):
+    """Enum of full-body anatomy instance labels used in whole-body segmentation.
+
+    Each member represents a distinct anatomical structure identified in a
+    whole-body scan.  Left/right pairs use an offset of 100 (right has the lower
+    value, left adds 100 where applicable).
+    """
+
     skull = 1
     clavicula_right = 2
     clavicula_left = 102
@@ -389,7 +453,8 @@ class Full_Body_Instance(Abstract_lvl):
     ignore = 63
 
     @classmethod
-    def bone(cls):
+    def bone(cls) -> list[Full_Body_Instance]:
+        """Return all skeletal bone instance labels."""
         return [
             Full_Body_Instance.skull,
             Full_Body_Instance.clavicula_right,
@@ -434,7 +499,8 @@ class Full_Body_Instance(Abstract_lvl):
         ]
 
     @classmethod
-    def feet(cls):
+    def feet(cls) -> list:
+        """Return the list of foot-level instances (talus and calcaneus, left and right)."""
         return [
             Full_Body_Instance.talus_right,
             Full_Body_Instance.talus_left,
@@ -449,7 +515,8 @@ class Full_Body_Instance(Abstract_lvl):
         ]
 
     @classmethod
-    def lung_system(cls):
+    def lung_system(cls) -> list[Full_Body_Instance]:
+        """Return trachea and lung instance labels."""
         return [
             Full_Body_Instance.trachea,
             Full_Body_Instance.lung_right,
@@ -457,7 +524,8 @@ class Full_Body_Instance(Abstract_lvl):
         ]
 
     @classmethod
-    def organs(cls):
+    def organs(cls) -> list[Full_Body_Instance]:
+        """Return solid abdominal and thoracic organ instance labels."""
         return [
             Full_Body_Instance.heart,
             Full_Body_Instance.kidney_right,
@@ -473,7 +541,8 @@ class Full_Body_Instance(Abstract_lvl):
         ]
 
     @classmethod
-    def digestion(cls):
+    def digestion(cls) -> list[Full_Body_Instance]:
+        """Return gastrointestinal organ instance labels."""
         return [
             Full_Body_Instance.stomach,
             Full_Body_Instance.pancreas,
@@ -483,7 +552,8 @@ class Full_Body_Instance(Abstract_lvl):
         ]
 
     @classmethod
-    def vessels(cls):
+    def vessels(cls) -> list[Full_Body_Instance]:
+        """Return vascular structure instance labels."""
         return [
             Full_Body_Instance.aorta,
             Full_Body_Instance.pulmonary_vein,
@@ -505,7 +575,8 @@ class Full_Body_Instance(Abstract_lvl):
         ]
 
     @classmethod
-    def full_spine(cls):
+    def full_spine(cls) -> list[Full_Body_Instance]:
+        """Return spinal structure instance labels (channel, IVD, vertebra, sacrum)."""
         return [
             Full_Body_Instance.channel,
             Full_Body_Instance.ivd,
@@ -515,7 +586,8 @@ class Full_Body_Instance(Abstract_lvl):
         ]
 
     @classmethod
-    def muscle(cls):
+    def muscle(cls) -> list[Full_Body_Instance]:
+        """Return individually segmented muscle group instance labels."""
         return [
             Full_Body_Instance.gluteus_maximus_right,
             Full_Body_Instance.gluteus_maximus_left,
@@ -530,7 +602,8 @@ class Full_Body_Instance(Abstract_lvl):
         ]
 
     @classmethod
-    def body_comp(cls):
+    def body_comp(cls) -> list[Full_Body_Instance]:
+        """Return body composition instance labels (fat, generic muscle, and named muscles)."""
         return [
             Full_Body_Instance.subcutaneous_fat,
             Full_Body_Instance.muscle_other,
@@ -539,7 +612,8 @@ class Full_Body_Instance(Abstract_lvl):
         ]
 
     @classmethod
-    def get_VIBESeg_mapping(cls):
+    def get_VIBESeg_mapping(cls) -> dict[int, int]:
+        """Return a mapping from VIBESeg label indices to ``Full_Body_Instance`` label values."""
         return {
             1: Full_Body_Instance.spleen.value,  # spleen
             2: Full_Body_Instance.kidney_right.value,  # kidney_right
@@ -619,7 +693,8 @@ class Full_Body_Instance(Abstract_lvl):
         }
 
     @classmethod
-    def get_to_VIBESeg(cls):
+    def get_to_VIBESeg(cls) -> dict[int, int]:
+        """Return a mapping from ``Full_Body_Instance`` label values to VIBESeg label indices."""
         return {
             Full_Body_Instance.skull.value: 0,
             Full_Body_Instance.clavicula_right.value: 47,
@@ -718,6 +793,11 @@ class Full_Body_Instance(Abstract_lvl):
 
 
 class Lower_Body(Abstract_lvl):
+    """Points-of-interest labels for lower body structures (patella, femur, tibia, fibula).
+
+    Members define anatomical landmark positions used in lower-extremity analysis.
+    """
+
     # Patella
     PATELLA_PROXIMAL_POLE = 1
     PATELLA_DISTAL_POLE = 2
@@ -763,7 +843,8 @@ class Lower_Body(Abstract_lvl):
     LATERAL_MALLEOLUS = 32
 
     @classmethod
-    def get_mapping(cls):
+    def get_mapping(cls) -> dict[str, tuple]:
+        """Return the abbreviation-to-enum mapping for lower body landmarks."""
         return _ABBREVIATION_TO_ENUM
 
 
@@ -820,7 +901,24 @@ _ABBREVIATION_TO_ENUM = {
 
 
 class Vertebra_Instance(Abstract_lvl):
+    """Enum of individual vertebra instances with associated rib, IVD, and endplate labels.
+
+    Each member represents one vertebra identified by its integer label (see module
+    docstring for the full numbering scheme).  Associated structure labels are
+    computed from fixed offsets and exposed as properties:
+
+    - :attr:`VERTEBRA` — the raw vertebra label value.
+    - :attr:`RIB`      — rib label (only for T1–T12 and C6–C7).
+    - :attr:`IVD`      — intervertebral disc label (label + 100).
+    - :attr:`ENDPLATE` — endplate label (label + 200).
+
+    Class methods :meth:`cervical`, :meth:`thoracic`, :meth:`lumbar`, and
+    :meth:`sacrum` return tuples of members for each spinal region.
+    :meth:`order` provides the full cranio-caudal sequence.
+    """
+
     def __new__(cls, *args):
+        """Create a new Vertebra_Instance enum member, storing the vertebra label as its value."""
         obj = object.__new__(cls)
         obj._value_ = args[0]
         return obj
@@ -847,6 +945,7 @@ class Vertebra_Instance(Abstract_lvl):
 
     @classmethod
     def vertebra_label_without_sacrum(cls) -> list[int]:
+        """Return the list of vertebra label integers excluding sacrum/coccyx (C1–L6 + T13)."""
         # TODO add sacrum label and similar flags into init (also C, T, L)
         l = list(range(1, 26))
         l.append(28)
@@ -854,15 +953,22 @@ class Vertebra_Instance(Abstract_lvl):
 
     @classmethod
     def rib_label(cls) -> list[int]:
+        """Return all rib label integers for vertebrae that have ribs."""
         return [i._rib for i in Vertebra_Instance if i._rib is not None]
 
     @classmethod
     def endplate_label(cls) -> list[int]:
+        """Return all endplate label integers for vertebrae that have endplates."""
         return [i._endplate for i in Vertebra_Instance if i._endplate is not None]
 
     # TODO maybe easier to have a nested enum where the inner enum stands for vertebra, rib, ivd, ... makes naming independent of hard-coded attribute names
     @classmethod
     def name2idx(cls) -> dict[str, int]:
+        """Return a cached mapping from vertebra/structure name to integer label.
+
+        Names include plain vertebra names (e.g. ``"L1"``) as well as derived names
+        for ribs, IVDs, and endplates (e.g. ``"L1_rib"``, ``"L1_ivd"``).
+        """
         global _vname2idx  # noqa: PLW0603
         if _vname2idx is not None:
             return _vname2idx
@@ -880,6 +986,7 @@ class Vertebra_Instance(Abstract_lvl):
 
     @classmethod
     def idx2name(cls) -> dict[int, str]:
+        """Return a cached mapping from integer label to vertebra/structure name."""
         global _vidx2name  # noqa: PLW0603
         if _vidx2name is not None:
             return _vidx2name
@@ -887,7 +994,8 @@ class Vertebra_Instance(Abstract_lvl):
         return _vidx2name
 
     @classmethod
-    def is_sacrum(cls, i: int):
+    def is_sacrum(cls, i: int) -> bool:
+        """Return True if integer label ``i`` corresponds to a sacral or coccyx vertebra."""
         try:
             return cls(i) in cls.sacrum()
         except KeyError:
@@ -896,11 +1004,13 @@ class Vertebra_Instance(Abstract_lvl):
             return False
 
     @classmethod
-    def cervical(cls):
+    def cervical(cls) -> tuple[Vertebra_Instance, ...]:
+        """Return a tuple of all cervical vertebra members (C1–C7)."""
         return (cls.C1, cls.C2, cls.C3, cls.C4, cls.C5, cls.C6, cls.C7)
 
     @classmethod
-    def thoracic(cls):
+    def thoracic(cls) -> tuple[Vertebra_Instance, ...]:
+        """Return a tuple of all thoracic vertebra members (T1–T13)."""
         return (
             cls.T1,
             cls.T2,
@@ -918,22 +1028,36 @@ class Vertebra_Instance(Abstract_lvl):
         )
 
     @classmethod
-    def lumbar(cls):
+    def lumbar(cls) -> tuple[Vertebra_Instance, ...]:
+        """Return a tuple of all lumbar vertebra members (L1–L6)."""
         return (cls.L1, cls.L2, cls.L3, cls.L4, cls.L5, cls.L6)
 
     @classmethod
-    def sacrum(cls):
+    def sacrum(cls) -> tuple[Vertebra_Instance, ...]:
+        """Return a tuple of sacral and coccyx members (S1–S6, COCC)."""
         return (cls.S1, cls.S2, cls.S3, cls.S4, cls.S5, cls.S6, cls.COCC)
 
     @classmethod
-    def order(cls):
+    def order(cls) -> tuple[Vertebra_Instance, ...]:
+        """Return all vertebra members in cranio-caudal anatomical order (C1 → COCC)."""
         return cls.cervical() + cls.thoracic() + cls.lumbar() + cls.sacrum()
 
     @classmethod
     def order_dict(cls) -> dict[int, int]:
+        """Return a mapping from vertebra label value to its position in :meth:`order`."""
         return {a.value: e for e, a in enumerate(cls.order())}
 
-    def get_next_poi(self, poi: POI | NII | list[int]):
+    def get_next_poi(self, poi: POI | NII | list[int]) -> Vertebra_Instance | None:
+        """Return the next vertebra (caudally) that is present in ``poi``.
+
+        Args:
+            poi: A POI container, NII segmentation, or list of label integers.
+                The method checks which vertebra labels are present.
+
+        Returns:
+            The next :class:`Vertebra_Instance` below ``self`` that is present
+            in ``poi``, or ``None`` if no such vertebra exists.
+        """
         r = poi if isinstance(poi, list) else poi.keys_region() if hasattr(poi, "keys_region") else poi.unique()  # type: ignore
         o = self.order()
         idx = o.index(self)
@@ -942,7 +1066,17 @@ class Vertebra_Instance(Abstract_lvl):
                 return vert
         return None
 
-    def get_previous_poi(self, poi: POI | NII | list[int]):
+    def get_previous_poi(self, poi: POI | NII | list[int]) -> Vertebra_Instance | None:
+        """Return the previous vertebra (cranially) that is present in ``poi``.
+
+        Args:
+            poi: A POI container, NII segmentation, or list of label integers.
+                The method checks which vertebra labels are present.
+
+        Returns:
+            The nearest :class:`Vertebra_Instance` above ``self`` that is present
+            in ``poi``, or ``None`` if no such vertebra exists.
+        """
         r = poi if isinstance(poi, list) else poi.keys_region() if hasattr(poi, "keys_region") else poi.unique()  # type: ignore
         o = self.order()
         idx = o.index(self)
@@ -987,25 +1121,52 @@ class Vertebra_Instance(Abstract_lvl):
 
     @property
     def VERTEBRA(self) -> int:
+        """Integer label of this vertebra (same as ``self.value``)."""
         return self.value
 
     @property
     def RIB(self) -> int:
+        """Integer label of the rib associated with this vertebra.
+
+        Raises:
+            AssertionError: If this vertebra has no associated rib.
+        """
         assert self._rib is not None, (self.name, self.value)
         return self._rib
 
     @classmethod
     def rib2vert(cls, riblabel: int) -> int:
+        """Convert a rib label integer back to its parent vertebra label integer.
+
+        Args:
+            riblabel (int): A valid rib label from :meth:`rib_label`.
+
+        Returns:
+            int: The vertebra label corresponding to ``riblabel``.
+
+        Raises:
+            AssertionError: If ``riblabel`` is not a known rib label.
+        """
         assert riblabel in Vertebra_Instance.rib_label(), riblabel
         return riblabel - VERTEBRA_INSTANCE_RIB_LABEL_OFFSET if riblabel != 21 + VERTEBRA_INSTANCE_RIB_LABEL_OFFSET else 28
 
     @property
     def IVD(self) -> int:
+        """Integer label of the intervertebral disc at this level (vertebra label + 100).
+
+        Raises:
+            AssertionError: If this vertebra has no associated IVD.
+        """
         assert self._ivd is not None, (self.name, self.value)
         return self._ivd
 
     @property
     def ENDPLATE(self) -> int:
+        """Integer label of the endplate at this level (vertebra label + 200).
+
+        Raises:
+            AssertionError: If this vertebra has no associated endplate.
+        """
         assert self._endplate is not None, (self.name, self.value)
         return self._endplate
 
@@ -1014,8 +1175,20 @@ class Vertebra_Instance(Abstract_lvl):
 
 
 class Location(Abstract_lvl):
+    """IntEnum of vertebra subregion and anatomical landmark labels used as POI subregion IDs.
+
+    Values below 100 correspond to anatomical subregions of the vertebra
+    (e.g. corpus, spinosus process, articular processes).  Values ≥ 100 are
+    used for computed locations such as intervertebral discs (100), endplates
+    superior (200–), and endplates inferior (300–).
+
+    Members are serialised as integers (not names) because :meth:`save_as_name`
+    returns ``False``.
+    """
+
     @classmethod
     def save_as_name(cls) -> bool:
+        """Always returns False; Location values are saved as integers."""
         return False
 
     Unknown = 0
@@ -1126,6 +1299,19 @@ class Location(Abstract_lvl):
 
 
 def vert_subreg_labels(with_border: bool = True) -> list[Location]:
+    """Return the standard list of vertebra subregion :class:`Location` labels.
+
+    The returned labels cover the main anatomical subregions used in vertebra
+    segmentation: arcus, spinosus process, costal processes, articular processes,
+    and vertebra corpus.
+
+    Args:
+        with_border (bool, optional): If True, also includes
+            :attr:`Location.Vertebra_Corpus_border`. Defaults to True.
+
+    Returns:
+        list[Location]: Ordered list of vertebra subregion ``Location`` members.
+    """
     labels = [
         Location.Arcus_Vertebrae,
         Location.Spinosus_Process,

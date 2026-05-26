@@ -8,11 +8,15 @@ import sys
 import typing
 from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 from warnings import warn
 
 import numpy as np
 
 import TPTBox
+
+if TYPE_CHECKING:
+    from TPTBox.core.nii_poi_abstract import Grid
 from TPTBox.core.bids_constants import (
     entities,
     entities_keys,
@@ -45,7 +49,19 @@ sys.path.append(str(file.parents[1]))
 # If the session level is omitted in the folder structure, the filename MUST begin with the string sub-<label>, without ses-<label>
 
 
-def validate_entities(key: str, value: str, name: str, verbose: bool):
+def validate_entities(key: str, value: str, name: str, verbose: bool) -> bool:
+    """Validate a BIDS key-value entity pair against the BIDS specification.
+
+    Args:
+        key: The BIDS entity key (e.g. ``"sub"``, ``"ses"``, ``"seg"``).
+        value: The value associated with the key.
+        name: The full filename, used for human-readable error messages.
+        verbose: If ``True``, print warnings for invalid entities.
+
+    Returns:
+        ``True`` when the entity is valid or ``verbose`` is ``False``;
+        ``False`` when a violation is detected.
+    """
     if not verbose:
         return True
     try:
@@ -105,7 +121,27 @@ def validate_entities(key: str, value: str, name: str, verbose: bool):
         return False
 
 
-def get_values_from_name(path: Path | str, verbose) -> tuple[str, dict[str, str], str, str]:
+def get_values_from_name(path: Path | str, verbose: bool) -> tuple[str, dict[str, str], str, str]:
+    """Parse a BIDS-formatted filename into its constituent components.
+
+    Splits a filename like ``sub-001_ses-01_T1w.nii.gz`` into the BIDS
+    format label, a key-value entity dictionary, the BIDS key stem, and
+    the file-type extension.
+
+    Args:
+        path: Path to (or plain name of) a BIDS file.
+        verbose: If ``True``, print warnings for non-conformant filenames.
+
+    Returns:
+        A 4-tuple ``(bids_format, info_dict, bids_key, file_type)`` where
+
+        * ``bids_format`` is the trailing label (e.g. ``"T1w"``),
+        * ``info_dict`` maps entity keys to values
+          (e.g. ``{"sub": "001", "ses": "01"}``),
+        * ``bids_key`` is the full stem without the extension
+          (e.g. ``"sub-001_ses-01_T1w"``),
+        * ``file_type`` is the extension (e.g. ``"nii.gz"``).
+    """
     name = Path(path).name
 
     bids_key, file_type = name.split(".", maxsplit=1)
@@ -146,9 +182,39 @@ def Buffered_BIDS_Global_info(
     file_name_manipulation: typing.Callable[[str], str] | None = None,
     sequence_splitting_keys: list[str] | None = None,
     filter_file: typing.Callable[[Path], bool] | None = None,
-    max_age_days=30,
-    recompute_parents=None,
-):
+    max_age_days: int = 30,
+    recompute_parents: list[str] | None = None,
+) -> BIDS_Global_info:
+    """Create a :class:`BIDS_Global_info` object backed by an on-disk file-path cache.
+
+    Scans each ``<dataset>/<parent>`` folder and serialises the discovered
+    file paths to a hidden pickle file (``.filepaths``) so that subsequent
+    calls can skip the directory walk.  The cache is automatically
+    invalidated when it is older than ``max_age_days`` days.
+
+    Args:
+        datasets: One or more dataset root directories (must contain a
+            ``dataset-`` prefix in their name per BIDS convention).
+        parents: Parent sub-folders to search inside each dataset, e.g.
+            ``["rawdata", "derivatives"]``.
+        additional_key: Extra BIDS entity keys beyond the official spec that
+            should not trigger validation warnings.
+        verbose: Print progress and cache-status messages.
+        file_name_manipulation: Optional callable applied to each filename
+            before BIDS parsing, e.g. to normalise non-conformant names.
+        sequence_splitting_keys: Keys used to group files into sequences
+            (families).  Defaults to the library-level constant when
+            ``None``.
+        filter_file: Optional predicate; if provided, only paths for which
+            the function returns ``True`` are included.
+        max_age_days: Number of days after which the on-disk cache is
+            considered stale and regenerated.  Defaults to ``30``.
+        recompute_parents: Parent names for which the cache should always be
+            rebuilt even if a valid cache exists.
+
+    Returns:
+        A fully initialised :class:`BIDS_Global_info` instance.
+    """
     import pickle
 
     if recompute_parents is None:
@@ -158,7 +224,8 @@ def Buffered_BIDS_Global_info(
         datasets = [datasets]
     files = {ds: [] for ds in datasets}
 
-    def save_buffer(f: Path, buffer_name):
+    def save_buffer(f: Path, buffer_name: str) -> list[Path]:
+        """Scan *f*, persist the discovered file list to a pickle cache, and return it."""
         global _cont  # noqa: PLW0603
         new_buffer = [Path(f.path) for f in _scan_tree(f, verbose=True) if Path(f.path).is_file()]
         try:
@@ -239,8 +306,8 @@ _cont = 0
 
 
 def _scan_tree(path, lvl=1, filter_folder=lambda _x, _y: True, verbose=False):
-    global _cont  # noqa: PLW0603
     """Recursively yield DirEntry objects for given directory."""
+    global _cont  # noqa: PLW0603
     for entry in os.scandir(path):
         if entry.is_dir(follow_symlinks=False):
             if filter_folder is not None and not filter_folder(Path(entry.path), lvl):
@@ -255,6 +322,8 @@ def _scan_tree(path, lvl=1, filter_folder=lambda _x, _y: True, verbose=False):
 
 
 class BIDS_Global_info:
+    """Global index of a BIDS dataset, mapping subjects to their files across multiple dataset roots."""
+
     def __init__(
         self,
         datasets: Sequence[Path | str] | Sequence[Path] | Sequence[str] | str | Path,
@@ -329,11 +398,32 @@ class BIDS_Global_info:
         self.entities_keys = entities_keys
 
     def search_folder(self, path: Path, ds, filter_folder) -> None:
+        """Recursively scan *path* and register every file found with the global info.
+
+        Args:
+            path: Directory to scan.
+            ds: Dataset root path associated with the scanned folder.
+            filter_folder: Callable ``(path, level) -> bool``; folders for
+                which this returns ``False`` are skipped.
+        """
         for entry in _scan_tree(path, filter_folder=filter_folder):
             if entry.is_file():
                 self.add_file_2_subject(Path(entry.path), ds)
 
-    def add_file_2_subject(self, bids: BIDS_FILE | Path, ds=None) -> None:
+    def add_file_2_subject(self, bids: BIDS_FILE | Path, ds: Path | str | None = None) -> None:
+        """Parse a file path (or pre-built :class:`BIDS_FILE`) and add it to the correct subject bucket.
+
+        Args:
+            bids: Either a raw filesystem path or an already-constructed
+                :class:`BIDS_FILE` instance.
+            ds: Dataset root path.  Required when *bids* is a plain
+                :class:`~pathlib.Path`; inferred automatically when *bids*
+                is a :class:`BIDS_FILE`.
+
+        Raises:
+            AssertionError: If *bids* is a :class:`~pathlib.Path` and *ds*
+                is ``None``.
+        """
         if isinstance(bids, Path) and "DS_Store" in bids.name:
             return
         if ds is None:
@@ -375,7 +465,18 @@ class BIDS_Global_info:
         )
         self.subjects[subject].add(bids)
 
-    def enumerate_subjects(self, sort=False, shuffle=False) -> list[tuple[str, Subject_Container]]:
+    def enumerate_subjects(self, sort: bool = False, shuffle: bool = False) -> list[tuple[str, Subject_Container]]:
+        """Return all subject identifiers together with their :class:`Subject_Container`.
+
+        Args:
+            sort: If ``True``, return subjects sorted alphabetically by
+                subject ID.
+            shuffle: If ``True``, return subjects in a random order.
+                Mutually exclusive with *sort* (sort takes precedence).
+
+        Returns:
+            A list of ``(subject_id, Subject_Container)`` pairs.
+        """
         # TODO Enumerate should put out numbers...
         if sort:
             return sorted(self.subjects.items())
@@ -385,7 +486,16 @@ class BIDS_Global_info:
             return s
         return self.subjects.items()  # type: ignore
 
-    def iter_subjects(self, sort=False) -> list[tuple[str, Subject_Container]]:
+    def iter_subjects(self, sort: bool = False) -> list[tuple[str, Subject_Container]]:
+        """Iterate over all subjects (alias for :meth:`enumerate_subjects` without shuffle).
+
+        Args:
+            sort: If ``True``, return subjects sorted alphabetically by
+                subject ID.
+
+        Returns:
+            A list of ``(subject_id, Subject_Container)`` pairs.
+        """
         if sort:
             return sorted(self.subjects.items())
         return self.subjects.items()  # type: ignore
@@ -397,17 +507,32 @@ class BIDS_Global_info:
         return "BIDS_Global_info: parents=" + str(self.parents) + f"\nDatasets = {self.datasets}"
 
     @property
-    def _global_bids_list(self):
+    def _global_bids_list(self) -> dict:
+        """Internal mapping from BIDS key stem to :class:`BIDS_FILE` instances."""
         return self.__bids_list
 
 
 class Subject_Container:
+    """Container for all BIDS files belonging to a single subject, grouped by sequence."""
+
     def __init__(self, name, sequence_splitting_keys: list[str]) -> None:
         self.name = name
         self.sequences: dict[str, list[BIDS_FILE]] = {}
         self.sequence_splitting_keys = sequence_splitting_keys.copy()
 
-    def get_sequence_name(self, bids: BIDS_FILE):
+    def get_sequence_name(self, bids: BIDS_FILE) -> str:
+        """Derive the sequence-bucket key for a given BIDS file.
+
+        Combines the values of :attr:`sequence_splitting_keys` that are
+        present in *bids* into a single underscore-joined string.
+
+        Args:
+            bids: The file whose sequence name should be resolved.
+
+        Returns:
+            A string key identifying the sequence bucket, e.g.
+            ``"ses-01_sequ-303"``.
+        """
         key_values = []
         for key in self.sequence_splitting_keys:
             key_values.append(bids.info[key]) if key in bids.info else None
@@ -429,6 +554,14 @@ class Subject_Container:
         return key + append_id
 
     def add(self, bids: BIDS_FILE) -> None:
+        """Register a BIDS file with this subject container.
+
+        Places *bids* into the correct sequence bucket (determined by
+        :meth:`get_sequence_name`) and sets the back-reference on the file.
+
+        Args:
+            bids: The BIDS file to add.
+        """
         sequ = self.get_sequence_name(bids)
         self.sequences.setdefault(sequ, [])
         if bids not in self.sequences[sequ]:
@@ -436,7 +569,7 @@ class Subject_Container:
         bids.set_subject(self)
 
     def new_query(self, flatten=False) -> Searchquery:
-        """Make a new search_query
+        """Make a new search_query.
 
         Args:
             flatten (bool, optional): If you look for single file set flatten to True,
@@ -455,6 +588,7 @@ class Subject_Container:
         alternative_sequ_list: list[BIDS_FILE] | None = None,
     ) -> BIDS_Family:
         """Returns a dictionary of all files the related sequence.
+
         Args:
                         sequ (str): key of the sequence
                         key_transform: function that maps BIDS_FILE to family key
@@ -466,7 +600,8 @@ class Subject_Container:
             dict: The key is the 'format' word (ct, dixon, snp,...), except special naming keys are passed.
             Default naming keys: ["seg", "label"] (see sequence_naming_keys for the up-to-date list)
             All default naming keys as well as those passed in key_addendum are appended as key-value to the family-key.
-            Example:
+
+        Example:
             ses-123_msk.nii.gz will get key msk
             seg-subreg_msk.nii.gz will get the key msk_seg-subreg
             ses-123_T1c.nii.gz will get key T1c
@@ -500,6 +635,8 @@ class Subject_Container:
 
 
 class BIDS_FILE:
+    """Representation of a single BIDS-compliant file with parsed entities and dataset context."""
+
     def __init__(
         self,
         file: Path | str,
@@ -508,8 +645,9 @@ class BIDS_FILE:
         bids_ds: BIDS_Global_info | None = None,
         file_name_manipulation: typing.Callable[[str], str] | None = None,
     ):
-        """A multi-file representation. It holds the path to Bids-files with the same identifier (filename excluding the file type).
-        It can hold the reference to the nii.gz, json, etc at the same time.
+        """Multi-file BIDS record sharing the same identifier (all extensions of one file stem).
+
+        Holds references to `.nii.gz`, `.json`, etc. simultaneously.
 
         The following fields are imported and can be accessed.
         self.format (str): The last value determining its use/modalities like T1w, msk, dixon
@@ -548,7 +686,18 @@ class BIDS_FILE:
                 self.file[file_type] = Path(file.parent, bids_key + "." + file_type)
         self.file = dict(sorted(self.file.items()))
 
-    def get_file(self, ending: str = "json", default=None):
+    def get_file(self, ending: str = "json", default: Path | None = None) -> Path | None:
+        """Return the path for a given file extension, or *default* if absent.
+
+        Args:
+            ending: File extension to look up, e.g. ``"json"`` or
+                ``"nii.gz"``.
+            default: Value returned when the extension is not present.
+
+        Returns:
+            The :class:`~pathlib.Path` for the requested extension, or
+            *default*.
+        """
         return self.file.get(ending, default)
 
     def __str__(self) -> str:
@@ -561,13 +710,24 @@ class BIDS_FILE:
     def __hash__(self) -> int:
         return self.BIDS_key.__hash__()
 
-    def exists(self):
+    def exists(self) -> bool:
+        """Return ``True`` when the primary file (preferring ``nii.gz``) exists on disk.
+
+        Returns:
+            ``True`` if the file exists, ``False`` otherwise.
+        """
         if "nii.gz" in self.file:
             return self.file["nii.gz"].exists()
         else:
             return self.file[next(iter(self.file.keys()))].exists()
 
-    def unlink(self, missing_ok=True):
+    def unlink(self, missing_ok: bool = True) -> None:
+        """Delete all files associated with this BIDS entry from disk.
+
+        Args:
+            missing_ok: If ``True``, suppress errors when a file does not
+                exist.  Passed directly to :meth:`pathlib.Path.unlink`.
+        """
         for f in self.file.values():
             f.unlink(missing_ok=missing_ok)
 
@@ -590,22 +750,60 @@ class BIDS_FILE:
         else:
             return False
 
-    def set_subject(self, sub: Subject_Container):
+    def set_subject(self, sub: Subject_Container) -> None:
+        """Attach a back-reference to the owning :class:`Subject_Container`.
+
+        Args:
+            sub: The subject container that owns this file.
+        """
         self.subject = sub
 
-    def set(self, key, value):
+    def set(self, key: str, value: str) -> None:
+        """Set a BIDS entity key-value pair on this file, validating the entity.
+
+        Args:
+            key: BIDS entity key (e.g. ``"seg"``).
+            value: Value to assign to the key.
+        """
         validate_entities(key, value, f"..._{key}-{value}_...", self.verbose)
         self.info[key] = value
 
-    def get(self, key, default=None):
+    def get(self, key: str, default: str | None = None) -> str | None:
+        """Return the value for a BIDS entity key, or *default* if not present.
+
+        Args:
+            key: BIDS entity key to look up (e.g. ``"sub"``, ``"ses"``).
+            default: Fallback value when *key* is absent.
+
+        Returns:
+            The entity value string, or *default*.
+        """
         if key in self.info:
             return self.info[key]
         return default
 
-    def loop_keys(self):
+    def loop_keys(self) -> typing.ItemsView[str, str]:
+        """Return all BIDS entity key-value pairs for this file.
+
+        Returns:
+            A view of ``(key, value)`` pairs from the :attr:`info` dictionary.
+        """
         return self.info.items()
 
-    def remove(self, key):
+    def remove(self, key: str) -> str:
+        """Remove and return a BIDS entity key from :attr:`info`.
+
+        Args:
+            key: Entity key to remove.  Must not be ``"sub"``.
+
+        Returns:
+            The value that was associated with *key*.
+
+        Raises:
+            AssertionError: If *key* is ``"sub"`` (subject ID cannot be
+                removed).
+            KeyError: If *key* is not present in :attr:`info`.
+        """
         assert key != "sub", "not allowed to remove subject name"
         return self.info.pop(key)
 
@@ -613,7 +811,22 @@ class BIDS_FILE:
         self,
         path: Path,
         bids_ds: BIDS_Global_info | None = None,
-    ):
+    ) -> None:
+        """Associate an additional file extension with this BIDS entry.
+
+        Used to register companion files (e.g. a ``.json`` sidecar alongside
+        a ``nii.gz``) that share the same BIDS key stem.
+
+        Args:
+            path: Path to the companion file.  Its stem must match
+                :attr:`BIDS_key`.
+            bids_ds: If provided, the global registry is updated so that the
+                merged file dictionary is reflected there as well.
+
+        Raises:
+            AssertionError: If the stem of *path* does not match
+                :attr:`BIDS_key`.
+        """
         bids_key, file_type = Path(path).name.split(".", maxsplit=1)
 
         assert bids_key == self.BIDS_key, f"only aligned data aka same name different file type: {bids_key} != {self.BIDS_key}"
@@ -624,7 +837,21 @@ class BIDS_FILE:
                 bids_ds._global_bids_list[bids_key].file = dict(sorted(bids_dic_file.items()))
         self.file = dict(sorted(bids_dic_file.items()))
 
-    def rename_files(self, path: Path | str, ending=".nii.gz"):
+    def rename_files(self, path: Path | str, ending: str = ".nii.gz") -> None:
+        """Rename all associated files on disk to a new base path.
+
+        The *ending* suffix is stripped from *path* to obtain the base stem,
+        then each extension in :attr:`file` is appended.
+
+        Args:
+            path: Target path including the primary extension (e.g.
+                ``/out/sub-001_T1w.nii.gz``).
+            ending: Extension that terminates *path* and that will be
+                stripped before adding per-extension suffixes.
+
+        Raises:
+            AssertionError: If *path* does not end with *ending*.
+        """
         path = str(path)
         assert path.endswith(ending), f"set 'ending' to the part after the '.'\n {path} does not end with {ending}"
         path = path.replace(ending, "")
@@ -632,7 +859,22 @@ class BIDS_FILE:
             p = Path(path + "." + key)
             value.rename(p)
 
-    def symlink_files(self, path: Path | str, ending=".nii.gz", exist_ok=False):
+    def symlink_files(self, path: Path | str, ending: str = ".nii.gz", exist_ok: bool = False) -> None:
+        """Create symbolic links for all associated files at a new base path.
+
+        Equivalent to :meth:`rename_files` but creates symlinks rather than
+        moving files.  Existing correct symlinks are silently skipped.
+
+        Args:
+            path: Target path including the primary extension (e.g.
+                ``/out/sub-001_T1w.nii.gz``).
+            ending: Extension used to compute the base stem; a leading dot is
+                added automatically if absent.
+
+        Raises:
+            AssertionError: If *path* does not end with *ending*, or if an
+                existing symlink at the target points elsewhere.
+        """
         ending = ending if ending[0] == "." else "." + ending
         path = str(path)
         assert path.endswith(ending), f"set 'ending' to the part after the '.'\n {path} does not end with {ending}"
@@ -648,7 +890,23 @@ class BIDS_FILE:
 
             os.symlink(value, p)
 
-    def get_path_decomposed(self, file_type=None) -> tuple[Path, str, str, str]:
+    def get_path_decomposed(self, file_type: str | None = None) -> tuple[Path, str, str, str]:
+        """Decompose the file path relative to the dataset root.
+
+        Args:
+            file_type: Extension key to use when selecting which path to
+                decompose (e.g. ``"nii.gz"``).  Defaults to the first
+                extension in :attr:`file`.
+
+        Returns:
+            A 4-tuple ``(dataset_path, parent, sub_path, filename)`` where
+
+            * ``dataset_path`` is the dataset root :class:`~pathlib.Path`,
+            * ``parent`` is the top-level folder (e.g. ``"rawdata"``),
+            * ``sub_path`` is the intermediate path (e.g.
+              ``"sub-001/ses-01"``),
+            * ``filename`` is the bare filename including extension.
+        """
         if file_type is None:
             file_type = next(iter(self.file.keys()))
         folder_list = str(self.file[file_type].relative_to(self.dataset)).replace("\\\\", "/").replace("\\", "/").split("/")
@@ -659,21 +917,38 @@ class BIDS_FILE:
         return self.dataset, parent, str.join("/", subpath), filename
 
     @property
-    def parent(self):
+    def parent(self) -> str:
+        """Top-level parent folder name (e.g. ``"rawdata"`` or ``"derivatives"``)."""
         return self.get_parent()
 
     @property
-    def bids_format(self):
+    def bids_format(self) -> str:
+        """Alias for :attr:`format`; the BIDS modality/format label (e.g. ``"T1w"``)."""
         return self.format
 
     @property
-    def mod(self):
+    def mod(self) -> str | None:
+        """Modality label, resolving ``"msk"`` to the underlying ``mod`` entity value.
+
+        Returns:
+            The ``mod`` entity value for mask files, or :attr:`bids_format`
+            for all other formats.
+        """
         mod = self.bids_format
         if mod == "msk":
             return self.get("mod")
         return mod
 
-    def get_parent(self, file_type=None):
+    def get_parent(self, file_type: str | None = None) -> str:
+        """Return the top-level parent folder name for this file.
+
+        Args:
+            file_type: Extension key used to select which path to inspect.
+                Defaults to the first extension in :attr:`file`.
+
+        Returns:
+            The parent folder name, e.g. ``"rawdata"`` or ``"derivatives"``.
+        """
         return self.get_path_decomposed(file_type)[1]
 
     def get_changed_bids(
@@ -683,13 +958,38 @@ class BIDS_FILE:
         parent: str = "derivatives",
         path: str | None = None,
         info: dict | None = None,
-        from_info=False,
-        auto_add_run_id=False,
+        from_info: bool = False,
+        auto_add_run_id: bool = False,
         additional_folder: str | None = None,
         dataset_path: str | None = None,
-        make_parent=False,
-        non_strict_mode=False,
-    ):
+        make_parent: bool = False,
+        non_strict_mode: bool = False,
+    ) -> BIDS_FILE:
+        """Construct a new :class:`BIDS_FILE` pointing to a derived output path.
+
+        Delegates path construction to :meth:`get_changed_path` and wraps the
+        result in a :class:`BIDS_FILE` instance.
+
+        Args:
+            file_type: Target file extension (e.g. ``"nii.gz"``).
+            bids_format: Override the format/modality label.
+            parent: Target parent folder (e.g. ``"derivatives"``).
+            path: Override the intermediate sub-path; supports ``{key}``
+                template substitution.
+            info: Additional or overriding entity key-value pairs.
+            from_info: If ``True``, use the in-memory :attr:`info` dict
+                instead of the original filename entities.
+            auto_add_run_id: Append an auto-incremented ``run`` tag when the
+                target path already exists.
+            additional_folder: Extra folder appended between *path* and the
+                filename.
+            dataset_path: Override the dataset root.
+            make_parent: Create parent directories if they do not exist.
+            non_strict_mode: Relax BIDS entity validation.
+
+        Returns:
+            A new :class:`BIDS_FILE` pointing to the derived output.
+        """
         ds = dataset_path if dataset_path is not None else self.get_path_decomposed()[0]
         return BIDS_FILE(
             self.get_changed_path(
@@ -723,8 +1023,8 @@ class BIDS_FILE:
         no_sorting_mode: bool = False,
         non_strict_mode: bool = False,
     ) -> Path:
-        """
-        Changes part of the path to generate new flies. The new parent will be derivatives as a default.
+        """Changes part of the path to generate new flies. The new parent will be derivatives as a default.
+
         Examples:
         subreg_path = ct_bids.get_changed_path(file_type="nii.gz",parent = "derivatives",info={"seg": "subreg"}, format="cdt")
 
@@ -854,12 +1154,33 @@ class BIDS_FILE:
         parent: str = "derivatives",
         path: str | None = None,
         info: dict | None = None,
-        from_info=False,
-        auto_add_run_id=False,
+        from_info: bool = False,
+        auto_add_run_id: bool = False,
         additional_folder: str | None = None,
         dataset_path: str | None = None,
         non_strict_mode: bool = False,
     ) -> None:
+        """Copy all associated files to their derived output paths.
+
+        Calls :meth:`get_changed_path` for every extension in :attr:`file`
+        and copies each source file to the resulting destination using
+        :func:`shutil.copy2`.
+
+        Args:
+            bids_format: Override the format/modality label.
+            parent: Target parent folder (e.g. ``"derivatives"``).
+            path: Override the intermediate sub-path; supports ``{key}``
+                template substitution.
+            info: Additional or overriding entity key-value pairs.
+            from_info: If ``True``, use the in-memory :attr:`info` dict
+                instead of the original filename entities.
+            auto_add_run_id: Append an auto-incremented ``run`` tag when the
+                target path already exists.
+            additional_folder: Extra folder appended between *path* and the
+                filename.
+            dataset_path: Override the dataset root.
+            non_strict_mode: Relax BIDS entity validation.
+        """
         import shutil
 
         for key, value in self.file.items():
@@ -883,8 +1204,24 @@ class BIDS_FILE:
         bids_ds: BIDS_Global_info,
         bids_format: str | None = None,
         info: dict | None = None,
-        from_info=False,
+        from_info: bool = False,
     ) -> BIDS_FILE | None:
+        """Look up an already-registered derived file in the global BIDS index.
+
+        Constructs the expected BIDS key for the derived file (applying the
+        same entity overrides as :meth:`get_changed_path`) and returns the
+        matching :class:`BIDS_FILE` from *bids_ds* if it exists.
+
+        Args:
+            bids_ds: The global BIDS dataset to search.
+            bids_format: Override the format/modality label.
+            info: Additional or overriding entity key-value pairs.
+            from_info: If ``True``, use the in-memory :attr:`info` dict
+                instead of the original filename entities.
+
+        Returns:
+            The matching :class:`BIDS_FILE` if found, otherwise ``None``.
+        """
         if info is None:
             info = {}
 
@@ -908,10 +1245,21 @@ class BIDS_FILE:
         file_name += f"{bids_format if bids_format is not None else same_format}"
         return bids_ds._global_bids_list.get(file_name)
 
-    def insert_info_into_path(self, path):
-        """Helper function. Automatically replaces {key} with  values from the self.info dict in a string. Like:
-        f"sub-{sub}" --> "sub-patient001"
-        f"{sub}/ses-{ses}/sub-{sub}_ses-{ses}_label-heart_msk.nii.gz" --> "sub-patient001"
+    def insert_info_into_path(self, path: str | None) -> str | None:
+        """Replace ``{key}`` placeholders in *path* with entity values from :attr:`info`.
+
+        Example::
+
+            # With self.info = {"sub": "patient001", "ses": "01"}
+            bids.insert_info_into_path("sub-{sub}/ses-{ses}")
+            # -> "sub-patient001/ses-01"
+
+        Args:
+            path: Template string containing ``{key}`` placeholders, or
+                ``None``.
+
+        Returns:
+            The expanded string, or ``None`` when *path* is ``None``.
         """
         if path is None:
             return None
@@ -930,32 +1278,82 @@ class BIDS_FILE:
         self,
         key_transform: typing.Callable[[BIDS_FILE], str | None] | None = None,
         key_addendum: list[str] | None = None,
-    ):
-        """
-        See Sequence.get_sequence_files()
-        The BIDS_file must be part of a Sequence-family. Usually automatically generated by tree generation of BIDS_Global_info
+    ) -> BIDS_Family:
+        """Return the :class:`BIDS_Family` that this file belongs to.
+
+        Delegates to :meth:`Subject_Container.get_sequence_files` using the
+        sequence name resolved from this file's entities.  The file must be
+        part of a subject sequence (i.e. registered via
+        :class:`BIDS_Global_info`).
+
+        Args:
+            key_transform: Optional callable mapping a :class:`BIDS_FILE` to
+                a custom family key string; return ``None`` to use the default
+                key.
+            key_addendum: Extra entity keys appended to the family key beyond
+                the default :attr:`sequence_naming_keys`.
 
         Returns:
-                dict:
-        """
+            The :class:`BIDS_Family` containing all related files for this
+            sequence.
 
+        Raises:
+            AssertionError: If this file has no owning
+                :class:`Subject_Container`.
+        """
         assert hasattr(self, "subject"), (
             "The BIDS_file must be part of a Sequence-family. Usually automatically generated by tree generation of BIDS_Global_info"
         )
         sequ = self.subject.get_sequence_name(self)
         return self.subject.get_sequence_files(sequ, key_transform=key_transform, key_addendum=key_addendum)
 
-    def open_nii_reorient(self, axcodes_to=("P", "I", "R"), verbose=False):
+    def open_nii_reorient(self, axcodes_to: tuple[str, ...] = ("P", "I", "R"), verbose: bool = False) -> TPTBox.NII:
+        """Open the NIfTI file and reorient it in-place to the target axis codes.
+
+        Args:
+            axcodes_to: Desired orientation as a tuple of axis code strings,
+                e.g. ``("P", "I", "R")``.
+            verbose: If ``True``, print reorientation details.
+
+        Returns:
+            The reoriented :class:`~TPTBox.NII` volume.
+        """
         return self.open_nii().reorient_(axcodes_to, verbose=verbose)
 
     def has_json(self) -> bool:
+        """Return ``True`` when a JSON sidecar is registered for this file."""
         return "json" in self.file
 
     def open_json(self) -> dict:
+        """Load and return the JSON sidecar as a dictionary.
+
+        Returns:
+            Parsed JSON contents.
+
+        Raises:
+            KeyError: If no JSON file is registered in :attr:`file`.
+        """
         with open(self.file["json"]) as f:
             return json.load(f)
 
-    def open_poi(self, nii: TPTBox.Image_Reference | None = None):
+    def open_poi(self, nii: TPTBox.Image_Reference | None = None) -> TPTBox.POI:
+        """Load the associated JSON file as a :class:`~TPTBox.POI` (point-of-interest) object.
+
+        If the POI lacks spatial metadata (zoom, shape, etc.) a reference
+        NIfTI image is required to fill in those fields.
+
+        Args:
+            nii: Optional image reference used to supply missing spatial
+                metadata.  Required when the JSON does not embed grid info.
+
+        Returns:
+            The loaded :class:`~TPTBox.POI` object with complete spatial
+            metadata.
+
+        Raises:
+            ValueError: If no JSON file is present or the POI lacks spatial
+                metadata and *nii* is ``None``.
+        """
         from TPTBox import POI
 
         try:
@@ -978,13 +1376,30 @@ class BIDS_FILE:
             raise ValueError(f"json not present. Found only {self.file.keys()}\t{self.file}\n\n{self}") from e
         return ctd
 
-    def open_ctd(self, nii: TPTBox.Image_Reference | None = None):
+    def open_ctd(self, nii: TPTBox.Image_Reference | None = None) -> TPTBox.POI:
+        """Alias for :meth:`open_poi`; load the centroid JSON as a :class:`~TPTBox.POI`.
+
+        Args:
+            nii: Optional image reference for missing spatial metadata.
+
+        Returns:
+            The loaded :class:`~TPTBox.POI` object.
+        """
         return self.open_poi(nii)
 
     def has_nii(self) -> bool:
+        """Return ``True`` when at least one supported NIfTI extension is registered."""
         return any(a in self.file for a in _supported_nii_files)
 
-    def open_nii(self):
+    def open_nii(self) -> TPTBox.NII:
+        """Load the NIfTI file into a :class:`~TPTBox.NII` object.
+
+        Returns:
+            The loaded :class:`~TPTBox.NII` volume.
+
+        Raises:
+            ValueError: If no NIfTI file (``nii.gz`` / ``nii``) is present.
+        """
         try:
             from TPTBox import NII
 
@@ -992,8 +1407,22 @@ class BIDS_FILE:
         except KeyError as e:
             raise ValueError(f"nii.gz not present. Found only {self.file.keys()}\t{self.file}\n\n{self}") from e
 
-    def get_grid_info(self, add_grid_info_to_json=True):
-        """returns the Grid info. It looks up if this info is in json. If not it loads the File, computes the Grid and saves it in the json"""
+    def get_grid_info(self, add_grid_info_to_json: bool = True) -> Grid | None:
+        """Return the spatial grid metadata for this file.
+
+        Looks up the grid info in the associated JSON sidecar.  If the JSON
+        does not contain grid information the NIfTI is loaded, the grid is
+        computed, and the result is written back to the JSON when
+        *add_grid_info_to_json* is ``True``.
+
+        Args:
+            add_grid_info_to_json: If ``True``, persist newly computed grid
+                info to the JSON sidecar.
+
+        Returns:
+            A :class:`~TPTBox.core.nii_poi_abstract.Grid` instance, or
+            ``None`` if no NIfTI file is present.
+        """
         from TPTBox.core.dicom.dicom_extract import _add_grid_info_to_json
         from TPTBox.core.nii_poi_abstract import Grid
 
@@ -1004,18 +1433,52 @@ class BIDS_FILE:
             self.file["json"] = Path(str(nii_file).split(".")[0] + ".json")
         return Grid(**_add_grid_info_to_json(nii_file, self.file["json"], add=add_grid_info_to_json)["grid"])
 
-    def get_nii_file(self) -> Path:  # type: ignore
+    def get_nii_file(self) -> Path | None:
+        """Return the path to the first available NIfTI file.
+
+        Checks the supported NIfTI extensions (``nii.gz``, ``nii``, ``mkd``)
+        in order and returns the first one present.
+
+        Returns:
+            The :class:`~pathlib.Path` to the NIfTI file, or ``None`` if
+            none of the supported extensions are registered.
+        """
         for key in _supported_nii_files:
             if key in self.file:
                 return self.file[key]
+        return None
 
     def has_npz(self) -> bool:
+        """Return ``True`` when an NPZ array file is registered for this entry."""
         return "npz" in self.file
 
     def open_npz(self) -> dict[str, np.ndarray]:
+        """Load the associated NPZ file and return its contents as a dictionary.
+
+        Returns:
+            A dictionary mapping array names to :class:`numpy.ndarray` objects.
+
+        Raises:
+            KeyError: If no NPZ file is registered in :attr:`file`.
+        """
         return dict(np.load(self.file["npz"], allow_pickle=False))  # type: ignore
 
-    def open(self, filetype, _internal=False) -> Path | TPTBox.NII | dict | None:
+    def open(self, filetype: str, _internal: bool = False) -> Path | TPTBox.NII | dict | None:
+        """Open a file by extension, returning the appropriate Python object.
+
+        .. deprecated::
+            Use :meth:`open_nii`, :meth:`open_json`, or :attr:`file` directly.
+
+        Args:
+            filetype: Extension to open (e.g. ``"nii.gz"``, ``"json"``).
+            _internal: Suppress the deprecation warning when called internally.
+
+        Returns:
+            * A :class:`~TPTBox.NII` for NIfTI extensions.
+            * A :class:`dict` for JSON files.
+            * A :class:`~pathlib.Path` for all other file types.
+            * ``None`` if *filetype* is not registered in :attr:`file`.
+        """
         if not _internal:
             warn("open is deprecated.", DeprecationWarning, stacklevel=2)
         if filetype not in self.file:
@@ -1030,20 +1493,28 @@ class BIDS_FILE:
         self,
         key: str,
         constrain: list[str] | str | typing.Callable[[str | object], bool],
-        required=False,
-    ):
-        """
-        Returns True/False if the  key,constrain is matched
-        If a key is not present the inverse of the "required" value is returned
+        required: bool = False,
+    ) -> bool:
+        """Check whether this file satisfies a key/constraint filter.
+
+        If the *key* is not present in this file, the inverse of *required*
+        is returned (i.e. absent keys pass when ``required=False`` and fail
+        when ``required=True``).
 
         Args:
-            key (str): The key for which we filter. Can be "format", a filetype, a key from the info-dict
-                    In case of filetype + constrain is a callable you get a opened Nifti, opened json or Path
-            constrain (str | typing.Callable[[str  |  object], bool]):
-                    If a string is given: An exact string match is looked up
-                    If a callable: The function is called with the value of the key.
-            required (bool, optional): If True: A key must exist or the family/file is filtered.
-                    If False: Only if the key exist the family/file will be considers for filtering. Defaults to True.
+            key: The entity to inspect.  Special values: ``"format"`` checks
+                :attr:`format`; ``"filetype"`` checks registered extensions;
+                ``"parent"`` checks the parent folder; ``"self"`` passes the
+                whole :class:`BIDS_FILE`.  Any other value is looked up in
+                :attr:`info`, then in :attr:`file` (opening the file when a
+                callable is given).
+            constrain: Matching criterion — a string for exact match, a list
+                of strings for membership, or a callable predicate.
+            required: If ``True``, files for which *key* is absent are
+                rejected.  Defaults to ``False``.
+
+        Returns:
+            ``True`` when the constraint is satisfied, ``False`` otherwise.
         """
         key = key.lower()
         if key == "":
@@ -1079,17 +1550,28 @@ class BIDS_FILE:
         return False
 
     def get_interpolation_order(self) -> int:
-        """Returns 0 if the file is a mask or segmentation
-        Returns 3 if the file is a image.
+        """Return the interpolation order for this file (0 for masks/segmentations, 3 for images).
 
         Returns:
             int: interpolation_order
         """
         return 0 if self.format == "msk" or "label" in self.info else 3
 
-    def get_frame_of_reference_uid(self, default=None):
-        """gives a unique identifier for diffrent world spaces"""
+    def get_frame_of_reference_uid(self, default: str | None = None) -> str | None:
+        """Return a short hash identifying the world-space frame of reference.
 
+        Reads ``FrameOfReferenceUID`` from the JSON sidecar and converts it
+        to an 8-character base-36 string.  Falls back to the ``res`` or
+        ``ses`` entity, and finally to *default*, when no JSON is available.
+
+        Args:
+            default: Value returned when the frame of reference cannot be
+                determined.
+
+        Returns:
+            An 8-character base-36 hash string, a BIDS entity value, or
+            *default*.
+        """
         import hashlib
 
         length = 8
@@ -1109,7 +1591,7 @@ class BIDS_FILE:
         return base36[:length]
 
     def get_identifier(self, sequence_splitting_keys: list[str]) -> str:
-        """Generates an identifier for the BIDS_FILE based on subject and splitting keys
+        """Generates an identifier for the BIDS_FILE based on subject and splitting keys.
 
         Args:
             sequence_splitting_keys (list[str]): list of keys to use for splitting
@@ -1126,6 +1608,8 @@ class BIDS_FILE:
 
 
 class Searchquery:
+    """Query builder for filtering and retrieving BIDS files from a Subject_Container."""
+
     def __init__(self, subj: Subject_Container, flatten=False) -> None:
         """Filter for specific files.
 
@@ -1145,7 +1629,16 @@ class Searchquery:
         self._flatten = flatten
 
     @classmethod
-    def from_BIDS_Family(cls, fam: BIDS_Family):
+    def from_BIDS_Family(cls, fam: BIDS_Family) -> Searchquery:
+        """Construct a :class:`Searchquery` pre-filtered to a single :class:`BIDS_Family`.
+
+        Args:
+            fam: The family whose sequence bucket will be the sole candidate.
+
+        Returns:
+            A new :class:`Searchquery` containing only the sequence that
+            produced *fam*.
+        """
         dic = fam.data_dict
         any_file = dic[next(iter(dic.keys()))][0]
         sub = any_file.subject
@@ -1154,7 +1647,8 @@ class Searchquery:
         # query.candidates = dic.copy()
         return query
 
-    def _filter_fam_id(self, fam: BIDS_Family):
+    def _filter_fam_id(self, fam: BIDS_Family) -> None:
+        """Restrict candidates to the single sequence bucket that produced *fam*."""
         self.unflatten()
         dic = fam.data_dict
         any_file = dic[next(iter(dic.keys()))][0]
@@ -1163,14 +1657,23 @@ class Searchquery:
         self.candidates = {}
         self.candidates[subject_id] = c[subject_id]  # type: ignore
 
-    def copy(self):
+    def copy(self) -> Searchquery:
+        """Return a shallow copy of this query with the same candidates.
+
+        Returns:
+            A new :class:`Searchquery` sharing the same subject and flatten
+            mode, with an independent copy of the candidates collection.
+        """
         copy = Searchquery(self.subject, self._flatten)
         copy.candidates = self.candidates.copy()
         return copy
 
-    def flatten(self):
-        """
-        Transform from multi-file-mode to single file-mode
+    def flatten(self) -> None:
+        """Transform from multi-file-mode (sequence buckets) to single-file-mode.
+
+        After calling this method, :attr:`candidates` is a flat
+        :class:`list` of :class:`BIDS_FILE` instances and
+        :meth:`loop_list` can be used to iterate over them.
         """
         if self._flatten:
             return
@@ -1182,9 +1685,11 @@ class Searchquery:
         self.candidates = a
         self._flatten = True
 
-    def unflatten(self):
-        """
-        Transforms from single file-mode to multi-file-mode. Filtered Objects are still removed
+    def unflatten(self) -> None:
+        """Transform from single-file-mode back to multi-file-mode (sequence buckets).
+
+        Previously filtered files remain excluded.  After calling this method
+        :meth:`loop_dict` can be used to iterate over sequence families.
         """
         if not self._flatten:
             return
@@ -1197,32 +1702,47 @@ class Searchquery:
         self.candidates = a
         self._flatten = False
 
-    def filter_self(self, filter_fun: typing.Callable[[BIDS_FILE], bool], required=True) -> None:
+    def filter_self(self, filter_fun: typing.Callable[[BIDS_FILE], bool], required: bool = True) -> None:
+        """Filter candidates by applying *filter_fun* directly to each :class:`BIDS_FILE`.
+
+        Args:
+            filter_fun: Predicate receiving a :class:`BIDS_FILE`; return
+                ``True`` to keep the file.
+            required: Passed to :meth:`filter`.
+        """
         return self.filter("self", filter_fun, required=required)  # type: ignore
 
-    def filter_json(self, filter_fun: typing.Callable[[dict], bool], required=True) -> None:
+    def filter_json(self, filter_fun: typing.Callable[[dict], bool], required: bool = True) -> None:
+        """Filter candidates by applying *filter_fun* to the parsed JSON sidecar.
+
+        Args:
+            filter_fun: Predicate receiving the JSON dictionary; return
+                ``True`` to keep the file.
+            required: If ``True``, files without a JSON sidecar are removed.
+        """
         return self.filter("json", filter_fun, required=required)  # type: ignore
 
     def filter(
         self,
         key: str,
         filter_fun: list[str] | str | typing.Callable[[str | object], bool],
-        required=True,
-    ):
-        """Remove family/file from the Searchquery if:
-                        (unflatten-mode) NO single file exist in the family returns True
-                        (unflatten-mode) the filter_fun returns False
+        required: bool = True,
+    ) -> None:
+        """Remove candidates from the query that do not satisfy the filter.
 
-                        If a key is not present the inverse of the "required" value is returned
+        In flatten mode (single-file mode), individual files that do not pass
+        are removed.  In unflatten mode (sequence mode), a sequence bucket is
+        removed when *no* file in the bucket satisfies the filter.
 
         Args:
-                        key (str): The key for which we filter. Can be "format", a filetype, a key from the info-dict
-                                    In case of filetype + filter_fun is a callable you get a opened Nifti, opened json or Path
-                        filter_fun (str | typing.Callable[[str  |  object], bool]):
-                                    If a string is given: An exact string match is looked up
-                                    If a callable: The function is called with the value of the key.
-                        required (bool, optional): If True: A key must exist or the family/file is filtered.
-                                    If False: Only if the key exist the family/file will be considers for filtering. Defaults to True.
+            key: The entity to inspect.  Special values: ``"format"``,
+                ``"filetype"``, ``"parent"``, ``"self"``; otherwise looked up
+                in :attr:`BIDS_FILE.info` or :attr:`BIDS_FILE.file`.
+            filter_fun: Matching criterion — a string for exact match, a list
+                of accepted strings, or a callable predicate.
+            required: If ``True``, candidates where *key* is absent are
+                removed.  If ``False``, absent keys are silently kept.
+                Defaults to ``True``.
         """
         if self._flatten:
             assert isinstance(self.candidates, list)
@@ -1236,12 +1756,26 @@ class Searchquery:
                 if not any(bids_file.do_filter(key, filter_fun, required=required) for bids_file in bids_files):
                     self.candidates.pop(sequences)
 
-    def filter_format(self, filter_fun: list[str] | str | typing.Callable[[str | object], bool]):
+    def filter_format(self, filter_fun: list[str] | str | typing.Callable[[str | object], bool]) -> None:
+        """Keep only files whose format label satisfies *filter_fun*.
+
+        Args:
+            filter_fun: A format string, a list of accepted format strings,
+                or a callable predicate applied to the format label.
+        """
         if isinstance(filter_fun, list):
             return self.filter_format(lambda x: x in filter_fun)
         return self.filter("format", filter_fun=filter_fun, required=True)
 
-    def filter_filetype(self, filter_fun: list[str] | str | typing.Callable[[str | object], bool], required=True):
+    def filter_filetype(self, filter_fun: list[str] | str | typing.Callable[[str | object], bool], required: bool = True) -> None:
+        """Keep only files that have a matching file extension.
+
+        Args:
+            filter_fun: An extension string (e.g. ``"nii.gz"``), a list of
+                accepted extensions, or a callable predicate.
+            required: If ``True``, files without any registered extension
+                are removed.
+        """
         return self.filter("filetype", filter_fun=filter_fun, required=required)
 
     def filter_non_existence(
@@ -1250,7 +1784,7 @@ class Searchquery:
         filter_fun: str | typing.Callable[[str | object], bool] = lambda x: True,  # noqa: ARG005
         required=True,
     ) -> None:
-        """Remove family/file from the Searchquery if:
+        """Remove family/file from the Searchquery if the filter condition is met.
 
             (unflatten-mode) ANY single file exist in the family returns True
 
@@ -1279,8 +1813,16 @@ class Searchquery:
                 if any(bids_file.do_filter(key, filter_fun, required=required) for bids_file in bids_files):
                     self.candidates.pop(sequences)
 
-    def filter_dixon_only_inphase(self):
-        def json_filter(x):
+    def filter_dixon_only_inphase(self) -> None:
+        """Remove Dixon files that are fat, water, out-of-phase, or difference images.
+
+        Retains only in-phase (or unlabelled) Dixon acquisitions by
+        inspecting both the JSON ``ImageType`` field and the ``rec``,
+        ``acq``, and ``part`` entities.
+        """
+
+        def json_filter(x: dict) -> bool:
+            """Return True if JSON ImageType does not indicate a fat/water/outphase channel."""
             return "ImageType" not in x or (
                 "W" not in x["ImageType"]
                 and "F" not in x["ImageType"]
@@ -1289,7 +1831,8 @@ class Searchquery:
                 and "OP" not in x["ImageType"]
             )
 
-        def lam_filter(x):
+        def lam_filter(x: str) -> bool:
+            """Return True if the entity value does not indicate a non-inphase Dixon channel."""
             return (
                 x.upper() != "W"
                 and x.upper() != "F"
@@ -1306,25 +1849,35 @@ class Searchquery:
         self.filter("acq", lam_filter, required=False)  # type: ignore DEPRECATED
         self.filter("part", "inphase", required=False)  # type: ignore
 
-    def filter_dixon_water(self, _keys=None):
+    def filter_dixon_water(self, _keys: list[str] | None = None) -> None:
+        """Keep only Dixon water-channel images (requires flatten mode).
+
+        Args:
+            _keys: Image-type labels that identify the water channel.
+                Defaults to ``["W", "WATER"]``.
+        """
         if _keys is None:
             _keys = ["W", "WATER"]
         assert self._flatten
 
-        def json_filter(x):
+        def json_filter(x: dict) -> bool:
+            """Return True if JSON ImageType contains all required channel keys."""
             return "ImageType" not in x or all(k in x["ImageType"] for k in _keys)
 
-        def lam_filter(x):
+        def lam_filter(x: str) -> bool:
+            """Return True if the entity value matches one of the target channel keys."""
             return any(k == x.upper() for k in _keys)
 
         self.filter_json(json_filter, required=False)
         self.filter("rec", lam_filter, required=False)  # type: ignore
         self.filter("part", lam_filter, required=False)  # type: ignore
 
-    def filter_dixon_fat(self):
+    def filter_dixon_fat(self) -> None:
+        """Keep only Dixon fat-channel images (requires flatten mode)."""
         self.filter_dixon_water(_keys=["F", "FAT"])
 
-    def filter_dixon_outphase(self):
+    def filter_dixon_outphase(self) -> None:
+        """Keep only Dixon out-of-phase images (requires flatten mode)."""
         self.filter_dixon_water(_keys=["OP", "OPP", "OUTPHASE"])
 
     def action(
@@ -1333,19 +1886,27 @@ class Searchquery:
         filter_fun: str | typing.Callable[[str | object], bool] = lambda x: True,  # noqa: ARG005
         key: str = "",
         required: bool = True,
-        all_in_sequence=False,
-    ):
-        """When the filter_function is True the action_fun is applied on the BIDS_File
+        all_in_sequence: bool = False,
+    ) -> None:
+        """Apply *action_fun* to every candidate file that passes the filter.
 
         Args:
-            action_fun (typing.Callable[[BIDS_FILE], None]): If the filter-function return True: The function is called with the BIDS_file as an argument
-            key (str): The key for which we filter. Can be "format", a filetype, a key from the info-dict
-                        In case of filetype + filter_fun is a callable you get a opened Nifti, opened json or Path
-            filter_fun (str | typing.Callable[[str  |  object], bool]):
-                        If a string is given: An exact string match is looked up
-                        If a callable: The function is called with the value of the key.
-            required (bool): _description_. Defaults to True.
-                all_in_sequence (bool, optional): If True, the action_fun is called also on all family files. Defaults to False.
+            action_fun: Callable invoked with each matching
+                :class:`BIDS_FILE` as its sole argument.
+            key: The entity to inspect for filtering (same semantics as in
+                :meth:`filter`).  An empty string matches everything.
+            filter_fun: Matching criterion — a string for exact match or a
+                callable predicate.  Defaults to a predicate that always
+                returns ``True`` (act on all candidates).
+            required: If ``True``, candidates where *key* is absent are
+                skipped.  Defaults to ``True``.
+            all_in_sequence: In unflatten mode, when ``True`` and at least
+                one file in a sequence bucket matches, *action_fun* is called
+                on *every* file in that bucket.  Defaults to ``False``.
+
+        Raises:
+            AssertionError: If both :attr:`_flatten` and *all_in_sequence*
+                are ``True`` (incompatible combination).
         """
         assert not (self._flatten and all_in_sequence)
         if self._flatten:
@@ -1386,7 +1947,8 @@ class Searchquery:
             return s
 
     def loop_list(self, sort=False) -> typing.Iterator[BIDS_FILE]:
-        """Returns an iterator. Flatten must be True
+        """Returns an iterator. Flatten must be True.
+
         Args:
             sort (bool, optional): Sort alphabetically. Defaults to False.
 
@@ -1404,7 +1966,7 @@ class Searchquery:
         key_transform: typing.Callable[[BIDS_FILE], str | None] | None = None,
         key_addendum: list[str] | None = None,  # type: ignore
     ) -> typing.Iterator[BIDS_Family]:
-        """Returns an iterator. Flatten must be False: it iterates over all families, where the return is the dict from the get_sequence_files function
+        """Returns an iterator. Flatten must be False: it iterates over all families, where the return is the dict from the get_sequence_files function.
 
         Args:
             sort (bool, optional): Sort alphabetically. Defaults to False.
@@ -1429,6 +1991,8 @@ class Searchquery:
 
 
 class BIDS_Family:
+    """A group of related BIDS files sharing the same sequence-splitting key values."""
+
     def __init__(
         self,
         family_data: dict[str, list[BIDS_FILE]],
@@ -1482,41 +2046,68 @@ class BIDS_Family:
     def __lt__(self, other):
         return str(self) < str(other)
 
-    def get_identifier(self):
+    def get_identifier(self) -> str:
+        """Return the subject+sequence identifier string for this family.
+
+        Delegates to :meth:`BIDS_FILE.get_identifier` on the first file in
+        the family.
+
+        Returns:
+            A string like ``"sub-001_ses-01_sequ-303"`` derived from the
+            sequence splitting keys.
+        """
         first_e = self.data_dict[next(iter(self.data_dict.keys()))][0]
         return first_e.get_identifier(self.sequence_splitting_keys)
-        # if "sub" not in first_e.info:
-        #    print(f"family_id, no sub-key, got {first_e.info} and data_dict {list(self.data_dict.keys())}")
-        #    identifier = "sub-404"
-        # else:
-        #    identifier = "sub-" + first_e.info["sub"]
-        # for s in first_e.info.keys():
-        #    if s in self.sequence_splitting_keys:
-        #        identifier += "_" + s + "-" + first_e.info[s]
-        # return identifier
 
-    def items(self):
+    def items(self) -> typing.ItemsView[str, list[BIDS_FILE]]:
+        """Return ``(format_key, [BIDS_FILE, ...])`` pairs from the family dictionary."""
         return self.data_dict.items()
 
-    def keys(self):
+    def keys(self) -> typing.KeysView[str]:
+        """Return the format keys present in this family."""
         return self.data_dict.keys()
 
-    def sort(self):
+    def sort(self) -> None:
+        """Sort the family dictionary alphabetically by format key in-place."""
         self.data_dict = dict(sorted(self.data_dict.items()))
 
-    def values(self):
+    def values(self) -> list[list[BIDS_FILE]]:
+        """Return all lists of :class:`BIDS_FILE` objects in this family."""
         return list(self.data_dict.values())
 
-    def new_query(self, flatten=False):
+    def new_query(self, flatten: bool = False) -> Searchquery:
+        """Create a :class:`Searchquery` scoped to this family's sequence.
+
+        Args:
+            flatten: If ``True``, the query starts in single-file mode.
+
+        Returns:
+            A :class:`Searchquery` pre-filtered to this family's sequence
+            bucket.
+        """
         q = Searchquery.from_BIDS_Family(self)
         if flatten:
             q.flatten()
         return q
 
     def get_key_len(self) -> dict[str, int]:
+        """Return the number of :class:`BIDS_FILE` instances for each format key.
+
+        Returns:
+            A dictionary mapping format key to the count of associated files.
+        """
         return {k: len(v) for k, v in self}
 
-    def get_format_len(self):
+    def get_format_len(self) -> dict[str, tuple[int, int]]:
+        """Return per-base-format counts aggregated across all sub-keys.
+
+        Groups family keys by their base format (the part before the first
+        ``_``) and accumulates ``(key_count, file_count)`` tuples.
+
+        Returns:
+            A dictionary mapping base-format label to a
+            ``(number_of_keys, total_file_count)`` tuple.
+        """
         format_len = {}
         for k, v in self:
             bids_format = k.split("_")[0]
@@ -1528,10 +2119,27 @@ class BIDS_Family:
             )
         return format_len
 
-    def get_files_with_multiples(self):
+    def get_files_with_multiples(self) -> dict[str, list[dict]]:
+        """Return file-path dictionaries for all format keys that have more than one file.
+
+        Returns:
+            A dictionary mapping format key to a list of :attr:`BIDS_FILE.file`
+            dicts, restricted to keys that hold more than one file.
+        """
         return self.get_files(key=[k for k, v in self.get_key_len().items() if v > 1])
 
-    def get_files(self, key: list[str] | str | None = None):
+    def get_files(self, key: list[str] | str | None = None) -> dict[str, list[dict]]:
+        """Return the raw file-path dictionaries for one or more format keys.
+
+        Args:
+            key: A single format key, a list of format keys, or ``None`` to
+                include all keys.
+
+        Returns:
+            A dictionary mapping each requested format key to a list of
+            :attr:`BIDS_FILE.file` dicts (one per associated
+            :class:`BIDS_FILE`).
+        """
         if key is None:
             key = [k for k, v in self]
         if isinstance(key, str):
@@ -1541,7 +2149,19 @@ class BIDS_Family:
             family_dict_files[k] = [b.file for b in self[k]]
         return family_dict_files
 
-    def get(self, item: str | list[str], default=None) -> list[BIDS_FILE] | None:
+    def get(self, item: str | list[str], default: list[BIDS_FILE] | None = None) -> list[BIDS_FILE] | None:
+        """Return the list of :class:`BIDS_FILE` instances for the first matching key.
+
+        When *item* is a list the method tries each element in order and
+        returns the first hit.
+
+        Args:
+            item: A single format key or an ordered list of candidate keys.
+            default: Value returned when none of the keys are found.
+
+        Returns:
+            The list of :class:`BIDS_FILE` instances, or *default*.
+        """
         if not isinstance(item, list):
             item = [item]
         for i in item:
@@ -1550,7 +2170,7 @@ class BIDS_Family:
         return default
 
     def get_bids_files_as_dict(self, keys: list[str]) -> dict[str, BIDS_FILE]:
-        """Checks each entry of the list, if everything is there, loads everything, one for each entry in keys
+        """Checks each entry of the list, if everything is there, loads everything, one for each entry in keys.
 
         Args:
             keys: list of (keys or list of keys)

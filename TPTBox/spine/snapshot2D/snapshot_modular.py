@@ -44,6 +44,8 @@ include special views for fracture rating and virtual DXA and QCT evaluations
 
 
 class Visualization_Type(Enum):
+    """Enum selecting how voxels along a projection axis are reduced to a 2D pixel value."""
+
     Slice = auto()
     Maximum_Intensity = auto()
     Maximum_Intensity_Colored_Depth = auto()
@@ -138,7 +140,7 @@ def sag_cor_curve_projection(
     cor_savgol_filter: bool = False,
     curve_location: Location = Location.Vertebra_Corpus,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Makes a curve projection (spline interpolation) over the spline through the given centroids
+    """Makes a curve projection (spline interpolation) over the spline through the given centroids.
 
     Args:
         ctd_list: given Centroids
@@ -220,7 +222,34 @@ def sag_cor_curve_projection(
     return x_ctd, y_cord, z_cord
 
 
-def curve_projected_slice(x_ctd, img_data, y_cord, z_cord, axial_heights):
+def curve_projected_slice(
+    x_ctd: np.ndarray,
+    img_data: np.ndarray,
+    y_cord: np.ndarray,
+    z_cord: np.ndarray,
+    axial_heights: list[float] | None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Extract sagittal, coronal, and axial slice planes along a curved spinal path.
+
+    For each axial position the sagittal slice is taken at the interpolated
+    coronal coordinate and vice versa.  Outside the range of the centroids the
+    boundary values are extrapolated.
+
+    Args:
+        x_ctd: Sorted x-indices of the vertebral centroids (integer array).
+        img_data: 3-D image volume in IPL orientation with shape (X, Y, Z).
+        y_cord: Interpolated y (anterior-posterior) coordinates for each x
+            position between the first and last centroid.
+        z_cord: Interpolated z (left-right) coordinates for each x position
+            between the first and last centroid.
+        axial_heights: Heights for the axial fallback planes passed through to
+            ``curve_projection_axial_fallback``.
+
+    Returns:
+        A tuple ``(sag_plane, cor_plane, axl_plane)`` where each element is a
+        2-D numpy array representing the sagittal, coronal, and axial
+        projections respectively.
+    """
     shp = img_data.shape
     cor_plane = np.zeros((shp[0], shp[2]))
     sag_plane = np.zeros((shp[0], shp[1]))
@@ -244,12 +273,33 @@ def curve_projected_slice(x_ctd, img_data, y_cord, z_cord, axial_heights):
 def curve_projected_mean(
     img_data: np.ndarray,
     zms: tuple[float, float, float],
-    x_ctd,
-    y_cord,
-    ctd_list,
+    x_ctd: np.ndarray,
+    y_cord: np.ndarray,
+    ctd_list: POI,
     thick_t: tuple[int, int] = (100, 300),
-    axial_heights=None,
-):
+    axial_heights: list[float] | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Compute mean-intensity curved-planar projections along the spinal curve.
+
+    For each axial position the sagittal mean is computed over all non-zero
+    voxels in that row, while the coronal mean is computed over a slab of
+    width ``thick_t`` centred on the interpolated y coordinate.
+
+    Args:
+        img_data: 3-D image volume in IPL orientation with shape (X, Y, Z).
+        zms: Voxel spacing (zoom) in mm for each axis ``(x, y, z)``.
+        x_ctd: Sorted x-indices of the vertebral centroids (integer array).
+        y_cord: Interpolated y (anterior-posterior) coordinates for each x
+            position between the first and last centroid.
+        ctd_list: POI object whose region keys are used to adjust slab
+            thickness near the sacrum.
+        thick_t: Anterior and posterior slab half-widths in mm used for the
+            coronal projection ``(anterior_mm, posterior_mm)``.
+        axial_heights: Heights for the axial fallback planes.
+
+    Returns:
+        A tuple ``(sag_plane, cor_plane, axl_plane)`` of 2-D float arrays.
+    """
     shp = img_data.shape
     cor_plane = np.zeros((shp[0], shp[2]))
     sag_plane = np.zeros((shp[0], shp[1]))
@@ -289,13 +339,39 @@ def curve_projected_mean(
 def curve_projected_mip(
     img_data: np.ndarray,
     zms: tuple[float, float, float],
-    x_ctd,
-    y_cord,
-    ctd_list,  # noqa: ARG001
+    x_ctd: np.ndarray,
+    y_cord: np.ndarray,
+    ctd_list: POI,  # noqa: ARG001
     thick_t: tuple[int, int] = (100, 300),
     make_colored_depth: bool = False,
-    axial_heights=None,
-):
+    axial_heights: list[float] | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Compute maximum-intensity curved-planar projections along the spinal curve.
+
+    A slab of configurable thickness is extracted around the interpolated
+    spinal curve for each axial position, and the maximum intensity is
+    projected onto the output plane.  Optionally the depth of the maximum is
+    colour-encoded using the ``inferno`` colourmap.
+
+    Args:
+        img_data: 3-D image volume in IPL orientation with shape (X, Y, Z).
+        zms: Voxel spacing (zoom) in mm for each axis ``(x, y, z)``.
+        x_ctd: Sorted x-indices of the vertebral centroids (integer array).
+        y_cord: Interpolated y (anterior-posterior) coordinates for each x
+            position between the first and last centroid.
+        ctd_list: POI object (currently unused, reserved for future thickness
+            adaptation near the sacrum).
+        thick_t: Anterior and posterior slab half-widths in mm
+            ``(anterior_mm, posterior_mm)``.
+        make_colored_depth: If ``True`` the returned planes are RGB arrays
+            colour-coded by depth; otherwise they are scalar intensity arrays.
+        axial_heights: Heights for the axial fallback planes.
+
+    Returns:
+        A tuple ``(sag_plane, cor_plane, axl_plane)``.  When
+        ``make_colored_depth`` is ``True`` the sagittal and coronal arrays
+        have shape ``(X, Y, 3)`` and ``(X, Z, 3)`` respectively.
+    """
     shp = img_data.shape
     cor_plane = np.zeros((shp[0], shp[2]))
     cor_depth_plane = np.zeros((shp[0], shp[2]))
@@ -357,7 +433,17 @@ def curve_projected_mip(
     )
 
 
-def normalize_image(img, v_range: tuple[float, float] | None = None):
+def normalize_image(img: np.ndarray, v_range: tuple[float, float] | None = None) -> np.ndarray:
+    """Linearly rescale an array to the range [0, 1].
+
+    Args:
+        img: Input array to normalise.
+        v_range: Optional ``(min, max)`` clip range.  When ``None`` the
+            actual minimum and maximum of ``img`` are used.
+
+    Returns:
+        A float array with values in ``[0, 1]``.
+    """
     if v_range is None:
         min_v = np.min(img)
         max_v = np.max(img)
@@ -367,7 +453,27 @@ def normalize_image(img, v_range: tuple[float, float] | None = None):
     return (img - min_v) / (max_v - min_v)
 
 
-def curve_projection_axial_fallback(img_data, x_ctd, heights: list[float] | None):
+def curve_projection_axial_fallback(
+    img_data: np.ndarray,
+    x_ctd: np.ndarray,
+    heights: list[float] | None,
+) -> np.ndarray:
+    """Build an axial composite plane for display as a fallback or from explicit heights.
+
+    When ``heights`` is given each value is interpreted as an absolute slice
+    index (if ``|h| >= 1``) or as a fraction of the volume depth (if
+    ``|h| < 1``).  The slices are concatenated vertically.  When ``heights``
+    is ``None`` three slices centred on the median centroid are concatenated.
+
+    Args:
+        img_data: 3-D image volume in IPL orientation with shape (X, Y, Z).
+        x_ctd: Sorted x-indices of the vertebral centroids (integer array).
+        heights: Explicit axial heights to extract, or ``None`` to use the
+            three slices surrounding the central centroid.
+
+    Returns:
+        A 2-D numpy array representing the composed axial view.
+    """
     if heights is not None:
         heights = [int(abs(h if abs(h) >= 1 else img_data.shape[0] * h)) for h in (heights) if abs(h) <= img_data.shape[0]]
         axl_plane = np.concatenate([img_data[h, :, :] for h in heights], axis=0)
@@ -392,7 +498,19 @@ def curve_projection_axial_fallback(img_data, x_ctd, heights: list[float] | None
         return axl_plane
 
 
-def make_isotropic2d(arr2d: np.ndarray, zms2d, msk=False) -> np.ndarray:
+def make_isotropic2d(arr2d: np.ndarray, zms2d: tuple[float, float], msk: bool = False) -> np.ndarray:
+    """Resample a 2-D array to isotropic pixel spacing.
+
+    Args:
+        arr2d: Input 2-D array.
+        zms2d: Voxel spacing ``(dy, dz)`` of the input array in mm.  The
+            output will have 1 mm × 1 mm pixels.
+        msk: If ``True`` nearest-neighbour interpolation is used (suitable
+            for label maps); otherwise linear interpolation is applied.
+
+    Returns:
+        Resampled 2-D array with isotropic pixel spacing.
+    """
     if np.issubdtype(arr2d.dtype, np.floating):
         arr2d = arr2d.astype(int)
     xs = list(range(arr2d.shape[0]))
@@ -414,7 +532,26 @@ def make_isotropic2d(arr2d: np.ndarray, zms2d, msk=False) -> np.ndarray:
     return img
 
 
-def make_isotropic2dpluscolor(arr3d, zms2d, msk=False):
+def make_isotropic2dpluscolor(
+    arr3d: np.ndarray,
+    zms2d: tuple[float, float],
+    msk: bool = False,
+) -> np.ndarray:
+    """Resample a 2-D or 2-D+RGB array to isotropic pixel spacing.
+
+    Delegates to :func:`make_isotropic2d` for scalar images.  For colour
+    images (3rd dimension of size 3) each channel is resampled independently
+    and the results are stacked.
+
+    Args:
+        arr3d: Input array with shape ``(H, W)`` or ``(H, W, 3)``.
+        zms2d: Voxel spacing ``(dy, dz)`` of the input array in mm.
+        msk: Passed through to :func:`make_isotropic2d`; use ``True`` for
+            label maps to enable nearest-neighbour interpolation.
+
+    Returns:
+        Resampled array with the same number of channels as the input.
+    """
     # print(arr3d.shape)
     if arr3d.ndim == 2:
         return make_isotropic2d(arr3d, zms2d, msk=msk)
@@ -428,7 +565,20 @@ def make_isotropic2dpluscolor(arr3d, zms2d, msk=False):
     return img
 
 
-def get_contrasting_stroke_color(rgb):
+def get_contrasting_stroke_color(rgb: int | list[float] | tuple[float, ...]) -> str:
+    """Return ``"gray"`` or ``"black"`` depending on the perceived luminance of ``rgb``.
+
+    A dark foreground colour (luminance < 0.3) gets a ``"gray"`` stroke so
+    that text remains readable on dark backgrounds; all other colours receive
+    a ``"black"`` stroke.
+
+    Args:
+        rgb: Either an integer label index (looked up in the colour map) or an
+            RGB / RGBA tuple / list of floats in ``[0, 1]``.
+
+    Returns:
+        ``"gray"`` for dark colours, ``"black"`` for bright colours.
+    """
     # Convert RGBA to RGB if necessary
     if isinstance(rgb, int):
         rgb = list(get_color_by_label(rgb).rgb / 255.0)
@@ -438,7 +588,25 @@ def get_contrasting_stroke_color(rgb):
     return "gray" if luminance < 0.3 else "black"
 
 
-def create_figure(dpi, planes: list, has_title=True):
+def create_figure(
+    dpi: int,
+    planes: list[np.ndarray],
+    has_title: bool = True,
+) -> tuple:
+    """Create a matplotlib figure sized to contain all projection planes side by side.
+
+    Args:
+        dpi: Output resolution in dots per inch.
+        planes: List of 2-D (or 3-D colour) arrays whose widths determine the
+            column layout of the figure.
+        has_title: When ``True`` extra vertical space is reserved for a title
+            row above the images.
+
+    Returns:
+        A ``(fig, axs)`` tuple where ``fig`` is the
+        :class:`~matplotlib.figure.Figure` and ``axs`` is a list of
+        :class:`~matplotlib.axes.Axes`, one per plane.
+    """
     fig_h = round(2 * planes[0].shape[0] / dpi, 2) + (0.5 if has_title else 0)
     plane_w = [p.shape[1] for p in planes]
     w = sum(plane_w)
@@ -460,13 +628,35 @@ def create_figure(dpi, planes: list, has_title=True):
 def plot_sag_centroids(
     axs: Axes,
     ctd: POI,
-    zms,
+    zms: tuple[float, float, float],
     poi_labelmap: dict[int, str],
     hide_centroid_labels: bool,
     cmap: ListedColormap = cm_itk,
     curve_location: Location = Location.Vertebra_Corpus,
-    show_these_subreg_poi=None,
-):
+    show_these_subreg_poi: list[int | Location] | None = None,
+) -> None:
+    """Overlay centroid circles and vertebra labels on a sagittal axis.
+
+    Points are drawn as filled circles coloured by vertebra label.  Vertebra
+    names from ``poi_labelmap`` are added as bold text next to the circle when
+    ``hide_centroid_labels`` is ``False``.  Additional arrows and text
+    annotations stored in ``ctd.info["line_segments_sag"]`` and
+    ``ctd.info["text_sag"]`` are also rendered.
+
+    Args:
+        axs: Matplotlib axes on which to draw.
+        ctd: POI object containing centroid coordinates and optional rendering
+            hints in its ``info`` dictionary.
+        zms: Voxel spacing ``(dx, dy, dz)`` in mm used to convert voxel
+            coordinates to pixel coordinates.
+        poi_labelmap: Mapping from vertebra region ID to display name.
+        hide_centroid_labels: When ``True`` vertebra name labels are omitted.
+        cmap: Colour map used to assign per-vertebra colours.
+        curve_location: Sub-region location whose centroid receives the text
+            label.
+        show_these_subreg_poi: If provided, only POIs with these sub-region
+            IDs are plotted.
+    """
     # requires v_dict = dictionary of mask labels
     ctd2 = ctd
     if show_these_subreg_poi is not None:
@@ -546,15 +736,35 @@ def plot_sag_centroids(
 
 
 def plot_cor_centroids(
-    axs,
+    axs: Axes,
     ctd: POI,
-    zms,
+    zms: tuple[float, float, float],
     poi_labelmap: dict[int, str],
     hide_centroid_labels: bool,
     cmap: ListedColormap = cm_itk,
     curve_location: Location = Location.Vertebra_Corpus,
-    show_these_subreg_poi=None,
-):
+    show_these_subreg_poi: list[int | Location] | None = None,
+) -> None:
+    """Overlay centroid circles and vertebra labels on a coronal axis.
+
+    Analogous to :func:`plot_sag_centroids` but uses the z-coordinate for the
+    horizontal axis instead of the y-coordinate.  Additional arrows and text
+    stored in ``ctd.info["line_segments_cor"]`` and ``ctd.info["text_cor"]``
+    are also rendered.
+
+    Args:
+        axs: Matplotlib axes on which to draw.
+        ctd: POI object containing centroid coordinates and optional rendering
+            hints in its ``info`` dictionary.
+        zms: Voxel spacing ``(dx, dy, dz)`` in mm.
+        poi_labelmap: Mapping from vertebra region ID to display name.
+        hide_centroid_labels: When ``True`` vertebra name labels are omitted.
+        cmap: Colour map used to assign per-vertebra colours.
+        curve_location: Sub-region location whose centroid receives the text
+            label.
+        show_these_subreg_poi: If provided, only POIs with these sub-region
+            IDs are plotted.
+    """
     ctd2 = ctd
     if show_these_subreg_poi is not None:
         ctd2 = ctd.extract_subregion(*show_these_subreg_poi)
@@ -646,11 +856,44 @@ def make_2d_slice(
     visualization_type: Visualization_Type,
     ctd_fallback: POI,
     cor_savgol_filter: bool = False,
-    to_ax=("I", "P", "L"),
+    to_ax: tuple[str, str, str] = ("I", "P", "L"),
     curve_location: Location = Location.Vertebra_Corpus,
     rescale_to_iso: bool = True,
-    axial_heights=None,
-):
+    axial_heights: list[float] | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Generate 2-D sagittal, coronal, and axial projection images from a volume.
+
+    The image is reoriented to ``to_ax`` and a spline through the vertebral
+    centroids is computed.  Depending on ``visualization_type`` slices,
+    maximum-intensity projections, depth-coloured MIPs, or mean-intensity
+    projections are extracted.  The result is optionally resampled to
+    isotropic pixel spacing.
+
+    Args:
+        img: Source image volume.
+        ctd: POI object used to compute the spinal curve.
+        zms: Voxel spacing ``(dx, dy, dz)`` in mm of the reoriented image.
+        msk: When ``True`` the volume is treated as a label map: zero voxels
+            are set to ``NaN`` and nearest-neighbour resampling is applied.
+        visualization_type: One of the :class:`Visualization_Type` enum values
+            controlling which projection method is used.
+        ctd_fallback: Fallback POI used when ``ctd`` has too few points for
+            spline interpolation.
+        cor_savgol_filter: Whether to apply a Savitzky-Golay filter to the
+            coronal spline in :func:`sag_cor_curve_projection`.
+        to_ax: Target orientation axes as a 3-tuple of direction codes.
+        curve_location: Anatomical sub-region used for spline fitting.
+        rescale_to_iso: When ``True`` all returned planes are resampled to
+            isotropic pixel spacing using the zoom factors from ``zms``.
+        axial_heights: Optional explicit axial slice heights; passed to
+            :func:`curve_projection_axial_fallback`.
+
+    Returns:
+        A tuple ``(sag, cor, axl)`` of 2-D float arrays.  For
+        :attr:`Visualization_Type.Maximum_Intensity_Colored_Depth` without
+        ``msk`` the sagittal and coronal arrays are ``(H, W, 3)`` colour
+        images.
+    """
     img_nii = to_nii(img)
     img_reo = img_nii.reorient_(to_ax)
     ctd_reo = ctd.reorient(img_reo.orientation)
@@ -734,8 +977,8 @@ def make_2d_slice(
     return sag, cor, axl
 
 
-def div0(a, b, fill=0):
-    """a / b, divide by 0 -> `fill`"""
+def div0(a, b, fill=0) -> np.ndarray | float:
+    """Divide ``a`` by ``b``, replacing divisions by zero with ``fill``."""
     with np.errstate(divide="ignore", invalid="ignore"):
         c = np.true_divide(a, b)
     if np.isscalar(c):
@@ -750,6 +993,8 @@ Image_Modes = Literal["CT", "MRI", "CTs", "MINMAX", "None"]
 
 @dataclass(init=True)
 class Snapshot_Frame:
+    """Dataclass bundling an image, optional segmentation/centroids, and per-frame rendering settings."""
+
     # Content
     image: Image_Reference
     segmentation: Image_Reference | None = None
@@ -790,6 +1035,16 @@ class Snapshot_Frame:
 
 
 def to_cdt(ctd_bids: POI_Reference | None) -> POI | None:
+    """Load a POI from a reference and return it, or ``None`` if it is empty.
+
+    Args:
+        ctd_bids: A path, BIDS file, or POI object to load.  ``None`` is
+            returned as-is.
+
+    Returns:
+        The loaded :class:`~TPTBox.POI` if it contains at least one centroid,
+        otherwise ``None``.
+    """
     if ctd_bids is None:
         return None
     ctd = POI.load(ctd_bids, allow_global=True)
@@ -807,8 +1062,8 @@ def create_snapshot(  # noqa: C901
     to_ax=("I", "P", "L"),
     dpi=96,
     verbose: bool = False,
-):
-    """Create virtual dx, sagittal, and coronal curved-planar CT snapshots with mask overlay
+) -> None:
+    """Create virtual dx, sagittal, and coronal curved-planar CT snapshots with mask overlay.
 
     Args:
         snp_path (str): Path to the new jpg
@@ -818,7 +1073,6 @@ def create_snapshot(  # noqa: C901
         to_ax (Orientation): Sets the Orientation. Can be used for flipping the image or fixing false rotations of the original inputs.
         dpi (int): Set the resolution.
     """
-
     # Checks if snaps already exists, does nothing if true and check is true
     exist = all(Path(i).is_file() for i in snp_path) if isinstance(snp_path, list) else Path(snp_path).is_file()
     if check and exist:
