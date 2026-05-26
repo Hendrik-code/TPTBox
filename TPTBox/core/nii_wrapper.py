@@ -4,6 +4,7 @@ import math
 import traceback
 import warnings
 import zlib
+from collections import deque
 from collections.abc import Sequence
 from enum import Enum
 from math import ceil, floor
@@ -14,6 +15,7 @@ import nibabel as nib
 import nibabel.orientations as nio
 import numpy as np
 from nibabel import Nifti1Header, Nifti1Image  # type: ignore
+from skimage.measure import marching_cubes
 from typing_extensions import Self
 
 from TPTBox.core import bids_files
@@ -32,7 +34,9 @@ from TPTBox.core.np_utils import (
     np_connected_components,
     np_connected_components_per_label,
     np_dilate_msk,
+    np_dilate_msk_euclid,
     np_erode_msk,
+    np_erode_msk_euclid,
     np_extract_label,
     np_fill_holes,
     np_fill_holes_global_with_majority_voting,
@@ -66,6 +70,7 @@ from TPTBox.core.vert_constants import (
 from TPTBox.logger.log_file import Log_Type
 
 if TYPE_CHECKING:
+    from stl.mesh import Mesh
     from torch import device
 MODES = Literal["constant", "nearest", "reflect", "wrap"]
 _unpacked_nii = tuple[np.ndarray, AFFINE, nib.nifti1.Nifti1Header]
@@ -967,7 +972,7 @@ class NII(NII_Math):
             s = s.apply_crop(tuple(crop),inplace=inplace)
         return s.apply_pad(padding,inplace=inplace,mode=mode)
 
-    def apply_pad(self, padd: Sequence[tuple[int | None, int]] | None, mode: MODES = "constant", inplace=False, verbose: logging = True) -> Self:
+    def apply_pad(self, padd: Sequence[tuple[int | None, int | None]] | int | None, mode: MODES = "constant", inplace=False, verbose: logging = True,) -> Self:
         """Pads the image with explicit per-axis ``(before, after)`` amounts.
 
         The affine is updated so that the world-space origin is preserved (i.e. the
@@ -989,25 +994,63 @@ class NII(NII_Math):
         #TODO add testcases and options for modes
         if padd is None:
             return self if inplace else self.copy()
-        transform = np.eye(self.dims+1, dtype=int)
-        assert len(padd) == self.dims
-        for i, (before,_) in enumerate(padd):
-            #transform[i, i] = pad_slice.step if pad_slice.step is not None else 1
-            transform[i, 3] = -before  if before is not None else 0
 
-        while len(padd) < len(self.shape):
-            padd = (*tuple(padd), (0, 0))
-        affine = self.affine.dot(transform)
+        if isinstance(padd, (int, float)):
+            padd = int(padd)
+            padd = ((padd, padd),) * self.dims
+
+        assert len(padd) == self.dims
+
+        # Replace None with 0
+        padd = tuple((b or 0, a or 0) for b, a in padd)
+
+        # Extend for non-spatial dims
+        padd = padd + ((0, 0),) * (len(self.shape) - len(padd))
+
+        # Build affine transform
+        transform = np.eye(self.dims + 1, dtype=float)
+        for i, (before, _) in enumerate(padd[:self.dims]):
+            transform[i, -1] = -before
+
+        affine = self.affine @ transform
+
+        arr = self.get_array()
+
+        # ---- 1. CROPPING (negative padding) ----
+        slices = []
+
+        for i, (before, after) in enumerate(padd[:self.dims]):
+            start = max(0, -before)
+            end = arr.shape[i] - max(0, -after)
+            slices.append(slice(start, end))
+
+        # keep non-spatial dims unchanged
+        slices += [slice(None)] * (arr.ndim - self.dims)
+
+        arr = arr[tuple(slices)]
+
+        # ---- 2. PADDING (positive only) ----
+        padd_positive = tuple(
+            (max(0, b), max(0, a)) for b, a in padd
+        )
+
         args = {}
         if mode == "constant":
-            args["constant_values"]=self.get_c_val()
-        log.print(f"Padd {padd}; {mode=}, {args}",verbose=verbose)
-        arr = np.pad(self.get_array(),padd,mode=mode,**args) # type: ignore
+            args["constant_values"] = self.get_c_val()
 
-        nii:_unpacked_nii = (arr,affine,self.header)
+        if mode == "nearest":
+            mode = "edge"
+
+        log.print(f"Padd {padd}; {mode=}, {args}", verbose=verbose)
+
+        arr = np.pad(arr, padd_positive, mode=mode, **args)
+
+        nii = (arr, affine, self.header)
+
         if inplace:
             self.nii = nii
             return self
+
         return self.copy(nii)
 
     def rescale_and_reorient(self, axcodes_to=None, voxel_spacing=(-1, -1, -1), verbose: logging = True, inplace=False, c_val: float | None = None, mode: MODES = 'nearest') -> Self:
@@ -1125,20 +1168,55 @@ class NII(NII_Math):
 
         Returns:
             NII:
-        """
+        """        ''''''
+        if to_vox_map is None:
+            return self if inplace else self.copy()
         c_val = self.get_c_val(c_val)
         if isinstance(to_vox_map,Has_Grid):
             mapping = to_vox_map.to_gird()
         else:
             mapping = to_vox_map if isinstance(to_vox_map, tuple) else to_nii_optional(to_vox_map, seg=self.seg, default=to_vox_map)
-        if isinstance(mapping,Has_Grid) and mapping.assert_affine(self,raise_error=False,origin_tolerance=0.000001,error_tolerance=0.000001,shape_tolerance=0):
-            log.print(f"resample_from_to skipped; already in space: {self}",verbose=verbose)
-            return self if inplace else self.copy()
+        if isinstance(mapping,Has_Grid):
+            if mapping.assert_affine(self,raise_error=False,origin_tolerance=0.000001,error_tolerance=0.000001,shape_tolerance=0):
+                log.print(f"resample_from_to skipped; already in space: {self}",verbose=verbose)
+                return self if inplace else self.copy()
+
+            m1 = mapping if mapping.orientation == self.orientation else mapping.make_empty_POI().reorient(self.orientation)
+            if m1.assert_affine(self,raise_error=False,origin_tolerance=0.00001,error_tolerance=0.00001,shape_tolerance=0):
+                log.print(f"resample_from_to only need reorientation; {self.orientation}",verbose=verbose)
+                ret = self.reorient(mapping.orientation,inplace=inplace)
+                ret.affine = mapping.affine #remove floating point error
+                return ret
+            if self.orientation == mapping.orientation and np.allclose(self.zoom , mapping.zoom, atol=1e-6):
+                shift = (np.array(self.origin) - np.array(m1.origin)) / np.array(m1.zoom)
+                if np.allclose(shift, np.round(shift), atol=1e-6):
+                    s = self.reorient(mapping.orientation,inplace=inplace)  # noqa: PLW0642
+                    shift = (np.array(self.origin) - np.array(mapping.origin)) / np.array(mapping.zoom)
+                    shift = np.round(shift).astype(int)
+                    dst_shape = np.array(mapping.shape)
+                    src_shape = np.array(s.shape)
+                    # padding before = how much dst starts before src
+                    pad_before = shift
+                    # padding after = remaining dst size after src
+                    pad_after = dst_shape-shift-src_shape
+                    pad = tuple((int(b), int(a)) for b, a in zip(pad_before, pad_after))
+                    ret = s.apply_pad(pad, mode=mode,inplace=inplace,verbose=verbose)
+
+                    #TODO SET raise_error=False before committing
+                    valid = ret.assert_affine(mapping,raise_error=True,origin_tolerance=0.0001,error_tolerance=0.0001,shape_tolerance=0)
+                    if valid:
+                        log.print(f"resample_from_to only needs padding/cropping {pad}",verbose=verbose)
+                        ret.affine = mapping.affine #remove floating point error
+                        return ret
+
+
         assert mapping is not None
         log.print(f"resample_from_to: {self} to {mapping}",verbose=verbose)
         if order is None:
             order = 0 if self.seg else 3
         nii = _resample_from_to(self, mapping,order=order, mode=mode,align_corners=align_corners)
+
+
         if inplace:
             self.nii = nii
             return self
@@ -1444,6 +1522,27 @@ class NII(NII_Math):
         from TPTBox.core.sitk_utils import nii_to_sitk
         return nii_to_sitk(self)
 
+    @classmethod
+    def from_deepali(cls, img, seg=False) -> NII:
+        """Construct a NII from a DeepALI ``Image`` object.
+
+        Args:
+            img: A ``deepali.data.Image`` instance.
+            seg: Mark the resulting NII as a segmentation mask.
+        """
+        try:
+            from deepali.data import Image as deepaliImage
+        except Exception:
+            log.print_error()
+            log.on_fail("run 'pip install hf-deepali' to install deepali")
+            raise
+        img_ : deepaliImage =img
+        grid = cls.from_deepali_grid(img_.grid())
+
+        arr = img_.data.squeeze().cpu().detach().numpy()
+        arr = np.transpose(arr, axes=tuple(reversed(range(arr.ndim))))
+        return  NII((nib.Nifti1Image(arr,grid.affine)),seg=seg)
+
     def to_deepali(self, align_corners: bool = True, dtype=None, device: device | str = "cpu") -> Any:
         """Converts this NII to a DeepALI ``Image`` tensor (requires the ``hf-deepali`` package).
 
@@ -1534,6 +1633,80 @@ class NII(NII_Math):
     def erode_msk_(self, n_pixel: int = 5, labels: LABEL_REFERENCE = None, connectivity: int = 3, verbose: logging = True, border_value=0, use_crop=True, ignore_direction: DIRECTIONS | int | None = None) -> Self:
         """In-place variant of `erode_msk`."""
         return self.erode_msk(n_pixel=n_pixel, labels=labels, connectivity=connectivity, inplace=True, verbose=verbose,border_value=border_value,use_crop=use_crop,ignore_direction=ignore_direction)
+    def erode_msk_euclid(
+        self,
+        n_pixel: int = 5,
+        labels: LABEL_REFERENCE = None,
+        mask: Self | None = None,
+        inplace=False,
+        verbose: logging = True,
+        use_crop=True,
+    ) -> Self:
+        """Euclidean erodes (in voxel space) a segmentation mask by the specified number.
+
+        Args:
+            n_pixel (int, optional): The number of voxels to erode the mask by. Defaults to 5.
+            labels (list[int], optional): Labels that should be eroded. If None, will erode all labels (not including zero!).
+            mask (NII, optional): If set, after operation, will zero out everything based on this mask.
+            inplace (bool, optional): Whether to modify the mask in place or return a new object. Defaults to False.
+            verbose (bool, optional): Whether to print a message. Defaults to True.
+            use_crop: Speed up computation by cropping/un-cropping.
+
+        Returns:
+            NII: The eroded mask.
+
+        Notes:
+            Uses Euclidean distance transform inside the foreground.
+            Runtime is independent of n_pixel and len(labels).
+            For n_pixel=1 this is similar to connectivity=1 erosion.
+        """
+        assert self.seg
+        log.print("erode mask", end="\r", verbose=verbose)
+
+        msk_i_data = self.get_seg_array()
+        mask_ = mask.get_seg_array() if mask is not None else None
+
+        out = np_erode_msk_euclid(
+            arr=msk_i_data,
+            n_pixel=n_pixel,
+            labels=labels,
+            use_crop=use_crop,
+            mask=mask_
+        )
+
+        out = out.astype(self.dtype)
+
+        log.print("Mask euclidean eroded by", n_pixel, "voxels", verbose=verbose)
+
+        return self.set_array(out, inplace=inplace)
+    def dilate_msk_euclid(self, n_pixel: int = 5, labels: LABEL_REFERENCE = None, mask: Self | None = None, inplace=False, verbose: logging = True, use_crop=True) -> Self:
+        """Euclidean Dilates (in voxel space) a segmentation mask by the specified number.
+
+        Args:
+            n_pixel (int, optional): The number of voxels to dilate the mask by. Defaults to 5.
+            labels (list[int], optional): Labels that should be dilated. If None, will dilate all labels (not including zero!)
+            mask (NII, optional): If set, after each iteration, will zero out everything based on this mask
+            inplace (bool, optional): Whether to modify the mask in place or return a new object. Defaults to False.
+            verbose (bool, optional): Whether to print a message indicating that the mask was dilated. Defaults to True.
+            use_crop: speed up computation by cropping and un-cropping the segmentation. Minor overhead if the segmentation fills most of the image
+        Returns:
+            NII: The dilated mask.
+
+        Notes:
+            The method uses euclidean dilation to dilate the mask by the specified number of voxels.
+            For n_pixel=1 dilate_msk_euclid and dilate_msk/connectivity=1 are equivalent.
+            This will algorithm runtime is independent of n_pixel and len(labels) unlike dilate_msk
+
+        """
+        assert self.seg
+        log.print("dilate mask",end='\r',verbose=verbose)
+        msk_i_data = self.get_seg_array()
+        mask_ = mask.get_seg_array() if mask is not None else None
+        out = np_dilate_msk_euclid(arr=msk_i_data, n_pixel=n_pixel,labels=labels,use_crop=use_crop,mask=mask_)
+        out = out.astype(self.dtype)
+        log.print("Mask euclidean dilated by", n_pixel, "voxels",verbose=verbose)
+
+        return self.set_array(out,inplace=inplace)
 
     def dilate_msk(self, n_pixel: int = 5, labels: LABEL_REFERENCE = None, connectivity: int = 3, mask: Self | None = None, inplace=False, verbose:logging=True,use_crop=True, ignore_direction:DIRECTIONS|int|None=None) -> Self:
         """Dilates the binary segmentation mask by the specified number of voxels.
@@ -1963,7 +2136,7 @@ class NII(NII_Math):
         """
         return self.truncate_labels_beyond_reference_(idx,not_beyond,fill,axis,inclusion,inplace=inplace)
 
-    def infect(self: NII, reference_mask: NII, inplace=False, verbose=True, axis: int | str | None = None, max_depth=None) -> Self:
+    def infect(self: NII, reference_mask: NII, inplace=False, verbose=True, axis: int | str | None = None, max_depth=None, _do_crop=True) -> Self:
         """Expands labels from this segmentation into a reference mask via breadth-first diffusion.
 
         Starting from the surface voxels of this NII, the algorithm propagates existing
@@ -1984,8 +2157,14 @@ class NII(NII_Math):
             The NII with expanded labels.
         """
         self.assert_affine(reference_mask)
-        self_mask = self.compute_surface_mask().get_seg_array().copy()
-        self_mask_org = self.get_seg_array().copy()
+        if _do_crop:
+            crop = reference_mask.compute_crop(0,5,raise_error=False)
+            s = self.apply_crop(crop)
+            reference_mask = reference_mask.apply_crop(crop)
+        else:
+            s = self
+        self_mask = s.compute_surface_mask().get_seg_array().copy()
+        self_mask_org = s.get_seg_array().copy()
         ref_mask = np.clip(reference_mask.get_seg_array(), 0, 1)
         ref_mask[self_mask_org != 0] = 0
         searched = np.clip(self_mask,0,1).astype(np.uint8)
@@ -2005,13 +2184,14 @@ class NII(NII_Math):
             else:
                 raise NotImplementedError(axis)
 
-        search = []
+        search = deque()
         coords = np.where(self_mask != 0)
         def _add_idx(x,y,z,v,d):
             for x1,y1,z1 in kernel:
                 a = x+x1
                 b = y+y1
                 c = z+z1
+
                 if a < 0 or b < 0 or c < 0:
                     continue
                 if a >= self_mask.shape[0] or b >= self_mask.shape[1] or c >= self_mask.shape[2]:
@@ -2024,29 +2204,38 @@ class NII(NII_Math):
         def _infect(a,b,c,v,d):
             if d-1 == max_depth:
                 return
-            if searched[a,b,c] != 0:
+            if searched[x,y,z] != 0:
                 return
-            if ref_mask[a,b,c] == 0:
+            if ref_mask[x,y,z] == 0:
                 return
             #print(a,b,c)
             searched[a,b,c] = 1
             self_mask[a,b,c] = v
-            _add_idx(x,y,z,v,d)
+            _add_idx(a,b,c,v,d)
 
         from tqdm import tqdm
         for x,y,z in tqdm(zip(coords[0],coords[1],coords[2]),total=len(coords[0]),disable=not verbose,desc="Collecting Surface"):
             _add_idx(x,y,z,self_mask[x,y,z],0)
         while len(search) != 0:
             search2 = search
-            search = []
-            for x,y,z,v,d in tqdm(search2,disable=not verbose,desc="infect"):
+            search = deque()
+            for _ in tqdm(range(len(search2)),disable=not verbose,desc="infect"):
+                x,y,z,v,d = search2.popleft()
                 _infect(x,y,z,v,d+1)
         self_mask[self_mask == 0] = self_mask_org[self_mask == 0]
+        if _do_crop:
+            if inplace:
+                self[crop] = self_mask
+                return self
+            else:
+                arr = self.get_array()
+                arr[crop] = self_mask
+                self_mask = arr
         return self.set_array(self_mask,inplace=inplace)
 
-    def infect_(self: NII, reference_mask: NII, verbose=True, axis: int | str | None = None) -> Self:
+    def infect_(self: NII, reference_mask: NII, verbose=True, axis: int | str | None = None,_do_crop=True) -> Self:
         """In-place variant of `infect`."""
-        return self.infect(reference_mask, inplace=True,verbose=verbose,axis=axis)
+        return self.infect(reference_mask, inplace=True,verbose=verbose,axis=axis,_do_crop=_do_crop)
 
     def map_labels(self, label_map:LABEL_MAP , verbose:logging=True, inplace=False) -> Self:
         """Maps labels in the given NIfTI image according to the label_map dictionary.
@@ -2148,6 +2337,9 @@ class NII(NII_Math):
         """
         if make_parents:
             Path(file).parent.mkdir(0o777,exist_ok=True,parents=True)
+        if str(file).endswith(".nrrd"):
+            return self.save_nrrd(file,verbose=verbose)
+
         arr = self.get_array() if not self.seg else self.get_seg_array()
         if isinstance(arr,np.floating) and self.seg:
             self.set_dtype_("smallest_uint")
@@ -2161,7 +2353,6 @@ class NII(NII_Math):
             # 1 means Scanner coordinate system
             # 2 means align (to something) coordinate system
             out.header["qform_code"] = 2 if self.seg else 1
-
         nib.save(out, file) #type: ignore
         log.print(f"Save {file} as {out.get_data_dtype()}",verbose=verbose,ltype=Log_Type.SAVE)
 
@@ -2183,10 +2374,174 @@ class NII(NII_Math):
             raise ImportError("The `pynrrd` package is required but not installed. Install it with `pip install pynrrd`." ) from None
         if isinstance(file, bids_files.BIDS_FILE):
             file = file.file['nrrd']
-
         from TPTBox.core.internal.slicer_nrrd import save_slicer_nrrd
         save_slicer_nrrd(self,file,make_parents=make_parents,verbose=verbose,**args)
 
+
+    def to_stls(
+        self: NII,
+        out_path: Path | dict[int, Path] | None = None,
+        bb: tuple | None = None,
+        to_world: bool = True,
+        include_normals: bool = False,
+        number_path: bool | None = None,
+    ) -> dict[int, Mesh]:
+        """Convert all labels in a segmentation into STL meshes.
+
+        This function iterates over all unique labels in the segmentation and
+        applies `to_stl_single` to each label independently.
+
+        Args:
+            seg (NII):
+                Segmentation object containing one or more labels.
+            out_path (Path | dict[int, Path] | None, optional):
+                Output specification:
+                    - Path → save all meshes into the same directory or file pattern
+                    - dict[label, Path] → per-label output paths
+                    - None → do not save meshes
+            bb (tuple | None, optional):
+                Optional bounding box (e.g., slices). If provided and `to_world=False`,
+                vertex coordinates are shifted by the bounding box start indices.
+            to_world (bool, optional):
+                If True, transform vertices from voxel coordinates into world
+                coordinates using `seg.affine`. Defaults to True.
+            include_normals (bool, optional):
+                If True, compute per-face normals for each mesh using
+                `mesh.Mesh.update_normals()`. Defaults to False.
+            number_path (bool | None, optional):
+                Controls filename numbering when saving:
+                    - If None (default):
+                        Automatically set to True if `out_path` is not a dict,
+                        and False otherwise.
+                    - If True:
+                        Append the label to the output filename.
+                    - If False:
+                        Do not modify the filename.
+
+        Returns:
+            dict[int, mesh.Mesh]:
+                Dictionary mapping each label to its corresponding STL mesh.
+
+        Notes:
+            - Each label is processed independently via `to_stl_single`.
+            - Padding is applied internally to ensure closed surfaces.
+            - STL format stores only triangle geometry and per-face normals;
+            it does not support per-vertex attributes such as scalar values.
+            - If `to_world=True`, all meshes are returned in physical space
+            (e.g., millimeters).
+        """
+        ret = {}
+
+        # Resolve default numbering behavior
+        if number_path is None:
+            number_path = not isinstance(out_path, dict)
+
+        for i in self.unique():
+            ret[i] = self.to_stl(
+                label=i, out_path=out_path, bb=bb, to_world=to_world, include_normals=include_normals, number_path=number_path
+            )
+
+        return ret
+
+
+    def to_stl(
+        self: NII,
+        label: int,
+        out_path: Path | dict[int, Path] | None = None,
+        bb: tuple | None = None,
+        to_world: bool = True,
+        include_normals: bool = False,
+        number_path=False,
+    ) -> Mesh:
+        """Convert a binary segmentation label into an STL surface mesh using marching cubes.
+
+        The function extracts a single label from a segmentation, runs marching cubes
+        to generate a triangular surface mesh, and optionally transforms the vertices
+        into world (physical) coordinates using the NIfTI affine.
+
+        Args:
+            seg (NII):
+                Segmentation object containing a 3D mask.
+            label (int, optional):
+                Label value to extract from the segmentation. Defaults to 1.
+            out_path (Path | dict[int, Path] | None, optional):
+                Output specification:
+                    - Path → save mesh to this file
+                    - dict[label, Path] → per-label output path
+                    - None → do not save mesh
+            bb (tuple | None, optional):
+                Optional bounding box (e.g., slices). If provided and `to_world=False`,
+                vertex coordinates are shifted by the bounding box start indices.
+            to_world (bool, optional):
+                If True, transform vertices from voxel coordinates into world
+                coordinates using `seg.affine`. Defaults to True.
+            include_normals (bool, optional):
+                If True, compute and include per-face normals in the returned mesh
+                using `mesh.Mesh.update_normals()`. Note that STL supports only
+                one normal per face. Defaults to False.
+            number_path (bool, optional):
+                If True, append the label to the output filename when saving.
+                Defaults to False.
+
+        Returns:
+            mesh.Mesh:
+                The generated STL mesh. If `include_normals=True`, normals are stored
+                in `mesh.normals` (per face).
+
+        Notes:
+            - Marching cubes is applied to a padded volume to ensure closed surfaces
+            at the segmentation boundaries.
+            - Vertex coordinates are initially in voxel space and shifted to account
+            for padding.
+            - If `to_world=True`, vertices are transformed to physical space (e.g. mm)
+            using the affine matrix of the input segmentation.
+            - STL format stores only triangle geometry and per-face normals; it does
+            not support per-vertex attributes such as scalar values from marching cubes.
+        """
+        from stl import mesh
+
+        seg = self.extract_label(label)
+        # Prepare binary mask
+        seg_arr = np.pad(seg.clamp(0, 1).get_array(), 1)
+        # Marching cubes (voxel coordinates)
+        try:
+            verts, faces, normals, values = marching_cubes(seg_arr, gradient_direction="ascent", step_size=1)
+        except RuntimeError as e:
+            raise RuntimeError(str(e),f"{label=}, {self.unique()}, {out_path=}") from None
+        # Remove padding offset (since we padded by 1 voxel)
+        verts -= 1
+        # Apply bounding box offset (still voxel space)
+        if bb is not None and not to_world:
+            verts += np.array([b.start for b in bb])
+        # Convert to world coordinates using affine
+        if to_world:
+            affine = self.affine  # (4, 4)
+            verts_h = np.c_[verts, np.ones(len(verts))]  # homogeneous coords
+            verts = (affine @ verts_h.T).T[:, :3]
+
+        # Build STL mesh
+        cube: mesh.Mesh = mesh.Mesh(np.zeros(faces.shape[0], dtype=mesh.Mesh.dtype))
+        for i, f in enumerate(faces):
+            cube.vectors[i] = verts[f]
+
+        # Save if requested
+        if out_path is not None:
+            out_path = out_path.get(label) if isinstance(out_path, dict) else out_path
+
+            if out_path is not None:
+                out_path = Path(out_path)
+                if out_path.is_dir():
+                    out_path = out_path / f"mask_{label}.stl"
+                elif number_path:
+                    out_path.with_name(f"{out_path.stem}_{label}.stl")
+                log.on_save(f"Saving STL to {out_path}")
+                out_path.parent.mkdir(exist_ok=True)
+                cube.save(str(out_path))
+
+        if include_normals:
+            cube.update_normals()
+
+        return cube
 
     def __str__(self) -> str:
         return f"{super().__str__()}, seg={self.seg}" # type: ignore

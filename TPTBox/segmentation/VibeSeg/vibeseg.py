@@ -92,7 +92,7 @@ def run_vibeseg(
     gpu: int = 0,
     ddevice: Literal["cpu", "cuda", "mps"] = "cuda",
     dataset_id: int = 100,
-    padd: int = 0,
+    padd: int = 5,
     keep_size: bool = False,
     **args,
 ) -> NII:
@@ -129,10 +129,22 @@ def run_vibeseg(
 def run_nnunet(
     i: list[Image_Reference],
     out_seg: str | Path,
+    *,
     override: bool = False,
     gpu: int = 0,
     ddevice: Literal["cpu", "cuda", "mps"] = "cuda",
     dataset_id: int = 80,
+    model_path: str | Path | None = None,
+    auto_download=False,  # set to True if model_path is None
+    keep_size=False,
+    fill_holes=False,
+    logits=False,
+    mapping=None,
+    crop=False,
+    max_folds=None,
+    mode="nearest",
+    padd: int = 0,
+    key_ResEnc="__nnUNet*ResEnc",
     **args,
 ) -> None:
     """Run an nnU-Net model on a list of images (multi-channel) and save the segmentation.
@@ -153,6 +165,17 @@ def run_nnunet(
         override=override,
         gpu=gpu,
         ddevice=ddevice,
+        model_path=model_path,
+        auto_download=auto_download,
+        keep_size=keep_size,
+        fill_holes=fill_holes,
+        logits=logits,
+        mapping=mapping,
+        crop=crop,
+        max_folds=max_folds,
+        mode=mode,
+        padd=padd,
+        _key_ResEnc=key_ResEnc,
         **args,
     )
 

@@ -285,6 +285,8 @@ def test_name_conflict(json_ob: dict, file: str | Path) -> bool:
     if Path(file).exists():
         with open(file) as f:
             js = json.load(f)
+            if "grid" in js:
+                del js["grid"]
         return js != json_ob
     return False
 

@@ -253,9 +253,18 @@ class Logger_Interface(Protocol):
         """Log a message with default ``Log_Type.TEXT`` severity."""
         self.print(*text, end=end, ltype=Log_Type.TEXT, verbose=verbose, **qargs)
 
+    # same logging as the python loger for drop in replacement
+    def warning(self, *text, end: str = "\n", verbose: bool | None = None, **qargs) -> None:
+        """Log a warning message (drop-in for Python's ``logging.warning``)."""
+        return self.on_warning(*text, end=end, verbose=verbose, **qargs)
+
+    def error(self, *text, end: str = "\n", verbose: bool | None = None, **qargs) -> None:
+        """Log an error message (drop-in for Python's ``logging.error``)."""
+        return self.on_fail(*text, end=end, verbose=verbose, **qargs)
+
     def info(self, *text, end: str = "\n", verbose: bool | None = None, **qargs) -> None:
         """Log an informational message (alias for :meth:`on_text`)."""
-        self.print(*text, end=end, ltype=Log_Type.TEXT, verbose=verbose, **qargs)
+        return self.on_text(*text, end=end, verbose=verbose, **qargs)
 
 
 class Logger(Logger_Interface):
