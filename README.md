@@ -8,6 +8,7 @@
 [![Stable Version](https://img.shields.io/pypi/v/tptbox?label=stable)](https://pypi.python.org/pypi/tptbox/)
 [![tests](https://github.com/Hendrik-code/TPTBox/actions/workflows/tests.yml/badge.svg)](https://github.com/Hendrik-code/TPTBox/actions/workflows/tests.yml)
 [![codecov](https://codecov.io/gh/Hendrik-code/TPTBox/graph/badge.svg?token=A7FWUKO9Y4)](https://codecov.io/gh/Hendrik-code/TPTBox)
+[![Documentation](https://readthedocs.org/projects/tptbox/badge/?version=latest)](https://tptbox.readthedocs.io/en/latest/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 
@@ -21,6 +22,14 @@ It can find, filter, search any BIDS_Family and subjects, and has many functiona
 - Registration
 - Logging everything consistently
 - ...
+
+## Documentation
+
+Full API reference and usage guides are available at **https://tptbox.readthedocs.io**.
+
+The docs cover all sub-packages — `NII`, `POI`, `BIDS_FILE`, NumPy utilities,
+vertebra constants, spine analysis, registration, segmentation, mesh3D,
+stitching, and the logger — with hyperlinks back to the GitHub source.
 
 ## Install the package
 ```bash
@@ -93,7 +102,7 @@ Python function and script for arbitrary image stitching. [See Details](TPTBox/s
 
 ![Example of two lumbar vertebrae. The left example is derived from 1 mm isotropic CT, the right from sagittal MRI with a resolution of 3.3 mm in the left–right direction. Top row: Subregion of the vertebra used for analysis. Middle row: Extreme points. Bottom row: Corpus edge and ligamentum flavum points.](TPTBox/images/poi_preview.png)
 For our Spine segmentation pipline follow the installation of [SPINEPS](https://github.com/Hendrik-code/spineps).
-Image Source: Rule-based Key-Point Extraction for MR-Guided Biomechanical Digital Twins of the Spine; 
+Image Source: Rule-based Key-Point Extraction for MR-Guided Biomechanical Digital Twins of the Spine;
 
 
 
