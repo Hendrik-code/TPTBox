@@ -109,8 +109,7 @@ class DeepaliPairwiseImageTrainer:
         loss_terms: list[LOSS | str] | dict[str, LOSS] | dict[str, str] | dict[str, tuple[str, dict]] | None = None,
         weights: list[float] | dict[str, float | list[float]] | dict[str, list[float]] | None = None,
     ) -> None:
-        """
-        Initializes the DeepaliPairwiseImageTrainer for pairwise image registration.
+        """Initializes the DeepaliPairwiseImageTrainer for pairwise image registration.
 
         Args:
             source (Union[Image, PathStr]): The source image or file path.

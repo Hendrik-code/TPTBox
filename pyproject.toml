@@ -176,6 +176,8 @@ ignore = [
     "D104",    # missing docstring in public package
     "D105",    # missing docstring in magic method
     "D107",    # missing docstring in __init__ (covered by class docstring)
+    # Argument descriptions in existing docstrings — addressed progressively
+    "D417",
     # Return-type annotation not required for private helpers
     "ANN202",
     # En-dashes (–) in docstrings are legitimate range notation (e.g. "C1–C7")

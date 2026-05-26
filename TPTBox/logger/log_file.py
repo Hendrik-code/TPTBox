@@ -27,7 +27,13 @@ indentation_level: int = 0
 
 
 class Logger_Interface(Protocol):
-    """General Logger Interface"""
+    """Structural protocol defining the logging interface for medical imaging pipelines.
+
+    All concrete logger classes (``Logger``, ``No_Logger``, ``String_Logger``,
+    ``Reflection_Logger``) implement this protocol.  Client code should type-hint
+    against ``Logger_Interface`` to remain independent of the concrete
+    implementation.
+    """
 
     prefix: str | None = None
 
@@ -38,17 +44,15 @@ class Logger_Interface(Protocol):
         ltype=Log_Type.TEXT,
         verbose: bool | None = None,
         ignore_prefix: bool = False,
-    ):
-        """
+    ) -> None:
+        """Print text to the logger and optionally to the terminal.
+
         Args:
-            *text: Text to the printed/logged
-            end: end char (default: newline)
-            ltype: log type (Text, Warning,...). If it is contained in *text and not here, it will still work
-            verbose: true/false: prints to terminal (If none, uses default verbose)
-            ignore_prefix: If false, will set a prefix character based on Log_Type (e.g. [*], [!], ...)
-
-
-        logger.print() without arguments will result in an empty newline
+            *text: Text to be printed/logged.
+            end: End char (default: newline).
+            ltype: Log type (Text, Warning,...). If it is contained in *text and not here, it will still work.
+            verbose: true/false: prints to terminal (if None, uses default verbose).
+            ignore_prefix: If False, will set a prefix character based on Log_Type (e.g. [*], [!], ...).
         """
         if verbose is None:
             verbose = getattr(self, "default_verbose", False)
@@ -66,7 +70,7 @@ class Logger_Interface(Protocol):
         self._log(_clean_all_color_from_text(string), end=end, ltype=ltype)
 
     def _preprocess_text(self, text: tuple[str, ...], ltype=Log_Type.TEXT, ignore_prefix: bool = False) -> str:
-        """Processes given text parts, converting manually specified datatypes, and adds the prefix and ltype corresponding color
+        """Processes given text parts, converting manually specified datatypes, and adds the prefix and ltype corresponding color.
 
         Args:
             text (tuple[str, ...]): _description_
@@ -92,7 +96,7 @@ class Logger_Interface(Protocol):
         _set_indent(False)
 
     def _prefix_indentation_level(self) -> str:
-        """Returns the indentation as processed string
+        """Returns the indentation as processed string.
 
         Returns:
             str: indentantion string
@@ -104,7 +108,7 @@ class Logger_Interface(Protocol):
         return string
 
     def _get_logger_prefix(self, ltype: Log_Type = Log_Type.TEXT):
-        """Returns the prefix based on indentation level and log_type
+        """Returns the prefix based on indentation level and log_type.
 
         Args:
             type (Log_Type, optional): _description_. Defaults to Log_Type.TEXT.
@@ -119,14 +123,21 @@ class Logger_Interface(Protocol):
 
     def _log(self, text: str, end: str = "\n", ltype=Log_Type.TEXT): ...
 
-    def close(self): ...
+    def close(self) -> None:
+        """Release any resources held by this logger."""
+        ...
 
-    def flush(self): ...
+    def flush(self) -> None:
+        """Flush any buffered log content."""
+        ...
 
-    def flush_sub_logger(self, sublogger: String_Logger, closed=False): ...
+    def flush_sub_logger(self, sublogger: String_Logger, closed: bool = False) -> None:
+        """Flush or close a sub-logger attached to this logger."""
+        ...
 
     def add_sub_logger(self, name: str, default_verbose: bool = False) -> String_Logger | No_Logger:
         """Creates a sub-logger that only logs to string. Will be appended in this loggers log file as sub-logger.
+
         Args:
             name: name of the sub-logger
             default_verbose: default_verbose attribute for the sub-logger
@@ -148,12 +159,29 @@ class Logger_Interface(Protocol):
         else:
             return self  # type: ignore
 
-    def print_error(self, **args):
+    def print_error(self, **args) -> None:
+        """Log the current exception traceback with ``Log_Type.FAIL`` severity."""
         self.print(traceback.format_exc(), ltype=Log_Type.FAIL, **args)
 
     logging_state = None
 
-    def log_statistic(self, key, value, key2=None, verbose=True, round_print: int | None = 5):
+    def log_statistic(
+        self, key: str, value: float, key2: str | int | None = None, verbose: bool = True, round_print: int | None = 5
+    ) -> None:
+        """Record a scalar metric and log it as a neutral message.
+
+        Values are accumulated under ``key`` / ``key2`` and can later be
+        summarized with :meth:`print_statistic`.
+
+        Args:
+            key: Primary metric name (e.g. ``"dice"``).
+            value: Numeric value to record.
+            key2: Secondary key (e.g. sample name). Defaults to the current
+                count for ``key`` when None.
+            verbose: If True, prints the entry immediately.
+            round_print: Number of decimal places for display. Set to None to
+                disable rounding.
+        """
         if self.logging_state is None:
             self.logging_state = {}
         if key not in self.logging_state:
@@ -169,7 +197,12 @@ class Logger_Interface(Protocol):
     def _print_by_logger(self, *text, end="\n", verbose: bool | None = None, **qargs):
         self.print(*text, end=end, ltype=Log_Type.LOG, verbose=verbose, **qargs)
 
-    def print_statistic(self):
+    def print_statistic(self) -> None:
+        """Print a summary table of all accumulated statistics to the log.
+
+        Computes and logs the mean, standard deviation, median, and count for
+        every key previously recorded via :meth:`log_statistic`.
+        """
         if self.logging_state is None:
             self._print_by_logger("??? No Accumulated Statistics ???")
             return
@@ -184,41 +217,49 @@ class Logger_Interface(Protocol):
             self._print_by_logger(f"{k:17} {mean:8}±{std:8} {median:8} {count:7}")
         self._print_by_logger("####################################################")
 
-    def on_fail(self, *text, end="\n", verbose: bool | None = None, **qargs):
+    def on_fail(self, *text, end: str = "\n", verbose: bool | None = None, **qargs) -> None:
+        """Log a message with ``Log_Type.FAIL`` severity."""
         self.print(*text, end=end, ltype=Log_Type.FAIL, verbose=verbose, **qargs)
 
-    def on_log(self, *text, end="\n", verbose: bool | None = None, **qargs):
+    def on_log(self, *text, end: str = "\n", verbose: bool | None = None, **qargs) -> None:
+        """Log a message with ``Log_Type.LOG`` severity."""
         self.print(*text, end=end, ltype=Log_Type.LOG, verbose=verbose, **qargs)
 
-    def on_bold(self, *text, end="\n", verbose: bool | None = None, **qargs):
+    def on_bold(self, *text, end: str = "\n", verbose: bool | None = None, **qargs) -> None:
+        """Log a message with ``Log_Type.BOLD`` formatting."""
         self.print(*text, end=end, ltype=Log_Type.BOLD, verbose=verbose, **qargs)
 
-    def on_save(self, *text, end="\n", verbose: bool | None = None, **qargs):
+    def on_save(self, *text, end: str = "\n", verbose: bool | None = None, **qargs) -> None:
+        """Log a message with ``Log_Type.SAVE`` severity."""
         self.print(*text, end=end, ltype=Log_Type.SAVE, verbose=verbose, **qargs)
 
-    def on_debug(self, *text, end="\n", verbose: bool | None = None, **qargs):
+    def on_debug(self, *text, end: str = "\n", verbose: bool | None = None, **qargs) -> None:
+        """Log a message with ``Log_Type.STRANGE`` (debug) severity."""
         self.print(*text, end=end, ltype=Log_Type.STRANGE, verbose=verbose, **qargs)
 
-    def on_ok(self, *text, end="\n", verbose: bool | None = None, **qargs):
+    def on_ok(self, *text, end: str = "\n", verbose: bool | None = None, **qargs) -> None:
+        """Log a message with ``Log_Type.OK`` severity."""
         self.print(*text, end=end, ltype=Log_Type.OK, verbose=verbose, **qargs)
 
-    def on_neutral(self, *text, end="\n", verbose: bool | None = None, **qargs):
+    def on_neutral(self, *text, end: str = "\n", verbose: bool | None = None, **qargs) -> None:
+        """Log a message with ``Log_Type.NEUTRAL`` severity."""
         self.print(*text, end=end, ltype=Log_Type.NEUTRAL, verbose=verbose, **qargs)
 
-    def on_warning(self, *text, end="\n", verbose: bool | None = None, **qargs):
+    def on_warning(self, *text, end: str = "\n", verbose: bool | None = None, **qargs) -> None:
+        """Log a message with ``Log_Type.WARNING`` severity."""
         self.print(*text, end=end, ltype=Log_Type.WARNING, verbose=verbose, **qargs)
 
-    def on_text(self, *text, end="\n", verbose: bool | None = None, **qargs):
+    def on_text(self, *text, end: str = "\n", verbose: bool | None = None, **qargs) -> None:
+        """Log a message with default ``Log_Type.TEXT`` severity."""
         self.print(*text, end=end, ltype=Log_Type.TEXT, verbose=verbose, **qargs)
 
-    def info(self, *text, end="\n", verbose: bool | None = None, **qargs):
+    def info(self, *text, end: str = "\n", verbose: bool | None = None, **qargs) -> None:
+        """Log an informational message (alias for :meth:`on_text`)."""
         self.print(*text, end=end, ltype=Log_Type.TEXT, verbose=verbose, **qargs)
 
 
 class Logger(Logger_Interface):
-    """
-    Defines a logger object, that automatically creates a logs folder and file in it. Logs logger.print() calls to this file.
-    """
+    """Defines a logger object, that automatically creates a logs folder and file in it. Logs logger.print() calls to this file."""
 
     def __init__(
         self,
@@ -228,14 +269,14 @@ class Logger(Logger_Interface):
         log_arguments=None,
         prefix: str | None = None,
     ):
-        """
+        """Initialise a file-backed logger, creating the log directory and file automatically.
 
         Args:
-            path: path to the folder that needs logging (usual dataset with raw/der in it)
-            log_filename: the filename or the bids-conform key-value pairs as dict
-            default_verbose: default verbose behavior of not specified in calls
-            log_arguments: if set, will print the contents in a "run with arguments" section
-            prefix: if set, will use this string as prefix instead of the automatically chosen one based on log_type
+            path: Path to the folder that needs logging (usual dataset with raw/der in it).
+            log_filename: The filename or the bids-conform key-value pairs as dict.
+            default_verbose: Default verbose behavior when not specified in calls.
+            log_arguments: If set, will print the contents in a "run with arguments" section.
+            prefix: If set, will use this string as prefix instead of the automatically chosen one.
         """
         path = Path(path)  # ensure pathlib object
         # Get Start time
@@ -285,7 +326,7 @@ class Logger(Logger_Interface):
         default_verbose: bool = False,
         override_prefix: str | None = None,
     ):
-        """Creates a logger object based on metadata from a BIDS_FILE
+        """Creates a logger object based on metadata from a BIDS_FILE.
 
         Args:
             bids_file (BIDS_FILE): _description_
@@ -298,14 +339,22 @@ class Logger(Logger_Interface):
         path = bids_file.dataset
         return Logger(path, log_filename, default_verbose=default_verbose, prefix=override_prefix)
 
-    def _log(self, text: str, end: str = "\n", ltype=Log_Type.TEXT):  # noqa: ARG002
+    def _log(self, text: str, end: str = "\n", ltype=Log_Type.TEXT) -> None:  # noqa: ARG002
+        """Write a plain-text line to the log file."""
         self.f.write(str(text))
         self.f.write(end)
 
-    def flush(self):
+    def flush(self) -> None:
+        """Flush the underlying file buffer to disk."""
         self.f.flush()
 
-    def flush_sub_logger(self, sublogger: String_Logger, closed=False):
+    def flush_sub_logger(self, sublogger: String_Logger, closed: bool = False) -> None:
+        """Append a sub-logger's accumulated content into this log file.
+
+        Args:
+            sublogger: The sub-logger whose content should be flushed.
+            closed: If True, also removes ``sublogger`` from the tracked list.
+        """
         if sublogger in self.sub_loggers:
             self.sub_loggers.remove(sublogger) if closed else None
             self.print("Flushed sub logger:", verbose=False, ltype=Log_Type.LOG)
@@ -313,10 +362,12 @@ class Logger(Logger_Interface):
             # Clear Sublogger
             sublogger.log_content = ""
 
-    def remove(self):
+    def remove(self) -> None:
+        """Trigger the finalizer to close and release the log file."""
         self._finalizer()
 
-    def close(self):
+    def close(self) -> None:
+        """Flush all sub-loggers, write timing information, and close the log file."""
         if not self.f.closed:
             self.sub_loggers = [s for s in self.sub_loggers if s.log_content != ""]
             if len(self.sub_loggers) > 0:
@@ -342,14 +393,13 @@ class Logger(Logger_Interface):
             self.f.close()
 
     @property
-    def removed(self):
+    def removed(self) -> bool:
+        """True if the log file has been closed and its finalizer is no longer alive."""
         return not self._finalizer.alive
 
 
 class No_Logger(Logger_Interface):
-    """
-    Does not create any logs, but instead verbose defaults to true, printing calls to the terminal
-    """
+    """Does not create any logs, but instead verbose defaults to true, printing calls to the terminal."""
 
     def __init__(
         self,
@@ -364,26 +414,26 @@ class No_Logger(Logger_Interface):
             start_time_short = format_time_short(self.start_time)
             self.print(f"Log started at: {start_time_short}\n", ltype=Log_Type.LOG)
 
-    def _log(self, text: str, end: str = "\n", ltype=Log_Type.TEXT):
-        pass  # self.print()
+    def _log(self, text: str, end: str = "\n", ltype: Log_Type = Log_Type.TEXT) -> None:
+        """No-op: No_Logger does not persist log entries."""
+        # self.print()
 
-    def flush(self):
-        pass
+    def flush(self) -> None:
+        """No-op: No_Logger has no buffer to flush."""
 
-    def flush_sub_logger(self, sublogger: String_Logger, closed=False):
-        pass
+    def flush_sub_logger(self, sublogger: String_Logger, closed: bool = False) -> None:
+        """No-op: No_Logger does not track sub-loggers."""
 
-    def close(self):
-        pass
+    def close(self) -> None:
+        """No-op: No_Logger has no resources to release."""
 
     def add_sub_logger(self, name: str, default_verbose: bool = False) -> Logger_Interface:  # noqa: ARG002
+        """Return self as No_Logger does not support sub-loggers."""
         return self
 
 
 class Reflection_Logger(No_Logger):
-    """
-    Does not create any logs, but instead verbose defaults to true, printing calls to the terminal. Accepts verbose to be a Logger_Interface. In that case, the given Logger_Interface calls their print function
-    """
+    """Logger that prints to the terminal and optionally delegates to another Logger_Interface."""
 
     def print(
         self,
@@ -392,17 +442,15 @@ class Reflection_Logger(No_Logger):
         ltype=Log_Type.NEUTRAL,
         verbose: bool | Logger_Interface | None = True,
         ignore_prefix: bool = False,
-    ):
-        """
+    ) -> None:
+        """Print to terminal or delegate to a Logger_Interface passed as ``verbose``.
+
         Args:
-            *text: Text to the printed/logged
-            end: end char
-            type: log type (Text, Warning,...)
-            verbose: true/false or other Logger: prints to terminal (If none, uses default verbose)
-            ignore_prefix: If false, will set a prefix character based on Log_Type (e.g. [*], [!], ...)
-
-        Returns:
-
+            *text: Text to be printed/logged.
+            end: End char.
+            ltype: Log type (Text, Warning,...).
+            verbose: true/false or another Logger; prints to terminal (if None, uses default verbose).
+            ignore_prefix: If False, will set a prefix character based on Log_Type (e.g. [*], [!], ...).
         """
         if isinstance(verbose, bool) or verbose is None:
             super().print(*text, end=end, ltype=ltype, verbose=verbose, ignore_prefix=ignore_prefix)
@@ -411,9 +459,7 @@ class Reflection_Logger(No_Logger):
 
 
 class String_Logger(Logger_Interface):
-    """
-    Logger that logs only to a string object "log_content".
-    """
+    """Logger that logs only to a string object "log_content"."""
 
     def __init__(
         self,
@@ -433,20 +479,38 @@ class String_Logger(Logger_Interface):
 
     @classmethod
     def as_sub_logger(cls, head_logger: Logger_Interface, default_verbose: bool = False) -> String_Logger:
+        """Create a ``String_Logger`` that is wired to a parent ``Logger_Interface``.
+
+        When flushed or closed the content is forwarded to ``head_logger``.
+
+        Args:
+            head_logger: Parent logger that will receive this sub-logger's content.
+            default_verbose: Default verbosity for calls on the sub-logger.
+
+        Returns:
+            A new ``String_Logger`` instance with ``head_logger`` set.
+        """
         sub_logger = String_Logger(default_verbose=default_verbose, finalize=False)
         sub_logger.head_logger = head_logger
         return sub_logger
 
-    def _log(self, text: str, end: str = "\n", ltype=Log_Type.TEXT):
+    def _log(self, text: str, end: str = "\n", ltype: Log_Type = Log_Type.TEXT) -> None:
+        """Append a log entry to both the plain-text and colored string buffers."""
         self.log_content += text
         self.log_content += end
         self.log_content_colored += color_log_text(ltype=ltype, text=text + end)
 
-    def flush(self):
+    def flush(self) -> None:
+        """Forward accumulated content to the head logger without closing."""
         if self.head_logger is not None:
             self.head_logger.flush_sub_logger(self, closed=False)
 
-    def close(self):
+    def close(self) -> tuple[str, str]:
+        """Finalize the sub-logger and forward its content to the head logger.
+
+        Returns:
+            A 2-tuple of ``(log_content, log_content_colored)`` strings.
+        """
         if len(self.sub_loggers) > 0:
             self.print()
             self.print(
@@ -468,8 +532,8 @@ class String_Logger(Logger_Interface):
             self.head_logger.flush()
         return self.log_content, self.log_content_colored
 
-    def flush_sub_logger(self, sublogger, closed=False):
-        pass
+    def flush_sub_logger(self, sublogger: String_Logger, closed: bool = False) -> None:
+        """No-op: String_Logger does not flush nested sub-loggers."""
 
 
 #####################################
@@ -477,14 +541,38 @@ class String_Logger(Logger_Interface):
 #####################################
 
 
-def print_to_terminal(text: str, end: str, ltype=Log_Type.TEXT) -> None:
+def print_to_terminal(text: str, end: str, ltype: Log_Type = Log_Type.TEXT) -> None:
+    r"""Print colored text to the terminal, or emit a warning for WARNING_THROW types.
+
+    Args:
+        text: The message string to display.
+        end: Line ending character (e.g. ``"\n"``).
+        ltype: Log type that controls the ANSI color applied to ``text``.
+    """
     if ltype == Log_Type.WARNING_THROW:
         warnings.warn(color_log_text(ltype=ltype, text=text), Warning, stacklevel=3)
     else:
         print(color_log_text(ltype=ltype, text=text), end=end)
 
 
-def sub_log_call_func(name, logger: Logger, function, default_verbose: bool | None = None, **kwargs):
+def sub_log_call_func(name: str, logger: Logger, function, default_verbose: bool | None = None, **kwargs) -> object:
+    """Call a function inside a sub-logger context and return its result.
+
+    Creates a sub-logger from ``logger``, then calls ``function`` passing
+    ``name`` and the sub-logger as keyword arguments.
+
+    Args:
+        name: Label for the sub-logger.
+        logger: Parent logger from which the sub-logger is created.
+        function: Callable to invoke. Must accept ``name`` and ``logger`` as
+            keyword arguments.
+        default_verbose: Verbosity for the sub-logger. Inherits from ``logger``
+            when None.
+        **kwargs: Additional keyword arguments forwarded to ``function``.
+
+    Returns:
+        Whatever ``function`` returns.
+    """
     if default_verbose is None:
         default_verbose = logger.default_verbose
     sub_logger = logger.add_sub_logger(name, default_verbose=default_verbose)
@@ -492,7 +580,7 @@ def sub_log_call_func(name, logger: Logger, function, default_verbose: bool | No
 
 
 def _set_indent(indent_change: int | bool):
-    """Changes the indentation level
+    """Changes the indentation level.
 
     Args:
         indent_change (int | bool): If bool, true/false == +1/-1, if int, sets to that int

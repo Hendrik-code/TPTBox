@@ -7,7 +7,7 @@ from time import struct_time
 
 
 class Log_Type(Enum):
-    """The different types of Logs supported"""
+    """The different types of Logs supported."""
 
     TEXT = auto()
     NEUTRAL = auto()
@@ -28,7 +28,7 @@ class Log_Type(Enum):
 
 
 class bcolors:
-    """Terminal color symbols"""
+    """Terminal color symbols."""
 
     # Front Colors
     BLACK = "\033[30m"
@@ -90,31 +90,26 @@ type2bcolors: dict[Log_Type, tuple[str, str]] = {
 }
 
 
-def datatype_to_string(text, log_type: Log_Type):
-    """Processes given text into a readable string
+def datatype_to_string(text: object, log_type: Log_Type) -> str:
+    """Convert an arbitrary value to its loggable string representation.
+
+    Dicts receive special colored formatting via :func:`_dict_to_string`; all
+    other types are converted with ``str()``.
 
     Args:
-        text (str): _description_
-        log_type (Log_Type): _description_
+        text: The value to convert.
+        log_type: Log type used for dict colorization.
 
     Returns:
-        _type_: _description_
+        A human-readable string representation of ``text``.
     """
     if isinstance(text, dict):
         return _dict_to_string(text, log_type)
     return str(text)
 
 
-def _dict_to_string(u_dict: dict, ltype: Log_Type = Log_Type.TEXT):
-    """Converts a dictionary into a readable string
-
-    Args:
-        u_dict (dict): dictionary to be logged
-        ltype (Log_Type, optional): Log_Type. Defaults to Log_Type.TEXT.
-
-    Returns:
-        _type_: string version of the dictionary
-    """
+def _dict_to_string(u_dict: dict, ltype: Log_Type = Log_Type.TEXT) -> str:
+    """Convert a dictionary into a colored, human-readable string for logging."""
     text = ""
     text += "{"
     for key, value in u_dict.items():
@@ -127,20 +122,31 @@ def _dict_to_string(u_dict: dict, ltype: Log_Type = Log_Type.TEXT):
     return text
 
 
-def get_formatted_time():
+def get_formatted_time() -> str:
+    """Return the current local time as a short formatted string."""
     return format_time_short(get_time())
 
 
 def get_time() -> struct_time:
+    """Return the current local time as a :class:`time.struct_time`."""
     t = time.localtime()
     return t
 
 
-def _format_time(t: struct_time):
+def _format_time(t: struct_time) -> str:
+    """Return a human-readable representation of a ``struct_time`` value."""
     return time.asctime(t)
 
 
 def format_time_short(t: struct_time) -> str:
+    """Format a ``struct_time`` as a compact ``date-YYYY-M-D_time-H-M-S`` string.
+
+    Args:
+        t: Local time struct to format.
+
+    Returns:
+        A string such as ``"date-2024-1-15_time-9-30-0"``.
+    """
     return (
         "date-"
         + str(t.tm_year)
@@ -157,29 +163,33 @@ def format_time_short(t: struct_time) -> str:
     )
 
 
-def _convert_seconds(seconds: float):
+def _convert_seconds(seconds: float) -> str:
+    """Convert a duration in seconds to a human-readable ``H:MM:SS h:mm:ss`` string."""
     return str(datetime.timedelta(seconds=seconds)) + " h:mm:ss"
 
 
-def color_log_text(ltype: Log_Type, text: str, end: Log_Type = Log_Type.TEXT):
-    """Colors text(str) based on given Log_Type
+def color_log_text(ltype: Log_Type, text: str, end: Log_Type = Log_Type.TEXT) -> str:
+    """Wrap ``text`` in the ANSI color codes corresponding to ``ltype``.
 
     Args:
-        ltype (Log_Type): Log_Type (defines the color being used)
-        text (str): Text to be colored
-        end (Log_Type, optional): What color should come after this text. Defaults to Log_Type.TEXT. (no color)
+        ltype: Log type that determines the opening color code.
+        text: The string to colorize.
+        end: Log type whose color code is applied after ``text``.
+            Defaults to ``Log_Type.TEXT`` (reset to default terminal color).
 
     Returns:
-        _type_: _description_
+        The colorized string with ANSI escape sequences.
     """
     return _color_text(color_char=type2bcolors[ltype][0], text=text, end=type2bcolors[end][0])
 
 
-def _color_text(text: str, color_char, end=bcolors.ENDC):
+def _color_text(text: str, color_char: str, end: str = bcolors.ENDC) -> str:
+    """Wrap text between an opening color code and a closing reset code."""
     return f"{color_char}{text}{bcolors.ENDC}{end}"
 
 
-def _clean_all_color_from_text(text: str):
+def _clean_all_color_from_text(text: str) -> str:
+    """Strip all ANSI escape sequences from a string."""
     import re
 
     ansi_escape = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")

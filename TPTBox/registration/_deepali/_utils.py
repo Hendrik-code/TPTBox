@@ -37,7 +37,15 @@ LOSS = Union[PairwiseImageLoss, PointSetDistance, LandmarkPointDistance, Displac
 
 
 def get_device_config(device: Union[torch.device, str, int]) -> torch.device:
-    r"""Get configured PyTorch device."""
+    """Return a ``torch.device`` from a device specifier.
+
+    Args:
+        device: Device specifier as a ``torch.device``, a device string such as
+            ``"cpu"`` or ``"cuda:0"``, or an integer GPU index.
+
+    Returns:
+        Resolved ``torch.device`` object.
+    """
     if isinstance(device, int):
         device = f"cuda:{device}"
     elif device == "cuda":
@@ -48,9 +56,25 @@ def get_device_config(device: Union[torch.device, str, int]) -> torch.device:
 def get_post_transform(
     target_grid: Grid,
     source_grid: Grid,
-    align=False,
+    align: bool | dict | str | Path = False,
 ) -> SpatialTransform | None:
-    r"""Get constant rigid transformation between image grid domains."""
+    """Build a constant rigid pre-alignment transform between two image grid domains.
+
+    Args:
+        target_grid: Target (fixed) image grid.
+        source_grid: Source (moving) image grid.
+        align: Pre-alignment strategy.  ``False`` / ``None`` disables alignment.
+            ``True`` aligns both centres and directions.  A ``dict`` may contain
+            ``"centers"`` and ``"directions"`` boolean flags.  A ``str`` or
+            ``Path`` is treated as a file path and loaded via :func:`load_transform`.
+
+    Returns:
+        A ``SpatialTransform`` encoding the pre-alignment, or ``None`` if
+        *align* is ``False`` or ``None``.
+
+    Raises:
+        ValueError: If *align* is an unrecognised type or value.
+    """
     if align is False or align is None:
         return None
     if isinstance(align, (Path, str)):
@@ -128,13 +152,22 @@ def load_transform(path: PathStr, grid: Grid) -> SpatialTransform:
 
 
 def slope_of_least_squares_fit(values: Sequence[float]) -> float:
-    r"""Compute slope of least squares fit of line to last n objective function values
+    """Compute the slope of a least-squares line fit through the given values.
 
-    See also:
-    - https://www.che.udel.edu/pdf/FittingData.pdf
-    - https://en.wikipedia.org/wiki/1_%2B_2_%2B_3_%2B_4_%2B_%E2%8B%AF
-    - https://proofwiki.org/wiki/Sum_of_Sequence_of_Squares
+    Each element index is treated as the x-coordinate.  The formula avoids
+    explicit matrix construction for efficiency.
 
+    Args:
+        values: Sequence of scalar objective-function values (at least 2).
+
+    Returns:
+        Slope of the fitted line, or ``float("nan")`` when fewer than 2 values
+        are provided.
+
+    See Also:
+        - https://www.che.udel.edu/pdf/FittingData.pdf
+        - https://en.wikipedia.org/wiki/1_%2B_2_%2B_3_%2B_4_%2B_%E2%8B%AF
+        - https://proofwiki.org/wiki/Sum_of_Sequence_of_Squares
     """
     n = len(values)
     if n < 2:
@@ -151,6 +184,16 @@ def slope_of_least_squares_fit(values: Sequence[float]) -> float:
 
 
 class OptimizerWrapper(ContextDecorator):
+    """Context manager that zeroes gradients on entry and steps the optimiser on clean exit.
+
+    Intended as a ``with``-statement body around a ``loss.backward()`` call.
+
+    Args:
+        optimizer: PyTorch optimiser to manage.
+        scheduler: Optional learning-rate scheduler stepped after each optimiser
+            update.
+    """
+
     def __init__(self, optimizer: torch.optim.Optimizer, scheduler=None):
         self.optimizer = optimizer
         self.scheduler = scheduler
@@ -167,7 +210,19 @@ class OptimizerWrapper(ContextDecorator):
 
 
 def overlap_mask(source_mask: Tensor | None, target_mask: Tensor | None) -> Tensor | None:
-    r"""Overlap mask at which to evaluate pairwise data term."""
+    """Compute the element-wise AND of two binary masks.
+
+    Returns the logical overlap region at which a pairwise loss should be
+    evaluated.  If either mask is ``None``, the other is returned as-is.
+
+    Args:
+        source_mask: Binary mask for the source image, or ``None``.
+        target_mask: Binary mask for the target image, or ``None``.
+
+    Returns:
+        Combined binary mask as an ``int8`` tensor, or ``None`` if both inputs
+        are ``None``.
+    """
     if source_mask is None:
         return target_mask
     if target_mask is None:
@@ -177,14 +232,43 @@ def overlap_mask(source_mask: Tensor | None, target_mask: Tensor | None) -> Tens
     return mask
 
 
-def make_foreground_mask(image: Image, foreground_lower_threshold, foreground_upper_threshold):
+def make_foreground_mask(image: Image, foreground_lower_threshold: float, foreground_upper_threshold: float) -> Image:
+    """Create a binary foreground mask by thresholding image intensities.
+
+    Args:
+        image: Source deepali ``Image``.
+        foreground_lower_threshold: Minimum intensity value considered foreground.
+        foreground_upper_threshold: Maximum intensity value considered foreground.
+
+    Returns:
+        A deepali ``Image`` of dtype ``int8`` with 1 where the intensity is
+        within [*foreground_lower_threshold*, *foreground_upper_threshold*] and
+        0 elsewhere.
+    """
     data = image.tensor()
     mask = U.threshold(data, foreground_lower_threshold, foreground_upper_threshold).type(torch.int8)
     # data = torch.cat([data, mask.type(data.dtype)], dim=0)
     return Image(mask, image.grid())
 
 
-def normalize_img(image: Image, normalize_strategy: Literal["auto", "CT", "MRI"] | None):
+def normalize_img(image: Image, normalize_strategy: Literal["auto", "CT", "MRI"] | None) -> Image:
+    """Normalise image intensities to the [0, 1] range.
+
+    Args:
+        image: Source deepali ``Image`` to normalise.
+        normalize_strategy: Normalisation strategy to apply.
+
+            - ``None``: Return the image unchanged.
+            - ``"auto"``: Shift/scale by the observed min and max.
+            - ``"CT"``: Clamp and scale within [-500, 500] HU.
+            - ``"MRI"``: Scale by the 95th percentile of positive voxels.
+
+    Returns:
+        Normalised deepali ``Image`` (same grid, intensity values in [0, 1]).
+
+    Raises:
+        NotImplementedError: If *normalize_strategy* is an unrecognised string.
+    """
     if normalize_strategy is None:
         return image
     data = image.tensor()
@@ -211,7 +295,16 @@ def normalize_img(image: Image, normalize_strategy: Literal["auto", "CT", "MRI"]
     return Image(data, image.grid())
 
 
-def clamp_mask(image: Image | None):
+def clamp_mask(image: Image | None) -> Image | None:
+    """Clamp mask values in-place to the [0, 1] range.
+
+    Args:
+        image: Deepali ``Image`` whose tensor is clamped, or ``None``.
+
+    Returns:
+        The same image object with values clamped to [0, 1], or ``None`` if the
+        input was ``None``.
+    """
     if image is None:
         return image
     data = image.tensor()
@@ -220,7 +313,12 @@ def clamp_mask(image: Image | None):
 
 
 def print_pyramid_info(pyramid: dict[int, Image]) -> None:
-    r"""Print information of image resolution pyramid."""
+    """Print size, origin, extent, and domain info for each level of an image pyramid.
+
+    Args:
+        pyramid: Mapping from pyramid level index to deepali ``Image`` objects.
+            Level 0 is typically the finest resolution.
+    """
     levels = sorted(pyramid.keys())
     for level in reversed(levels):
         grid = pyramid[level].grid()
@@ -259,7 +357,27 @@ def new_loss(
     return cls(*args, **kwargs)  # type: ignore
 
 
-def parse_loss(loss_terms, weights):
+def parse_loss(loss_terms: list | dict, weights: list | dict | None) -> tuple[dict, dict]:
+    """Normalise loss-term and weight specifications to a pair of dictionaries.
+
+    Accepts flexible input formats (lists of loss instances or strings, dicts
+    mapping name to loss or to ``(name, args)`` tuples) and returns a
+    standardised mapping from term name to loss module and from term name to
+    per-pyramid-level weight.
+
+    Args:
+        loss_terms: Loss specification as a list of loss objects / names, or a
+            dict mapping term names to loss objects, name strings, or
+            ``(name, args)`` / ``(name, args, kwargs)`` tuples.
+        weights: Corresponding weights.  When *loss_terms* is a list this should
+            also be a list.  When it is a dict this should be a matching dict.
+            ``None`` defaults to equal weights of 1.
+
+    Returns:
+        A 2-tuple ``(loss_terms, weights)`` where both are plain dictionaries
+        keyed by term name and the values in *weights* are scalars or
+        reversed-order per-pyramid-level lists.
+    """
     if isinstance(loss_terms, Sequence):
         if weights is None:
             weights = {}

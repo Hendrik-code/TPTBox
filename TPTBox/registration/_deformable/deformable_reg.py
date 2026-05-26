@@ -18,14 +18,16 @@ cuda = device("cuda")
 
 
 class Deformable_Registration(General_Registration):
-    """
-    A class for performing deformable registration between a fixed and moving image.
+    """Deformable registration between a fixed and moving image using deepali.
+
+    Wraps ``General_Registration`` with default loss terms (LNCC + BSpline bending
+    energy) and a Stationary Velocity Field Free-Form Deformation (SVFFD) transform.
 
     Attributes:
-        transform (torch.Tensor): The transformation matrix resulting from the registration.
-        ref_nii (NII): Reference NII object used for registration.
-        grid (torch.Tensor): Target grid for image warping.
-        mov (NII): Processed version of the moving image.
+        transform: The learned deformation field resulting from the registration.
+        ref_nii: Reference NII object used for registration.
+        grid: Target grid for image warping.
+        mov: Processed version of the moving image.
     """
 
     def __init__(
@@ -129,10 +131,7 @@ class Deformable_Registration(General_Registration):
 
 
 def test1(run=False):
-    """
-    Main function to test the deformable registration process.
-    Loads reference and moving images, performs registration, and saves the output.
-    """
+    """Test deformable registration by loading reference and moving images, registering, and saving output."""
     from TPTBox import NII
 
     fixed = NII.load(
@@ -174,10 +173,7 @@ def test1(run=False):
 
 
 def test2(run=False):
-    """
-    Main function to test the deformable registration process.
-    Loads reference and moving images, performs registration, and saves the output.
-    """
+    """Test deformable registration by loading reference and moving images, registering, and saving output."""
     from TPTBox import NII
 
     # ref = NII.load("/media/data/robert/code/TPTBox/tmp/sub-100000_sequ-stitched_acq-ax_part-water_vibe.nii.gz", False)

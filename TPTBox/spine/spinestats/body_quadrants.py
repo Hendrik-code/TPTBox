@@ -4,7 +4,7 @@ from pathlib import Path
 
 import numpy as np
 
-from TPTBox import Image_Reference, Location, calc_poi_from_subreg_vert, to_nii
+from TPTBox import NII, Image_Reference, Location, calc_poi_from_subreg_vert, to_nii
 
 
 def make_quadrants(
@@ -13,9 +13,8 @@ def make_quadrants(
     poi_buffer: str | Path | None = None,
     vert_ids: list[int] | None = None,
     mask_ids=(49, 50, 52),
-):
-    """
-    Subdivide vertebral body masks into anatomically oriented 3×3×3 regions.
+) -> NII:
+    """Subdivide vertebral body masks into anatomically oriented 3×3×3 regions.
 
     This function computes point-of-interest (POI) landmarks for each vertebra,
     constructs a local vertebra-centric coordinate system, and partitions the
@@ -25,7 +24,7 @@ def make_quadrants(
     image coordinates, making it robust to subject pose, spinal curvature,
     and acquisition orientation.
 
-    Notes
+    Notes:
     -----
     - Only vertebral body voxels are considered (intersection of vertebra and
       spine body labels).
@@ -67,18 +66,18 @@ def make_quadrants(
         List of vertebra IDs to process. If None, all vertebrae found
         in the segmentation are processed.
 
-    Returns
+    Returns:
     -------
     Image_Reference
         An image where each vertebral body voxel is labeled with a value
         from 1 to 27, representing its anatomical subregion.
 
-    Raises
+    Raises:
     ------
     None
         Vertebrae missing required POIs are silently skipped.
 
-    Examples
+    Examples:
     --------
     >>> out = make_quadrants(vert_seg, spine_seg)
     >>> out.save("vertebra_quadrants.nii.gz")

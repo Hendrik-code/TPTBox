@@ -82,8 +82,8 @@ def _warp_poi(
 
 
 class Deformable_Registration:
-    """
-    A class for performing deformable registration between a fixed and moving image.
+    """A class for performing deformable registration between a fixed and moving image.
+
     Attributes:
         transform (torch.Tensor): The transformation matrix resulting from the registration.
         ref_nii (NII): Reference NII object used for registration.
@@ -107,8 +107,8 @@ class Deformable_Registration:
         gpu=0,
         ddevice: DEVICES = "cuda",
     ) -> None:
-        """
-        Initialize the deformable registration process.
+        """Initialize the deformable registration process.
+
         Args:
             fixed_image (Image_Reference): The fixed image to which the moving image is registered.
             moving_image (Image_Reference): The moving image to be registered.
@@ -172,10 +172,11 @@ class Deformable_Registration:
 
     @torch.no_grad()
     def transform_nii(self, img: NII, gpu: int | None = None, ddevice: DEVICES | None = None, target: Has_Grid | None = None) -> NII:
-        """
-        Apply the computed transformation to a given NII image.
+        """Apply the computed transformation to a given NII image.
+
         Args:
             img (NII): The NII image to be transformed.
+
         Returns:
             NII: The transformed image as an NII object.
         """
@@ -212,11 +213,12 @@ class Deformable_Registration:
         return data.resample_from_to(self.target_grid)
 
     def __call__(self, *args, **kwds) -> NII:
-        """
-        Call method to apply the transformation using the transform_nii method.
+        """Call method to apply the transformation using the transform_nii method.
+
         Args:
             *args: Positional arguments for the transform_nii method.
             **kwds: Keyword arguments for the transform_nii method.
+
         Returns:
             NII: The transformed image.
         """
@@ -248,10 +250,7 @@ class Deformable_Registration:
 
 
 def test1(run=False):
-    """
-    Main function to test the deformable registration process.
-    Loads reference and moving images, performs registration, and saves the output.
-    """
+    """Test deformable registration: load reference and moving images, register, and save output."""
     from TPTBox import NII
 
     fixed = NII.load(
@@ -293,10 +292,7 @@ def test1(run=False):
 
 
 def test2(run=False):
-    """
-    Main function to test the deformable registration process.
-    Loads reference and moving images, performs registration, and saves the output.
-    """
+    """Test deformable registration: load reference and moving images, register, and save output."""
     from TPTBox import NII
 
     # ref = NII.load("/media/data/robert/code/TPTBox/tmp/sub-100000_sequ-stitched_acq-ax_part-water_vibe.nii.gz", False)

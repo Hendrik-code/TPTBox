@@ -52,7 +52,8 @@ _Centroid_DictList = Sequence[Union[_Orientation, _Point3D]]
 
 
 ######## Saving #######
-def _is_Point3D(obj) -> TypeGuard[_Point3D]:
+def _is_Point3D(obj: object) -> TypeGuard[_Point3D]:
+    """Return ``True`` when ``obj`` looks like a ``_Point3D`` dict."""
     return "label" in obj and "X" in obj and "Y" in obj and "Z" in obj
 
 
@@ -89,8 +90,7 @@ def save_poi(
     verbose: logging = True,
     save_hint=2,
 ) -> None:
-    """
-    Saves the POIs to a JSON file.
+    """Saves the POIs to a JSON file.
 
     Args:
         out_path (Path | str): The path where the JSON file will be saved.
@@ -98,6 +98,7 @@ def save_poi(
             Defaults to False.
         verbose (bool, optional): If True, print status messages to the console. Defaults to True.
         save_hint: 0 Default, 1 Gruber, 2 POI (readable), 10 ISO-POI (outdated)
+
     Returns:
         None
 
@@ -140,10 +141,29 @@ def save_poi(
 def _poi_to_dict_list(  # noqa: C901
     ctd: POI | POI_Global,
     additional_info: dict | None,
-    save_hint=0,
+    save_hint: int = 0,
     resample_reference: Has_Grid | None = None,
     verbose: logging = False,
-):
+) -> tuple[list, str]:
+    """Serialise a ``POI`` or ``POI_Global`` to a JSON-compatible list.
+
+    Converts the POI and its metadata into the list format used by
+    :func:`save_poi`.  Handles all supported ``FORMAT_*`` variants.
+
+    Args:
+        ctd: POI object to serialise.
+        additional_info: Extra key-value pairs merged into the header dict.
+        save_hint: Format constant (``FORMAT_DOCKER``, ``FORMAT_GRUBER``,
+            ``FORMAT_POI``, ``FORMAT_GLOBAL``, or ``FORMAT_OLD_POI``).
+            Defaults to ``FORMAT_DOCKER`` (0).
+        resample_reference: When set, the POI is first resampled to this
+            grid's coordinate system before serialisation.
+        verbose: Forward to coordinate-conversion methods.
+
+    Returns:
+        Tuple ``(dict_list, print_str)`` where ``dict_list`` is the list to
+        JSON-dump and ``print_str`` is a short human-readable format label.
+    """
     from TPTBox import POI, POI_Global
 
     if isinstance(ctd, POI_Global) and resample_reference is None:
@@ -229,6 +249,24 @@ def _poi_to_dict_list(  # noqa: C901
 
 
 def _open_file(ctd_path: Union[Path, str, bids_files.BIDS_FILE]) -> dict | list:
+    """Open a POI file and return its parsed content.
+
+    Handles BIDS file objects, plain JSON files, and landmark TXT files.
+
+    Args:
+        ctd_path: Path to the file (``str``, ``pathlib.Path``, or
+            ``BIDS_FILE``).  For ``BIDS_FILE`` objects the ``json`` or ``txt``
+            sub-file is selected automatically.
+
+    Returns:
+        Parsed file contents — either a ``dict`` (for Slicer markup JSON) or a
+        ``list`` (for the standard POI JSON or landmark TXT format).
+
+    Raises:
+        OSError: If the file cannot be opened.
+        ValueError: If the file is neither valid JSON nor a recognised landmark
+            TXT format.
+    """
     # BIDS JSON
     if isinstance(ctd_path, bids_files.BIDS_FILE):
         if "json" in ctd_path.file:
@@ -263,8 +301,7 @@ def _open_file(ctd_path: Union[Path, str, bids_files.BIDS_FILE]) -> dict | list:
 
 ######### Load  #############
 def load_poi(ctd_path: POI_Reference, verbose=True) -> POI | POI_Global:  # noqa: ARG001
-    """
-    Load POIs from a file or a BIDS file object.
+    """Load POIs from a file or a BIDS file object.
 
     Args:
         ctd_path (Centroid_Reference): Path to a file or BIDS file object from which to load POIs.
@@ -350,7 +387,8 @@ def load_poi(ctd_path: POI_Reference, verbose=True) -> POI | POI_Global:  # noqa
     )  # type: ignore
 
 
-def _load_docker_centroids(dict_list, centroids: POI_Descriptor, format_):  # noqa: ARG001
+def _load_docker_centroids(dict_list: list, centroids: POI_Descriptor, format_: int | None) -> None:  # noqa: ARG001
+    """Populate ``centroids`` from a docker/legacy-format POI dict list."""
     for d in dict_list[1:]:
         assert "direction" not in d, f'File format error: only first index can be a "direction" but got {dict_list[0]}'
         if "nan" in str(d):  # skipping NaN POIs
@@ -376,7 +414,20 @@ def _load_docker_centroids(dict_list, centroids: POI_Descriptor, format_):  # no
             raise ValueError(d)
 
 
-def _load_format_POI_old(dict_list):
+def _load_format_POI_old(dict_list: list) -> POI:
+    """Load a deprecated old-format POI file into a ``POI`` object.
+
+    The old format stores each vertebra as a dict with a ``"vert_label"`` key
+    and subregion IDs as additional string keys whose values are
+    ``"(x, y, z)"`` strings.
+
+    Args:
+        dict_list: Parsed JSON list from the old POI file (no header entry).
+
+    Returns:
+        ``POI`` object in ``("R", "P", "I")`` orientation with 1 mm isotropic
+        zoom (the stored coordinate space of the old format).
+    """
     # [
     # {
     #    "vert_label": "8",
@@ -401,7 +452,17 @@ def _load_format_POI_old(dict_list):
     return POI(centroids, orientation=("R", "P", "I"), zoom=(1, 1, 1), shape=None, format=FORMAT_OLD_POI, rotation=None)  # type: ignore
 
 
-def _load_form_POI_spine_r2(data: dict):
+def _load_form_POI_spine_r2(data: dict) -> POI:
+    """Load a spine-r2 format POI dict into a ``POI`` object.
+
+    Args:
+        data: Top-level dict from a spine-r2 JSON file, containing a nested
+            ``"centroids"`` key with centroid entries.
+
+    Returns:
+        ``POI`` object constructed from the centroid data and affine metadata
+        present in ``data``.
+    """
     from TPTBox import POI
 
     orientation = None
@@ -427,11 +488,21 @@ def _load_form_POI_spine_r2(data: dict):
 
 
 def _load_POI_centroids(
-    dict_list,
+    dict_list: list,
     centroids: POI_Descriptor,
     level_one_info: Abstract_lvl,
     level_two_info: Abstract_lvl,
-):
+) -> None:
+    """Populate ``centroids`` from a ``FORMAT_POI`` or ``FORMAT_GLOBAL`` dict list.
+
+    Args:
+        dict_list: Two-element list where the second element is a nested dict
+            ``{region_name: {subregion_name: (x, y, z)}}``.
+        centroids: ``POI_Descriptor`` to populate in place.
+        level_one_info: Registry class used to resolve region name/ID mappings.
+        level_two_info: Registry class used to resolve subregion name/ID
+            mappings.
+    """
     assert len(dict_list) == 2
     d: dict[int | str, dict[int | str, tuple[float, float, float]]] = dict_list[1]
     for vert_id, v in d.items():
@@ -441,7 +512,21 @@ def _load_POI_centroids(
             centroids[vert_id, sub_id] = tuple(t)
 
 
-def _get_poi_idx_from_text(idx: str, label: str, centroids):
+def _get_poi_idx_from_text(idx: str, label: str, centroids: POI_Descriptor) -> tuple[int, int]:
+    """Parse a Slicer markup control-point ID and label into a ``(region, subregion)`` integer pair.
+
+    Tries several strategies in order: splitting by ``"-"``, converting to int,
+    and looking up via the ``Any`` registry.  Handles collisions by incrementing
+    ``subregion`` until the slot is free.
+
+    Args:
+        idx: Control-point ``id`` field from the Slicer markup JSON.
+        label: Control-point ``label`` field (used as a fallback).
+        centroids: Existing ``POI_Descriptor`` used to detect collisions.
+
+    Returns:
+        A ``(region, subregion)`` integer tuple unique within ``centroids``.
+    """
     has_ids = False
     if "-" in label:
         try:
@@ -493,7 +578,21 @@ def _get_poi_idx_from_text(idx: str, label: str, centroids):
     return region, subregion
 
 
-def _load_mkr_POI(dict_mkr: dict):
+def _load_mkr_POI(dict_mkr: dict) -> POI_Global:
+    """Load a 3D Slicer ``.mrk.json`` markup file into a ``POI_Global`` object.
+
+    Args:
+        dict_mkr: Parsed JSON dict from a Slicer markup file containing a
+            ``"markups"`` key with Fiducial control points.
+
+    Returns:
+        ``POI_Global`` object in the coordinate system declared by the markup
+        (``"LPS"`` → ``itk_coords=True``; ``"RAS"`` → ``itk_coords=False``).
+
+    Raises:
+        ValueError: If the ``"markups"`` key is absent or ``itk_coords`` cannot
+            be determined from the file.
+    """
     centroids = POI_Descriptor()
 
     if "@schema" not in dict_mkr or "markups-schema-v1.0.3" not in dict_mkr["@schema"]:
@@ -557,8 +656,17 @@ def _load_mkr_POI(dict_mkr: dict):
 
 
 def _parse_coords(coord_str: str) -> list[float]:
-    """
-    Parse '(x, y, z)' → [x, y, z]
+    """Parse a ``'(x, y, z)'`` coordinate string into a list of three floats.
+
+    Args:
+        coord_str: Coordinate string in the form ``"(x, y, z)"``.
+
+    Returns:
+        List of three floats ``[x, y, z]``.
+
+    Raises:
+        ValueError: If the string is not in the expected format or does not
+            contain exactly three comma-separated values.
     """
     coord_str = coord_str.strip()
 
@@ -573,18 +681,25 @@ def _parse_coords(coord_str: str) -> list[float]:
     return [float(v.strip()) for v in values]
 
 
-def _parse_header_value(value: str):
-    """
-    Parse header values into numbers, lists, or nested lists if possible.
+def _parse_header_value(value: str) -> int | float | list | str:
+    """Parse a header value string into a Python scalar or list.
+
+    Args:
+        value: Raw string value from the landmark TXT header.
+
+    Returns:
+        Parsed value — one of:
+
+        * ``int`` or ``float`` for a single numeric token.
+        * ``list`` (possibly nested) for bracketed or space-separated sequences.
+        * ``str`` unchanged when no conversion applies.
 
     Examples:
-        "3.14" -> 3.14
-        "256 931 27" -> [256, 931, 27]
-        "[1, 2, 3]" -> [1, 2, 3]
-        "[[1, 0, 0], [0, 1, 0]]" -> [[1, 0, 0], [0, 1, 0]]
-        "-3.5e-12" -> -3.5e-12
+        ``"3.14"`` → ``3.14``; ``"256 931 27"`` → ``[256, 931, 27]``;
+        ``"[1, 2, 3]"`` → ``[1, 2, 3]``;
+        ``"[[1, 0, 0], [0, 1, 0]]"`` → ``[[1, 0, 0], [0, 1, 0]]``;
+        ``"-3.5e-12"`` → ``-3.5e-12``.
     """
-
     value = value.strip()
 
     # --- single number ---
@@ -637,7 +752,25 @@ def _parse_header_value(value: str):
     return value
 
 
-def _load_landmark_txt(path: Path):
+def _load_landmark_txt(path: Path) -> list:
+    """Parse a plain-text landmark file into a two-element ``[header, points]`` list.
+
+    The file format uses colon-separated ``key: value`` lines.  Group headers
+    are bare names followed by a colon (empty value).  Coordinate entries look
+    like ``landmark_name: (x, y, z)``.
+
+    Args:
+        path: Path to the ``.txt`` landmark file.
+
+    Returns:
+        Two-element list ``[header_dict, points_dict]`` compatible with the
+        ``FORMAT_PLST`` loader:
+
+        * ``header_dict``: metadata dict including ``format``,
+          ``coordinate_system``, and optional ``label_name`` /
+          ``label_group_name``.
+        * ``points_dict``: nested dict ``{group_id: {point_id: [x, y, z]}}``.
+    """
     header: dict = {
         "format": format_key[FORMAT_PLST],
         "coordinate_system": "nib",

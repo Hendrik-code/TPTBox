@@ -47,7 +47,8 @@ source_folders = {
 }
 
 
-def __test_nii(path: Path | str | BIDS_FILE):
+def __test_nii(path: Path | str | BIDS_FILE) -> bool:
+    """Return True if the NIfTI file at *path* can be loaded successfully."""
     if isinstance(path, str):
         path = Path(path)
     if path.exists():
@@ -58,7 +59,14 @@ def __test_nii(path: Path | str | BIDS_FILE):
     return True
 
 
-def find_all_broken(path: str = "/DATA/NAS/datasets_processed/NAKO/dataset-nako/", parents=None):
+def find_all_broken(path: str = "/DATA/NAS/datasets_processed/NAKO/dataset-nako/", parents=None) -> None:
+    """Scan a BIDS dataset for broken NIfTI files and record them in a pickle file.
+
+    Args:
+        path: Root directory of the BIDS dataset to scan.
+        parents: List of BIDS parent folders to include (e.g., ``["rawdata"]``).
+            Defaults to ``["rawdata"]`` when ``None``.
+    """
     brocken = []
     subj_id = 0
     with open("broken.pkl", "rb") as w:
@@ -90,7 +98,8 @@ source_folder_encrypted_alternative = Path(
 )
 
 
-def __test_and_replace(out_folder="/media/data/NAKO/dataset-nako2"):
+def __test_and_replace(out_folder: str = "/media/data/NAKO/dataset-nako2") -> None:
+    """Re-extract broken NIfTI files from the original DICOM source archives."""
     from TPTBox.core.dicom.dicom_extract import extract_dicom_folder
 
     with open("/run/user/1000/gvfs/smb-share:server=172.21.251.64,share=nas/tools/TPTBox/broken.pkl", "rb") as w:
@@ -157,7 +166,23 @@ def clean_dicom_data(dcm_data) -> dict:
     return py_dict
 
 
-def replace_birthdate_with_age(d):
+def replace_birthdate_with_age(d: dict) -> dict:
+    """Replace the PatientBirthDate DICOM tag with a computed PatientAge tag.
+
+    Calculates the patient's age from the birth date and the study date (or today
+    if the study date is unavailable) and stores it in the PatientAge field using
+    the DICOM age-string format (e.g. ``"034Y"``).  The PatientBirthDate field is
+    removed to avoid storing personally identifiable information.
+
+    Args:
+        d: Dictionary representation of a DICOM dataset as produced by
+            ``pydicom.dataset.Dataset.to_json_dict``.
+
+    Returns:
+        The modified dictionary with the PatientBirthDate field replaced by a
+        PatientAge field, or the original dictionary unchanged if the birth date
+        is missing or cannot be parsed.
+    """
     try:
         # DICOM tags
         BIRTH_TAG = "00100030"  # PatientBirthDate
@@ -203,7 +228,21 @@ def replace_birthdate_with_age(d):
     return d
 
 
-def get_json_from_dicom(data: list[pydicom.FileDataset] | pydicom.FileDataset):
+def get_json_from_dicom(data: list[pydicom.FileDataset] | pydicom.FileDataset) -> dict:
+    """Extract a JSON-serialisable metadata dictionary from a DICOM dataset or list of datasets.
+
+    If a list is given, only the first element is used (assumes all slices in a
+    series share the same header metadata).  Pixel data and inline binary fields
+    are stripped, and the patient birth date is replaced with a computed age.
+
+    Args:
+        data: A single DICOM ``FileDataset`` or a list of them representing one
+            imaging series.
+
+    Returns:
+        A flat dictionary mapping DICOM keyword strings to Python-native values,
+        suitable for JSON serialisation.
+    """
     if isinstance(data, list):
         data = data[0]
     py_dict = clean_dicom_data(data)
@@ -212,10 +251,7 @@ def get_json_from_dicom(data: list[pydicom.FileDataset] | pydicom.FileDataset):
 
 
 def _get_json_from_dicom(py_dict: dict):
-    """
-    takes a dictionary returned from pydicom.dataset.to_json_dict and rearranges it to be
-    compatible with json encoding
-    """
+    """Rearrange a pydicom ``to_json_dict`` output into a JSON-serialisable form."""
     data1 = {}
     for key, value in py_dict.items():
         try:
@@ -235,7 +271,17 @@ def _get_json_from_dicom(py_dict: dict):
     return data1
 
 
-def test_name_conflict(json_ob, file):
+def test_name_conflict(json_ob: dict, file: str | Path) -> bool:
+    """Check whether an existing JSON file has different content from the given object.
+
+    Args:
+        json_ob: JSON-serialisable object to compare against the file on disk.
+        file: Path to an existing (or non-existing) JSON file.
+
+    Returns:
+        ``True`` if the file exists and its content differs from ``json_ob``,
+        ``False`` otherwise (file does not exist or content matches).
+    """
     if Path(file).exists():
         with open(file) as f:
             js = json.load(f)
@@ -243,9 +289,23 @@ def test_name_conflict(json_ob, file):
     return False
 
 
-def save_json(json_ob, file, check_exist=False, override=True):
-    """
-    recieves a json object and a path and saves the object as a json file
+def save_json(json_ob: dict, file: str | Path, check_exist: bool = False, override: bool = True) -> bool:
+    """Serialize a Python object to a JSON file, handling NumPy scalar types.
+
+    Args:
+        json_ob: JSON-serialisable object to save.
+        file: Destination file path.
+        check_exist: If ``True``, raise ``FileExistsError`` when a file with
+            different content already exists at *file*.
+        override: If ``False``, skip writing when the file already exists.
+
+    Returns:
+        ``True`` if the file already existed and writing was skipped, ``False``
+        if the file was written successfully.
+
+    Raises:
+        FileExistsError: When *check_exist* is ``True`` and the existing file
+            contains different content.
     """
 
     def convert(obj):
@@ -265,7 +325,15 @@ def save_json(json_ob, file, check_exist=False, override=True):
     return False
 
 
-def load_json(file):
+def load_json(file: str | Path) -> dict:
+    """Load and parse a JSON file into a Python dictionary.
+
+    Args:
+        file: Path to the JSON file to read.
+
+    Returns:
+        Parsed contents of the JSON file.
+    """
     with open(file) as file_handel:
         return json.load(file_handel)
 

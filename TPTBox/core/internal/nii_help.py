@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+from collections.abc import Callable
 from functools import wraps
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -16,16 +17,11 @@ if TYPE_CHECKING:
 from TPTBox.core.vert_constants import AFFINE, MODES, SHAPE, ZOOMS, Sentinel, _supported_img_files
 
 
-def secure_save(func):
-    """
-    A decorator that ensures a safe file-saving process by creating a backup of the target file before
-    overwriting it and restoring the backup if an error occurs during the save operation.
+def secure_save(func) -> Callable:
+    """Decorator that writes to a `.backup` file first and restores it if saving fails.
 
-    The decorator wraps a function that takes a file path as one of its arguments and adds the following safety steps:
-    1. If the target file exists, create a backup with a `.backup` suffix.
-    2. Call the wrapped function to perform the file-saving operation.
-    3. If the save is successful, delete the backup.
-    4. If an error occurs, restore the backup and clean up any partially written files.
+    Steps: (1) back up existing file, (2) call the wrapped save function, (3) delete backup on
+    success, or (4) restore backup and clean up on error.
 
     Args:
         func (callable): The function to be wrapped. It should take a file path (`str`, `Path`, or `bids_files.BIDS_FILE`)
@@ -88,10 +84,38 @@ def secure_save(func):
 def _resample_from_to(
     from_img: NII,
     to_img: tuple[SHAPE, AFFINE, ZOOMS] | Has_Grid,
-    order=3,
+    order: int = 3,
     mode: MODES = "nearest",
     align_corners: bool | Sentinel = Sentinel(),  # noqa: B008
-):
+) -> tuple[np.ndarray, np.ndarray, object]:
+    """Resample *from_img* into the voxel space defined by *to_img*.
+
+    Implements an optional ``align_corners`` mode (analogous to PyTorch) for
+    order-0 (nearest-neighbour) interpolation by adjusting both affines so that
+    voxel corners rather than voxel centres are aligned.
+
+    Args:
+        from_img: Source NII image to be resampled.
+        to_img: Target space, given either as a ``(shape, affine, zooms)`` tuple
+            or as any object that implements the ``Has_Grid`` interface (providing
+            ``shape_int``, ``affine``, and ``zoom`` attributes).
+        order: Spline interpolation order (0 = nearest, 1 = linear, 3 = cubic).
+        mode: Border handling mode passed to ``scipy.ndimage.affine_transform``
+            (e.g. ``"nearest"``, ``"constant"``).
+        align_corners: When ``True`` (or when left as a ``Sentinel`` and
+            ``order == 0``), voxel corners are aligned between source and target
+            grids.  When ``False``, voxel centres are aligned (standard
+            nibabel/scipy behaviour).
+
+    Returns:
+        A 3-tuple ``(data, affine, header)`` where *data* is the resampled
+        NumPy array, *affine* is the target affine matrix, and *header* is the
+        NIfTI header taken from *from_img*.
+
+    Raises:
+        AffineError: If *from_img* has fewer than 3 spatial dimensions.
+        ValueError: If *from_img* does not have spatial axes first.
+    """
     import numpy.linalg as npl
     import scipy.ndimage as scipy_img
     from nibabel.affines import AffineError, to_matvec
