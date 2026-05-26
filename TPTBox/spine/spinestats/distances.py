@@ -10,17 +10,35 @@ def _compute_distance(
     key: str,
     vert: Image_Reference | None = None,
     subreg: Image_Reference | None = None,
-    all_pois_computed=False,
-    recompute=False,
-):
-    """Compute the IVD height with a single point. Returns poi-object with computed points poi heights in
-    poi.info["ivd_heights_center_mm"]
-    all_pois_computed requires [Location.Vertebra_Direction_Inferior,  Location.Vertebra_Disc_Superior] to be computed
-    recompute skips if poi.info["ivd_heights_center_mm"] exist
+    all_pois_computed: bool = False,
+    recompute: bool = False,
+) -> POI:
+    """Compute pairwise distances between two anatomical locations across vertebral regions.
+
+    The distances are stored in ``poi.info[key]`` as a dictionary mapping
+    vertebra region IDs to distances in mm.  If the key already exists and
+    ``recompute`` is ``False`` the function returns ``poi`` unchanged.
+
     Args:
-        vert (Image_Reference): _description_
-        subreg (Image_Reference): _description_
-        poi (POI): _description_
+        poi: POI object containing (or to be extended with) anatomical
+            landmark coordinates.
+        l1: First anatomical location (e.g. superior disc face).
+        l2: Second anatomical location (e.g. inferior disc face).
+        key: Name under which the computed distances are stored in
+            ``poi.info``.
+        vert: Vertebra segmentation image used to compute missing POIs.
+            Required when ``all_pois_computed=False`` and the locations are
+            absent from ``poi``.
+        subreg: Subregion segmentation image used together with ``vert`` for
+            POI computation.
+        all_pois_computed: Skip POI computation and use existing centroids
+            directly.  Requires ``l1`` and ``l2`` to already be present in
+            ``poi``.
+        recompute: When ``True`` overwrite an existing entry in ``poi.info``.
+
+    Returns:
+        The updated :class:`~TPTBox.POI` object with distances stored under
+        ``poi.info[key]``.
     """
     if key in poi.info and not recompute:
         return poi
@@ -59,9 +77,30 @@ def compute_all_distances(
     poi: POI,
     vert: Image_Reference | None = None,
     subreg: Image_Reference | None = None,
-    all_pois_computed=False,
-    recompute=False,
-):
+    all_pois_computed: bool = False,
+    recompute: bool = False,
+) -> POI:
+    """Compute all registered anatomical distances and store them in ``poi.info``.
+
+    Iterates over :data:`distances_funs` and calls :func:`_compute_distance`
+    for each entry.  Results are accumulated in the returned POI object under
+    the corresponding key in ``poi.info``.
+
+    Args:
+        poi: POI object to compute distances for and to store results in.
+        vert: Vertebra segmentation image required when POIs have not been
+            pre-computed.  May be ``None`` when ``all_pois_computed=True``.
+        subreg: Subregion segmentation image required when POIs have not been
+            pre-computed.  May be ``None`` when ``all_pois_computed=True``.
+        all_pois_computed: When ``True`` the function skips POI computation
+            and uses the existing centroids in ``poi`` directly.
+        recompute: When ``True`` existing entries in ``poi.info`` are
+            overwritten; otherwise already-computed keys are skipped.
+
+    Returns:
+        The updated :class:`~TPTBox.POI` object with distance dictionaries
+        stored under the keys defined in :data:`distances_funs`.
+    """
     for key, (l1, l2) in distances_funs.items():
         poi = _compute_distance(poi, l1, l2, key, vert, subreg, all_pois_computed, recompute)
     return poi

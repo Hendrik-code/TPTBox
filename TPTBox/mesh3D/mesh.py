@@ -21,14 +21,29 @@ logging = vc.logging
 
 
 class MeshOutputType(Enum):
+    """Supported mesh output file formats."""
+
     PLY = "ply"
 
 
 class Mesh3D:
+    """Wrapper around a pyvista PolyData mesh providing save, load, and display utilities."""
+
     def __init__(self, mesh: pv.PolyData) -> None:
         self.mesh = mesh
 
-    def save(self, filepath: str | Path, mode: MeshOutputType = MeshOutputType.PLY, verbose: logging = True):
+    def save(self, filepath: str | Path, mode: MeshOutputType = MeshOutputType.PLY, verbose: logging = True) -> None:
+        """Save the mesh to disk in the specified format.
+
+        Args:
+            filepath: Destination file path. The appropriate extension is appended if absent.
+            mode: Output format. Currently only PLY is supported.
+            verbose: If True, prints a confirmation message after saving.
+
+        Raises:
+            FileNotFoundError: If the parent directory of ``filepath`` does not exist.
+            NotImplementedError: If ``mode`` is not supported.
+        """
         filepath = str(filepath)
         if not filepath.endswith(mode.value):
             filepath += "." + mode.value
@@ -47,13 +62,25 @@ class Mesh3D:
         log.print(f"Saved mesh: {filepath}", Log_Type.SAVE, verbose=verbose)
 
     @classmethod
-    def load(cls, filepath: str | Path):
+    def load(cls, filepath: str | Path) -> Mesh3D:
+        """Load a mesh from a file supported by pyvista.
+
+        Args:
+            filepath: Path to the mesh file (e.g. PLY, OBJ, VTK).
+
+        Returns:
+            A new ``Mesh3D`` instance wrapping the loaded mesh.
+
+        Raises:
+            AssertionError: If ``filepath`` does not exist.
+        """
         assert Path(filepath).exists(), f"loading mesh from {filepath}, filepath does not exist"
         reader = pv.get_reader(str(filepath))
         mesh = reader.read()
         return Mesh3D(mesh)
 
-    def show(self):
+    def show(self) -> None:
+        """Display the mesh interactively in a pyvista window with a black background."""
         pv.start_xvfb()
         pl = pv.Plotter()
         pl.set_background("black", top=None)
@@ -64,7 +91,12 @@ class Mesh3D:
         pl.add_mesh(self.mesh)
         pl.show()
 
-    def save_to_html(self, file_output: str | Path):
+    def save_to_html(self, file_output: str | Path) -> None:
+        """Export the mesh as an interactive HTML file via pyvista.
+
+        Args:
+            file_output: Destination path for the HTML file.
+        """
         pv.start_xvfb()
         pl = pv.Plotter()
         pl.set_background("black", top=None)
@@ -78,6 +110,8 @@ class Mesh3D:
 
 
 class SegmentationMesh(Mesh3D):
+    """Mesh generated from a segmentation volume using the marching-cubes algorithm."""
+
     def __init__(self, int_arr: np.ndarray | Image_Reference) -> None:
         if not isinstance(int_arr, np.ndarray):
             seg_nii = to_nii_seg(int_arr)
@@ -111,7 +145,15 @@ class SegmentationMesh(Mesh3D):
         mesh["values"] = values
         self.mesh = mesh
 
-    def get_mesh_with_offset(self, offset: tuple[float, float, float]):
+    def get_mesh_with_offset(self, offset: tuple[float, float, float]) -> pv.PolyData:
+        """Return a copy of the mesh with all vertices shifted by the given offset.
+
+        Args:
+            offset: A (x, y, z) translation vector applied to every vertex.
+
+        Returns:
+            A new pyvista PolyData mesh with shifted vertex positions.
+        """
         vertices = self._vertices + offset
         vfaces = np.column_stack((np.ones(len(self._faces)) * 3, self._faces)).astype(int)
 
@@ -121,7 +163,20 @@ class SegmentationMesh(Mesh3D):
         return mesh
 
     @classmethod
-    def from_segmentation_nii(cls, seg_nii: NII, rescale_to_iso: bool = True):
+    def from_segmentation_nii(cls, seg_nii: NII, rescale_to_iso: bool = True) -> SegmentationMesh:
+        """Construct a ``SegmentationMesh`` from a NIfTI segmentation image.
+
+        Args:
+            seg_nii: A NIfTI segmentation image. Must have ``seg=True``.
+            rescale_to_iso: If True, resamples the image to isotropic voxel spacing before
+                extracting the surface mesh.
+
+        Returns:
+            A new ``SegmentationMesh`` built from the segmentation array.
+
+        Raises:
+            AssertionError: If ``seg_nii.seg`` is False.
+        """
         assert seg_nii.seg, "NII is not a segmentation"
         seg_nii.reorient_()
         if rescale_to_iso:
@@ -131,6 +186,8 @@ class SegmentationMesh(Mesh3D):
 
 
 class POIMesh(Mesh3D):
+    """Mesh constructed from a set of POI (point-of-interest) coordinates rendered as spheres."""
+
     def __init__(
         self,
         poi: POI,
@@ -163,7 +220,15 @@ class POIMesh(Mesh3D):
         glyphed = n.glyph(scale="radius", geom=geom, progress_bar=False, orient=False)
         self.mesh = glyphed
 
-    def get_mesh_with_offset(self, offset: tuple[float, float, float]):
+    def get_mesh_with_offset(self, offset: tuple[float, float, float]) -> pv.PolyData:
+        """Return a copy of the glyph mesh with all POI positions shifted by the given offset.
+
+        Args:
+            offset: A (x, y, z) translation vector applied to every point-of-interest coordinate.
+
+        Returns:
+            A new pyvista PolyData glyph mesh with shifted sphere positions.
+        """
         pois_shifted = [(x + offset[0], y + offset[1], z + offset[2]) for x, y, z in self.poi_extracted]
         n = pv.PolyData(pois_shifted)
         n["radius"] = np.ones(shape=len(pois_shifted)) * self.size_factor

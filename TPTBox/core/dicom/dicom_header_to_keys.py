@@ -99,15 +99,20 @@ map_series_description_to_file_format_default = {
 }
 
 
-def get_plane_dicom(dicoms: list[pydicom.FileDataset] | NII, hires_threshold=0.8) -> str | None:
-    """Determines the orientation plane of the NIfTI image along the x, y, or z-axis.
+def get_plane_dicom(dicoms: list[pydicom.FileDataset] | NII, hires_threshold: float = 0.8) -> str | None:
+    """Determine the acquisition plane from a DICOM series or NIfTI image.
+
+    Args:
+        dicoms: Either a list of pydicom datasets (one per slice) representing
+            a single DICOM series, or an already-loaded :class:`~TPTBox.NII`
+            object.
+        hires_threshold: Zoom threshold used to distinguish the slice axis from
+            in-plane axes when all zooms are similar (iso detection).
 
     Returns:
-        str: The orientation plane of the image, which can be one of the following:
-            - 'ax': Axial plane (along the z-axis).
-            - 'cor': Coronal plane (along the y-axis).
-            - 'sag': Sagittal plane (along the x-axis).
-            - 'iso': Isotropic plane (if the image has equal zoom values along all axes).
+        One of ``'ax'`` (axial), ``'cor'`` (coronal), ``'sag'`` (sagittal),
+        ``'iso'`` (isotropic), or ``None`` on failure.
+
     Examples:
         >>> nii = NII(nib.load("my_image.nii.gz"))
         >>> nii.get_plane()
@@ -146,13 +151,44 @@ def get_plane_dicom(dicoms: list[pydicom.FileDataset] | NII, hires_threshold=0.8
 def extract_keys_from_json(  # noqa: C901
     simp_json: dict,
     dcm_data_l: list[pydicom.FileDataset] | NII | Path,
-    session=False,
-    parts=None,
-    map_series_description_to_file_format=None,
+    session: bool = False,
+    parts: list[str] | None = None,
+    map_series_description_to_file_format: dict | None = None,
     override_subject_name: Callable[[dict, Path], str] | None = None,
     chunk: int | str | None = None,
     keys: dict[str, str | None] | None = None,
-):
+) -> tuple[str, dict]:
+    """Extract BIDS-style key-value pairs from a DICOM JSON metadata dictionary.
+
+    Parses study and series descriptions together with DICOM tag values to
+    infer the image format (e.g. ``"T2w"``, ``"vibe"``) and BIDS entities
+    (``sub``, ``ses``, ``acq``, ``part``, ``chunk``, ``ce``, ``sequ``).
+    Special handling is included for NAKO study data.
+
+    Args:
+        simp_json: Flattened DICOM metadata dict, typically produced by
+            ``pydicom``'s JSON export or a BIDS sidecar.
+        dcm_data_l: List of pydicom datasets for the series, an NIfTI object,
+            or a Path to a NIfTI file. Used only to compute the acquisition
+            plane when not already in ``simp_json``.
+        session: If ``True``, populate the ``ses`` key from the study date.
+        parts: Explicit Dixon part labels that override automatic detection.
+        map_series_description_to_file_format: Custom regex-to-format mapping
+            applied before the built-in defaults.
+        override_subject_name: Optional callable that receives ``(simp_json,
+            path)`` and returns the subject ID string.
+        chunk: Explicit chunk identifier; overrides automatic detection.
+        keys: Pre-populated BIDS key dict; updated in-place and returned.
+
+    Returns:
+        A tuple ``(mri_format, keys)`` where ``mri_format`` is the inferred
+        image format string (e.g. ``"T2w"``) and ``keys`` is the updated BIDS
+        entity dict.
+
+    Raises:
+        NotImplementedError: For unsupported modalities or unrecognised NAKO
+            series descriptions.
+    """
     if keys is None:
         keys = {}
     if map_series_description_to_file_format is None:
@@ -165,7 +201,6 @@ def extract_keys_from_json(  # noqa: C901
             return keys.get(key, default)
         return str(simp_json[key]).replace("_", "-").replace(" ", "-").replace(".", "-")
 
-    """Extract keys from JSON based on study and series descriptions."""
     #### NAKO FIXED ####
     if "StudyDescription" in simp_json and "nako" in _get("StudyDescription", "").lower():
         keys["sub"] = _get("PatientID", "unnamed").split("_")[0]

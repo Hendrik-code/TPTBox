@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from TPTBox import Image_Reference, to_nii
 from TPTBox.segmentation.VibeSeg.inference_nnunet import run_inference_on_file
+
+if TYPE_CHECKING:
+    from TPTBox import NII, POI
 
 VibeSeg_map = {
     1: "spleen",
@@ -85,14 +88,31 @@ VibeSeg_map = {
 def run_vibeseg(
     i: Image_Reference,
     out_seg: str | Path,
-    override=False,
-    gpu=0,
+    override: bool = False,
+    gpu: int = 0,
     ddevice: Literal["cpu", "cuda", "mps"] = "cuda",
-    dataset_id=100,
-    padd=0,
-    keep_size=False,  # Keep size of the model Segmentation
+    dataset_id: int = 100,
+    padd: int = 0,
+    keep_size: bool = False,
     **args,
-):
+) -> NII:
+    """Run the VibeSeg whole-body segmentation model on a single image.
+
+    Args:
+        i: Input image reference (path, ``NII``, or ``BIDS_FILE``).
+        out_seg: Destination path for the segmentation output (NIfTI).
+        override: If True, recompute and overwrite an existing output file.
+        gpu: GPU device index to use for inference.
+        ddevice: Compute device: ``"cuda"``, ``"cpu"``, or ``"mps"``.
+        dataset_id: nnU-Net dataset identifier for the VibeSeg model.
+        padd: Number of voxels to pad the image before inference.
+        keep_size: If True, keep the model's native output resolution instead of
+            resampling back to the input image space.
+        **args: Additional keyword arguments forwarded to ``run_inference_on_file``.
+
+    Returns:
+        Segmentation ``NII`` saved at *out_seg*.
+    """
     return run_inference_on_file(
         dataset_id,
         [to_nii(i)] if not isinstance(i, (list, tuple)) else [to_nii(j) for j in i],
@@ -109,12 +129,23 @@ def run_vibeseg(
 def run_nnunet(
     i: list[Image_Reference],
     out_seg: str | Path,
-    override=False,
-    gpu=0,
+    override: bool = False,
+    gpu: int = 0,
     ddevice: Literal["cpu", "cuda", "mps"] = "cuda",
-    dataset_id=80,
+    dataset_id: int = 80,
     **args,
-):
+) -> None:
+    """Run an nnU-Net model on a list of images (multi-channel) and save the segmentation.
+
+    Args:
+        i: List of input image references forming one multi-channel sample.
+        out_seg: Destination path for the segmentation output (NIfTI).
+        override: If True, recompute and overwrite an existing output file.
+        gpu: GPU device index to use for inference.
+        ddevice: Compute device: ``"cuda"``, ``"cpu"``, or ``"mps"``.
+        dataset_id: nnU-Net dataset identifier.
+        **args: Additional keyword arguments forwarded to ``run_inference_on_file``.
+    """
     run_inference_on_file(
         dataset_id,
         [to_nii(i) for i in i],
@@ -132,9 +163,8 @@ def extract_vertebra_bodies_from_VibeSeg(
     num_lumbar_verts: int = 5,
     out_path: str | Path | None = None,
     out_path_poi: str | Path | None = None,
-):
-    """
-    Extracts and labels vertebra bodies from a VibeSeg segmentation NIfTI file.
+) -> tuple[NII, POI]:
+    """Extracts and labels vertebra bodies from a VibeSeg segmentation NIfTI file.
 
     This function processes a segmentation mask containing vertebrae and intervertebral discs (IVDs).
     It separates individual vertebra bodies by eroding and splitting the mask at IVD regions, labels the vertebrae
@@ -158,6 +188,7 @@ def extract_vertebra_bodies_from_VibeSeg(
         - The output files, if saved, will include the mask and POI data:
           - Mask file: `<out_path>`
           - POI file: `<out_path>` with `_poi.json` suffix recommended.
+
     Example:
         >>> nii_vibeSeg = "/path/to/vibe_segmentation.nii.gz"
         >>> labeled_mask, centroids = extract_vertebra_bodies_from_nii_vibeSeg(nii_vibeSeg, out_path="output_mask.nii.gz")
@@ -189,7 +220,8 @@ def extract_vertebra_bodies_from_VibeSeg(
     )
 
     # Map centroids to labels based on thoracic and lumbar vertebra counts
-    def map_to_label(index):
+    def map_to_label(index: int) -> int:
+        """Map a bottom-up vertebra index to the corresponding anatomical label integer."""
         if index >= num_thoracic_verts + num_lumbar_verts:
             return 0  # Remove cervical vertebrae
         if index < num_lumbar_verts:

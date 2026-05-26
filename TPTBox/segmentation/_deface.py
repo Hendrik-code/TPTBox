@@ -8,10 +8,7 @@ from TPTBox.segmentation.VibeSeg.inference_nnunet import run_inference_on_file, 
 
 
 def _compute_deface_mask_cta(ct_img: Image_Reference, outpath: str | Path | None = None, override=False, gpu=None, **args):
-    """
-    Mahmutoglu, M.A., Rastogi, A., Schell, M. et al. Deep learning-based defacing tool for CT angiography: CTA-DEFACE. Eur Radiol Exp 8, 111 (2024). https://doi.org/10.1186/s41747-024-00510-9
-
-    """
+    """Mahmutoglu, M.A., Rastogi, A., Schell, M. et al. Deep learning-based defacing tool for CT angiography: CTA-DEFACE. Eur Radiol Exp 8, 111 (2024). https://doi.org/10.1186/s41747-024-00510-9."""
     if isinstance(outpath, str):
         outpath = Path(outpath)
     if isinstance(ct_img, BIDS_FILE) and outpath is None:
@@ -22,8 +19,7 @@ def _compute_deface_mask_cta(ct_img: Image_Reference, outpath: str | Path | None
 
 
 def _extend_mask(mask: NII, n: int, direction: DIRECTIONS = "A") -> NII:
-    """
-    Extend a binary mask n voxels further in anterior (A) direction.
+    """Extend a binary mask n voxels further in anterior (A) direction.
 
     Parameters
     ----------
@@ -32,12 +28,11 @@ def _extend_mask(mask: NII, n: int, direction: DIRECTIONS = "A") -> NII:
     n : int
         Number of voxels to extend beyond the most anterior voxel
 
-    Returns
+    Returns:
     -------
     NII
         Extended mask
     """
-
     m = mask.copy()
     arr = m.extract_label(1).get_array()
 
@@ -83,10 +78,7 @@ def _extend_mask(mask: NII, n: int, direction: DIRECTIONS = "A") -> NII:
 def compute_deface_mask_cta(
     ct_img: Image_Reference, outpath: str | Path | None = None, override=False, gpu=None, partially_defaced=False, **args
 ):
-    """
-    Mahmutoglu, M.A., Rastogi, A., Schell, M. et al. Deep learning-based defacing tool for CT angiography: CTA-DEFACE. Eur Radiol Exp 8, 111 (2024). https://doi.org/10.1186/s41747-024-00510-9
-
-    """
+    """Mahmutoglu, M.A., Rastogi, A., Schell, M. et al. Deep learning-based defacing tool for CT angiography: CTA-DEFACE. Eur Radiol Exp 8, 111 (2024). https://doi.org/10.1186/s41747-024-00510-9."""
     if isinstance(outpath, str):
         outpath = Path(outpath)
     if isinstance(ct_img, BIDS_FILE) and outpath is None:

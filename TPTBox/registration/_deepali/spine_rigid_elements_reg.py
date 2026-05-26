@@ -24,7 +24,18 @@ from TPTBox.registration._ridged_intensity.affine_deepali import Rigid_Registrat
 from TPTBox.registration._ridged_points import Point_Registration
 
 
-def not_exist_or_is_younger_than(path: Path | str, other_path: Path | str | None):
+def not_exist_or_is_younger_than(path: Path | str, other_path: Path | str | None) -> bool:
+    """Check whether *path* does not exist or was modified before *other_path*.
+
+    Args:
+        path: File path to test.
+        other_path: Reference file path for modification-time comparison, or
+            ``None`` to always return ``True`` when *path* does not exist.
+
+    Returns:
+        ``True`` if *path* does not exist, *other_path* is ``None``, or *path*
+        has an older modification time than *other_path``.  ``False`` otherwise.
+    """
     path = Path(path)
     if not path.exists():
         return True
@@ -35,7 +46,23 @@ def not_exist_or_is_younger_than(path: Path | str, other_path: Path | str | None
     return fileCreation < fileCreation_ref
 
 
-def _load_poi(fixed_poi_file, vert: NII, subreg: NII, save_pois):
+def _load_poi(fixed_poi_file: Path | None, vert: NII, subreg: NII, save_pois: bool) -> POI:
+    """Load or compute a POI object for a vertebra segmentation.
+
+    If *fixed_poi_file* is provided, that POI is loaded from disk (and its
+    affine is validated against *vert*).  The corpus, spinous process, and arcus
+    centroids are always (re-)computed from *vert* and *subreg* using
+    :func:`calc_poi_from_subreg_vert`, with the loaded file used as a buffer.
+
+    Args:
+        fixed_poi_file: Optional path to a pre-computed POI file.
+        vert: Vertebra segmentation ``NII``.
+        subreg: Subregion segmentation ``NII``.
+        save_pois: Save the computed POI to *fixed_poi_file* when ``True``.
+
+    Returns:
+        Computed ``POI`` object with corpus, spinous-process, and arcus centroids.
+    """
     buffer_file = None
     if fixed_poi_file is not None:
         poi = POI.load(fixed_poi_file)
@@ -51,11 +78,35 @@ def _load_poi(fixed_poi_file, vert: NII, subreg: NII, save_pois):
     return poi_ct
 
 
-def compute_distance(array, background: np.ndarray | int = 0, i=0) -> np.ndarray:
+def compute_distance(array: np.ndarray, background: np.ndarray | int = 0, i: int = 0) -> np.ndarray:
+    """Compute the Euclidean distance transform for label *i* excluding background.
+
+    Args:
+        array: Label array whose distance transform is computed.
+        background: Background mask; voxels where this equals 0 are excluded from
+            the distance computation.
+        i: Label value in *array* to treat as the foreground seed.
+
+    Returns:
+        Distance transform array of the same shape as *array*.
+    """
     return distance_transform_edt(np.logical_and(array == i, background == 0))  # type: ignore
 
 
-def compute_distance_cord(segmentation, query_coords, i=0):
+def compute_distance_cord(segmentation: np.ndarray, query_coords: np.ndarray, i: int = 0) -> np.ndarray:
+    """Compute the distance from each query coordinate to the nearest voxel of label *i*.
+
+    Uses a KD-tree for efficient nearest-neighbour lookup.
+
+    Args:
+        segmentation: Label array.
+        query_coords: Array of shape ``(N, ndim)`` with query coordinate positions.
+        i: Label value whose foreground voxels form the reference set.
+
+    Returns:
+        1-D array of length ``N`` with the distance from each query coordinate to
+        the nearest voxel labelled *i*.
+    """
     # List of (y, x) coordinates where we want distances & segmentation lookup
     # query_coords = np.array([(0.5, 0.5), (1.7, 3.2), (2.3, 2.3)])
 
@@ -69,6 +120,53 @@ def compute_distance_cord(segmentation, query_coords, i=0):
 
 
 class Rigid_Elements_Registration:
+    """Per-vertebra rigid registration using DeepALI.
+
+    Performs a two-stage spine registration pipeline:
+
+    1. Point-based pre-alignment using vertebra centroids (``Point_Registration``).
+    2. Per-element (per-vertebra) rigid intensity registration via
+       ``Rigid_Registration_with_Tether``.
+
+    A weighted-blending field is then computed from the individual vertebra
+    transformations using an inverse-distance weighting scheme and exposed
+    through :meth:`transform_nii` and :meth:`compute_weightings`.
+
+    Args:
+        fixed_image: Fixed (reference) image.
+        fixed_vert: Vertebra segmentation aligned to *fixed_image*.
+        fixed_subreg: Subregion segmentation aligned to *fixed_image*.
+        moving_image: Moving image to be registered.
+        moving_vert: Vertebra segmentation aligned to *moving_image*.
+        moving_subreg: Subregion segmentation aligned to *moving_image*.
+        fixed_poi: Optional path to a pre-computed fixed POI file.
+        moving_poi: Optional path to a pre-computed moving POI file.
+        crop_to_FOV: Crop images to the moving-image field of view when ``True``.
+        save_pois: Save computed POI files to disk when ``True``.
+        reference_image: Optional reference grid; defaults to *fixed_vert*.
+        device: PyTorch device; inferred from *ddevice*/*gpu* when ``None``.
+        gpu: GPU index used when *device* is ``None``.
+        ddevice: Device type string (e.g. ``"cuda"``).
+        pyramid_levels: Number of multi-resolution pyramid levels (``None`` = 1).
+        finest_level: Index of the finest pyramid level.
+        coarsest_level: Index of the coarsest pyramid level.
+        pyramid_finest_spacing: Target voxel spacing at the finest pyramid level.
+        pyramid_min_size: Minimum spatial extent per level.
+        dims: Spatial axes to optimise (default all three).
+        align: Pre-align grids before optimisation.
+        optim_name: Name of a ``torch.optim`` optimiser class.
+        lr: Optimiser learning rate.
+        optim_args: Additional optimiser keyword arguments (without ``lr``).
+        verbose: Verbosity level for progress output.
+        max_steps: Maximum number of optimisation steps per level.
+        max_history: Window size for convergence monitoring.
+        weights: Loss term weights.
+        patience: Early-stopping patience (number of steps without improvement).
+        patience_delta: Minimum loss improvement to reset patience.
+        my: Exponent for the inverse-distance weighting scheme (default 1.5).
+        orientation: Reorient all inputs to this orientation before registration.
+    """
+
     def __init__(
         self,
         fixed_image: Image_Reference,
@@ -161,7 +259,8 @@ class Rigid_Elements_Registration:
         crop_to_FOV: bool,
         save_pois: bool,
         orientation,
-    ):
+    ) -> None:
+        """Load inputs, compute POIs, apply point-registration, and crop to FOV."""
         # Load
         # fixed_image = to_nii(fixed_image_)
         fixed_vert = to_nii(fixed_vert_, True)
@@ -240,19 +339,20 @@ class Rigid_Elements_Registration:
         finest_level: int = 0,
         coarsest_level: int | None = None,
         pyramid_finest_spacing: Sequence[int] | torch.Tensor | None = None,
-        pyramid_min_size=16,
+        pyramid_min_size: int = 16,
         dims=("x", "y", "z"),
-        align=False,
-        optim_name="Adam",  # Optimizer name defined in torch.optim. or override on_optimizer finer control
-        lr=0.01,  # Learning rate
+        align: bool = False,
+        optim_name: str = "Adam",  # Optimizer name defined in torch.optim. or override on_optimizer finer control
+        lr: float = 0.01,  # Learning rate
         optim_args=None,  # args of Optimizer with out lr
-        verbose=99,
+        verbose: int = 99,
         max_steps: int | Sequence[int] = 10000,  # Early stopping.  override on_converged finer control
         max_history: int | None = None,
         weights: list[float] | None = None,
-        patience=100,
-        patience_delta=0.0,
-    ):
+        patience: int = 100,
+        patience_delta: float = 0.0,
+    ) -> None:
+        """Run per-vertebra rigid registration and store the fitted models."""
         self._rigid_registrations: list[Rigid_Registration_with_Tether] = []
         self._ids = []
         ids_fixed = self.fixed_vert.unique()
@@ -297,11 +397,34 @@ class Rigid_Elements_Registration:
             self._ids.append(idx)
 
     @torch.no_grad()
-    def compute_weightings(self, my: float | None = None, coords: np.ndarray | None = None, device=None, align_corners=True):
-        """
-        weighting schema from https://www.sciencedirect.com/science/article/pii/S1077314297906081?ref=cra_js_challenge&fr=RR-1
-        if coords is None:
-            use ref image
+    def compute_weightings(
+        self,
+        my: float | None = None,
+        coords: np.ndarray | None = None,
+        device: torch.device | None = None,
+        align_corners: bool = True,
+    ) -> torch.Tensor:
+        """Compute the inverse-distance weighted blending field across all vertebrae.
+
+        Implements the weighting scheme from
+        https://www.sciencedirect.com/science/article/pii/S1077314297906081
+
+        Each vertebra's rigid transformation is blended using inverse-distance
+        weights computed from the Euclidean distance to the vertebra label.
+        Voxels inside a label are assigned weight 1 for their own vertebra and 0
+        for all others.
+
+        Args:
+            my: Exponent for the inverse-distance weighting (defaults to
+                ``self.my``).
+            coords: Optional array of query coordinates (shape ``(N, 3)``).
+                When ``None``, the full reference-image grid is used.
+            device: PyTorch device for computation; defaults to ``self.device``.
+            align_corners: Whether corners are aligned in grid-to-world mapping.
+
+        Returns:
+            Blended displacement field as a ``torch.Tensor`` containing the
+            weighted sum of per-vertebra transformed grid points.
         """
         if my is None:
             my = self.my
@@ -371,8 +494,30 @@ class Rigid_Elements_Registration:
 
     @torch.no_grad()
     def transform_nii(
-        self, img: NII, gpu: int | None = None, ddevice: DEVICES | None = None, align_corners=True, padding=PaddingMode.ZEROS
+        self,
+        img: NII,
+        gpu: int | None = None,
+        ddevice: DEVICES | None = None,
+        align_corners: bool = True,
+        padding: PaddingMode = PaddingMode.ZEROS,
     ) -> NII:
+        """Apply the blended rigid warp to an arbitrary NII image.
+
+        The moving image is first pre-aligned via ``Point_Registration``, then
+        cropped to the field of view, and finally warped using the blended
+        displacement field stored in ``self.y_total``.
+
+        Args:
+            img: Input ``NII`` to transform (may be a different modality from
+                those used during registration).
+            gpu: GPU index override.
+            ddevice: Device type override.
+            align_corners: Whether corners are aligned during warping.
+            padding: Padding mode used outside the source image bounds.
+
+        Returns:
+            Transformed ``NII`` resampled to the reference grid.
+        """
         device = get_device(ddevice, 0 if gpu is None else gpu) if ddevice is not None else self.device
         if self.orientation:
             img = img.reorient(self.orientation)
@@ -391,7 +536,21 @@ class Rigid_Elements_Registration:
         moved_data = np.transpose(moved_data.detach().cpu().numpy(), axes=tuple(reversed(range(moved_data.ndim)))).squeeze()
         return self.ref.make_empty_nii(img.seg, moved_data)
 
-    def transform_poi(self, poi: POI, gpu: int | None = None, ddevice: DEVICES | None = None, align_corners=True):
+    def transform_poi(self, poi: POI, gpu: int | None = None, ddevice: DEVICES | None = None, align_corners: bool = True) -> POI:
+        """Apply the blended rigid warp to a POI object (not yet tested).
+
+        Args:
+            poi: Input ``POI`` whose centroids are to be transformed.
+            gpu: GPU index override.
+            ddevice: Device type override.
+            align_corners: Whether corners are aligned during warping.
+
+        Returns:
+            Transformed ``POI`` on the reference grid.
+
+        Raises:
+            NotImplementedError: This method has not been validated yet.
+        """
         raise NotImplementedError("transform_poi is not tested")
         device = get_device(ddevice, 0 if gpu is None else gpu) if ddevice is not None else self.device
         # POINT REG
@@ -412,22 +571,51 @@ class Rigid_Elements_Registration:
         return out_poi
 
     def __call__(self, *args, **kwds) -> NII:
+        """Apply the registration by calling :meth:`transform_nii`."""
         return self.transform_nii(*args, **kwds)
 
-    def get_dump(self):
+    def get_dump(self) -> None:
+        """Return a serialisable representation of the registration (not implemented).
+
+        Raises:
+            NotImplementedError: Serialisation is not yet supported.
+        """
         raise NotImplementedError("transform_poi is not tested")
 
-    def save(self, path: str | Path):
+    def save(self, path: str | Path) -> None:
+        """Serialise the registration to a pickle file (not implemented).
+
+        Args:
+            path: Destination file path.
+
+        Raises:
+            NotImplementedError: Serialisation is not yet supported.
+        """
         with open(path, "wb") as w:
             pickle.dump(self.get_dump(), w)
 
     @classmethod
-    def load(cls, path, gpu=0, ddevice: DEVICES = "cuda"):
+    def load(cls, path: str | Path, gpu: int = 0, ddevice: DEVICES = "cuda"):
+        """Load a saved registration from a pickle file (not implemented).
+
+        Args:
+            path: Path to the pickle file.
+            gpu: GPU index.
+            ddevice: Device type string.
+
+        Raises:
+            NotImplementedError: Deserialisation is not yet supported.
+        """
         with open(path, "rb") as w:
             return cls.load_(pickle.load(w), gpu, ddevice)
 
     @classmethod
-    def load_(cls, w, gpu=0, ddevice: DEVICES = "cuda"):
+    def load_(cls, w, gpu: int = 0, ddevice: DEVICES = "cuda"):
+        """Reconstruct from a raw dump tuple (not implemented).
+
+        Raises:
+            NotImplementedError: Deserialisation is not yet supported.
+        """
         raise NotImplementedError("transform_poi is not tested")
 
 

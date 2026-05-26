@@ -19,6 +19,7 @@ def compute_gaussian(
     dtype=torch.float16,
     device=torch.device("cuda", 0),  # noqa: B008
 ) -> torch.Tensor:
+    """Compute a normalised Gaussian importance map for a sliding-window tile of the given size."""
     tmp = np.zeros(tile_size)
     center_coords = [i // 2 for i in tile_size]
     sigmas = [i * sigma_scale for i in tile_size]
@@ -37,6 +38,7 @@ def compute_gaussian(
 
 
 def compute_steps_for_sliding_window(image_size: tuple[int, ...], tile_size: tuple[int, ...], tile_step_size: float) -> list[list[int]]:
+    """Compute per-dimension step start indices for a sliding-window inference pass over an image."""
     assert [i >= j for i, j in zip(image_size, tile_size)], "image size must be as large or larger than patch_size"
     assert 0 < tile_step_size <= 1, "step_size must be larger than 0 and smaller or equal to 1"
 
