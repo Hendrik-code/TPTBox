@@ -447,6 +447,7 @@ def main(  # noqa: C901
     is_segmentation: bool = False,
     dtype: type | str = float,
     save: bool = True,
+    ramp_path=None,
 ) -> tuple[Nifti1Image | None, Nifti1Image | None]:
     """Stitch multiple overlapping NIfTI volumes into a single output volume.
 
@@ -702,7 +703,8 @@ def main(  # noqa: C901
             occupancy_arr = occupancy_arr[ex_slice]
         assert output is not None
         nii_occ = set_array(nii_out, occupancy_arr)
-        output = output.replace(".nii.gz", "_ramps.nii.gz")
+        nii_occ.set_data_dtype(np.int8)
+        output = output.replace(".nii.gz", "_ramps.nii.gz").replace("_msk_", "_") if ramp_path is None else ramp_path
         if save:
             nib.save(nii_occ, output)  # type: ignore
             print("Saved ", output) if verbose else None

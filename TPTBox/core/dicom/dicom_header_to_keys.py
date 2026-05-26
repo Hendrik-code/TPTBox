@@ -46,6 +46,8 @@ map_series_description_to_file_format_default = {
     "t2w?_fse.*": "T2w",
     ".*t1w?_tse.*": "T1w",
     ".*t1w?_vibe_tra.*": "vibe",
+    ".*Durchleuchtung.*": "fluroscopy",
+    ".*fluroscopy.*": "fluroscopy",
     ".*scout": "localizer",
     "localizer": "localizer",
     ".*pilot.*": "localizer",
@@ -199,7 +201,15 @@ def extract_keys_from_json(  # noqa: C901
     def _get(key, default=None):
         if key not in simp_json:
             return keys.get(key, default)
-        return str(simp_json[key]).replace("_", "-").replace(" ", "-").replace(".", "-")
+        value = str(simp_json[key]).replace("_", "-").replace(" ", "-").replace(".", "-")
+        # remove invalid filename characters
+        value = re.sub(r'[<>:"/\\|?*\x00-\x1F]', "", value)
+        # collapse repeated dashes
+        value = re.sub(r"-+", "-", value)
+        # strip leading/trailing dots and dashes
+        value = value.strip(".-")
+
+        return value
 
     #### NAKO FIXED ####
     if "StudyDescription" in simp_json and "nako" in _get("StudyDescription", "").lower():
@@ -207,25 +217,28 @@ def extract_keys_from_json(  # noqa: C901
         series_description = _get("SeriesDescription", "unnamed")
         """Determine the MRI format based on the series description."""
         if "T2_TSE" in series_description:
-            return "T2w", {"acq": "sag", "chunk": series_description.split("_")[-1], "sequ": simp_json["SeriesNumber"], **keys}
+            return "T2w", {"acq": "sag", "chunk": series_description.split("_")[-1], "sequ": simp_json["SeriesNumber"], **keys}, ".nii.gz"
         elif "3D_GRE_TRA" in series_description:
-            return "vibe", {
-                "acq": "ax",
-                "part": dixon_mapping[series_description.split("_")[-1].lower()],
-                "chunk": _get("ProtocolName", "unnamed").split("_")[-1],
-                **keys,
-            }
+            return (
+                "vibe",
+                {
+                    "acq": "ax",
+                    "part": dixon_mapping[series_description.split("_")[-1].lower()],
+                    "chunk": _get("ProtocolName", "unnamed").split("_")[-1],
+                    **keys,
+                },
+                ".nii.gz",
+            )
         elif "ME_vibe" in series_description:
-            return "mevibe", {
-                "acq": "ax",
-                "part": dixon_mapping[series_description.split("_")[-1].lower()],
-                "sequ": simp_json["SeriesNumber"],
-                **keys,
-            }
+            return (
+                "mevibe",
+                {"acq": "ax", "part": dixon_mapping[series_description.split("_")[-1].lower()], "sequ": simp_json["SeriesNumber"], **keys},
+                ".nii.gz",
+            )
         elif "PD" in series_description:
-            return "pd", {"acq": "iso", **keys}
+            return "pd", {"acq": "iso", **keys}, ".nii.gz"
         elif "T2_HASTE" in series_description:
-            return "T2haste", {"acq": "ax", **keys}
+            return "T2haste", {"acq": "ax", **keys}, ".nii.gz"
         else:
             raise NotImplementedError(series_description)
     # GENERAL
@@ -301,22 +314,36 @@ def extract_keys_from_json(  # noqa: C901
         found = False
         if modality == "ct":
             mri_format = "ct"
+        elif modality.lower() == "pt":
+            mri_format = "pet"
         elif modality == "xa":  # Angiography
+            biplane = False
             if "BIPLANE A" in image_type or "SINGLE A" in image_type:
                 keys["acq"] = "A"
+                biplane = True
             elif "BIPLANE B" in image_type or "SINGLE B" in image_type:
                 keys["acq"] = "B"
+                biplane = True
+            derived = "DERIVED" in image_type
+            series_description = _get("SeriesDescription", " ").lower()  # "SeriesDescription": "Durchleuchtung - gespeichert",
             monitor = _get("PositionerMotion", " ").lower()
             # ftv = _get("FrameTimeVector", None).lower()
             monitor = _get("PositionerMotion", " ").lower()
             tag = _get("DerivationDescription", " ").lower()
+            # "ImagerPixelSpacing"
+            # FrameTimeVector = _get("DerivationDescription", [])
             # ftv is not None
-            if tag == "subtraction":
+            if "durchleuchtung" in series_description or "fluroscopy" in series_description:
+                mri_format = "fluroscopy"
+            elif tag == "subtraction":
                 mri_format = "DSA" if monitor == "static" and "VOLUME" not in image_type and "RECON" not in image_type else "subtraction"
             elif "3DRA_PROP" in image_type:
                 mri_format = "3DRA"
             elif monitor == "dynamic" or "VOLUME" in image_type or "RECON" in image_type or "3DRA_PROP" in image_type:
                 mri_format = "DSA3D"
+            elif biplane and derived and "VOLUME" not in image_type and "RECON" not in image_type:
+                ##len(FrameTimeVector) >= 1 and (monitor == "static" and "VOLUME" not in image_type and "RECON" not in image_type)
+                mri_format = "DSA"
             else:
                 mri_format = "XA"
         elif modality == "mr":
@@ -340,9 +367,14 @@ def extract_keys_from_json(  # noqa: C901
                     " km " in series_description.lower() or series_description.startswith("km") or series_description.endswith("km")
                 ) and keys.get("ce") is None:
                     keys["ce"] = "ContrastAgent"
+        elif modality.lower() == "pdf":
+            return "report", keys, ".pdf"
+        elif modality.lower() == "sr":
+            keys["desc"] = _get("SeriesDescription", None)
+            return "report", keys, ".txt"
         else:
-            raise NotImplementedError(f"modality='{modality.upper()}', ({modalities.get(modality.upper())})")
+            raise NotImplementedError(f"modality='{modality}', ({modalities.get(modality.upper(), 'Non Standard Modality key')})")
 
             # ".*sub.*t1.*": "subtraktion",
         # "subtraktion.*t1.*": "subtraktion",
-        return mri_format, keys
+        return mri_format, keys, ".nii.gz"

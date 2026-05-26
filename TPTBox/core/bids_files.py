@@ -859,7 +859,7 @@ class BIDS_FILE:
             p = Path(path + "." + key)
             value.rename(p)
 
-    def symlink_files(self, path: Path | str, ending: str = ".nii.gz") -> None:
+    def symlink_files(self, path: Path | str, ending: str = ".nii.gz", exist_ok: bool = False) -> None:
         """Create symbolic links for all associated files at a new base path.
 
         Equivalent to :meth:`rename_files` but creates symlinks rather than
@@ -881,9 +881,13 @@ class BIDS_FILE:
         path = path.replace(ending, "")
         for key, value in self.file.items():
             p = Path(path + "." + key)
+
             if os.path.islink(p):
                 assert Path(os.readlink(p)) == value, f"{p} exists"
                 continue
+            if exist_ok and p.exists():
+                continue
+
             os.symlink(value, p)
 
     def get_path_decomposed(self, file_type: str | None = None) -> tuple[Path, str, str, str]:
@@ -958,7 +962,7 @@ class BIDS_FILE:
         auto_add_run_id: bool = False,
         additional_folder: str | None = None,
         dataset_path: str | None = None,
-        make_parent: bool = True,
+        make_parent: bool = False,
         non_strict_mode: bool = False,
     ) -> BIDS_FILE:
         """Construct a new :class:`BIDS_FILE` pointing to a derived output path.

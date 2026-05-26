@@ -22,6 +22,7 @@ def stitching(
     dtype: type = float,
     match_histogram: bool = False,
     store_ramp: bool = False,
+    ramp_path=None,
 ) -> tuple:
     """Stitch a list of BIDS/NII volumes into a single output NIfTI file.
 
@@ -66,6 +67,7 @@ def stitching(
         kick_out_fully_integrated_images=kick_out_fully_integrated_images,
         is_segmentation=is_seg,
         dtype=dtype,
+        ramp_path=ramp_path,
     )
 
 

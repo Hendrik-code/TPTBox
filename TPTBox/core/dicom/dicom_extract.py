@@ -87,6 +87,44 @@ def _generate_bids_path(
     return fname.file["json"], fname
 
 
+def dicom_to_nifti_multiframe_2d(ds, nii_path, pixel_array) -> None:
+    """Convert a 2D multiframe DICOM dataset to a NIfTI file using its affine metadata.
+
+    Args:
+        ds: pydicom FileDataset object containing the DICOM header.
+        nii_path: Destination path for the output NIfTI file.
+        pixel_array: Pixel data array extracted from the DICOM dataset.
+    """
+    if hasattr(ds, "PixelSpacing"):
+        dy, dx = map(float, ds.PixelSpacing)
+        affine = np.eye(4)
+
+        if hasattr(ds, "ImageOrientationPatient"):
+            orientation = list(map(float, ds.ImageOrientationPatient))
+            row_cosines = np.array(orientation[:3])
+            col_cosines = np.array(orientation[3:])
+            affine[:3, 0] = row_cosines * dx
+            affine[:3, 1] = col_cosines * dy
+        else:
+            affine[0, 0] = dx
+            affine[1, 1] = dy
+
+        if hasattr(ds, "ImagePositionPatient"):
+            affine[:3, 3] = np.array(list(map(float, ds.ImagePositionPatient)))
+
+    elif hasattr(ds, "ImagerPixelSpacing"):
+        dy, dx = map(float, ds.ImagerPixelSpacing)
+        affine = np.diag([-dx, -dy, 1, 1])
+
+    else:
+        affine = np.eye(4)
+
+    nii = nib.Nifti1Image(pixel_array.T[:, :, None], affine)
+    logger.on_log("Save 2D", nii_path)
+    nib.save(nii, nii_path)
+    return nii_path
+
+
 def dicom_to_nifti_multiframe(ds: pydicom.FileDataset, nii_path: str | Path) -> str | Path:
     """Convert a multi-frame DICOM dataset to a NIfTI file.
 
@@ -107,6 +145,9 @@ def dicom_to_nifti_multiframe(ds: pydicom.FileDataset, nii_path: str | Path) -> 
             an affine matrix.
     """
     pixel_array = ds.pixel_array
+    if len(pixel_array.shape) == 2:
+        return dicom_to_nifti_multiframe_2d(ds, nii_path, pixel_array)
+
     if len(pixel_array.shape) != 3 and len(pixel_array.shape) != 4:
         raise ValueError(f"Expected a shape with 3 colums not {len(pixel_array.shape)}; {pixel_array.shape=}")
     n_frames = pixel_array.shape[0]
@@ -173,7 +214,68 @@ def dicom_to_nifti_multiframe(ds: pydicom.FileDataset, nii_path: str | Path) -> 
     return nii_path
 
 
-def _convert_to_nifti(dicom_out_path, nii_path):
+def _export_pdf_from_dicom(dcm_path, out_pdf):
+    assert len(dcm_path) == 1, dcm_path
+    ds = dcm_path[0]
+
+    # verify modality / SOP class
+    if ds.Modality.upper() != "PDF":
+        raise ValueError("Not a PDF DICOM")
+
+    if "EncapsulatedDocument" not in ds:
+        raise ValueError("No embedded PDF found")
+
+    pdf_bytes = ds.EncapsulatedDocument
+
+    out_pdf = Path(out_pdf)
+    out_pdf.write_bytes(pdf_bytes)
+
+
+def _collect_text(ds, txt_lines: list[str] | None = None):
+    if txt_lines is None:
+        txt_lines = []
+
+    def _help_collect_text(content_sequence, level: int = 0):
+        for item in content_sequence:
+            prefix = "  " * level
+
+            concept = ""
+
+            if hasattr(item, "ConceptNameCodeSequence"):
+                try:
+                    concept = item.ConceptNameCodeSequence[0].CodeMeaning
+                except Exception:
+                    pass
+
+            value = None
+
+            for attr in ["TextValue", "CodeMeaning", "NumericValue"]:
+                if hasattr(item, attr):
+                    value = getattr(item, attr)
+                    break
+
+            if concept or value is not None:
+                txt_lines.append(f"{prefix}{concept}: {value}")
+
+            if hasattr(item, "ContentSequence"):
+                _help_collect_text(
+                    item.ContentSequence,
+                    level + 1,
+                )
+
+    if hasattr(ds, "ContentSequence"):
+        _help_collect_text(ds.ContentSequence)
+    return txt_lines
+
+
+def _extract_txt_from_dicom(dcm_path, out_txt):
+    lines = []
+    for p in dcm_path:
+        lines = _collect_text(p, lines)
+    Path(out_txt).write_text("\n".join(lines))
+
+
+def _extract_nii_from_dicom(dicom_out_path, nii_path):
     """Convert DICOM files to NIfTI format and handle common conversion errors.
 
     Args:
@@ -199,6 +301,7 @@ def _convert_to_nifti(dicom_out_path, nii_path):
                     return True
             except Exception as e:
                 logger.on_debug("Multi-Frame DICOM did not work:", e)
+            ## The PDF dicom lands here
             convert_dicom.dicom_array_to_nifti(dicom_out_path, nii_path, True)
         else:
             # func_timeout(10, dicom2nifti.dicom_series_to_nifti, (dicom_out_path, nii_path, True))
@@ -228,6 +331,9 @@ def _convert_to_nifti(dicom_out_path, nii_path):
         logger.print_error()
 
         return False
+    except Exception:
+        print(nii_path)
+
     return True
 
 
@@ -269,7 +375,7 @@ def _get_paths(
     """
     if keys is None:
         keys = {}
-    (mri_format, keys) = extract_keys_from_json(
+    (mri_format, keys, ending) = extract_keys_from_json(
         simp_json,
         dcm_data_l,
         use_session,
@@ -282,7 +388,7 @@ def _get_paths(
     json_file_name, json_bids_name = _generate_bids_path(
         dataset_nifti_dir, keys, mri_format, simp_json, make_subject_chunks=make_subject_chunks, parent=parent
     )
-    nii_path = str(json_file_name).replace(".json", "") + ".nii.gz"
+    nii_path = str(json_file_name).replace(".json", "") + ending
     return json_file_name, json_bids_name, nii_path
 
 
@@ -305,7 +411,9 @@ def _from_dicom_to_nii(
     override_subject_name: Callable[[dict, Path], str] | None = None,
     chunk: int | str | None = None,
     skip_localizer: bool = False,
-) -> str | None | list:
+    parent="rawdata",
+    censor_list=None,
+):
     """Convert a list of DICOM datasets for one series to a NIfTI file.
 
     Handles spatial-stack splitting, metadata extraction, BIDS path generation,
@@ -327,6 +435,19 @@ def _from_dicom_to_nii(
         Path to the generated NIfTI file, ``None`` on failure, or a list of paths
         when the series was automatically split into multiple stacks.
     """
+    if censor_list is None:
+        censor_list = [
+            "StudyDate",
+            "SeriesDate",
+            "AcquisitionDate",
+            "ContentDate",
+            "StudyTime",
+            "SeriesTime",
+            "AcquisitionTime",
+            "ContentTime",
+            "InstanceCreationDate",
+            "InstanceCreationTime",
+        ]
     if chunk is None:
         splitted_dcm_data_l = _classic_get_grouped_dicoms(dcm_data_l)
         if len(splitted_dcm_data_l) != 1:
@@ -343,6 +464,7 @@ def _from_dicom_to_nii(
                     override_subject_name=override_subject_name,
                     chunk=i,
                     skip_localizer=skip_localizer,
+                    parent=parent,
                 )
                 outs.append(o)
             return outs
@@ -352,6 +474,9 @@ def _from_dicom_to_nii(
         return None
 
     simp_json = get_json_from_dicom(dcm_data_l)
+    for censor_key in censor_list:
+        if censor_key in simp_json:
+            del simp_json[censor_key]
     json_file_name, json_bids, nii_path = _get_paths(
         simp_json,
         dcm_data_l,
@@ -362,19 +487,27 @@ def _from_dicom_to_nii(
         map_series_description_to_file_format,
         override_subject_name,
         chunk=chunk,
+        parent=parent,
     )
     if skip_localizer and json_bids.bids_format == "localizer":
         return
     logger.print(json_file_name, Log_Type.NEUTRAL, verbose=verbose)
-    exist = save_json(simp_json, json_file_name)
+    exist = save_json(simp_json, json_file_name, override=False)
+    # logger.on_debug(exist, Path(nii_path).exists(), nii_path)
     if exist and Path(nii_path).exists():
         logger.print("already exists:", json_file_name, ltype=Log_Type.STRANGE, verbose=verbose)
         return nii_path
-    suc = _convert_to_nifti(dcm_data_l, nii_path)
+    add_grid = False
+    if nii_path.endswith(".pdf"):
+        _export_pdf_from_dicom(dcm_data_l, nii_path)
+    elif nii_path.endswith(".txt"):
+        _extract_txt_from_dicom(dcm_data_l, nii_path)
+    else:
+        add_grid = _extract_nii_from_dicom(dcm_data_l, nii_path)
 
-    if suc:
+    if add_grid:
         _add_grid_info_to_json(nii_path, json_file_name)
-    return nii_path if suc else None
+    return nii_path if add_grid else None
 
 
 def _add_grid_info_to_json(nii_path: Path | str, simp_json: Path | str, force_update: bool = False, add: bool = True) -> dict:
@@ -407,7 +540,7 @@ def _add_grid_info_to_json(nii_path: Path | str, simp_json: Path | str, force_up
     return json_dict
 
 
-def _find_all_files(dcm_dirs: Path | list[Path]):
+def _find_all_files(dcm_dirs: Path | list[Path], verbose=False):
     """Recursively find all DICOM directories or files in the given paths.
 
     Args:
@@ -416,6 +549,9 @@ def _find_all_files(dcm_dirs: Path | list[Path]):
     Yields:
         Path: Paths to directories or individual DICOM files found during the search.
     """
+    if verbose:
+        logger.on_neutral("Start file searching")
+        i = 0
     yield dcm_dirs
     dcm_dirs = dcm_dirs if isinstance(dcm_dirs, list) else [dcm_dirs]
     for dcm_dir in dcm_dirs:
@@ -424,9 +560,15 @@ def _find_all_files(dcm_dirs: Path | list[Path]):
                 file = ""
                 for file in files:
                     if Path(file).is_file():  # str(file).endswith(".dcm") or str(file).endswith(".ima")
+                        if verbose:
+                            logger.on_neutral("File ", i, end="\r")
+                            i += 1
                         yield Path(root, file).absolute().parent
                         break
                     else:
+                        if verbose:
+                            logger.on_neutral("File ", i, end="\r")
+                            i += 1
                         yield Path(root, file)
                 # if "." not in str(file):
                 #    yield Path(root, file).absolute().parent
@@ -611,6 +753,8 @@ def extract_dicom_folder(
     n_cpu: int | None = 1,
     override_subject_name: Callable[[dict, Path], str] | None = None,
     skip_localizer=True,
+    parent: str = "rawdata",
+    censor_list: list | None = None,
 ) -> dict:
     """Extract DICOM files from a directory or list of directories, convert them to NIfTI format, and store the output.
 
@@ -627,6 +771,8 @@ def extract_dicom_folder(
     Returns:
         dict: A dictionary with keys representing DICOM series and values as paths to the generated NIfTI files.
     """
+    if censor_list is None:
+        censor_list = []
     if not validate_slicecount:
         convert_dicom.settings.disable_validate_slicecount()
     if not validate_orientation:
@@ -637,7 +783,7 @@ def extract_dicom_folder(
         convert_dicom.settings.disable_validate_slice_increment()
     outs = {}
 
-    for p in _find_all_files(dicom_folder):
+    for p in _find_all_files(dicom_folder, verbose=verbose):
         dicom_path = p
 
         if str(dicom_path).endswith(".pkl"):
@@ -666,6 +812,8 @@ def extract_dicom_folder(
                     map_series_description_to_file_format=map_series_description_to_file_format,
                     override_subject_name=override_subject_name,
                     skip_localizer=skip_localizer,
+                    parent=parent,
+                    censor_list=censor_list,
                 )
 
             # Process in parallel or sequentially based on n_cpu
@@ -696,8 +844,10 @@ def extract_dicom_folder(
 
 
 if __name__ == "__main__":
-    for p in Path("/DATA/NAS/datasets_source/brain/dsa").iterdir():
-        extract_dicom_folder(p, Path("/DATA/NAS/datasets_source/brain/", "dataset-DSA"), False, False, validate_slice_increment=False)
+    for p in Path("/media/robert/STORE N GO/DSA_Daten/").iterdir():
+        extract_dicom_folder(
+            p, Path("/media/data/robert/datasets", "dataset-Durchleuchtung222"), False, False, validate_slice_increment=False
+        )
 
     sys.exit()
     # s = "/home/robert/Downloads/bein/dataset-oberschenkel/rawdata/sub-1-3-46-670589-11-2889201787-2305829596-303261238-2367429497/mr/sub-1-3-46-670589-11-2889201787-2305829596-303261238-2367429497_sequ-406_mr.nii.gz"
