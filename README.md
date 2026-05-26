@@ -31,6 +31,23 @@ The docs cover all sub-packages — `NII`, `POI`, `BIDS_FILE`, NumPy utilities,
 vertebra constants, spine analysis, registration, segmentation, mesh3D,
 stitching, and the logger — with hyperlinks back to the GitHub source.
 
+## Modules
+
+Each sub-package has its own README with API tables and examples:
+
+| Module | Description |
+|---|---|
+| [`core`](TPTBox/core/README.md) | `NII` (NIfTI I/O and transforms), `POI` (anatomical landmarks), BIDS dataset navigation, NumPy utilities, vertebra constants |
+| [`core/poi_fun`](TPTBox/core/poi_fun/README.md) | Internal POI computation strategies (surface points, corpus centers, disc points) |
+| [`spine`](TPTBox/spine/README.md) | Spine-specific tools: 2D snapshot generation and statistical measurements |
+| [`spine/snapshot2D`](TPTBox/spine/snapshot2D/README.md) | Modular 2D image generation — axial/sagittal/coronal slices, MIPs, segmentation overlays |
+| [`spine/spinestats`](TPTBox/spine/spinestats/README.md) | Clinical spine measurements: distances, angles, disc heights, IVD landmarks |
+| [`registration`](TPTBox/registration/README.md) | Rigid and deformable image registration via ANTs and DeepALI |
+| [`segmentation`](TPTBox/segmentation/README.md) | Integration with SPINEPS, VibeSeg/TotalVibeSeg, and nnU-Net pipelines |
+| [`mesh3D`](TPTBox/mesh3D/README.md) | 3D surface mesh generation and rendering from segmentation volumes |
+| [`stitching`](TPTBox/stitching/README.md) | Multi-station NIfTI stitching for whole-body or long-spine acquisitions |
+| [`logger`](TPTBox/logger/README.md) | Structured, consistent logging for medical image processing pipelines |
+
 ## Install the package
 ```bash
 conda create -n 3.10 python=3.10
