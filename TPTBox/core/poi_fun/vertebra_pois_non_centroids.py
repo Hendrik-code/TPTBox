@@ -24,16 +24,47 @@ _sacrum = set(Vertebra_Instance.sacrum())
 ivd_pois_list = (Location.Vertebra_Disc_Inferior, Location.Vertebra_Disc_Superior, Location.Vertebra_Disc)
 
 
-def run_poi_pipeline(vert: NII, subreg: NII, poi_path: Path, logger: Logger_Interface = _log):
+def run_poi_pipeline(vert: NII, subreg: NII, poi_path: Path, logger: Logger_Interface = _log) -> None:
+    """Compute all POIs from vertebra and subregion segmentations and save them to disk.
+
+    Wraps :func:`~TPTBox.calc_poi_from_subreg_vert` for every ``Location``
+    member and writes the result as a JSON file.
+
+    Args:
+        vert: Vertebra instance segmentation ``NII`` (one label per vertebra).
+        subreg: Subregion segmentation ``NII`` (spine substructure labels).
+        poi_path: Output path for the JSON POI file.  Used as a buffer file
+            so that an existing file is read and extended rather than
+            recomputed from scratch.
+        logger: Logger instance for progress and error messages.
+    """
     poi = calc_poi_from_subreg_vert(vert, subreg, buffer_file=poi_path, save_buffer_file=True, subreg_id=list(Location), verbose=logger)
     poi.save(poi_path)
 
 
-def _strategy_side_effect(*args, **qargs):  # noqa: ARG001
-    pass
+def _strategy_side_effect(*args, **qargs) -> None:  # noqa: ARG001
+    """No-op placeholder used by side-effect and pre-computed strategy entries."""
 
 
-def add_prerequisites(locs: Sequence[Location]):
+def add_prerequisites(locs: Sequence[Location]) -> list[Location]:
+    """Expand a list of ``Location`` members with all transitive prerequisites.
+
+    Walks the :data:`all_poi_functions` registry and iteratively adds any
+    ``Location`` entries that are required by the provided list (and their
+    requirements, and so on) until no new entries are found.
+
+    Args:
+        locs: Initial sequence of ``Location`` members for which POIs are to
+            be computed.
+
+    Returns:
+        Sorted list of ``Location`` members including all original entries and
+        every transitive prerequisite, ordered by ``Location.value``.
+
+    Raises:
+        UserWarning: If a dependency cycle is detected (loop limit of 1000
+            iterations reached).
+    """
     addendum = set()
     locs2 = set(locs)
     loop_var = locs2
@@ -122,6 +153,7 @@ class Strategy_Pattern:
         bb,
         log: Logger_Interface = _log,
     ):
+        """Execute the POI computation strategy for the given vertebra, returning the result or None on failure."""
         try:
             return self.strategy(
                 poi=poi,
@@ -136,17 +168,47 @@ class Strategy_Pattern:
             _log.print_error()
             return None
 
-    def prority(self):
+    def prority(self) -> int:
+        """Return the scheduling priority for this strategy (lower value runs first)."""
         return self.target.value + self._prio
 
 
 class Strategy_Pattern_Side_Effect(Strategy_Pattern):
+    """Strategy marker for POIs computed as a side effect of another strategy.
+
+    Registers ``target`` as a POI that does not need its own compute call
+    because it is produced implicitly when ``prerequisite`` is computed.  The
+    callable is a no-op; the dependency is tracked in
+    :data:`pois_computed_by_side_effect`.
+
+    Args:
+        target: The ``Location`` that is produced as a side effect.
+        prerequisite: The ``Location`` whose computation produces ``target``.
+        **args: Additional keyword arguments forwarded to
+            :class:`Strategy_Pattern`.
+    """
+
     def __init__(self, target: Location, prerequisite: Location, **args) -> None:
         super().__init__(target, _strategy_side_effect, {prerequisite}, **args)
         pois_computed_by_side_effect[target.value] = prerequisite
 
 
 class Strategy_Computed_Before(Strategy_Pattern):
+    """Strategy marker for POIs that must be computed before the pipeline runs.
+
+    Use this when a ``Location`` is computed by an earlier, separate step
+    (e.g. spinal canal centroids) rather than by a generic strategy function.
+    The callable is a no-op; the class simply registers the prerequisite
+    dependencies.
+
+    Args:
+        target: The ``Location`` that is already computed before the pipeline.
+        *prerequisite: One or more ``Location`` members that must be present
+            before ``target`` can be used.
+        **args: Additional keyword arguments forwarded to
+            :class:`Strategy_Pattern`.
+    """
+
     def __init__(self, target: Location, *prerequisite: Location, **args) -> None:
         super().__init__(target, _strategy_side_effect, set(prerequisite), **args)
 
@@ -246,8 +308,36 @@ def compute_non_centroid_pois(  # noqa: C901
     _vert_ids: Sequence[int] | None = None,
     log: Logger_Interface = _log,
     verbose: bool | None = True,
-    _orientation_version=0,
-):
+    _orientation_version: int = 0,
+) -> None:
+    """Compute all requested non-centroid anatomical landmarks and store them in ``poi`` in place.
+
+    Runs the full non-centroid POI pipeline:
+
+    1. Vertebra orientation (PIR direction vectors) — always computed first if
+       ``Location.Vertebra_Direction_Inferior`` is requested.
+    2. Global landmarks: spinal canal / cord centres, intervertebral disc
+       POIs, dense-axis tip.
+    3. Per-vertebra landmarks via the registered :class:`Strategy_Pattern`
+       functions (extreme points, ray casts, corner finders, etc.).
+    4. Intervertebral disc (IVD) POIs.
+
+    Args:
+        poi: ``POI`` object that will be modified in place.  Must contain
+            centroid information for ``vert`` and ``subreg``.
+        locations: One or more ``Location`` members identifying the POIs to
+            compute.  A single ``Location`` is accepted and converted to a
+            list internally.
+        vert: Vertebra instance segmentation ``NII`` (one label per vertebra).
+        subreg: Spine subregion segmentation ``NII``.
+        _vert_ids: Explicit list of vertebra integer labels to process.
+            When ``None``, all labels present in ``vert`` are used.
+        log: Logger for progress and error messages.
+        verbose: Verbosity passed to logging calls.  ``None`` silences
+            everything, ``True`` enables all messages.
+        _orientation_version: Internal version selector for the vertebra
+            orientation algorithm; keep at 0 (default) for production use.
+    """
     if _vert_ids is None:
         _vert_ids = vert.unique()
 
@@ -350,7 +440,8 @@ def compute_non_centroid_pois(  # noqa: C901
         poi = calculate_IVD_POI(vert, subreg, poi, ivd_location)
 
 
-def _print_prerequisites():
+def _print_prerequisites() -> None:
+    """Print a Graphviz DOT representation of all strategy prerequisites to stdout."""
     print("digraph G {")
     for source, strategy in all_poi_functions.items():
         for prereq in strategy.prerequisite:

@@ -29,28 +29,43 @@ def load_inf_model(
     init_threads: bool = True,
     allow_non_final: bool = True,
     inference_augmentation: bool = False,
-    use_gaussian=True,
+    use_gaussian: bool = True,
     verbose: bool = False,
-    gpu=None,
-    memory_base=5000,  # Base memory in MB, default is 5GB
-    memory_factor=160,  # prod(shape)*memory_factor / 1000, 160 ~> 30 GB
-    memory_max=160000,  # in MB, default is 160GB
-    wait_till_gpu_percent_is_free=0.3,
+    gpu: int | None = None,
+    memory_base: int = 5000,
+    memory_factor: int = 160,
+    memory_max: int = 160000,
+    wait_till_gpu_percent_is_free: float = 0.3,
 ) -> nnUNetPredictor:
-    """Loads the Nako-Segmentor Model Predictor
+    """Load and initialise an nnU-Net model predictor from a trained model folder.
 
     Args:
-        model_folder (str, optional): nnUNet Result Model Folder containing the "fold_x" directories. Default to the basic folder
-        step_size (float, optional): Step size for sliding window prediction. The larger it is the faster but less accurate "
-        "the prediction. Default: 0.5. Cannot be larger than 1.
-        ddevice (str, optional): The device the inference should run with. Available options are 'cuda' "
-        "(GPU), 'cpu' (CPU) and 'mps' (Apple M1/M2). Do NOT use this to set which GPU ID!. Defaults to "cuda".
-        memory_base (int, optional): Base memory in MB for the model. Default is 5000 MB (5GB).
-        memory_factor (int, optional): Memory factor for the model. Default is 160, which is ~30GB for a 512x512x512 image.
-        memory_max (int, optional): Maximum memory in MB for the model. Default is 160000 MB (160GB).
+        model_folder: Path to the nnU-Net result folder containing ``fold_*``
+            sub-directories.
+        step_size: Sliding-window step size as a fraction of the patch size.
+            Larger values are faster but may reduce accuracy.  Must be in (0, 1].
+        ddevice: Inference device: ``"cuda"`` (GPU), ``"cpu"``, or ``"mps"``
+            (Apple Silicon).  Do NOT use this to select a GPU index.
+        use_folds: Tuple of fold indices or fold names to load.  Loads all
+            available folds when ``None``.
+        init_threads: If True, configure PyTorch thread counts optimally for the
+            selected device.
+        allow_non_final: If True, fall back to ``checkpoint_best.pth`` when
+            ``checkpoint_final.pth`` is not found.
+        inference_augmentation: If True, enable test-time mirroring augmentation.
+        use_gaussian: If True, apply Gaussian weighting in the sliding window.
+        verbose: If True, print progress information during model initialisation.
+        gpu: GPU device index forwarded to the predictor.  ``None`` defaults to 0.
+        memory_base: Base GPU memory reservation in MB (default 5 000 MB = 5 GB).
+        memory_factor: Per-voxel memory scaling factor.  The formula is
+            ``prod(shape) * memory_factor / 1000`` MB; 160 corresponds to ~30 GB
+            for a 512³ volume.
+        memory_max: Maximum GPU memory cap in MB (default 160 000 MB = 160 GB).
+        wait_till_gpu_percent_is_free: Fraction of GPU memory that must be free
+            before inference is started.
 
     Returns:
-        predictor: Loaded model predictor object
+        Initialised ``nnUNetPredictor`` ready for inference.
     """
     if isinstance(model_folder, str):
         model_folder = Path(model_folder)
@@ -113,20 +128,28 @@ def run_inference(
     input_nii: str | NII | list[NII],
     predictor: nnUNetPredictor,
     reorient_PIR: bool = False,  # noqa: N803
-    logits=False,
-    verbose=False,  # noqa: ARG001
+    logits: bool = False,
+    verbose: bool = False,  # noqa: ARG001
 ) -> tuple[NII, NII | None, np.ndarray | None]:
-    """Runs nnUnet model inference on one input.
+    """Run nnU-Net inference on a single image or list of images (multi-channel).
 
     Args:
-        input (str | NII): Path to a nifty file or a NII object.
-        predictor (_type_, optional): Loaded model predictor. If none, will load the default one. Defaults to None.
+        input_nii: Input as a path to a ``.nii.gz`` file, a ``NII`` object, or a
+            list of ``NII`` objects for multi-channel models.
+        predictor: Loaded ``nnUNetPredictor`` as returned by :func:`load_inf_model`.
+        reorient_PIR: If True, reorient each input image to PIR orientation before
+            passing it to the model.
+        logits: If True, return raw softmax logits.  Currently not implemented and
+            will raise ``NotImplementedError``.
+        verbose: Unused; reserved for future logging support.
 
     Raises:
-        AssertionError: If the input is not of expected type
+        NotImplementedError: If *logits* is True.
+        AssertionError: If *input_nii* is not a supported type, or if the output
+            shape does not match the input shape.
 
     Returns:
-        Segmentation (NII), Uncertainty Map (NII), Softmax Logits (numpy arr)
+        A tuple of (segmentation_NII, uncertainty_map_or_None, softmax_logits_or_None).
     """
     if logits:
         raise NotImplementedError("logits=True")
@@ -177,7 +200,20 @@ def run_inference(
 #    return sliding_nd_slices(img, patch_size=patch_size, overlap=overlap, fun=fun)[0], None
 
 
-def sliding_nd_slices(arr: np.ndarray, patch_size, overlap, fun):
+def sliding_nd_slices(arr: np.ndarray, patch_size: tuple, overlap: int, fun) -> np.ndarray:
+    """Apply *fun* to an N-D array using a sliding-window strategy with overlap.
+
+    Args:
+        arr: Input array to process.
+        patch_size: Size of each patch along every dimension.
+        overlap: Number of voxels to overlap between adjacent patches (symmetric).
+        fun: Callable applied to each patch; must return an array with the same
+            shape as its input.
+
+    Returns:
+        Reconstructed array of the same shape as *arr* with patch outputs stitched
+        together (overlap regions are overwritten by the most recent patch).
+    """
     print("sliding window")
     step = tuple(p - overlap for p in patch_size)
     half_overlap = overlap // 2

@@ -42,16 +42,18 @@ def np_extract_label(
     to_label: int = 1,
     inplace: bool = True,
 ) -> np.ndarray:
-    """Extracts a label from an given arr (works with zero as well!)
+    """Extracts a label from an given arr (works with zero as well!).
 
     Args:
         arr (np.ndarray): input arr
-        label (int): label to be extracted (all other values are set to zero, label will be set to one, even if label==0!)
+        label (int): label to be extracted (all other values are set to zero,
+            label will be set to one, even if label==0!)
         to_label (int): the value of the entries that had the <label> value. Defaults to 1.
         inplace (bool, optional): If False, will make a copy of the arr. Defaults to True.
 
     Returns:
-        np.ndarray: _description_
+        np.ndarray: Binary array where the selected label is set to ``to_label``
+            and all other entries are zero.
     """
     if isinstance(label, int) and to_label == 1:
         return arr == label
@@ -84,8 +86,7 @@ def np_extract_label(
 
 
 def cc3dstatistics(arr: UINTARRAY, use_crop: bool = True) -> dict:
-    """
-    Computes connected component statistics for a labeled array using connected components 3D (cc3d).
+    """Computes connected component statistics for a labeled array using connected components 3D (cc3d).
 
     Args:
         arr (UINTARRAY): A 3D array of unsigned integers or booleans where each connected component
@@ -114,13 +115,15 @@ def cc3dstatistics(arr: UINTARRAY, use_crop: bool = True) -> dict:
 
 
 def np_volume(arr: UINTARRAY, include_zero: bool = False) -> dict[int, int]:
-    """Returns a dictionary mapping array label to voxel_count
+    """Returns a dictionary mapping each label in the array to its voxel count.
 
     Args:
-        arr (np.ndarray): _description_
+        arr (UINTARRAY): Input unsigned-integer label array.
+        include_zero (bool, optional): If True, also counts voxels with label 0
+            (background). Defaults to False.
 
     Returns:
-        dict[int, int]: _description_
+        dict[int, int]: Mapping from label value to number of voxels with that label.
     """
     if include_zero:
         return {idx: i for idx, i in dict(enumerate(cc3dstatistics(arr, use_crop=False)["voxel_counts"])).items() if i > 0}
@@ -129,7 +132,7 @@ def np_volume(arr: UINTARRAY, include_zero: bool = False) -> dict[int, int]:
 
 
 def np_is_empty(arr: UINTARRAY | INTARRAY) -> bool:
-    """Returns true if the array is empty (only zeros)
+    """Returns true if the array is empty (only zeros).
 
     Args:
         arr (UINTARRAY): input uint array
@@ -146,25 +149,29 @@ def np_is_empty(arr: UINTARRAY | INTARRAY) -> bool:
 
 
 def np_count_nonzero(arr: np.ndarray) -> int:
-    """Returns number of nonzero entries in the array
+    """Returns number of nonzero entries in the array.
 
     Args:
-        arr (np.ndarray): _description_
+        arr (np.ndarray): Input array.
 
     Returns:
-        int: _description_
+        int: Number of elements in ``arr`` that are not equal to zero.
     """
     return np.count_nonzero(arr)
 
 
 def np_unique(arr: np.ndarray) -> list[int]:
-    """Returns each existing label in the array (including zero!)
+    """Returns each existing label in the array (including zero!).
+
+    Uses cc3d statistics for unsigned-integer arrays for speed, and falls back
+    to ``numpy.unique`` for other dtypes.
 
     Args:
-        arr (np.ndarray): _description_
+        arr (np.ndarray): Input label array.
 
     Returns:
-        list[int]: _description_
+        list[int]: Sorted list of every distinct label value present in ``arr``,
+            including 0 (background).
     """
     if np.issubdtype(arr.dtype, np.unsignedinteger):
         try:
@@ -175,13 +182,14 @@ def np_unique(arr: np.ndarray) -> list[int]:
 
 
 def np_unique_withoutzero(arr: UINTARRAY) -> list[int]:
-    """Returns each existing label in the array (including zero!)
+    """Returns each existing non-zero label in the array (excluding background zero).
 
     Args:
-        arr (np.ndarray): _description_
+        arr (UINTARRAY): Input unsigned-integer label array.
 
     Returns:
-        list[int]: _description_
+        list[int]: Sorted list of every distinct label value present in ``arr``,
+            excluding 0 (background).
     """
     try:
         return [idx for idx, i in enumerate(cc3dstatistics(arr)["voxel_counts"]) if i > 0 and idx != 0]
@@ -191,13 +199,14 @@ def np_unique_withoutzero(arr: UINTARRAY) -> list[int]:
 
 
 def np_center_of_mass(arr: UINTARRAY) -> dict[int, COORDINATE]:
-    """Calculates center of mass, mapping label in array to a coordinate (float) (exluding zero)
+    """Calculates center of mass for each non-zero label in the array.
 
     Args:
-        arr (np.ndarray): _description_
+        arr (UINTARRAY): Input unsigned-integer label array.
 
     Returns:
-        dict[int, Coordinate]: _description_
+        dict[int, COORDINATE]: Mapping from each non-zero label to its
+            (x, y, z) center-of-mass coordinate as floats.
     """
     stats = cc3dstatistics(arr, use_crop=False)
     # Does not use the other calls for speed reasons
@@ -206,13 +215,15 @@ def np_center_of_mass(arr: UINTARRAY) -> dict[int, COORDINATE]:
 
 
 def np_bounding_boxes(arr: UINTARRAY) -> dict[int, tuple[slice, slice, slice]]:
-    """Calculates bounding boxes for each different label (not zero!) in the array, returning a mapping
+    """Calculates tight axis-aligned bounding boxes for each non-zero label in the array.
 
     Args:
-        arr (np.ndarray): _description_
+        arr (UINTARRAY): Input unsigned-integer label array.
 
     Returns:
-        dict[int, tuple[slice, slice, slice]]: _description_
+        dict[int, tuple[slice, slice, slice]]: Mapping from each non-zero label
+            to a 3-tuple of slices representing the bounding box of that label
+            in each spatial dimension.
     """
     stats = cc3dstatistics(arr)
     # Does not use the other calls for speed reasons
@@ -220,15 +231,17 @@ def np_bounding_boxes(arr: UINTARRAY) -> dict[int, tuple[slice, slice, slice]]:
     return {idx: v for idx, v in enumerate(stats["bounding_boxes"]) if idx in unique}
 
 
-def np_contacts(arr: UINTARRAY, connectivity: int):
-    """Calculates the contacting labels and the amount of touching voxels based on connectivity
+def np_contacts(arr: UINTARRAY, connectivity: int) -> dict[tuple[int, int], int]:
+    """Calculates the contacting labels and the amount of touching voxels based on connectivity.
 
     Args:
-        arr (UINTARRAY): _description_
-        connectivity (int): _description_
+        arr (UINTARRAY): Input 2D or 3D label array.
+        connectivity (int): Connectivity level in range [1, 3]. 1 = face-only,
+            2 = face+edge, 3 = face+edge+corner adjacency.
 
     Returns:
-        dict[tuple[int,int], int]: mapping touching labels as tuple to number of touching voxels
+        dict[tuple[int, int], int]: Mapping from a pair of touching labels to the
+            number of voxels where they touch.
     """
     assert 2 <= arr.ndim <= 3, f"expected 2D or 3D, but got {arr.ndim}"
     assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
@@ -236,15 +249,17 @@ def np_contacts(arr: UINTARRAY, connectivity: int):
     return _contacts(arr, connectivity=connectivity)
 
 
-def np_region_graph(arr: UINTARRAY, connectivity: int):
-    """Returns the unique tuples of different labels in the array touching each other
+def np_region_graph(arr: UINTARRAY, connectivity: int) -> set[tuple[int, int]]:
+    """Returns the unique pairs of different labels that are adjacent in the array.
 
     Args:
-        arr (UINTARRAY): _description_
-        connectivity (int): _description_
+        arr (UINTARRAY): Input 2D or 3D label array.
+        connectivity (int): Connectivity level in range [1, 3]. 1 = face-only,
+            2 = face+edge, 3 = face+edge+corner adjacency.
 
     Returns:
-        set[tuple[int,int]]: touching labels in the array
+        set[tuple[int, int]]: Set of (label_a, label_b) pairs where each pair
+            indicates two labels that share at least one adjacent voxel.
     """
     assert 2 <= arr.ndim <= 3, f"expected 2D or 3D, but got {arr.ndim}"
     assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
@@ -252,8 +267,8 @@ def np_region_graph(arr: UINTARRAY, connectivity: int):
     return _region_graph(arr, connectivity=connectivity)
 
 
-def np_voxel_connectivity_graph(arr: UINTARRAY, connectivity: int):
-    """Returns a voxel connectivity graph of the input array
+def np_voxel_connectivity_graph(arr: UINTARRAY, connectivity: int) -> np.ndarray:
+    """Returns a voxel connectivity graph of the input array.
 
     For 2D connectivity, the output is an 8-bit unsigned integer.
 
@@ -273,11 +288,13 @@ def np_voxel_connectivity_graph(arr: UINTARRAY, connectivity: int):
         26-32: unused (zeroed)
 
     Args:
-        arr (UINTARRAY): _description_
-        connectivity (int): _description_
+        arr (UINTARRAY): Input 2D or 3D label array.
+        connectivity (int): Connectivity level in range [1, 3]. 1 = face-only,
+            2 = face+edge, 3 = face+edge+corner adjacency.
 
     Returns:
-        uint8 or uint32 numpy array the same size as the input
+        np.ndarray: uint8 or uint32 array the same shape as the input, where
+            each value encodes which neighbors share the same label as that voxel.
     """
     assert 2 <= arr.ndim <= 3, f"expected 2D or 3D, but got {arr.ndim}"
     assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
@@ -285,8 +302,8 @@ def np_voxel_connectivity_graph(arr: UINTARRAY, connectivity: int):
     return _voxel_connectivity_graph(arr, connectivity=connectivity)
 
 
-def np_dice(seg: np.ndarray, gt: np.ndarray, binary_compare: bool = False, label: int = 1):
-    """Calculates the dice similarity between two numpy arrays
+def np_dice(seg: np.ndarray, gt: np.ndarray, binary_compare: bool = False, label: int = 1) -> float:
+    """Calculates the dice similarity between two numpy arrays.
 
     Args:
         seg: segmentation array
@@ -315,11 +332,10 @@ def np_dice(seg: np.ndarray, gt: np.ndarray, binary_compare: bool = False, label
     return dice
 
 
-def np_erode_msk_euclid(arr: np.ndarray, n_pixel: int = 3, use_crop=True, labels=None, mask=None):
-    """
-    Fast approximate erosion:
-    - shrinks segmentation by k voxels
-    - removes voxels close to background
+def np_erode_msk_euclid(arr: np.ndarray, n_pixel: int = 3, use_crop=True, labels=None, mask=None) -> np.ndarray:
+    """Euclidean erosion: shrink each foreground label by ``n_pixel`` voxels via distance transform.
+
+    Removes voxels whose Euclidean distance to background is ≤ ``n_pixel``.
     """
     if use_crop:
         arr_bin = arr.copy()
@@ -362,11 +378,10 @@ def np_erode_msk_euclid(arr: np.ndarray, n_pixel: int = 3, use_crop=True, labels
     return arr
 
 
-def np_dilate_msk_euclid(arr: np.ndarray, n_pixel: int = 3, use_crop=True, labels=None, mask=None):
-    """
-    Fast approximate dilation:
-    - expands segmentation by k voxels
-    - assigns new voxels to nearest label
+def np_dilate_msk_euclid(arr: np.ndarray, n_pixel: int = 3, use_crop=True, labels=None, mask=None) -> np.ndarray:
+    """Euclidean dilation: expand each foreground label by ``n_pixel`` voxels via distance transform.
+
+    Assigns each newly covered voxel to the nearest existing label.
     """
     if use_crop:
         arr_bin = arr.copy()
@@ -415,20 +430,26 @@ def np_dilate_msk(
     mask: np.ndarray | None = None,
     ignore_axis: None | int = None,
 ) -> np.ndarray:
-    """
-    Dilates the given array by the specified number of voxels (not including the zero).
+    """Dilates the given array by the specified number of voxels (not including the zero label).
 
     Args:
-        mm (int, optional): The number of voxels to dilate the mask by. Defaults to 5.
-        connectivity (int, optional): Elements up to a squared distance of connectivity from the center are considered neighbors. connectivity may range from 1 (no diagonal elements are neighbors) to rank (all elements are neighbors).
-        mask (nparray, optional): If set, after each iteration, will zero out everything based on this mask
-        ignore_axis: This axis will be ignored. e. g. do 2d dilation in a 3d array
+        arr (np.ndarray): Input label array.
+        label_ref (LABEL_REFERENCE, optional): Label or list of labels to dilate.
+            If None, all non-zero labels are dilated. Defaults to None.
+        n_pixel (int, optional): Number of voxels to dilate by. Defaults to 5.
+        connectivity (int, optional): Elements up to a squared distance of
+            ``connectivity`` from the center are considered neighbors.
+            Ranges from 1 (no diagonal neighbors) to 3 (all neighbors). Defaults to 3.
+        use_crop (bool, optional): If True, crops to a bounding box before dilating
+            for speed. Defaults to True.
+        mask (np.ndarray | None, optional): If set, after each iteration all voxels
+            outside this mask are zeroed out. Defaults to None.
+        ignore_axis (int | None, optional): If set, dilation is performed in 2D
+            along all slices of this axis (e.g., 0 for slice-wise axial dilation).
+            Defaults to None.
+
     Returns:
-        nparray: The dilated mask.
-
-    Notes:
-        The method uses binary dilation with a 3D structuring element to dilate the mask by the specified number of voxels.
-
+        np.ndarray: The dilated label array.
     """
     labels: list[int] = _to_labels(arr, label_ref)
     # present_labels = np_unique(arr)
@@ -488,18 +509,25 @@ def np_erode_msk(
     border_value=0,
     ignore_axis: None | int = None,
 ) -> np.ndarray:
-    """
-    Erodes the given array by the specified number of voxels.
+    """Erodes the given array by the specified number of voxels.
 
     Args:
-        mm (int, optional): The number of voxels to erode the mask by. Defaults to 5.
-        connectivity (int, optional): Elements up to a squared distance of connectivity from the center are considered neighbors. connectivity may range from 1 (no diagonal elements are neighbors) to rank (all elements are neighbors).
-        ignore_axis: This axis will be ignored. e. g. do 2d erosion in a 3d array
-    Returns:
-        nparray: The eroded mask.
+        arr (np.ndarray): Input label array.
+        label_ref (LABEL_REFERENCE, optional): Label or list of labels to erode.
+            If None, all non-zero labels are eroded. Defaults to None.
+        n_pixel (int, optional): Number of voxels to erode by. Defaults to 5.
+        use_crop (bool, optional): If True, crops to a bounding box before eroding
+            for speed. Defaults to True.
+        connectivity (int, optional): Elements up to a squared distance of
+            ``connectivity`` from the center are considered neighbors.
+            Ranges from 1 (no diagonal neighbors) to 3 (all neighbors). Defaults to 3.
+        border_value (int, optional): Value to pad the border with during erosion.
+            Defaults to 0.
+        ignore_axis (int | None, optional): If set, erosion is performed in 2D
+            along all slices of this axis. Defaults to None.
 
-    Notes:
-        The method uses binary erosion with a 3D structuring element to erode the mask by the specified number of voxels.
+    Returns:
+        np.ndarray: The eroded label array.
     """
     labels: list[int] = _to_labels(arr, label_ref)
 
@@ -537,12 +565,16 @@ def np_erode_msk(
 
 
 def np_map_labels(arr: UINTARRAY, label_map: LABEL_MAP) -> np.ndarray:
-    """Maps labels in the given array according to the label_map dictionary.
+    """Maps labels in the given array according to a label-map dictionary.
+
     Args:
-        label_map (dict): A dictionary that maps the original label values (str or int) to the new label values (int).
+        arr (UINTARRAY): Input unsigned-integer label array to remap.
+        label_map (LABEL_MAP): Dictionary mapping original label values (int or str)
+            to new label values (int or str). Labels not present in the map are
+            left unchanged.
 
     Returns:
-        np.ndarray: Returns a copy of the remapped array
+        np.ndarray: A new array with labels remapped according to ``label_map``.
     """
     k = np.array(list(label_map.keys()))
     v = np.array(list(label_map.values()))
@@ -564,18 +596,21 @@ def np_calc_crop_around_centerpoint(
     cutout_size: tuple[int, ...],
     pad_to_size: Sequence[int] | np.ndarray | int = 0,
 ) -> tuple[np.ndarray, tuple[slice, slice, slice], tuple]:
-    """
+    """Crops a fixed-size region centred on a given point, optionally padding near-edge regions.
 
     Args:
-        poi: center point of cutout
-        arr: input array to cut
-        cutout_size: size of the image cutout
-        pad_to_size: additional padding amount
+        poi: Center point of the cutout, one coordinate per dimension.
+        arr: Input array to crop.
+        cutout_size: Desired size of the cutout in each dimension.
+        pad_to_size: Additional symmetric padding to add around the cutout.
+            Can be a single int (same for all dims) or a per-dim sequence.
+            Defaults to 0.
 
     Returns:
-        np.ndarray: cut array
-        tuple of the cutout coordinates
-        tuple of the paddings
+        tuple: A 3-element tuple containing:
+            - np.ndarray: The cropped (and padded) sub-array.
+            - tuple[slice, ...]: Slices used to extract the cutout from ``arr``.
+            - tuple: Per-dimension padding amounts applied as ``(pad_before, pad_after)``.
     """
     n_dim = len(poi)
     if isinstance(pad_to_size, int):
@@ -603,7 +638,7 @@ def np_calc_crop_around_centerpoint(
 
 
 def np_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 0, raise_error=True) -> tuple[slice, ...]:
-    """calculates a bounding box in n dimensions given a image (factor ~2 times faster than compute_crop)
+    """Calculates a bounding box in n dimensions given a image (factor ~2 times faster than compute_crop).
 
     Args:
         img: input array
@@ -638,7 +673,7 @@ def np_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 
     return out
 
 
-def np_center_of_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 0):
+def np_center_of_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 0) -> list[int]:
     """Calculates the center coordinates of the bounding box around non-zero regions in a binary image.
 
     This function determines the bounding box of non-zero regions in a binary image,
@@ -668,7 +703,7 @@ def np_center_of_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.
 
 
 def _np_get_min_max_pad(pos: int, img_size: int, cutout_size: int, add_pad_size: int = 0) -> tuple[int, int, int, int]:
-    """calc the min and max position around a center "pos" of a img and cutout size and whether it needs to be padded
+    """Calc the min and max position around a center "pos" of a img and cutout size and whether it needs to be padded.
 
     Args:
         pos: center position in one dim
@@ -694,7 +729,7 @@ def _np_get_min_max_pad(pos: int, img_size: int, cutout_size: int, add_pad_size:
 
 
 def np_find_index_of_k_max_values(arr: np.ndarray, k: int = 2) -> list[int]:
-    """Calculates the indices of the k-highest values in the given arr
+    """Calculates the indices of the k-highest values in the given arr.
 
     Args:
         arr: input array
@@ -708,7 +743,7 @@ def np_find_index_of_k_max_values(arr: np.ndarray, k: int = 2) -> list[int]:
     return list(indices)
 
 
-def np_compute_surface(arr: UINTARRAY, connectivity: int = 3, dilated_surface: bool = False):
+def np_compute_surface(arr: UINTARRAY, connectivity: int = 3, dilated_surface: bool = False) -> UINTARRAY:
     """Computes the surface of a binary array based on connectivity and dilation options.
 
     This function identifies the surface voxels of a binary array. If `dilated_surface`
@@ -741,7 +776,7 @@ def np_compute_surface(arr: UINTARRAY, connectivity: int = 3, dilated_surface: b
 
 def np_point_coordinates(
     arr: UINTARRAY,
-):
+) -> list[tuple[int, int, int]]:
     """Extracts the coordinates of non-zero points from a 3D binary array.
 
     This function locates all non-zero voxels within a 3D binary array and returns
@@ -769,7 +804,7 @@ def np_connected_components(
     connectivity: int = 3,
     include_zero: bool = False,
 ) -> tuple[UINTARRAY, int]:
-    """Calculates the connected components of a given array (works with zeros as well!)
+    """Calculates the connected components of a given array (works with zeros as well!).
 
     Args:
         arr: input arr
@@ -800,8 +835,10 @@ def np_connected_components_per_label(
     label_ref: LABEL_REFERENCE = None,
     include_zero: bool = False,
 ) -> dict[int, UINTARRAY]:
-    """Calculates the connected components of a given array for each label in label_ref (works with zeros as well!)
-    It returns a dictionary mapping the labels in label_ref to its corresponding connected components mask
+    """Calculates the connected components for each label in label_ref.
+
+    Returns a dictionary mapping each label to its connected-component mask.
+    Supports zero labels when ``include_zero=True``.
 
     Args:
         arr: input arr
@@ -812,7 +849,6 @@ def np_connected_components_per_label(
     Returns:
         subreg_cc: dict[label, cc_idx, arr], subreg_cc_N: dict[label, n_connected_components]
     """
-
     assert np.min(arr) == 0, f"min value of mask not zero, got {np.min(arr)}"
     assert np.max(arr) >= 0, f"wrong normalization, max value is not >= 0, got {np_unique(arr)}"
     assert 2 <= arr.ndim <= 3, f"expected 2D or 3D, but got {arr.ndim}"
@@ -851,7 +887,7 @@ def np_filter_connected_components(
     removed_to_label=0,
     k_larges_global=False,
 ) -> UINTARRAY:
-    """finds the largest k connected components in a given array (does NOT work with zero as label!)
+    """Finds the largest k connected components in a given array (does NOT work with zero as label!).
 
     Args:
         arr (np.ndarray): input array
@@ -863,7 +899,6 @@ def np_filter_connected_components(
     Returns:
         np.ndarray: array with the largest k connected components
     """
-
     assert largest_k_components is None or largest_k_components > 0
     assert 2 <= arr.ndim <= 3, f"expected 2D or 3D, but got {arr.ndim}"
     assert 1 <= connectivity <= 3, f"expected connectivity in [1,3], but got {connectivity}"
@@ -924,16 +959,19 @@ def np_filter_connected_components(
 def np_get_connected_components_center_of_mass(
     arr: UINTARRAY, label: int, connectivity: int = 3, sort_by_axis: int | None = None
 ) -> list[COORDINATE]:
-    """Calculates the center of mass of the different connected components of a given label in an array
+    """Calculates the center of mass of each connected component of a given label.
 
     Args:
-        arr (np.ndarray): input array
-        label (int): the label of the connected components
-        connectivity (int, optional): Connectivity for the connected components. Defaults to 3.
-        sort_by_axis (int | None, optional): If not none, will sort the center of mass list by this axis values. Defaults to None.
+        arr (UINTARRAY): Input label array.
+        label (int): The label whose connected components are analysed.
+        connectivity (int, optional): Connectivity for connected components in range
+            [1, 3]. Defaults to 3.
+        sort_by_axis (int | None, optional): If not None, the returned list is sorted
+            in ascending order of the coordinate along this axis. Defaults to None.
 
     Returns:
-        _type_: _description_
+        list[COORDINATE]: List of (x, y, z) center-of-mass coordinates, one per
+            connected component of ``label``.
     """
     # Per label argument true/false
     #
@@ -952,7 +990,7 @@ def np_get_connected_components_center_of_mass(
 
 
 def np_translate_to_center_of_array(image: np.ndarray) -> np.ndarray:
-    """Moves the nonzero values of an array so its center of mass is in the center of the array shape
+    """Moves the nonzero values of an array so its center of mass is in the center of the array shape.
 
     Args:
         image: input array
@@ -1014,7 +1052,7 @@ def np_fill_holes(
     use_crop: bool = True,
     pbar: bool = False,
 ) -> np.ndarray:
-    """Fills holes in segmentations
+    """Fills holes in segmentations.
 
     Args:
         arr (np.ndarray): Input segmentation array
@@ -1079,8 +1117,7 @@ def np_smooth_gaussian_labelwise(
     smooth_background: bool = True,
     background_threshold: float | None = None,
 ) -> UINTARRAY:
-    """Smoothes selected labels in a segmentation mask using Gaussian filtering,
-    while keeping other labels unaffected.
+    """Smooth selected labels in a segmentation mask using Gaussian filtering, leaving other labels unaffected.
 
     Internal Description:
         1. Ensures label(s) to be smoothed are present in the segmentation.
@@ -1178,12 +1215,20 @@ def np_calc_convex_hull(
     arr: INTARRAY,
     axis: int | None = None,
     verbose: bool = False,
-):
-    """Calculates the convex hull of a given array, returning the array filled with its convex hull
+) -> INTARRAY:
+    """Calculates the convex hull of a given array and returns a filled binary mask.
 
     Args:
-        arr (INTARRAY): Input array
-        axis (int | None, optional): If given axis, will calculate convex hull along that axis (remaining dimension must be at least 2). Defaults to None.
+        arr (INTARRAY): Input integer array (non-zero voxels define the point set).
+        axis (int | None, optional): If given, computes the convex hull slice-by-slice
+            along this axis (remaining dimensions must be at least 2D). If None,
+            computes the hull over the full 2D or 3D volume. Defaults to None.
+        verbose (bool, optional): If True, prints warnings for degenerate cases.
+            Defaults to False.
+
+    Returns:
+        INTARRAY: Binary array of the same shape as ``arr`` with 1 inside the
+            convex hull and 0 outside.
     """
     n_dims = arr.ndim
     if axis is None:
@@ -1206,6 +1251,7 @@ def np_calc_convex_hull(
 
 
 def _select_axis_dynamically(axis: int, index: int | slice, n_dims: int = 3):
+    """Build an n-dimensional index tuple that selects a single slice along ``axis``."""
     slices = tuple([slice(None) if i != axis else index for i in range(n_dims)])
     return slices
 
@@ -1214,13 +1260,17 @@ def _convex_hull(
     arr: INTARRAY,
     verbose: bool = False,
 ):
-    """Calculates the convex hull of a given array (all labels are taken)
+    """Calculates the convex hull of a given array (all non-zero voxels are treated as points).
 
     Args:
-        arr (INTARRAY): integer array
+        arr (INTARRAY): Integer array; all non-zero voxels contribute to the hull.
+        verbose (bool, optional): If True, prints a warning when there are too few
+            points to form a hull. Defaults to False.
 
     Returns:
-        _type_: out_img, hull
+        tuple: A 2-element tuple ``(out_img, hull)`` where ``out_img`` is a binary
+            array filled inside the convex hull and ``hull`` is the
+            ``scipy.spatial.ConvexHull`` object.
     """
     points = np.transpose(np.where(arr))
     if len(points) <= 3:
@@ -1239,9 +1289,8 @@ def np_calc_boundary_mask(
     img: np.ndarray,
     threshold: float = 0,
     adjust_intensity_for_ct=False,
-):
-    """
-    Calculate a boundary mask based on the input image.
+) -> np.ndarray:
+    """Calculate a boundary mask based on the input image.
 
     Parameters:
     - img (NII): The image used to create the boundary mask.
@@ -1314,19 +1363,25 @@ def np_calc_boundary_mask(
 
 
 def np_betti_numbers(img: np.ndarray, verbose=False) -> tuple[int, int, int]:
-    """
-    calculates the Betti number B0, B1, and B2 for a 3D img
-    from the Euler characteristic number
+    """Calculates the Betti numbers B0, B1, and B2 for a 3D binary image.
 
-    B0: Number of connected compotes
-    B1: Number of holes
-    B2: Number of fully engulfed empty spaces
+    Uses the Euler characteristic to derive the counts from connected-component
+    analysis of both the foreground (26-connected) and background (6-connected).
 
-    code prototyped by
-    - Martin Menten (Imperial College)
-    - Suprosanna Shit (Technical University Munich)
-    - Johannes C. Paetzold (Imperial College)
+    B0: Number of connected components.
+    B1: Number of loops / handles (tunnels).
+    B2: Number of fully enclosed voids.
+
+    Code prototyped by Martin Menten (Imperial College), Suprosanna Shit (TU Munich),
+    and Johannes C. Paetzold (Imperial College).
     Source: https://github.com/CoWBenchmark/TopCoW_Eval_Metrics/blob/master/metric_functions.py
+
+    Args:
+        img (np.ndarray): 3D binary array (values must be 0 or 1).
+        verbose (bool, optional): If True, prints the Betti numbers. Defaults to False.
+
+    Returns:
+        tuple[int, int, int]: ``(B0, B1, B2)`` — connected components, holes, and voids.
     """
     # make sure the image is 3D (for connectivity settings)
     assert len(img.shape) == 3
@@ -1359,7 +1414,7 @@ def np_calc_overlapping_labels(
     reference_arr: np.ndarray,
     prediction_arr: np.ndarray,
 ) -> list[tuple[int, int]]:
-    """Calculates the pairs of labels that are overlapping in at least one voxel (fast)
+    """Calculates the pairs of labels that are overlapping in at least one voxel (fast).
 
     Args:
         prediction_arr (np.ndarray): Numpy array containing the prediction labels.
@@ -1382,6 +1437,17 @@ def np_calc_overlapping_labels(
 
 
 def np_normalize_to_range(arr: np.ndarray, min_value: float = 0, max_value: float = 1500) -> np.ndarray:
+    """Normalize array values so the minimum maps to ``min_value`` and the maximum is capped at ``max_value``.
+
+    Args:
+        arr (np.ndarray): Input array to normalize. Modified in-place.
+        min_value (float, optional): Target minimum value after shift. Defaults to 0.
+        max_value (float, optional): Upper bound; if the original maximum exceeds
+            this, values are scaled down proportionally. Defaults to 1500.
+
+    Returns:
+        np.ndarray: The normalized array (same object as input, modified in-place).
+    """
     mi, ma = arr.min(), arr.max()
     arr += -mi + min_value  # min = 0
     max_value2 = ma
@@ -1392,8 +1458,8 @@ def np_normalize_to_range(arr: np.ndarray, min_value: float = 0, max_value: floa
     return arr
 
 
-def np_fill_holes_global_with_majority_voting(arr: UINTARRAY, connectivity: int = 3, inplace: bool = False, verbose=False):  # noqa: ARG001
-    """Fill holes globaly (across labels) and resolves inter-label conflicts with majority voting of neighbors
+def np_fill_holes_global_with_majority_voting(arr: UINTARRAY, connectivity: int = 3, inplace: bool = False, verbose=False) -> UINTARRAY:  # noqa: ARG001
+    """Fill holes globaly (across labels) and resolves inter-label conflicts with majority voting of neighbors.
 
     Args:
         arr (UINTARRAY): input array
@@ -1434,8 +1500,8 @@ def np_map_labels_based_on_majority_label_mask_overlap(
     dilate_pixel: int = 1,
     inplace: bool = False,
     no_match_label=0,
-):
-    """Relabels all individual labels from input array to the majority labels of a given label_mask
+) -> UINTARRAY:
+    """Relabels all individual labels from input array to the majority labels of a given label_mask.
 
     Args:
         arr (UINTARRAY): input array to be relabeled
@@ -1476,7 +1542,7 @@ def _pad_to_parameters(
     origin_shape: list[int] | tuple[int, int, int],
     target_shape: list[int] | tuple[int, int, int],
 ):
-    """Returns the parameter to pad the input to the target shape
+    """Returns the parameter to pad the input to the target shape.
 
     Args:
         arr (np.ndarray): input array
@@ -1504,6 +1570,7 @@ def _pad_to_parameters(
 
 
 def _to_labels(arr: np.ndarray, label_ref: LABEL_REFERENCE = None) -> Sequence[int]:
+    """Resolve ``label_ref`` to a list of integer labels present in ``arr``."""
     if label_ref is None:
         label_ref = list(np_unique_withoutzero(arr))
     if not isinstance(label_ref, Sequence):
@@ -1512,6 +1579,7 @@ def _to_labels(arr: np.ndarray, label_ref: LABEL_REFERENCE = None) -> Sequence[i
 
 
 def _generate_binary_structure(n_dim: int, connectivity: int, kernel_size: int = 3):
+    """Generate a binary structuring element for morphological operations with an extended kernel size."""
     assert kernel_size >= 3, f"kernel_size must be >= 3, got {kernel_size}"
     assert kernel_size % 2 == 1, f"kernel_size must be an odd number, got {kernel_size}"
     connectivity = max(connectivity, 1)
@@ -1524,7 +1592,8 @@ def _generate_binary_structure(n_dim: int, connectivity: int, kernel_size: int =
 
 
 # Fast Binary Morphological operations (taken from https://github.com/shoheiogawa/binmorphopy/blob/master/binmorphopy/morphology.py)
-def _binary_dilation(image: np.ndarray, struct=None):
+def _binary_dilation(image: np.ndarray, struct=None) -> np.ndarray:
+    """Fast binary dilation using perimeter-based iteration (1D, 2D, and 3D)."""
     selem = struct
     dim = image.ndim
     if not isinstance(image, np.ndarray):
@@ -1585,6 +1654,7 @@ def _binary_dilation(image: np.ndarray, struct=None):
 
 
 def _binary_erosion(image: np.ndarray, struct=None) -> np.ndarray:
+    """Fast binary erosion implemented as complement-dilation of the complement image."""
     image = image.astype(bool)
     image = np.pad(image, 1, constant_values=0)
     out_image = _binary_dilation(~image, struct)
@@ -1595,6 +1665,7 @@ def _binary_erosion(image: np.ndarray, struct=None) -> np.ndarray:
 
 
 def _unpad(image: np.ndarray, pad_width: tuple[tuple[int, int], ...] | int):
+    """Remove padding from an array, reversing a prior ``np.pad`` call."""
     slices = []
     if isinstance(pad_width, int):
         ndim = image.ndim
@@ -1606,17 +1677,19 @@ def _unpad(image: np.ndarray, pad_width: tuple[tuple[int, int], ...] | int):
 
 
 def _binary_closing(image: np.ndarray, struct=None):
+    """Fast binary closing: dilation followed by erosion."""
     out_image = _binary_erosion(_binary_dilation(image, struct), struct)
     return out_image
 
 
 def _binary_opening(image, struct=None):
+    """Fast binary opening: erosion followed by dilation."""
     out_image = _binary_dilation(_binary_erosion(image, struct), struct)
     return out_image
 
 
 def _get_perimeter_image(image):
-    """Return the image of the perimeter structure of the input image
+    """Return the image of the perimeter structure of the input image.
 
     Args:
         image (Numpy array): Image data as an array
@@ -1676,7 +1749,7 @@ def _get_perimeter_image(image):
 
 
 def _generate_array_indices(selem_center, selem_radius, selem_length, result_length):
-    """Return the correct indices for slicing considering near-edge regions
+    """Return the correct indices for slicing considering near-edge regions.
 
     Args:
         selem_center (int): The index of the structuring element's center

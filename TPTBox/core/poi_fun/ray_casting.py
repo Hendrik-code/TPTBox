@@ -16,13 +16,25 @@ from TPTBox.logger.log_file import Logger_Interface
 _log = Print_Logger()
 
 
-def unit_vector(vector):
+def unit_vector(vector: np.ndarray) -> np.ndarray:
     """Returns the unit vector of the vector."""
     return vector / np.linalg.norm(vector)
 
 
 # @njit(fastmath=True)
-def trilinear_interpolate(volume, x, y, z):
+def trilinear_interpolate(volume: np.ndarray, x: float, y: float, z: float) -> float:
+    """Perform trilinear interpolation of a 3D volume at a sub-voxel coordinate.
+
+    Args:
+        volume: 3D array to interpolate.
+        x: Sub-voxel coordinate along the first axis.
+        y: Sub-voxel coordinate along the second axis.
+        z: Sub-voxel coordinate along the third axis.
+
+    Returns:
+        Interpolated scalar value at (x, y, z), or 0.0 if the point is outside
+        the valid interior of the volume.
+    """
     xi, yi, zi = np.floor(x).astype(int), np.floor(y).astype(int), np.floor(z).astype(int)
     if xi < 0 or yi < 0 or zi < 0 or xi >= volume.shape[0] - 1 or yi >= volume.shape[1] - 1 or zi >= volume.shape[2] - 1:
         return 0.0
@@ -51,8 +63,28 @@ def max_distance_ray_cast_convex_npfast(
     region_array: np.ndarray,
     start_coord: np.ndarray,
     direction_vector: np.ndarray,
-    acc_delta=0.00005,
-):
+    acc_delta: float = 0.00005,
+) -> np.ndarray:
+    """Find the exit point of a ray inside a convex region using bisection (fast path).
+
+    Uses trilinear interpolation and bisection search to locate the last point
+    inside the region along the given direction.  Prints a debug line at each
+    bisection step (development helper — see ``max_distance_ray_cast_convex_np``
+    for the production version without debug output).
+
+    Args:
+        region_array: Binary 3D numpy array where nonzero voxels define the region.
+        start_coord: Starting coordinate ``(x, y, z)`` of the ray (must be inside
+            the region).
+        direction_vector: Direction of the ray; need not be a unit vector.
+        acc_delta: Bisection stops when the bracket width falls below this value.
+            Defaults to 0.00005.
+
+    Returns:
+        3-element array with the approximate exit coordinate along the ray.
+        If ``start_coord`` is already outside the region the start coordinate is
+        returned unchanged.
+    """
     # Normalize direction
     norm_vec = direction_vector / np.sqrt((direction_vector**2).sum())
 
@@ -93,18 +125,26 @@ def max_distance_ray_cast_convex_np(
     direction_vector: np.ndarray,
     acc_delta: float = 0.00005,
     max_v: int | None = None,
-):
-    """
-    Computes the maximum distance a ray can travel inside a convex region before exiting.
+) -> np.ndarray | None:
+    """Find the exit point of a ray inside a convex region (numpy array input).
 
-    Parameters:
-    region (NII): The region of interest as a 3D NIfTI image.
-    start_coord (COORDINATE | np.ndarray): The starting coordinate of the ray.
-    direction_vector (np.ndarray): The direction vector of the ray.
-    acc_delta (float, optional): The accuracy threshold for bisection search. Default is 0.00005.
+    Uses ``RegularGridInterpolator`` and bisection to locate the boundary of a
+    convex binary region along the given direction vector.
+
+    Args:
+        region: Binary 3D numpy array where values > 0.5 are considered inside.
+        start_coord: Starting coordinate ``(x, y, z)`` of the ray.  If already
+            outside the region the start coordinate is returned unchanged.
+        direction_vector: Direction of the ray; will be normalised internally.
+        acc_delta: Bisection convergence threshold in voxel units.
+            Defaults to 0.00005.
+        max_v: Upper bound for the bisection search (in voxels along the ray).
+            Defaults to ``sum(region.shape)`` when ``None``.
 
     Returns:
-    np.ndarray: The exit coordinate of the ray within the region.
+        3-element numpy array with the approximate exit coordinate, or the start
+        coordinate if it lies outside the region.  Returns ``None`` when
+        ``start_coord`` is ``None``.
     """
     start_point_np = np.asarray(start_coord)
     if start_point_np is None:
@@ -150,18 +190,25 @@ def max_distance_ray_cast_convex(
     start_coord: COORDINATE | np.ndarray,
     direction_vector: np.ndarray,
     acc_delta: float = 0.00005,
-):
-    """
-    Computes the maximum distance a ray can travel inside a convex region before exiting.
+) -> np.ndarray | None:
+    """Find the exit point of a ray inside a convex NII region.
 
-    Parameters:
-    region (NII): The region of interest as a 3D NIfTI image.
-    start_coord (COORDINATE | np.ndarray): The starting coordinate of the ray.
-    direction_vector (np.ndarray): The direction vector of the ray.
-    acc_delta (float, optional): The accuracy threshold for bisection search. Default is 0.00005.
+    Wraps the underlying numpy logic by extracting the voxel array from an
+    ``NII`` object and delegating to bisection-based ray casting.
+
+    Args:
+        region: ``NII`` object whose nonzero voxels define the convex region.
+        start_coord: Starting coordinate ``(x, y, z)`` of the ray in voxel
+            space.  If already outside the region, the start coordinate is
+            returned unchanged.
+        direction_vector: Direction of the ray; will be normalised internally.
+        acc_delta: Bisection convergence threshold in voxel units.
+            Defaults to 0.00005.
 
     Returns:
-    np.ndarray: The exit coordinate of the ray within the region.
+        3-element numpy array with the approximate exit coordinate, or the start
+        coordinate if it lies outside the region.  Returns ``None`` when
+        ``start_coord`` is ``None``.
     """
     start_point_np = np.asarray(start_coord)
     if start_point_np is None:
@@ -205,8 +252,31 @@ def ray_cast_pixel_lvl(
     start_point_np: np.ndarray,
     normal_vector: np.ndarray,
     shape: np.ndarray | tuple[int, ...],
-    two_sided=False,
+    two_sided: bool = False,
 ) -> tuple[np.ndarray | None, np.ndarray | None]:
+    """Cast a ray at pixel/voxel resolution and return all integer voxel coordinates along it.
+
+    Traces the ray starting at ``start_point_np`` in the direction of
+    ``normal_vector`` until it exits the volume defined by ``shape``.  When
+    ``two_sided`` is ``True``, the ray is also cast in the opposite direction and
+    the two halves are concatenated.
+
+    Args:
+        start_point_np: Starting voxel coordinate ``(x, y, z)`` of the ray.
+        normal_vector: Direction vector of the ray; will be normalised to a
+            unit vector internally.
+        shape: Volume shape ``(dim0, dim1, dim2)`` used to clip the ray.
+        two_sided: When ``True``, cast the ray in both directions and concatenate
+            the results.  Defaults to ``False``.
+
+    Returns:
+        A tuple ``(plane_coords, arange)`` where
+
+        * ``plane_coords`` is an integer array of shape ``(N, 3)`` with the
+          voxel indices visited by the ray, or ``None`` on failure.
+        * ``arange`` is a float array of shape ``(N,)`` with the distance
+          values along the ray for each voxel, or ``None`` on failure.
+    """
     normal_vector = unit_vector(normal_vector)
 
     def _calc_pixels(normal_vector, start_point_np):
@@ -243,11 +313,37 @@ def add_ray_to_img(
     start_point: np.ndarray | COORDINATE,
     normal_vector: np.ndarray,
     seg: NII,
-    add_to_img=True,
-    inplace=False,
-    value=0,
-    dilate=1,
-):
+    add_to_img: bool = True,
+    inplace: bool = False,
+    value: int = 0,
+    dilate: int = 1,
+) -> NII | None:
+    """Paint a ray into a segmentation NII image.
+
+    Casts a ray from ``start_point`` along ``normal_vector`` at voxel
+    resolution, fills the visited voxels with distance values (or a fixed
+    ``value``), optionally dilates the ray, and optionally composites it onto
+    the source segmentation.
+
+    Args:
+        start_point: Starting voxel coordinate of the ray.
+        normal_vector: Direction of the ray.
+        seg: Segmentation ``NII`` that defines the volume shape and is used as
+            the base when ``add_to_img`` is ``True``.
+        add_to_img: If ``True``, the ray is overlaid on ``seg`` and the
+            composite image is returned.  If ``False``, only the ray image is
+            returned.  Defaults to ``True``.
+        inplace: Modify ``seg`` in place when ``add_to_img`` is ``True``.
+            Defaults to ``False``.
+        value: Fixed voxel value written along the ray.  When 0, distance
+            values along the ray are used instead.  Defaults to 0.
+        dilate: Morphological dilation radius applied to the ray image.
+            Set to 0 to skip dilation.  Defaults to 1.
+
+    Returns:
+        The modified ``NII`` image, or ``None`` if the ray cast produced no
+        valid coordinates.
+    """
     start_point = np.array(start_point)
     plane_coords, arange = ray_cast_pixel_lvl(start_point, normal_vector, shape=seg.shape)
     if plane_coords is None:
@@ -268,12 +364,33 @@ def add_ray_to_img(
 def add_spline_to_img(
     seg: NII,
     poi: POI,
-    location=50,
-    add_to_img=True,
-    override_seg=True,
-    value=100,
-    dilate=2,
-):
+    location: int = 50,
+    add_to_img: bool = True,
+    override_seg: bool = True,
+    value: int = 100,
+    dilate: int = 2,
+) -> NII:
+    """Fit and paint a POI spline onto a segmentation NII image.
+
+    Computes a cubic spline through the POI centroids at ``location``,
+    converts it to voxel coordinates, paints each spline point with ``value``,
+    dilates the result, and (optionally) composites it onto ``seg``.
+
+    Args:
+        seg: Base segmentation ``NII`` image used for shape and affine.
+        poi: ``POI`` object from which the spline is computed.
+        location: Subregion ID used as the spline anchor points.
+            Defaults to 50 (``Vertebra_Corpus``).
+        add_to_img: If ``True``, the spline is overlaid on ``seg``.
+            Defaults to ``True``.
+        override_seg: When overlaying, whether to overwrite existing nonzero
+            voxels in ``seg``.  Defaults to ``True``.
+        value: Voxel label written along the spline.  Defaults to 100.
+        dilate: Morphological dilation radius.  Defaults to 2.
+
+    Returns:
+        The composite or standalone spline ``NII`` image.
+    """
     cor, _ = poi.fit_spline(location=location, vertebra=True)
     spline = seg.copy() * 0
     # spline.rescale_()
@@ -294,11 +411,35 @@ def add_spline_to_img(
 def shift_point(
     poi: POI,
     vert_id: int,
-    bb,
+    bb: tuple[slice, slice, slice] | None,
     start_point: Location = Location.Vertebra_Corpus,
     direction: DIRECTIONS | None = "R",
     log: Logger_Interface = _log,
-):
+) -> np.ndarray | None:
+    """Shift a POI start point laterally by a fraction of the vertebra width.
+
+    Estimates the vertebra width from articular-process or costal-process POIs
+    and returns a new coordinate displaced from ``start_point`` along
+    ``direction`` by a scaled fraction of that width.  Sacrum vertebrae without
+    arcus are skipped.
+
+    Args:
+        poi: ``POI`` object with pre-computed anatomical landmarks.
+        vert_id: Vertebra identifier (integer label).
+        bb: Bounding-box slices used to convert global POI coordinates to local
+            coordinates within the cropped sub-volume.
+        start_point: Location enum member or already-resolved numpy coordinate
+            from which the shift originates.  Defaults to
+            ``Location.Vertebra_Corpus``.
+        direction: Anatomical direction letter (``"R"``, ``"L"``, etc.) for the
+            shift, or ``None`` to return the raw local start point without
+            shifting.  Defaults to ``"R"``.
+        log: Logger used for warning and error messages.
+
+    Returns:
+        Shifted voxel coordinate as a 3-element numpy array, or ``None`` when
+        required POIs are missing or the vertebra is excluded.
+    """
     if vert_id in sacrum_w_o_arcus:
         return
 
@@ -342,24 +483,36 @@ def max_distance_ray_cast_convex_poi(
     start_point: Location | np.ndarray = Location.Vertebra_Corpus,
     log: Logger_Interface = _log,
     acc_delta: float = 0.00005,
-):
-    """
-    Computes the maximum distance a ray can travel inside a convex region for a point of interest (POI).
+) -> np.ndarray | None:
+    """Find the boundary point of a convex region along a direction derived from POI landmarks.
 
-    Parameters:
-    poi (POI): The point of interest.
-    region (NII): The region of interest as a 3D NIfTI image.
-    vert_id (int): The vertebra identifier.
-    bb (tuple[slice, slice, slice] | None): Bounding box constraints.
-    normal_vector_points (tuple[Location, Location] | DIRECTIONS, optional):
-        Two locations defining the normal vector or a predefined direction. Default is "R".
-    start_point (Location | np.ndarray, optional):
-        The starting location or coordinate of the ray. Default is Location.Vertebra_Corpus.
-    log (Logger_Interface, optional): Logger instance for error handling. Default is _log.
-    acc_delta (float, optional): The accuracy threshold for bisection search. Default is 0.00005.
+    Resolves the ray start coordinate and direction vector from the ``POI``
+    object, then delegates to :func:`max_distance_ray_cast_convex` to locate
+    the exit point.
+
+    Args:
+        poi: ``POI`` object with pre-computed anatomical landmarks and direction
+            vectors.
+        region: ``NII`` image whose nonzero voxels define the convex region to
+            cast the ray into.
+        vert_id: Vertebra identifier (integer label).
+        bb: Bounding-box slices that map between global POI coordinates and the
+            local sub-volume coordinate system.
+        normal_vector_points: Either a ``DIRECTIONS`` string (e.g. ``"R"``,
+            ``"P"``) that is resolved from the vertebra orientation, or a
+            2-tuple of ``Location`` members whose vector difference defines the
+            ray direction.  Defaults to ``"R"``.
+        start_point: Starting point of the ray: a ``Location`` enum member
+            (resolved via the POI) or a pre-computed numpy coordinate.
+            Defaults to ``Location.Vertebra_Corpus``.
+        log: Logger used for warning and error messages.
+        acc_delta: Bisection convergence threshold in voxel units.
+            Defaults to 0.00005.
 
     Returns:
-    np.ndarray: The exit coordinate of the ray within the region.
+        3-element numpy array with the approximate exit coordinate in the local
+        sub-volume coordinate system, or ``None`` when the start point or
+        direction cannot be resolved.
     """
     start_point_np = to_local_np(start_point, bb, poi, vert_id, log) if isinstance(start_point, Location) else start_point
     if start_point_np is None:
@@ -392,9 +545,13 @@ def max_distance_ray_cast_convex_poi(
     return max_distance_ray_cast_convex(region, start_point_np, normal_vector, acc_delta)
 
 
-def calculate_pca_normal_np(segmentation: np.ndarray, pca_component, zoom=None, verbose=False):
-    """
-    Computes the normal vector of a segmented region using Principal Component Analysis (PCA).
+def calculate_pca_normal_np(
+    segmentation: np.ndarray,
+    pca_component: int,
+    zoom: tuple[float, ...] | np.ndarray | None = None,
+    verbose: bool = False,
+) -> np.ndarray:
+    """Computes the normal vector of a segmented region using Principal Component Analysis (PCA).
 
     Parameters:
     ----------
@@ -439,16 +596,15 @@ def calculate_pca_normal_np(segmentation: np.ndarray, pca_component, zoom=None, 
 
 def set_label_above_3_point_plane(
     array: NII | np.ndarray,
-    p1,
-    p2,
-    p3,
-    value=0,
+    p1: np.ndarray | list[float],
+    p2: np.ndarray | list[float],
+    p3: np.ndarray | list[float],
+    value: float = 0,
     invert: Literal[-1, 1] = 1,
     mask: np.ndarray | NII | bool = True,
-    inplace=False,
-):
-    """
-    Set all values in a 3D array above a plane defined by three non-collinear points to a specified value.
+    inplace: bool = False,
+) -> NII | np.ndarray:
+    """Set all values in a 3D array above a plane defined by three non-collinear points to a specified value.
 
     Parameters:
     -----------

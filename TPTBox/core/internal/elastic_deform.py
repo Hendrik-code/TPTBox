@@ -16,8 +16,7 @@ def deformed_nii(
     normalize=True,
     joint_normalize=False,
 ) -> dict[str, NII]:
-    """
-    Deform a dictionary of NII objects using random grid deformation. Requires elasticdeform. 'pip install elasticdeform'
+    """Deform a dictionary of NII objects using random grid deformation (requires ``pip install elasticdeform``).
 
     IMPORTANT: Normalize your image data to 0,1. The .seg property of NII shows if this is a segmentation. (NII is form our TPTBox and is a wrapper for nibable)
 
@@ -78,13 +77,13 @@ def deformed_nii(
     return out2
 
 
-def pad(arr, p=10):
+def pad(arr: np.ndarray, p: int = 10) -> np.ndarray:
+    """Reflect-pad a 3-D array by ``p`` voxels on every side."""
     return np.pad(arr, p, mode="reflect")
 
 
-def get_random_deform_parameter(deform_factor: float = 1):
-    """
-    Generate random deformation parameters for use in 3D deformation.
+def get_random_deform_parameter(deform_factor: float = 1) -> tuple[float, int]:
+    """Generate random deformation parameters for use in 3D deformation.
 
     This function generates random values for the deformation parameters, including 'sigma' and 'points',
     based on the specified deformation factor. These parameters are used for 3D deformation operations.

@@ -7,16 +7,40 @@ import numpy as np
 
 
 class RGB_Color:
+    """An RGB color stored as a NumPy integer array with helpers for normalized access."""
+
     def __init__(self, rgb: tuple[int, int, int]):
         assert isinstance(rgb, tuple) and [isinstance(i, int) for i in rgb], "did not receive a tuple of 3 ints"
         self.rgb = np.array(rgb)
 
     @classmethod
-    def init_separate(cls, r: int, g: int, b: int):
+    def init_separate(cls, r: int, g: int, b: int) -> RGB_Color:
+        """Construct an ``RGB_Color`` from three separate channel values.
+
+        Args:
+            r: Red channel (0–255).
+            g: Green channel (0–255).
+            b: Blue channel (0–255).
+
+        Returns:
+            A new ``RGB_Color`` instance.
+        """
         return cls((r, g, b))
 
     @classmethod
-    def init_list(cls, rgb: list[int] | np.ndarray):
+    def init_list(cls, rgb: list[int] | np.ndarray) -> RGB_Color:
+        """Construct an ``RGB_Color`` from a list or NumPy array of three integers.
+
+        Args:
+            rgb: Sequence of three integers (R, G, B) each in the range 0–255.
+
+        Returns:
+            A new ``RGB_Color`` instance.
+
+        Raises:
+            AssertionError: If ``rgb`` does not contain exactly three elements or
+                the NumPy array dtype is not int.
+        """
         assert len(rgb) == 3, "rgb requires exactly three integers"
         if isinstance(rgb, np.ndarray):
             assert rgb.dtype == int, "rgb numpy array not of type int!"
@@ -28,16 +52,38 @@ class RGB_Color:
     def __str__(self) -> str:
         return "RGB_Color-" + str(self.rgb)
 
-    def __call__(self, normed: bool = False):
+    def __call__(self, normed: bool = False) -> np.ndarray:
+        """Return the RGB values as an array, optionally normalized to [0, 1].
+
+        Args:
+            normed: If True, divides each channel by 255.
+
+        Returns:
+            NumPy array of shape (3,) with either raw (0–255) or normalized (0–1) values.
+        """
         if normed:
             return self.rgb / 255.0
         return self.rgb
 
-    def __getitem__(self, item):
+    def __getitem__(self, item: int) -> float:
+        """Return a single normalized channel value.
+
+        Args:
+            item: Channel index (0=R, 1=G, 2=B).
+
+        Returns:
+            The channel value divided by 255.
+        """
         return self.rgb[item] / 255.0
 
 
 class Mesh_Color_List:
+    """Catalog of named RGB colors used for anatomical mesh visualization.
+
+    Contains general-purpose color constants and 201 ITK-style colors (``ITK_1``
+    through ``ITK_201``) matching the ITK-SNAP color table convention.
+    """
+
     # General Colors
     BEIGE = RGB_Color.init_list([255, 250, 200])
     MAROON = RGB_Color.init_list([128, 0, 0])
@@ -276,13 +322,30 @@ _color_mapping_by_label: dict[int, RGB_Color] = {
 _color_map_in_row = np.array([v.rgb for v in _color_mapping_by_label.values()])
 
 
-def get_color_by_label(label: int):
+def get_color_by_label(label: int) -> RGB_Color:
+    """Return the ``RGB_Color`` assigned to a given integer label.
+
+    Labels 1–149 have a fixed ITK-style color. Labels outside that range are
+    wrapped modulo 50 to stay within the defined palette.
+
+    Args:
+        label: Integer segmentation label (must be >= 1).
+
+    Returns:
+        The ``RGB_Color`` mapped to ``label``.
+    """
     if label not in _color_mapping_by_label:
         return _color_mapping_by_label[label % 50 + 1]
     return _color_mapping_by_label[label]
 
 
-def write_ctbl(path: str | Path = "ITK_ColorTable.ctbl"):
+def write_ctbl(path: str | Path = "ITK_ColorTable.ctbl") -> None:
+    """Write the ITK color table to a 3D Slicer-compatible ``.ctbl`` file.
+
+    Args:
+        path: Destination file path. Defaults to ``"ITK_ColorTable.ctbl"`` in the
+            current working directory.
+    """
     with open(path, "w") as f:
         f.write("# Color table file for 3D Slicer\n")
         f.write("# Name: ITK_ColorTable\n")

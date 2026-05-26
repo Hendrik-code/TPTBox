@@ -17,7 +17,19 @@ out_base = Path(__file__).parent.parent / "nnUNet/"
 _model_path_ = out_base / "nnUNet_results"
 
 
-def get_ds_info(idx, _model_path: str | Path | None = None, exit_one_fail=True, logger=logger) -> dict:
+def get_ds_info(idx: int, _model_path: str | Path | None = None, exit_one_fail: bool = True, logger=logger) -> dict:
+    """Load and return the ``dataset.json`` for the model with the given dataset index.
+
+    Args:
+        idx: Numeric dataset identifier (e.g. ``100`` for Dataset100).
+        _model_path: Optional base directory containing ``nnUNet_results``. If
+            ``None``, the bundled default path is used.
+        exit_one_fail: If ``True``, call :func:`sys.exit` when the dataset is
+            not found; otherwise return ``None``.
+
+    Returns:
+        Parsed ``dataset.json`` dictionary for the requested dataset.
+    """
     if _model_path is not None:
         _model_path = Path(_model_path)
         model_path = _model_path / "nnUNet_results"
@@ -41,7 +53,16 @@ def get_ds_info(idx, _model_path: str | Path | None = None, exit_one_fail=True, 
     return ds_info
 
 
-def squash_so_it_fits_in_float16(x: NII):
+def squash_so_it_fits_in_float16(x: NII) -> NII:
+    """Scale image intensities so the maximum fits within the float16 range.
+
+    Args:
+        x: Input NIfTI image. Modified in-place when rescaling is necessary.
+
+    Returns:
+        The (potentially rescaled) image, with maximum capped at 1000 when the
+        original maximum exceeds 10000.
+    """
     m = x.max()
     if m > 10000:
         x /= m / 1000  # new max will be 1000
@@ -53,28 +74,74 @@ def run_inference_on_file(
     input_nii: list[NII],
     out_file: str | Path | None = None,
     orientation=None,
-    override=False,
+    override: bool = False,
     gpu=None,
-    keep_size=False,
-    fill_holes=False,
-    logits=False,
+    keep_size: bool = False,
+    fill_holes: bool = False,
+    logits: bool = False,
     mapping=None,
-    crop=False,
+    crop: bool = False,
     max_folds=None,
-    mode="nearest",
+    mode: str = "nearest",
     padd: int = 0,
     ddevice: Literal["cpu", "cuda", "mps"] = "cuda",
     model_path=None,
-    step_size=0.5,
-    memory_base=5000,  # Base memory in MB, default is 5GB
-    memory_factor=160,  # prod(shape)*memory_factor / 1000, 160 ~> 30 GB
-    memory_max=160000,  # in MB, default is 160GB
-    wait_till_gpu_percent_is_free=0.1,
-    verbose=True,
-    auto_download=False,
-    _key_ResEnc="__nnUNet*ResEnc",
+    step_size: float = 0.5,
+    memory_base: int = 5000,  # Base memory in MB, default is 5GB
+    memory_factor: int = 160,  # prod(shape)*memory_factor / 1000, 160 ~> 30 GB
+    memory_max: int = 160000,  # in MB, default is 160GB
+    wait_till_gpu_percent_is_free: float = 0.1,
+    verbose: bool = True,
+    auto_download: bool = False,
+    _key_ResEnc: str = "__nnUNet*ResEnc",
     logger=logger,
 ) -> tuple[Image_Reference, np.ndarray | None]:
+    """Load a VibeSeg model and run inference on the supplied NIfTI images.
+
+    Args:
+        idx: Either an integer dataset ID (model weights are auto-downloaded) or
+            a :class:`~pathlib.Path` pointing directly to a trained model folder.
+        input_nii: List of input NIfTI images (one per model input channel).
+        out_file: Optional path to save the segmentation. If the file already
+            exists and ``override`` is ``False``, returns early.
+        orientation: Three-letter orientation code to reorient inputs before
+            inference (e.g. ``("R", "A", "S")``). Inferred from the model's
+            ``dataset.json`` when ``None``.
+        override: Overwrite an existing ``out_file`` when ``True``.
+        gpu: GPU index to use. ``None`` lets the loader decide automatically.
+        keep_size: If ``True``, do not resample the segmentation back to the
+            original image size.
+        fill_holes: If ``True``, fill holes in the segmentation mask after
+            inference.
+        logits: If ``True``, also return the raw softmax logits array.
+        mapping: Optional label remapping dict applied to the segmentation after
+            inference.
+        crop: If ``True``, crop the input to its foreground bounding box before
+            inference and revert afterwards.
+        max_folds: Maximum number of folds to average. Accepts an ``int`` (use
+            the first N folds) or a list of specific fold names.
+        mode: Interpolation mode used when resampling the segmentation back to
+            the original space (default ``"nearest"``).
+        padd: Padding (in voxels) added on all sides before inference and
+            removed afterwards.
+        ddevice: Device to run inference on (``"cuda"``, ``"cpu"``, or
+            ``"mps"``).
+        model_path: Optional path to a directory containing ``nnUNet_results``.
+            Uses the bundled default when ``None``.
+        step_size: Sliding-window step size fraction (see
+            :class:`~TPTBox.segmentation.nnUnet_utils.predictor.nnUNetPredictor`).
+        memory_base: Base GPU memory reservation in MB.
+        memory_factor: Memory scaling factor per million voxels.
+        memory_max: Hard cap on assumed GPU memory in MB.
+        wait_till_gpu_percent_is_free: Minimum free GPU fraction to require
+            before starting inference.
+        verbose: Print progress information.
+
+    Returns:
+        A tuple ``(seg_nii, softmax_logits)`` where ``seg_nii`` is the
+        segmentation (as a :class:`~TPTBox.NII` or file path) and
+        ``softmax_logits`` is the raw logit array or ``None``.
+    """
     if model_path is None:
         auto_download = True
     if model_path is not None:
@@ -260,20 +327,53 @@ idx_models = [100]
 def run_VibeSeg(
     img: Path | str | list[Path] | list[NII] | Image_Reference,
     out_path: str | Path | None,
-    override=False,
-    dataset_id=None,
+    override: bool = False,
+    dataset_id: int | None = None,
     gpu: int | None = None,
-    logits=False,
-    known_idx=idx_models,
-    keep_size=False,
-    fill_holes=False,
-    crop=False,
+    logits: bool = False,
+    known_idx: list[int] = idx_models,
+    keep_size: bool = False,
+    fill_holes: bool = False,
+    crop: bool = False,
     max_folds: int | None = None,
     _model_path=None,
-    step_size=0.5,
+    step_size: float = 0.5,
     logger: Print_Logger = logger,
     **_kargs,
-):
+) -> NII | Path | None:
+    """High-level entry point for running VibeSeg body-composition segmentation.
+
+    Automatically downloads model weights when needed, selects the appropriate
+    dataset, and delegates to :func:`run_inference_on_file`.
+
+    Args:
+        img: Input image(s). Accepts a single path/NII, or a list of paths/NIIs
+            for multi-channel models.
+        out_path: Output path for the segmentation file. Skipped when
+            ``None``; skips inference when the file exists and
+            ``override`` is ``False``.
+        override: Overwrite existing output file.
+        dataset_id: Explicit dataset ID to use. When ``None``, iterates
+            through ``known_idx`` to find the first available model.
+        gpu: GPU device index. ``None`` selects automatically.
+        logits: If ``True``, return raw softmax logits in addition to the
+            label map.
+        known_idx: List of dataset IDs to probe when ``dataset_id`` is
+            ``None``.
+        keep_size: Skip resampling the segmentation back to the input
+            resolution.
+        fill_holes: Fill holes in the output segmentation.
+        crop: Crop input images to their foreground bounding box.
+        max_folds: Limit the number of folds used for ensemble averaging.
+        _model_path: Override for the default model weights directory.
+        step_size: Sliding-window step size fraction.
+        **_kargs: Additional keyword arguments forwarded to
+            :func:`run_inference_on_file`.
+
+    Returns:
+        Path or :class:`~TPTBox.NII` of the saved segmentation, or ``None``
+        on failure.
+    """
     if isinstance(out_path, str):
         out_path = Path(out_path)
     if out_path is not None and out_path.exists() and not override:

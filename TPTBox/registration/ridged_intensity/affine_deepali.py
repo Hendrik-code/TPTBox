@@ -27,15 +27,33 @@ from TPTBox.registration._deepali.deepali_trainer import PairwiseImageLoss
 
 
 class PairwiseSegImageLoss(Module, metaclass=ABCMeta):
-    r"""Base class of pairwise image dissimilarity criteria."""
+    r"""Base class of pairwise image dissimilarity criteria for segmentation masks."""
 
     @abstractmethod
     def forward(self, source: Tensor, target: Tensor, mask: [Tensor] | None = None) -> Tensor:
-        r"""Evaluate image dissimilarity loss."""
+        r"""Evaluate image dissimilarity loss.
+
+        Args:
+            source: Warped source image/segmentation tensor.
+            target: Fixed target image/segmentation tensor.
+            mask: Optional spatial mask restricting the loss computation.
+
+        Returns:
+            Scalar loss tensor.
+        """
         raise NotImplementedError(f"{type(self).__name__}.forward()")
 
 
-def center_of_mass(tensor):
+def center_of_mass(tensor: torch.Tensor) -> torch.Tensor:
+    """Compute the centre of mass of a spatial tensor.
+
+    Args:
+        tensor: Arbitrary-shape float tensor treated as a spatial density map.
+
+    Returns:
+        1-D tensor of length ``tensor.ndim`` with the weighted-average
+        coordinate along each axis.
+    """
     grid = torch.meshgrid([torch.arange(s, device=tensor.device) for s in tensor.shape], indexing="ij")
     t = tensor / tensor.sum()
     com = torch.stack([(t * g).sum() for g in grid])
@@ -43,12 +61,20 @@ def center_of_mass(tensor):
 
 
 class Tether_single(PairwiseImageLoss):
+    """Centre-of-mass tethering loss for a single binary channel.
+
+    Penalises the Euclidean distance between the centre of mass of the warped
+    source and the fixed target. The penalty is zeroed out when the distance
+    is smaller than 10 voxels.
+    """
+
     def forward(
         self,
         source: torch.Tensor,
         target: torch.Tensor,
         mask: torch.Tensor | None = None,  # noqa: ARG002
     ) -> torch.Tensor:  # noqa: ARG002
+        """Compute the centre-of-mass distance loss between source and target."""
         com_fixed = center_of_mass(target)
         com_warped = center_of_mass(source)
         l_com = torch.norm(com_fixed - com_warped)
@@ -59,9 +85,9 @@ class Tether_single(PairwiseImageLoss):
 
 
 def center_of_mass_cc(tensor: torch.Tensor) -> torch.Tensor:
-    """
-    Computes the center of mass for each channel in a (B, C, X, Y, Z) tensor.
-    Returns a tensor of shape (B, C, 3) containing the (x, y, z) coordinates per channel.
+    """Compute the centre of mass for each channel in a ``(B, C, X, Y, Z)`` tensor.
+
+    Returns a tensor of shape ``(B, C, 3)`` with ``(x, y, z)`` coordinates per channel.
     """
     dtype = tensor.dtype
     B, C, *spatial_shape = tensor.shape
@@ -82,7 +108,19 @@ def center_of_mass_cc(tensor: torch.Tensor) -> torch.Tensor:
 
 
 class Tether_Seg(PairwiseSegImageLoss):
-    def __init__(self, delta=1, *args, **kwargs):
+    """Per-channel centre-of-mass tethering loss for multi-channel segmentation tensors.
+
+    Computes the mean normalised Euclidean distance between the centre of mass
+    of each channel in the warped source and the fixed target. Channels whose
+    displacement is smaller than ``delta`` (relative to the largest spatial
+    dimension) are ignored.
+
+    Args:
+        delta: Minimum relative displacement threshold below which a channel
+            contributes zero loss.
+    """
+
+    def __init__(self, delta: float = 1, *args, **kwargs):
         self.delta = delta
         super().__init__(*args, **kwargs)
 
@@ -92,6 +130,7 @@ class Tether_Seg(PairwiseSegImageLoss):
         target: torch.Tensor,  # shape: (B, C, X, Y, Z)
         mask: torch.Tensor | None = None,  # noqa: ARG002
     ) -> torch.Tensor:
+        """Compute the mean per-channel normalised centre-of-mass distance."""
         w = max(target.shape[2:])
         com_fixed = center_of_mass_cc(target)  # (B, C, 3)
         com_warped = center_of_mass_cc(source)  # (B, C, 3)
@@ -106,13 +145,26 @@ class Tether_Seg(PairwiseSegImageLoss):
 
 
 class Tether(PairwiseImageLoss):
+    """Centre-of-mass tethering loss with optional per-class and memory features.
+
+    Args:
+        delta: Minimum voxel distance below which the loss is zeroed. Prevents
+            penalising already-well-aligned structures.
+        uniq: If ``True``, compute separate centre-of-mass distances per unique
+            label value instead of the whole foreground mass.
+        remember: If ``True``, skip computing the loss for ``remember_c``
+            iterations after the loss is zeroed (early stopping memory).
+        remember_c: Number of iterations to skip after the loss drops to zero.
+        max_v: Scale factor mapping continuous output values to integer labels.
+    """
+
     def __init__(
         self,
-        delta=10,
-        uniq=False,
-        remember=False,
-        remember_c=10,
-        max_v=1,
+        delta: float = 10,
+        uniq: bool = False,
+        remember: bool = False,
+        remember_c: int = 10,
+        max_v: float = 1,
         *args,
         **kwargs,
     ) -> None:
@@ -130,6 +182,7 @@ class Tether(PairwiseImageLoss):
         target: torch.Tensor,
         mask: torch.Tensor | None = None,  # noqa: ARG002
     ) -> torch.Tensor:  # noqa: ARG002
+        """Compute the centre-of-mass tethering loss."""
         if self.count != 0:
             self.count -= 1
             return torch.zeros(1, device=source.device)
@@ -169,12 +222,9 @@ class Tether(PairwiseImageLoss):
 
 
 def subsample_coords(coords: torch.Tensor, k: int) -> torch.Tensor:
-    """
-    If `coords` has more than `k` rows, return a random subset of size `k`;
-    otherwise return `coords` unchanged.
+    """Return a random subset of ``k`` rows from ``coords``, or the full tensor if it has ≤ ``k`` rows.
 
-    Uses sampling *without* replacement (`torch.randperm`), so every
-    coordinate appears at most once.  Works entirely on-device.
+    Samples without replacement via ``torch.randperm``; works entirely on-device.
     """
     n = coords.size(0)
     if n <= k:
@@ -184,10 +234,22 @@ def subsample_coords(coords: torch.Tensor, k: int) -> torch.Tensor:
 
 
 class DISTANCE_to_TARGET(PairwiseImageLoss):
+    """Chamfer-style distance loss penalising mislabelled voxels.
+
+    For each foreground class, computes the mean minimum distance from
+    incorrectly predicted voxels to the nearest correct ground-truth voxel of
+    the same class.
+
+    Args:
+        max_v: Scale factor to convert continuous predictions to integer labels.
+        res_gt: Spatial downsampling factor applied to the ground-truth when
+            computing nearest-neighbour distances (reduces memory usage).
+    """
+
     def __init__(
         self,
-        max_v=1,
-        res_gt=4,
+        max_v: float = 1,
+        res_gt: int = 4,
         *args,
         **kwargs,
     ) -> None:
@@ -201,8 +263,7 @@ class DISTANCE_to_TARGET(PairwiseImageLoss):
         target: torch.Tensor,
         mask: torch.Tensor | None = None,  # noqa: ARG002
     ) -> torch.Tensor:
-        """
-        Chamfer-style distance loss for mis-labelled voxels.
+        """Chamfer-style distance loss for mis-labelled voxels.
 
         Parameters
         ----------
@@ -215,7 +276,7 @@ class DISTANCE_to_TARGET(PairwiseImageLoss):
             back to integer labels. Set to 1 if `source` and `target` are already
             integer encoded.
 
-        Returns
+        Returns:
         -------
         torch.Tensor  scalar
             The mean distance (in voxel units) from every wrongly predicted voxel
@@ -267,6 +328,51 @@ class DISTANCE_to_TARGET(PairwiseImageLoss):
 
 
 class Rigid_Registration_with_Tether(General_Registration):
+    """Rigid (or affine) image registration with an optional centre-of-mass tether.
+
+    Extends :class:`~TPTBox.registration._deepali.deepali_model.General_Registration`
+    with a patience-based early-stopping strategy and an additional
+    centre-of-mass regularisation term that keeps the warped image anchored
+    near the fixed image.
+
+    Args:
+        fixed_image: Reference (target) image.
+        moving_image: Image to be registered.
+        reference_image: Optional reference image defining the output grid.
+        device: PyTorch device for computation.
+        gpu: GPU index used when ``ddevice`` is ``"cuda"``.
+        ddevice: Device type string (``"cpu"``, ``"cuda"``, or ``"mps"``).
+        fixed_mask: Optional foreground mask for the fixed image.
+        moving_mask: Optional foreground mask for the moving image.
+        normalize_strategy: Intensity normalisation strategy
+            (``"auto"``, ``"CT"``, ``"MRI"``, or ``None``).
+        pyramid_levels: Number of multi-resolution pyramid levels.
+        finest_level: Index of the finest pyramid level (0 = full resolution).
+        coarsest_level: Index of the coarsest pyramid level.
+        pyramid_finest_spacing: Voxel spacing at the finest pyramid level.
+        pyramid_min_size: Minimum spatial size per axis at the coarsest level.
+        dims: Spatial dimensions to include in the transform.
+        align: If ``True``, initialise the transform to align image centres.
+        transform_name: Name of the spatial transform class from DeepALI.
+        transform_args: Extra keyword arguments for the transform constructor.
+        transform_init: Optional path to a pre-computed flow field for
+            warm-starting.
+        optim_name: PyTorch optimiser class name.
+        lr: Learning rate.
+        optim_args: Extra keyword arguments for the optimiser (excluding ``lr``).
+        smooth_grad: Gradient smoothing factor.
+        verbose: Verbosity level (0 = silent).
+        max_steps: Maximum optimisation steps per pyramid level.
+        max_history: History length for convergence checking.
+        min_value: Minimum loss value for early stopping.
+        min_delta: Minimum loss improvement for early stopping.
+        loss_terms: Tuple of loss functions (image similarity + regulariser).
+        weights: Corresponding loss weights.
+        patience: Number of steps without improvement before stopping.
+        patience_delta: Minimum loss change to reset patience counter.
+        desc: Description string shown in the progress bar.
+    """
+
     def __init__(
         self,
         fixed_image: Image_Reference,
@@ -353,9 +459,22 @@ class Rigid_Registration_with_Tether(General_Registration):
         opt: torch.optim.Optimizer,
         lr_sq,  # noqa: ARG002
         level,  # noqa: ARG002
-        max_steps,
+        max_steps: int,
         sampling: Union[Sampling, str] = Sampling.LINEAR,  # noqa: ARG002
-    ):
+    ) -> None:
+        """Optimise the transform at a single pyramid level.
+
+        Args:
+            grid_transform: The spatial transform being optimised.
+            target_image: Fixed target image at the current resolution.
+            source_image: Moving source image at the current resolution.
+            opt: Initialised PyTorch optimiser.
+            lr_sq: Learning-rate scheduler (unused, kept for API compatibility).
+            level: Current pyramid level index (unused).
+            max_steps: Maximum number of gradient steps for this level.
+            sampling: Interpolation mode for image warping (unused at this
+                level; linear sampling is hard-coded).
+        """
         loss_list = []
         self.loss_values = loss_list
         self.transform = grid_transform
@@ -386,7 +505,12 @@ class Rigid_Registration_with_Tether(General_Registration):
             pbar.desc = f"{self.desc} loss={l_mse.item() * lambda_mse:.5f}, center_of_mass={l_com * lambda_com:.5f}, {self.early_stopping=}, {self.best=}"
 
     def on_converged(self) -> bool:
-        r"""Check convergence criteria."""
+        """Check patience-based early-stopping convergence criterion.
+
+        Returns:
+            ``True`` when the patience counter exceeds the configured patience
+            limit and the best transform has been restored; ``False`` otherwise.
+        """
         values = self.loss_values
         if not values:
             return False

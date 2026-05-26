@@ -1,0 +1,78 @@
+site_name: TPTBox
+site_description: Torso Processing Toolbox — BIDS-compliant medical image processing for CT and MRI.
+site_url: https://tptbox.readthedocs.io
+repo_url: https://github.com/Hendrik-code/TPTBox
+repo_name: Hendrik-code/TPTBox
+edit_uri: blob/main/
+
+theme:
+  name: material
+  logo: TPTBox/images/logo.svg
+  favicon: TPTBox/images/logo.svg
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - toc.integrate
+    - content.code.copy
+    - content.code.annotate
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            members_order: source
+            separate_signature: true
+            show_signature_annotations: true
+            unwrap_annotated: true
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - API Reference:
+      - Core:
+          - NII (NIfTI wrapper): api/nii.md
+          - POI (Points of Interest): api/poi.md
+          - BIDS Files: api/bids.md
+          - NumPy Utilities: api/np_utils.md
+          - Vertebra Constants: api/vert_constants.md
+          - POI Strategies: api/poi_fun.md
+      - Spine: api/spine.md
+      - Registration: api/registration.md
+      - Segmentation: api/segmentation.md
+      - Mesh 3D: api/mesh3d.md
+      - Stitching: api/stitching.md
+      - Logger: api/logger.md

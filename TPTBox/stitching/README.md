@@ -1,6 +1,16 @@
-# Torso Processing ToolBox (TPTBox) - Stitching
+# Stitching (`TPTBox.stitching`)
 
-This tool can merge multiple Nifti images if they are already aligned in global space. You can check this by opening them in ITKSnap with "open additional image."
+Merges multiple NIfTI images that are already aligned in global space into a single volume.
+Useful for whole-body or long-spine multi-station acquisitions.
+You can verify alignment by opening the images in ITKSnap with "open additional image."
+
+## API
+
+| Function | Description |
+|---|---|
+| `stitching(nii_list, out, ...)` | Stitch a list of `NII` objects; returns `(result_nii, ramp_nii)` |
+| `stitching_raw(paths, out, ...)` | Stitch from file paths directly |
+| `GNC_stitch_T2w(nii_list, ...)` | GNC-based stitching optimised for T2w spine MRI |
 
 ![Example of a stitching](stitching.jpg?raw=true "Example of a stitching")
 
