@@ -53,7 +53,8 @@ markdown_extensions:
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.inlinehilite
-  - pymdownx.snippets
+  - pymdownx.snippets:
+      base_path: ["."]
   - attr_list
   - md_in_html
   - toc:
@@ -62,6 +63,17 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
+  - Modules:
+      - Core: modules/core.md
+      - POI Strategies: modules/poi_fun.md
+      - Spine: modules/spine.md
+      - "Spine – 2D Snapshots": modules/snapshot2d.md
+      - "Spine – Statistics": modules/spinestats.md
+      - Registration: modules/registration.md
+      - Segmentation: modules/segmentation.md
+      - Mesh 3D: modules/mesh3d.md
+      - Stitching: modules/stitching.md
+      - Logger: modules/logger.md
   - API Reference:
       - Core:
           - NII (NIfTI wrapper): api/nii.md
