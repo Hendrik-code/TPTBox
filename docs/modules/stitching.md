@@ -16,7 +16,7 @@ You can verify alignment by opening the images in ITKSnap with "open additional 
 
 
 ### Standalone
-This script can be run directly from the console. Copy 'stiching.py' and install the necessary package.
+This script can be run directly from the console. Copy 'stitching.py' and install the necessary package.
 
 ```
 stitching.py
