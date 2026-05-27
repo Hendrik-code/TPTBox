@@ -1050,8 +1050,15 @@ class Location(Abstract_lvl):
     Rib_Left = 63
     Rib_Right = 64
     # 66-80 Free
+    # Sacrum Subregions
+    Sacrum_Sacral_Ala_Left = 70
+    Sacrum_Sacral_Ala_Right = 71
+    Sacrum_Posterior_Sacral_Elements = 72
+    Sacrum_Body = 73
+    Sacrum_Endplate = 74
     # Muscle inserts
     # https://www.frontiersin.org/articles/10.3389/fbioe.2022.862804/full
+    Metal = 80
     # 81-91
     Muscle_Inserts_Spinosus_Process = 81
     Muscle_Inserts_Transverse_Process_Left = 83
