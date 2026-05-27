@@ -30,9 +30,9 @@ def new_optimizer(name: str, model: Module, **kwargs) -> Optimizer:
 
 
 def slope_of_least_squares_fit(values: Sequence[float]) -> float:
-    r"""Compute slope of least squares fit of line to last n objective function values
+    r"""Compute slope of least squares fit of line to last n objective function values.
 
-    See also:
+    See Also:
     - https://www.che.udel.edu/pdf/FittingData.pdf
     - https://en.wikipedia.org/wiki/1_%2B_2_%2B_3_%2B_4_%2B_%E2%8B%AF
     - https://proofwiki.org/wiki/Sum_of_Sequence_of_Squares

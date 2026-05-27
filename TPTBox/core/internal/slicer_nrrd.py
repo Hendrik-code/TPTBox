@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 
 def _read(filename, skip_voxels=False, verbos=True):
-    """Read segmentation metadata from a .seg.nrrd file or NIFTI file and store it in a dict.
+    r"""Read segmentation metadata from a .seg.nrrd file or NIFTI file and store it in a dict.
 
     Example header:
 
@@ -302,10 +302,20 @@ def _read(filename, skip_voxels=False, verbos=True):
     return segmentation
 
 
-def _write_segmentation(file, segmentation, compression_level=9, index_order=None):
-    """
-    Extracts segments from a segmentation volume and header.
-    :param segmentation: segmentation metadata and voxels
+def _write_segmentation(file: str, segmentation: dict, compression_level: int = 9, index_order: str | None = None) -> None:
+    """Write a segmentation dictionary to a 3D Slicer-compatible NRRD file.
+
+    Args:
+        file: Destination file path (must be a string as accepted by pynrrd).
+        segmentation: Dictionary with keys ``"voxels"`` (numpy array), ``"ijkToLPS"``
+            (4x4 affine), and optional segment metadata.
+        compression_level: gzip compression level (0-9). Defaults to 9.
+        index_order: NRRD index order (``"C"`` or ``"F"``). Defaults to ``"F"``.
+
+    Raises:
+        ImportError: If the ``pynrrd`` package is not installed.
+        ValueError: If the voxel array is ``None`` or has an unsupported number
+            of dimensions.
     """
     try:
         import nrrd
@@ -319,7 +329,7 @@ def _write_segmentation(file, segmentation, compression_level=9, index_order=Non
     # Copy non-segmentation fields to the extracted header
     output_header = {}
     ijkToLPS = None
-    for key in segmentation:
+    for key, value in segmentation.items():
         if key == "voxels":
             # written separately
             continue
@@ -328,17 +338,17 @@ def _write_segmentation(file, segmentation, compression_level=9, index_order=Non
             continue
         elif key == "ijkToLPS":
             # image geometry will be set later in space directions, space origin fields
-            ijkToLPS = segmentation[key]
+            ijkToLPS = value
             continue
         elif key == "containedRepresentationNames":
             # Segmentation_ContainedRepresentationNames:=Binary labelmap|Closed surface|
             # An extra closing "|" is added as this is requires by some older Slicer versions.
-            representations = "|".join(segmentation[key]) + "|"
+            representations = "|".join(value) + "|"
             output_header["Segmentation_ContainedRepresentationNames"] = representations
         elif key == "conversionParameters":
             # Segmentation_ConversionParameters:=Collapse labelmaps|1|Merge the labelmaps into as few...&Compute surface normals|1|Compute...&Crop to reference image geometry|0|Crop the model...&
             parameters_str = ""
-            parameters = segmentation[key]
+            parameters = value
             for parameter in parameters:
                 if parameters_str != "":
                     parameters_str += "&"
@@ -346,13 +356,13 @@ def _write_segmentation(file, segmentation, compression_level=9, index_order=Non
             output_header["Segmentation_ConversionParameters"] = parameters_str
         elif key == "masterRepresentation":
             # Segmentation_MasterRepresentation:=Binary labelmap
-            output_header["Segmentation_MasterRepresentation"] = segmentation[key]
+            output_header["Segmentation_MasterRepresentation"] = value
         elif key == "referenceImageExtentOffset":
             # Segmentation_ReferenceImageExtentOffset:=0 0 0
-            offset = segmentation[key]
+            offset = value
             output_header["Segmentation_ReferenceImageExtentOffset"] = " ".join([str(i) for i in offset])
         else:
-            output_header[key] = segmentation[key]
+            output_header[key] = value
 
     # Add kinds, space directions, space origin to the header
     # kinds: list domain domain domain
@@ -551,7 +561,6 @@ def _terminology_entry_from_string(terminology_str):
     Specification of terminology entry string is available at
     https://slicer.readthedocs.io/en/latest/developer_guide/modules/segmentations.html#terminologyentry-tag
     """
-
     terminology_items = terminology_str.split("~")
 
     terminology = {}
@@ -576,8 +585,8 @@ def _terminology_entry_from_string(terminology_str):
     return terminology
 
 
-def _terminology_entry_to_string(terminology):
-    """Converts a terminology dict to string."""
+def _terminology_entry_to_string(terminology: dict) -> str:
+    """Convert a terminology dictionary back to the Slicer ``TerminologyEntry`` tag string."""
     terminology_str = ""
 
     if "contextName" in terminology:
@@ -601,9 +610,8 @@ def _terminology_entry_to_string(terminology):
     return terminology_str
 
 
-def _generate_unique_segment_id(existing_segment_ids):
-    """Generate a unique segment ID, i.e., an ID that is not among existing_segment_ids.
-    It follows DICOM convention to allow using this ID in DICOM Segmentation objects."""
+def _generate_unique_segment_id(existing_segment_ids: set) -> str:
+    """Generate a DICOM-compatible UUID-based segment ID not present in *existing_segment_ids*."""
     import uuid
 
     while True:
@@ -612,7 +620,15 @@ def _generate_unique_segment_id(existing_segment_ids):
             return segment_id
 
 
-def remove_not_supported_values(nrrd_dict: dict):
+def remove_not_supported_values(nrrd_dict: dict) -> None:
+    """Strip NRRD fields that cannot be round-tripped through the current writer.
+
+    Removes ``"conversionParameters"`` from the top-level dict and ``"extent"``
+    from each segment entry, as these are not reliably preserved.
+
+    Args:
+        nrrd_dict: Segmentation dictionary to clean in place.
+    """
     nrrd_dict.pop("conversionParameters", None)
 
     if "segments" in nrrd_dict:
@@ -621,14 +637,28 @@ def remove_not_supported_values(nrrd_dict: dict):
             i.pop("extent", None)
 
 
-def load_slicer_nrrd(filename, seg, skip_voxels=False, verbos=True) -> NII:
-    """
-    Load a 3D/4D Slicer NRRD segmentation and return a NII object (wrapper around NIfTI).
+def load_slicer_nrrd(filename: str | Path, seg: bool, skip_voxels: bool = False, verbos: bool = True) -> NII:
+    """Load a 3D Slicer ``.seg.nrrd`` segmentation file and return a NII wrapper.
 
-    :param filename: path to .seg.nrrd file
-    :param skip_voxels: if True, only metadata is read
-    :param logging: logger
-    :return: NII object with segmentation data
+    Reads the NRRD header and optional voxel data, converts the LPS affine to
+    RAS for NIfTI compatibility, and packages the result as a ``NII`` object.
+
+    Args:
+        filename: Path to the ``.seg.nrrd`` file.
+        seg: Set to ``True`` when the file contains a segmentation (label map)
+            rather than raw intensity data.
+        skip_voxels: Read only the NRRD header without loading voxel data when
+            ``True``.  The returned ``NII`` will have ``None`` for its array.
+        verbos: Emit log messages for missing segment IDs when ``True``.
+
+    Returns:
+        A ``NII`` instance wrapping the loaded image with its affine, segment
+        metadata stored in ``NII.info``, and ``seg`` set accordingly.
+
+    Raises:
+        ImportError: If the ``pynrrd`` package is not installed.
+        ValueError: If the file does not contain voxel data (when *skip_voxels*
+            is ``False``).
     """
     import nibabel as nib
     import numpy as np
@@ -662,16 +692,30 @@ def load_slicer_nrrd(filename, seg, skip_voxels=False, verbos=True) -> NII:
     return NII(nib_obj, seg=seg, c_val=c_val, desc="", info=nrrd_dict)
 
 
-def save_slicer_nrrd(nii: NII, file: str | Path, make_parents=True, verbose: logging = True, compression_level=9, index_order=None):
-    """
-    Save a NII object (segmentation) to a Slicer-compatible NRRD file.
+def save_slicer_nrrd(
+    nii: NII,
+    file: str | Path,
+    make_parents: bool = True,
+    verbose: logging = True,
+    compression_level: int = 9,
+    index_order: str | None = None,
+) -> None:
+    """Save a NII image or segmentation to a 3D Slicer-compatible NRRD file.
 
-    :param nii: NII object with seg=True
-    :param filename: path to save .seg.nrrd
-    :param compression_level: gzip compression level
-    :param index_order: NRRD index order, e.g., "F" for Fortran
-    """
+    Converts the NIfTI RAS affine to LPS as required by the NRRD/Slicer
+    convention, then delegates to ``_write_segmentation``.  If *file* does not
+    end with ``"nrrd"``, a ``.seg.nrrd`` (for segmentations) or ``.nrrd`` suffix
+    is appended automatically.
 
+    Args:
+        nii: ``NII`` object whose array and affine are to be saved.
+        file: Destination file path.
+        make_parents: Create missing parent directories when ``True``.
+        verbose: Print a save message to the logger when ``True``.
+        compression_level: gzip compression level (0-9). Defaults to 9.
+        index_order: NRRD index order (``"C"`` or ``"F"``). Defaults to ``"F"``
+            (Fortran / column-major, as expected by Slicer).
+    """
     if not str(file).endswith("nrrd"):
         file = str(file) + (".seg.nrrd" if nii.seg else ".nrrd")
     if make_parents:
@@ -752,7 +796,7 @@ if __name__ == "__main__":
 
     slicerio_data = Path(__file__).parent / "slicerio_data"
 
-    def download_file(url: str, out_path: str):
+    def download_file(url: str, out_path: str) -> None:
         """Download a URL to a local file."""
         resp = requests.get(url, stream=True)
         resp.raise_for_status()
@@ -776,7 +820,8 @@ if __name__ == "__main__":
             download_file(url, out_local)
 
     # Test loading/saving
-    def test_file(path: str):
+    def test_file(path: str) -> None:
+        """Load a Slicer NRRD file, print its shape, and save a roundtrip copy."""
         print(f"\nTesting: {path}")
         seg = "seg." in path
         # Load

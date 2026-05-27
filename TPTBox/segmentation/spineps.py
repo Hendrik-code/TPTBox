@@ -11,9 +11,9 @@ logger = Print_Logger()
 
 def get_outpaths_spineps(
     file_path: str | Path | BIDS_FILE,
-    dataset=None,
-    derivative_name="derivative",
-    ignore_bids_filter=True,
+    dataset: str | Path | None = None,
+    derivative_name: str = "derivative",
+    ignore_bids_filter: bool = True,
 ) -> dict[
     Literal[
         "out_spine",
@@ -30,6 +30,19 @@ def get_outpaths_spineps(
     ],
     Path,
 ]:
+    """Return the expected output paths for a SPINEPS segmentation run.
+
+    Args:
+        file_path: Path to the input NIfTI image, or a ``BIDS_FILE`` object.
+        dataset: Optional dataset root directory.  Required when *file_path* is a
+            plain ``str`` or ``Path`` and a BIDS dataset root is needed.
+        derivative_name: Name of the derivatives sub-folder used by SPINEPS.
+        ignore_bids_filter: If True, disable strict BIDS filename filtering.
+
+    Returns:
+        Dictionary mapping output keys (e.g. ``"out_spine"``, ``"out_vert"``) to
+        the corresponding ``Path`` objects.
+    """
     from spineps.seg_run import output_paths_from_input
 
     if not isinstance(file_path, BIDS_FILE):
@@ -47,21 +60,51 @@ def get_outpaths_spineps(
 
 def run_spineps(
     file_path: str | Path | BIDS_FILE,
-    dataset=None,
+    dataset: str | Path | None = None,
     model_semantic: str | Path = "t2w",
     model_instance: str | Path = "instance",
     model_labeling: str | None = "t2w_labeling",
-    derivative_name="derivative",
-    override_semantic=False,
-    override_instance=False,
+    derivative_name: str = "derivative",
+    override_semantic: bool = False,
+    override_instance: bool = False,
     lambda_semantic=None,
-    save_debug_data=False,
-    verbose=False,
-    save_raw=False,
-    ignore_compatibility_issues=False,
-    use_cpu=False,
+    save_debug_data: bool = False,
+    verbose: bool = False,
+    save_raw: bool = False,
+    ignore_compatibility_issues: bool = False,
+    use_cpu: bool = False,
     **args,
-):
+) -> dict:
+    """Run the SPINEPS spine segmentation pipeline on a single image.
+
+    Handles model loading, BIDS path resolution, and delegates to SPINEPS'
+    ``process_img_nii`` function.
+
+    Args:
+        file_path: Path to the input NIfTI image, or a ``BIDS_FILE`` object.
+        dataset: Optional dataset root directory (used when *file_path* is a plain
+            path and a BIDS root is required).
+        model_semantic: Semantic segmentation model name (e.g. ``"t2w"``) or
+            explicit path to a model folder.
+        model_instance: Instance segmentation model name or explicit path.
+        model_labeling: Labeling model name, or ``None`` to skip labeling.
+        derivative_name: Name of the derivatives sub-folder for outputs.
+        override_semantic: If True, recompute the semantic segmentation even when
+            a cached result exists.
+        override_instance: If True, recompute the instance segmentation even when
+            a cached result exists.
+        lambda_semantic: Optional callable to post-process the semantic output.
+        save_debug_data: If True, save intermediate debug files.
+        verbose: If True, enable verbose logging.
+        save_raw: If True, also save unprocessed (raw) model outputs.
+        ignore_compatibility_issues: If True, suppress BIDS compatibility checks
+            and model/image compatibility warnings.
+        use_cpu: If True, force CPU inference even if a GPU is available.
+        **args: Additional keyword arguments forwarded to ``process_img_nii``.
+
+    Returns:
+        The output paths dictionary returned by SPINEPS' ``process_img_nii``.
+    """
     from spineps import get_instance_model, get_semantic_model, process_img_nii
     from spineps.get_models import get_actual_model
 
@@ -106,7 +149,8 @@ def run_spineps(
     return output_paths
 
 
-def _run_spineps_all(nii_dataset: Path | str):
+def _run_spineps_all(nii_dataset: Path | str) -> None:
+    """Run SPINEPS with all supported semantic models over an entire dataset."""
     for model_semantic in ["t2w", "t1w", "vibe"]:
         command = [
             "spineps",
@@ -139,9 +183,10 @@ def _run_spineps_internal(
     proc_fillholes: bool = True,
     verbose: bool = False,
     outpath: str | Path | None = None,
-    override=False,
+    override: bool = False,
     # gpu=0,
-):
+) -> NII | None:
+    """Run a single SPINEPS semantic segmentation model on one image internally."""
     # TODO select GPU
     from spineps.get_models import get_actual_model
     from spineps.seg_model import OutputType, Segmentation_Model
@@ -199,20 +244,42 @@ def _run_spineps_internal(
 def _run_spineps_vert(
     input_nii: NII,
     subreg_nii: NII,
-    model_instance="instance",  # _sagittal_v1.2.0
+    model_instance: str | Path = "instance",  # _sagittal_v1.2.0
     model_labeling=None,
-    vertebra_instance_labeling_offset=2,
-    proc_fill_3d_holes=False,
-    proc_inst_detect_and_solve_merged_corpi=True,
-    proc_inst_corpus_clean=True,
-    proc_inst_clean_small_cc_artifacts=True,
-    proc_inst_largest_k_cc=0,
-    proc_clean_inst_by_sem=True,
-    proc_assign_missing_cc=False,
-    proc_vertebra_inconsistency=True,
-    verbose=True,
-    use_cpu=False,
-):
+    vertebra_instance_labeling_offset: int = 2,
+    proc_fill_3d_holes: bool = False,
+    proc_inst_detect_and_solve_merged_corpi: bool = True,
+    proc_inst_corpus_clean: bool = True,
+    proc_inst_clean_small_cc_artifacts: bool = True,
+    proc_inst_largest_k_cc: int = 0,
+    proc_clean_inst_by_sem: bool = True,
+    proc_assign_missing_cc: bool = False,
+    proc_vertebra_inconsistency: bool = True,
+    verbose: bool = True,
+    use_cpu: bool = False,
+) -> tuple[NII, NII, NII]:
+    """Run SPINEPS instance segmentation and post-processing to produce vertebra labels.
+
+    Args:
+        input_nii: Input image used for post-processing.
+        subreg_nii: Semantic sub-region segmentation used as input to the instance model.
+        model_instance: Instance model name or path.
+        model_labeling: Optional labeling model for vertebra numbering.
+        vertebra_instance_labeling_offset: Label offset applied during labeling.
+        proc_fill_3d_holes: If True, fill 3-D holes in the instance mask.
+        proc_inst_detect_and_solve_merged_corpi: Detect and split merged vertebra bodies.
+        proc_inst_corpus_clean: Apply corpus-cleaning post-processing.
+        proc_inst_clean_small_cc_artifacts: Remove small connected-component artefacts.
+        proc_inst_largest_k_cc: Keep only the *k* largest connected components (0 = keep all).
+        proc_clean_inst_by_sem: Clean instance mask using the semantic segmentation.
+        proc_assign_missing_cc: Assign unlabelled connected components to nearest vertebra.
+        proc_vertebra_inconsistency: Resolve vertebra label inconsistencies.
+        verbose: If True, enable verbose logging.
+        use_cpu: If True, force CPU inference.
+
+    Returns:
+        A tuple of (cleaned_semantic_NII, cleaned_vertebra_NII, raw_vertebra_NII).
+    """
     from spineps import (
         get_instance_model,
         phase_postprocess_combined,
