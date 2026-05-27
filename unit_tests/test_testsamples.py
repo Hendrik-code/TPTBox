@@ -113,6 +113,12 @@ class Test_test_samples(unittest.TestCase):
             Location.Vertebral_Body_Endplate_Inferior,
             Location.Rib_Left,
             Location.Rib_Right,
+            Location.Sacrum_Sacral_Ala_Left,
+            Location.Sacrum_Sacral_Ala_Right,
+            Location.Sacrum_Posterior_Sacral_Elements,
+            Location.Sacrum_Body,
+            Location.Sacrum_Endplate,
+            Location.Metal,
         ]
         self.make_POIs(vert_nii, subreg_nii, label, ignore_list)
 
@@ -134,6 +140,12 @@ class Test_test_samples(unittest.TestCase):
             Location.Vertebral_Body_Endplate_Inferior,
             Location.Rib_Left,
             Location.Rib_Right,
+            Location.Sacrum_Sacral_Ala_Left,
+            Location.Sacrum_Sacral_Ala_Right,
+            Location.Sacrum_Posterior_Sacral_Elements,
+            Location.Sacrum_Body,
+            Location.Sacrum_Endplate,
+            Location.Metal,
         ]
         self.make_POIs(vert_nii, subreg_nii, label, ignore_list)
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sys
-import warnings
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -495,6 +494,7 @@ class Has_Grid(Grid_Proxy):
         Returns:
             tuple: World-space coordinate rounded to 7 decimal places.
         """
+        # TODO ITK version
         a = self.rotation @ (np.array(x) * np.array(self.zoom)) + self.origin
         return tuple(round(float(v), 7) for v in a)
 
