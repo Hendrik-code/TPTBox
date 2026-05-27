@@ -20,7 +20,35 @@ def convert_predicted_logits_to_segmentation_with_correct_shape(
     properties_dict: dict,
     return_probabilities: bool = False,
     num_threads_torch: int = 8,
-):
+) -> np.ndarray:
+    """Revert all preprocessing steps and return a segmentation in the original image space.
+
+    Performs (in reverse order): resampling from network output spacing back to
+    the cropped shape, argmax / softmax conversion, padding to the pre-crop
+    shape, and axis transposition to restore the original orientation.
+
+    Args:
+        predicted_logits: Raw network output with shape
+            ``(num_classes, X', Y', Z')`` in the *preprocessed* space.
+        plans_manager: Plans manager carrying transpose information.
+        configuration_manager: Configuration manager carrying spacing and
+            resampling function references.
+        label_manager: Label manager used for converting logits to a
+            segmentation map.
+        properties_dict: Case properties dict as updated by
+            :meth:`DefaultPreprocessor.run_case_npy` (contains cropping bbox,
+            pre-crop shape, and original spacing).
+        return_probabilities: Reserved for future use. Raises
+            :class:`NotImplementedError` if ``True``.
+        num_threads_torch: Number of threads used by PyTorch during resampling.
+
+    Returns:
+        Integer segmentation array with dtype ``np.uint8`` or ``np.uint16``
+        in the original image space (before any preprocessing).
+
+    Raises:
+        NotImplementedError: If ``return_probabilities`` is ``True``.
+    """
     if return_probabilities:
         raise NotImplementedError()
     old_threads = torch.get_num_threads()
@@ -95,7 +123,30 @@ def export_prediction_from_logits(
     dataset_json_dict_or_file: dict | str,
     output_file_truncated: str,
     save_probabilities: bool = False,
-):
+) -> None:
+    """Convert logits to a segmentation and write it to disk.
+
+    Delegates shape reversion to
+    :func:`convert_predicted_logits_to_segmentation_with_correct_shape` and
+    then writes the result using the image reader/writer defined in the plans.
+
+    Args:
+        predicted_array_or_file: Raw logits array/tensor in the preprocessed
+            image space.
+        properties_dict: Case properties dict containing cropping and resampling
+            metadata.
+        configuration_manager: Configuration manager for the active plans
+            configuration.
+        plans_manager: Plans manager (provides image writer class and transpose
+            directions).
+        dataset_json_dict_or_file: Either a parsed ``dataset.json`` dict or a
+            path to the file.
+        output_file_truncated: Output path **without** file extension. The
+            correct extension is appended automatically from ``dataset_json``.
+        save_probabilities: If ``True``, also save softmax probability maps as
+            ``.npz``. Currently raises :class:`NotImplementedError` inside the
+            conversion step.
+    """
     # if isinstance(predicted_array_or_file, str):
     #     tmp = deepcopy(predicted_array_or_file)
     #     if predicted_array_or_file.endswith('.npy'):

@@ -12,6 +12,30 @@ from TPTBox.segmentation.nnUnet_utils.plans_handler import ConfigurationManager,
 
 
 class PreprocessAdapterFromNpy(DataLoader):
+    """DataLoader adapter that preprocesses raw numpy arrays on-the-fly for nnU-Net inference.
+
+    Wraps a list of image arrays and their metadata into a
+    :class:`~batchgenerators.dataloading.data_loader.DataLoader` that applies
+    the full nnU-Net preprocessing pipeline (crop, normalise, resample) via
+    :class:`~TPTBox.segmentation.nnUnet_utils.default_preprocessor.DefaultPreprocessor`.
+
+    Args:
+        list_of_images: Image arrays, each with shape ``(C, X, Y, Z)``.
+        list_of_segs_from_prev_stage: Optional cascade segmentation arrays
+            (one per image) to be stacked as one-hot channels. Pass ``None``
+            for all entries when not using the cascade.
+        list_of_image_properties: Per-image property dicts containing at
+            least a ``'spacing'`` key.
+        truncated_of_names: Optional output file stems for each image (used
+            downstream for saving). Pass ``None`` when not needed.
+        plans_manager: Plans manager for the loaded model.
+        dataset_json: Parsed ``dataset.json`` dictionary.
+        configuration_manager: Configuration-specific preprocessing parameters.
+        num_threads_in_multithreaded: Number of worker threads (passed to the
+            underlying :class:`DataLoader`).
+        verbose: If ``True``, print preprocessing progress information.
+    """
+
     def __init__(
         self,
         list_of_images: list[np.ndarray],
@@ -52,7 +76,16 @@ class PreprocessAdapterFromNpy(DataLoader):
 
         self.indices = list(range(len(list_of_images)))
 
-    def generate_train_batch(self):
+    def generate_train_batch(self) -> dict:
+        """Preprocess the next sample and return it as a data dictionary.
+
+        Returns:
+            A dict with keys:
+                - ``'data'``: preprocessed image tensor ``(C, X, Y, Z)``.
+                - ``'data_properites'``: updated properties dict with cropping
+                  and resampling metadata.
+                - ``'ofile'``: output file stem (may be ``None``).
+        """
         idx = self.get_indices()[0]
         image = self._data[idx][0]
         seg_prev_stage = self._data[idx][1]
@@ -76,17 +109,24 @@ class PreprocessAdapterFromNpy(DataLoader):
 def convert_labelmap_to_one_hot(
     segmentation: np.ndarray | torch.Tensor, all_labels: list | torch.Tensor | np.ndarray | tuple, output_dtype=None
 ) -> np.ndarray | torch.Tensor:
-    """
-    if output_dtype is None then we use np.uint8/torch.uint8
-    if input is torch.Tensor then output will be on the same device
+    """Convert an integer label map to a one-hot encoded array.
 
-    np.ndarray is faster than torch.Tensor
+    Args:
+        segmentation: Integer label array/tensor with shape ``(X, Y, Z)``. When
+            a :class:`torch.Tensor`, using ``LongTensor`` avoids an extra cast.
+        all_labels: Ordered sequence of all label values to encode. Labels must
+            be **consecutive integers** starting from 0 (e.g. ``[0, 1, 2, 3]``).
+            Non-consecutive labels (e.g. ``[0, 32, 255]``) are **not** supported.
+        output_dtype: Desired dtype for the output. Defaults to
+            ``np.uint8`` / ``torch.uint8`` when ``None``.
 
-    if segmentation is torch.Tensor, this function will be faster if it is LongTensor. If it is something else we have
-    to cast which takes time.
+    Returns:
+        One-hot encoded array/tensor with shape
+        ``(len(all_labels), X, Y, Z)``, on the same device as the input when
+        ``segmentation`` is a :class:`torch.Tensor`.
 
-    IMPORTANT: This function only works properly if your labels are consecutive integers, so something like 0, 1, 2, 3, ...
-    DO NOT use it with 0, 32, 123, 255, ... or whatever (fix your labels, yo)
+    Note:
+        NumPy arrays are processed faster than Torch tensors in this function.
     """
     if isinstance(segmentation, torch.Tensor):
         result = torch.zeros(

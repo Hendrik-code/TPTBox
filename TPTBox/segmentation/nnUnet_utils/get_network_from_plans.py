@@ -18,9 +18,8 @@ def get_network_from_plans(
     num_input_channels: int,
     num_output_channels: int | None = None,
     deep_supervision: bool = True,
-):
-    """
-    we may have to change this in the future to accommodate other plans -> network mappings
+) -> nn.Module:
+    """We may have to change this in the future to accommodate other plans -> network mappings.
 
     num_input_channels can differ depending on whether we do cascade. Its best to make this info available in the
     trainer rather than inferring it again from the plans here.

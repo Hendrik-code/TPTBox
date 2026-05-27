@@ -13,7 +13,8 @@ from TPTBox.mesh3D.mesh import Mesh3D, POIMesh, SegmentationMesh
 from TPTBox.mesh3D.mesh_colors import RGB_Color, get_color_by_label
 
 
-def _add_mesh(pl, mesh: pv.PolyData | SegmentationMesh, color: str | RGB_Color, opacity: float = 1.0):
+def _add_mesh(pl: pv.Plotter, mesh: pv.PolyData | SegmentationMesh, color: str | RGB_Color, opacity: float = 1.0) -> None:
+    """Add a mesh to a pyvista Plotter, normalizing Mesh3D and RGB_Color inputs."""
     if isinstance(mesh, Mesh3D):
         mesh = mesh.mesh
     if isinstance(color, RGB_Color):
@@ -24,8 +25,7 @@ def _add_mesh(pl, mesh: pv.PolyData | SegmentationMesh, color: str | RGB_Color, 
 
 @dataclass
 class Preview_Settings:
-    """
-    Configuration for visualizing a `NII` or `POI` object as a mesh.
+    """Configuration for visualizing a `NII` or `POI` object as a mesh.
 
     Attributes:
         obj (NII | POI): The image or point-of-interest object to visualize.
@@ -48,8 +48,7 @@ class Preview_Settings:
         default_color_nii="bisque",
         default_poi_nii="red",
     ):
-        """
-        Generates one or more meshes from the underlying image or POI.
+        """Generates one or more meshes from the underlying image or POI.
 
         Args:
             rescale_to_iso (bool): Whether to rescale to isotropic spacing.
@@ -106,9 +105,8 @@ def make_html_preview(
     default_poi_nii="red",
     ref_spacing: Has_Grid | None = None,
     auto_rescale_to_ref=False,
-):
-    """
-    Render NII or POI objects as meshes in an interactive 3D HTML viewer.
+) -> None:
+    """Render NII or POI objects as meshes in an interactive 3D HTML viewer.
 
     Args:
         images (list[NII | POI | Preview_Settings]): List of images or wrapped settings to visualize.

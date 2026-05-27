@@ -13,7 +13,18 @@ from scipy.spatial import ConvexHull
 from skimage.exposure import match_histograms
 
 
-def get_rotation_and_spacing_from_affine(affine: np.ndarray):
+def get_rotation_and_spacing_from_affine(affine: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Decompose a NIfTI affine into its rotation matrix and voxel spacing.
+
+    Adapted from nibabel.orientations.
+
+    Args:
+        affine: 4x4 affine transformation matrix.
+
+    Returns:
+        A 2-tuple of ``(rotation, spacing)`` where ``rotation`` is a 3x3
+        orthonormal matrix and ``spacing`` is a 1-D array of three voxel sizes.
+    """
     # From https://github.com/nipy/nibabel/blob/master/nibabel/orientations.py
     rotation_zoom = affine[:3, :3]
     spacing = np.sqrt(np.sum(rotation_zoom * rotation_zoom, axis=0))
@@ -21,7 +32,19 @@ def get_rotation_and_spacing_from_affine(affine: np.ndarray):
     return rotation, spacing
 
 
-def get_ras_affine(rotation, spacing, origin) -> np.ndarray:
+def get_ras_affine(rotation: np.ndarray, spacing: np.ndarray, origin: np.ndarray) -> np.ndarray:
+    """Build a RAS affine matrix from rotation, voxel spacing, and image origin.
+
+    Adapted from TorchIO's IO utilities.
+
+    Args:
+        rotation: 3x3 orthonormal rotation matrix.
+        spacing: 1-D array of three voxel spacings (mm).
+        origin: 1-D array giving the index-space origin coordinates.
+
+    Returns:
+        A 4x4 RAS affine matrix.
+    """
     # https://github.com/fepegar/torchio/blob/5983f83f0e7f13f9c5056e25f8753b03426ae18a/src/torchio/data/io.py#L357
     rotation_zoom = rotation * spacing
     translation_ras = rotation.dot(origin)
@@ -31,7 +54,17 @@ def get_ras_affine(rotation, spacing, origin) -> np.ndarray:
     return affine
 
 
-def get_all_corner_points(affine, shape):
+def get_all_corner_points(affine: np.ndarray, shape: tuple[int, ...]) -> np.ndarray:
+    """Compute the eight world-space corner points of a voxel volume.
+
+    Args:
+        affine: 4x4 affine mapping voxel indices to world coordinates.
+        shape: Volume shape (X, Y, Z).
+
+    Returns:
+        Array of shape (8, 3) with the world-space coordinates of all eight
+        corners of the bounding box.
+    """
     lst = list(itertools.product([0, 1], repeat=3))
     lst = np.array(lst) * np.array(shape)
     lst += 1
@@ -40,10 +73,30 @@ def get_all_corner_points(affine, shape):
 
 
 def get_array(nii: Nifti1Image) -> np.ndarray:
+    """Extract the voxel data from a NIfTI image as a writable NumPy array.
+
+    Args:
+        nii: Source NIfTI image.
+
+    Returns:
+        A copy of the image data array with the original dtype preserved.
+    """
     return np.asanyarray(nii.dataobj, dtype=nii.dataobj.dtype).copy()  # type: ignore
 
 
 def set_array(nii: Nifti1Image, arr: np.ndarray) -> Nifti1Image:
+    """Return a new NIfTI image with the given array, preserving header and affine.
+
+    If the dtype of ``arr`` differs from the existing image, the header dtype is
+    updated accordingly.
+
+    Args:
+        nii: Source NIfTI image whose header and affine are reused.
+        arr: Replacement voxel data array.
+
+    Returns:
+        A new :class:`Nifti1Image` backed by ``arr``.
+    """
     if nii.dataobj.dtype == arr.dtype:  # type: ignore
         nii = Nifti1Image(arr, nii.affine, nii.header)
     else:
@@ -53,11 +106,47 @@ def set_array(nii: Nifti1Image, arr: np.ndarray) -> Nifti1Image:
     return nii
 
 
-def argmin(lst: list):
+def argmin(lst: list) -> int:
+    """Return the index of the minimum element in a list.
+
+    Args:
+        lst: Input list of comparable elements.
+
+    Returns:
+        Zero-based index of the smallest element.
+    """
     return lst.index(min(lst))
 
 
-def get_max_affine_and_shape(points: np.ndarray, affines, min_spacing=None, dtype: type = float, verbose=False):
+def get_max_affine_and_shape(
+    points: np.ndarray,
+    affines: list[np.ndarray],
+    min_spacing: float | None = None,
+    dtype: type = float,
+    verbose: bool = False,
+) -> Nifti1Image:
+    """Determine the optimal output affine and shape that encloses all input volumes.
+
+    Iterates over all input affines and selects the rotation that minimises the
+    bounding-box volume of the convex hull of ``points``.  The finest (minimum)
+    voxel spacing across all inputs is used, optionally clipped from below by
+    ``min_spacing``.
+
+    Args:
+        points: World-space corner coordinates of all input volumes, shape (N, 3).
+        affines: List of 4x4 affine matrices, one per input volume.
+        min_spacing: Optional lower-bound on the output voxel spacing (mm).
+        dtype: NumPy dtype for the output image data.
+        verbose: If True, prints chosen spacing, shape, origin, and optimal
+            rotation to stdout.
+
+    Returns:
+        A zeroed :class:`Nifti1Image` with the computed affine and shape, ready
+        to be used as a resampling target.
+
+    Raises:
+        ValueError: If no valid rotation could be determined from ``affines``.
+    """
     hull = ConvexHull(points)
 
     min_possible_volume = hull.volume
@@ -109,9 +198,8 @@ def get_max_affine_and_shape(points: np.ndarray, affines, min_spacing=None, dtyp
     return nib.Nifti1Image(np.zeros(shape.astype(int), dtype=dtype), affine)  # type: ignore
 
 
-def compute_crop_slice(nii: Nifti1Image, minimum=0, dist=0):
-    """
-    Computes the minimum slice that removes unused space from the image and returns the corresponding slice tuple along with the origin shift required for centroids.
+def compute_crop_slice(nii: Nifti1Image, minimum=0, dist=0) -> tuple[slice, slice, slice]:
+    """Computes the minimum slice that removes unused space from the image and returns the corresponding slice tuple along with the origin shift required for centroids.
 
     Args:
         minimum (int): The minimum value of the array (0 for MRI, -1024 for CT). Default value is 0.
@@ -153,25 +241,20 @@ def compute_crop_slice(nii: Nifti1Image, minimum=0, dist=0):
     return ex_slice
 
 
-def dilate_msk(msk_i_data: np.ndarray, mm: int = 5, connectivity: int = 3):
-    from scipy.ndimage import binary_dilation, generate_binary_structure
-
-    """
-    Dilates the binary segmentation mask by the specified number of voxels.
+def dilate_msk(msk_i_data: np.ndarray, mm: int = 5, connectivity: int = 3) -> np.ndarray:
+    """Dilate each label in a segmentation mask by a fixed number of voxels.
 
     Args:
-        mm (int, optional): The number of voxels to dilate the mask by. Defaults to 5.
-        connectivity (int, optional): Elements up to a squared distance of connectivity from the center are considered neighbors. connectivity may range from 1 (no diagonal elements are neighbors) to rank (all elements are neighbors).
-        inplace (bool, optional): Whether to modify the mask in place or return a new object. Defaults to False.
-        verbose (bool, optional): Whether to print a message indicating that the mask was dilated. Defaults to True.
+        msk_i_data: Integer-valued 3-D segmentation array. Label 0 is background.
+        mm: Number of dilation iterations to apply per label.
+        connectivity: Structuring-element connectivity (1 = face-connected,
+            3 = fully-connected including diagonals).
 
     Returns:
-        NII: The dilated mask.
-
-    Notes:
-        The method uses binary dilation with a 3D structuring element to dilate the mask by the specified number of voxels.
-
+        A dilated ``uint8`` array of the same shape as ``msk_i_data``.
     """
+    from scipy.ndimage import binary_dilation, generate_binary_structure
+
     struct = generate_binary_structure(3, connectivity)
     out = msk_i_data.copy() * 0
     for i in np.unique(msk_i_data):
@@ -186,15 +269,42 @@ def dilate_msk(msk_i_data: np.ndarray, mm: int = 5, connectivity: int = 3):
 
 def n4_bias_field_correction(
     nib: Nifti1Image,
-    mask=None,
-    threshold=60,
-    shrink_factor=4,
-    convergence=None,
-    spline_param=150,
-    verbose=False,
-    weight_mask=None,
-    crop=False,
-):
+    mask: np.ndarray | None = None,
+    threshold: int = 60,
+    shrink_factor: int = 4,
+    convergence: dict | None = None,
+    spline_param: int = 150,
+    verbose: bool = False,
+    weight_mask: np.ndarray | None = None,
+    crop: bool = False,
+) -> Nifti1Image:
+    """Apply N4 bias-field correction to a NIfTI image using ANTsPy.
+
+    A binary mask is derived automatically from voxels above ``threshold``
+    and dilated by 3 voxels before correction is applied.
+
+    Args:
+        nib: Input NIfTI image to correct.
+        mask: Optional pre-computed binary mask passed to ANTsPy. Overridden
+            when ``threshold != 0``.
+        threshold: Voxel intensity threshold for automatic mask generation.
+            Set to 0 to disable automatic masking.
+        shrink_factor: Image downsampling factor used inside ANTsPy to
+            speed up computation.
+        convergence: ANTsPy convergence dict with keys ``"iters"`` and
+            ``"tol"``. Defaults to ``{"iters": [50, 50, 50, 50], "tol": 1e-7}``.
+        spline_param: B-spline control point spacing for the bias field model.
+        verbose: If True, ANTsPy prints progress information.
+        weight_mask: Optional spatial weight mask passed to ANTsPy.
+        crop: If True, crops the corrected image to the region where the bias
+            field differed from the input.
+
+    Returns:
+        The bias-field-corrected NIfTI image.
+
+    Raises:
+        ModuleNotFoundError: If ``antspyx`` is not installed.
+    """
     try:
         import ants
         import ants.utils.bias_correction as bc  # pip install antspyx==0.4.2
@@ -209,14 +319,13 @@ def n4_bias_field_correction(
         # TODO add conversion and remove this
 
         def from_nibabel(nib_image):
-            """
-            Converts a given Nifti image into an ANTsPy image
+            """Converts a given Nifti image into an ANTsPy image.
 
             Parameters
             ----------
                 img: NiftiImage
 
-            Returns
+            Returns:
             -------
                 ants_image: ANTsImage
             """
@@ -286,7 +395,21 @@ def n4_bias_field_correction(
 buffer_references = {}
 
 
-def buffer_reference(path, bias_field: bool, crop=False):
+def buffer_reference(path: str | Path, bias_field: bool, crop: bool = False) -> np.ndarray | Nifti1Image:
+    """Load (and optionally bias-correct) a NIfTI file, caching the result.
+
+    Subsequent calls with the same ``path`` return the cached result without
+    re-reading or re-correcting the file.
+
+    Args:
+        path: File path of the NIfTI image.
+        bias_field: If True, applies N4 bias-field correction before caching.
+        crop: Passed to :func:`n4_bias_field_correction` when ``bias_field`` is True.
+
+    Returns:
+        The image data array (if ``bias_field`` is False) or the corrected
+        :class:`Nifti1Image` (if ``bias_field`` is True).
+    """
     if path in buffer_references:
         return buffer_references[path]
     reference = n4_bias_field_correction(nib.load(path), crop) if bias_field else get_array(nib.load(path))  # type: ignore
@@ -318,14 +441,64 @@ def main(  # noqa: C901
     crop_to_bias_field: bool = False,
     crop_empty: bool = False,
     histogram: str | None = None,
-    ramp_edge_min_value=5,
-    min_spacing: None | int = None,
-    kick_out_fully_integrated_images=False,
+    ramp_edge_min_value: int = 5,
+    min_spacing: int | None = None,
+    kick_out_fully_integrated_images: bool = False,
     is_segmentation: bool = False,
     dtype: type | str = float,
-    save=True,
+    save: bool = True,
     ramp_path=None,
-):
+) -> tuple[Nifti1Image | None, Nifti1Image | None]:
+    """Stitch multiple overlapping NIfTI volumes into a single output volume.
+
+    The algorithm:
+
+    1. Optionally applies N4 bias-field correction and histogram matching to
+       each input volume.
+    2. Finds the minimum bounding-box affine that encloses all inputs.
+    3. Resamples every volume into that common space.
+    4. Computes per-voxel blending weights using distance-transform-based
+       ramps in overlap regions.
+    5. Combines all resampled volumes with those weights and saves the result.
+
+    Args:
+        images: Input volumes as file paths or pre-loaded :class:`Nifti1Image`
+            objects. At least two are required.
+        output: Output file path (``".nii.gz"`` extension is appended if
+            absent). If None the result is returned without writing to disk
+            (``save`` must also be False).
+        match_histogram: If True, matches the histogram of each volume to the
+            previous one before stitching.
+        store_ramp: If True, also saves the per-volume blend weights as a 4-D
+            NIfTI alongside the stitched output.
+        verbose: If True, prints progress messages to stdout.
+        min_value: Background value (0 for MRI, -1024 for CT). Voxels at or
+            below this value are replaced by it in the output.
+        bias_field: If True, applies N4 bias-field correction to each input
+            before stitching. Forced to False for segmentations.
+        crop_to_bias_field: If True, crops each bias-corrected volume to the
+            region affected by the correction.
+        crop_empty: If True, crops the final output to its non-background
+            bounding box.
+        histogram: Path or index string used as the histogram reference for
+            ``match_histogram``.
+        ramp_edge_min_value: Minimum thickness (voxels) of non-overlapping
+            regions used when computing distance-transform ramps.
+        min_spacing: Minimum allowed output voxel spacing (mm). Overrides the
+            finest input spacing when specified.
+        kick_out_fully_integrated_images: If True, recursively removes volumes
+            that are fully enclosed within another volume.
+        is_segmentation: If True, disables bias field, histogram matching, and
+            uses nearest-neighbour resampling with integer dtype selection.
+        dtype: Output data type. Accepts a Python type (e.g. ``float``,
+            ``np.uint16``) or a string key from the internal type mapping.
+        save: If True, writes the stitched image to ``output``.
+
+    Returns:
+        A 2-tuple ``(stitched_nii, ramp_nii)`` where ``ramp_nii`` is None
+        unless ``store_ramp`` is True. Returns ``(None, None)`` when fewer
+        than two images are supplied.
+    """
     np.set_printoptions(precision=2, floatmode="fixed")
     if is_segmentation:
         bias_field = False

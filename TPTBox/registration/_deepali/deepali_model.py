@@ -29,13 +29,24 @@ from TPTBox.registration._deepali.deepali_trainer import (
 )
 
 
-def center_of_mass(tensor):
+def center_of_mass(tensor: torch.Tensor) -> torch.Tensor:
+    """Compute the centre of mass of a tensor along all dimensions.
+
+    Args:
+        tensor: Input tensor with non-negative values (e.g. a probability map).
+
+    Returns:
+        1-D tensor of length ``tensor.ndim`` containing the weighted-mean index
+        along each dimension.
+    """
     grid = torch.meshgrid([torch.arange(s, device=tensor.device) for s in tensor.shape], indexing="ij")
     com = torch.stack([(tensor * g).sum() / tensor.sum() for g in grid])
     return com
 
 
 def time_it(func):
+    """Decorator that prints the wall-clock execution time of the wrapped function."""
+
     def wrapper(*args, **kwargs):
         start_time = time.time()
         result = func(*args, **kwargs)
@@ -46,8 +57,17 @@ def time_it(func):
     return wrapper
 
 
-def _load_config(path):
-    r"""Load registration parameters from configuration file."""
+def _load_config(path: str | Path) -> dict:
+    """Load registration parameters from a JSON or YAML configuration file.
+
+    Args:
+        path: Absolute or relative path to the configuration file.  Files with
+            a ``.json`` suffix are parsed as JSON; all other suffixes are
+            treated as YAML.
+
+    Returns:
+        Parsed configuration as a Python dictionary.
+    """
     config_path = Path(path).absolute()
     config_text = config_path.read_text()
     if config_path.suffix == ".json":
@@ -62,10 +82,23 @@ def _warp_image(
     source_image: deepaliImage,
     target_grid: Deepali_Grid,
     transform: SpatialTransform,
-    mode="linear",
-    device=default_device,
-    inverse=False,
+    mode: str = "linear",
+    device: torch.device = default_device,
+    inverse: bool = False,
 ) -> torch.Tensor:
+    """Warp a source image to the target grid using the given spatial transform.
+
+    Args:
+        source_image: Deepali ``Image`` to be warped.
+        target_grid: Target grid defining the output spatial domain.
+        transform: Fitted deepali ``SpatialTransform``.
+        mode: Interpolation mode (``"linear"`` or ``"nearest"``).
+        device: PyTorch device on which warping is performed.
+        inverse: Apply the inverse transform when ``True``.
+
+    Returns:
+        Warped image data as a ``torch.Tensor``.
+    """
     if inverse:
         transform = transform.inverse(update_buffers=True)
     warp_func = TransformImage(
@@ -83,10 +116,27 @@ def _warp_poi(
     poi_moving: POI,
     target_grid: TPTBox_Grid,
     transform: SpatialTransform,
-    align_corners,
-    device=default_device,
-    inverse=True,
+    align_corners: bool,
+    device: torch.device = default_device,
+    inverse: bool = True,
 ) -> POI:
+    """Apply a spatial transform to all centroids in a POI object.
+
+    Args:
+        poi_moving: Source ``POI`` whose centroid coordinates (voxel space) are
+            to be transformed.
+        target_grid: Output grid that defines the coordinate space of the returned
+            ``POI``.
+        transform: Fitted deepali ``SpatialTransform``.
+        align_corners: Whether voxel corners (``True``) or centres (``False``) are
+            aligned when converting between grid and world coordinates.
+        device: PyTorch device for computation.
+        inverse: Apply the inverse transform when ``True`` (default).
+
+    Returns:
+        A new ``POI`` object defined on *target_grid* with transformed centroid
+        coordinates.
+    """
     keys: list[tuple[int, int]] = []
     points = []
     for key, key2, (x, y, z) in poi_moving.items():
@@ -124,8 +174,8 @@ def _warp_points(
     device=default_device,
     inverse=True,
 ) -> torch.Tensor:
-    """
-    Warp points using a spatial transform.
+    """Warp points using a spatial transform.
+
     Args:
         points (list): List of points to warp: (b,n) b points with n coordinates.
         transform (SpatialTransform): Spatial transform to apply.
@@ -145,8 +195,7 @@ def _warp_points(
 
 
 class General_Registration(DeepaliPairwiseImageTrainer):
-    """
-    A class for performing deformable registration between a fixed and moving image.
+    """A class for performing deformable registration between a fixed and moving image.
 
     Attributes:
         transform (torch.Tensor): The transformation matrix resulting from the registration.
@@ -295,8 +344,7 @@ class General_Registration(DeepaliPairwiseImageTrainer):
     #        # )
     #    return data.clone()
     def inverse(self) -> Self:
-        """
-        Invert the registration transformation.
+        """Invert the registration transformation.
 
         Returns:
             Self: The instance with the inverted transformation.
@@ -389,8 +437,7 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         align_corners=True,
         inverse=False,
     ) -> NII:
-        """
-        Apply the computed transformation to a given NII image.
+        """Apply the computed transformation to a given NII image.
 
         Args:
             img (NII): The NII image to be transformed.
@@ -421,9 +468,22 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         poi: POI,
         gpu: int | None = None,
         ddevice: DEVICES | None = None,
-        align_corners=True,
-        inverse=True,
-    ):
+        align_corners: bool = True,
+        inverse: bool = True,
+    ) -> POI:
+        """Apply the computed registration to a POI object.
+
+        Args:
+            poi: Source ``POI`` with centroid coordinates to transform.
+            gpu: GPU index override. Defaults to the device used during registration.
+            ddevice: Device type override (e.g. ``"cuda"``).
+            align_corners: Whether corners or centres are aligned during warping.
+            inverse: Apply the inverse transform when ``True`` (default, maps
+                moving centroids to fixed space).
+
+        Returns:
+            A new ``POI`` resampled to the target grid with transformed coordinates.
+        """
         if self._is_inverted:
             inverse = not inverse
         device = get_device(ddevice, 0 if gpu is None else gpu) if ddevice is not None else self.device
@@ -449,8 +509,8 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         ddevice: DEVICES | None = None,
         inverse=True,
     ):
-        """
-        Transform a set of points using the registered transformation.
+        """Transform a set of points using the registered transformation.
+
         Args:
             points (list): List of points to warp: (b,n) b points with n coordinates.
             axes (Axes): Axes of the input points.
@@ -461,7 +521,6 @@ class General_Registration(DeepaliPairwiseImageTrainer):
             ddevice (DEVICES, optional): Device type. Defaults to "cuda".
             inverse (bool, optional): Whether to apply the inverse transformation. Defaults to True.
         """
-
         if self._is_inverted:
             inverse = not inverse
         if isinstance(grid, Has_Grid):
@@ -481,8 +540,7 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         )
 
     def __call__(self, *args, **kwds) -> NII:
-        """
-        Call method to apply the transformation using the transform_nii method.
+        """Call method to apply the transformation using the transform_nii method.
 
         Args:
             *args: Positional arguments for the transform_nii method.
@@ -493,20 +551,50 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         """
         return self.transform_nii(*args, **kwds)
 
-    def get_dump(self):
+    def get_dump(self) -> tuple:
+        """Return a serialisable tuple of the registration state for pickling.
+
+        Returns:
+            Tuple of ``(transform, target_grid, input_grid, _is_inverted)``.
+        """
         return (self.transform, self.target_grid, self.input_grid, self._is_inverted)
 
-    def save(self, path: str | Path):
+    def save(self, path: str | Path) -> None:
+        """Serialise the registration result to a pickle file.
+
+        Args:
+            path: Destination file path.
+        """
         with open(path, "wb") as w:
             pickle.dump(self.get_dump(), w)
 
     @classmethod
-    def load(cls, path, gpu=0, ddevice: DEVICES = "cuda"):
+    def load(cls, path: str | Path, gpu: int = 0, ddevice: DEVICES = "cuda") -> Self:
+        """Load a previously saved ``General_Registration`` from a pickle file.
+
+        Args:
+            path: Path to the pickle file written by :meth:`save`.
+            gpu: GPU index to map the transform to.
+            ddevice: Device type (e.g. ``"cuda"`` or ``"cpu"``).
+
+        Returns:
+            Reconstructed ``General_Registration`` instance.
+        """
         with open(path, "rb") as w:
             return cls.load_(pickle.load(w), gpu, ddevice)
 
     @classmethod
-    def load_(cls, w, gpu=0, ddevice: DEVICES = "cuda") -> Self:
+    def load_(cls, w: tuple, gpu: int = 0, ddevice: DEVICES = "cuda") -> Self:
+        """Reconstruct a ``General_Registration`` from a raw dump tuple.
+
+        Args:
+            w: Tuple as returned by :meth:`get_dump`.
+            gpu: GPU index for device placement.
+            ddevice: Device type string.
+
+        Returns:
+            Reconstructed ``General_Registration`` instance.
+        """
         transform, grid, mov, _is_inverted = w
         self = cls.__new__(cls)
         self.transform = transform

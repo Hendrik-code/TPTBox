@@ -32,46 +32,39 @@ def make_snapshot3D(
     output_path: str | Path | None,
     view: VIEW | list[VIEW] = "A",
     ids_list: list[Sequence[int]] | None = None,
-    smoothing=20,
+    smoothing: int = 20,
     resolution: float | None = None,
     width_factor: float = 1.0,
     scale_factor: int = 1,
-    verbose=True,
-    crop=True,
-    png_magnify=1,
+    verbose: bool = True,
+    crop: bool = True,
+    png_magnify: int = 1,
 ) -> Image.Image:
-    """
-    Generate a 3D snapshot from a medical image and save it to the specified output path.
+    """Generate a 3D surface-rendered snapshot from a segmentation image.
 
-    Parameters:
-    ----------
-    img : Image_Reference
-        The medical image reference from which to generate the snapshot.
+    Renders each label in the segmentation with its ITK color, arranges the
+    specified views side-by-side, and saves the composite image as a PNG.
 
-    output_path : str | Path | None
-        The file path where the snapshot will be saved.
-
-    view : VIEW | list[VIEW], optional
-        The orientation(s) for the snapshot. Default is "A" (Axial).
-        Can be a single orientation or a list of orientations.
-
-    ids_list : list[Sequence[int]] | None, optional
-        A list of lists containing the IDs of the structures to be included in the snapshot.
-        If None, all unique IDs in the image will be used. Default is None.
-
-    smoothing : int, optional
-        The smoothing factor to apply to the structures. Default is 20.
-
-    resolution : float | None, optional
-        The resolution to which the image should be rescaled. If None, the minimum zoom level of the image is used. Default is None.
-
-    width_factor : float, optional
-        A factor to adjust the width of the final snapshot. Default is 1.0.
+    Args:
+        img: Source segmentation image reference (NIfTI path, NII, etc.).
+        output_path: Destination PNG path. If None, a temporary file is used and
+            the resulting image is returned without being saved permanently.
+        view: Camera direction(s) for the render. Accepts a single direction
+            string or a list. Valid values: ``"R"``, ``"A"``, ``"L"``, ``"P"``,
+            ``"S"``, ``"I"``.
+        ids_list: Per-view lists of label IDs to render. If None, all unique
+            non-zero labels are used for every view.
+        smoothing: Number of VTK smoothing iterations applied to each surface.
+        resolution: Isotropic voxel size (mm) to resample to before rendering.
+            Defaults to the minimum zoom of the image.
+        width_factor: Multiplier applied to the per-view pixel width.
+        scale_factor: PNG magnification factor passed to fury's record function.
+        verbose: If True, logs the output path after saving.
+        crop: If True, crops the image to its bounding box before rendering.
+        png_magnify: Window pixel density multiplier for the fury renderer.
 
     Returns:
-    -------
-    None
-        The function saves the generated snapshot to the specified output path.
+        The rendered snapshot as a PIL Image object.
     """
     is_tmp = output_path is None
     t = None
@@ -140,15 +133,31 @@ def make_snapshot3D_parallel(
     output_paths: list[Path | str],
     view: VIEW | list[VIEW] = "A",
     ids_list: list[Sequence[int]] | None = None,
-    smoothing=20,
+    smoothing: int = 20,
     resolution: float = 1,
-    cpus=10,
-    width_factor=1.0,
-    png_magnify=1,
+    cpus: int = 10,
+    width_factor: float = 1.0,
+    png_magnify: int = 1,
     scale_factor: int = 1,
-    override=True,
-    crop=True,
-):
+    override: bool = True,
+    crop: bool = True,
+) -> None:
+    """Run :func:`make_snapshot3D` in parallel across multiple images.
+
+    Args:
+        imgs: List of segmentation image references to render.
+        output_paths: Destination PNG paths, one per image in ``imgs``.
+        view: Camera direction(s) forwarded to :func:`make_snapshot3D`.
+        ids_list: Per-view label ID lists forwarded to :func:`make_snapshot3D`.
+        smoothing: VTK smoothing iterations forwarded to :func:`make_snapshot3D`.
+        resolution: Isotropic voxel size (mm) for resampling.
+        cpus: Number of worker processes in the multiprocessing pool.
+        width_factor: Per-view width multiplier.
+        png_magnify: Window pixel density multiplier.
+        scale_factor: PNG magnification factor.
+        override: If False, skips images whose output file already exists.
+        crop: If True, crops each image to its bounding box before rendering.
+    """
     ress = []
     with Pool(cpus) as p:  # type: ignore
         for out_path, img in zip_strict(output_paths, imgs):
@@ -179,7 +188,8 @@ def make_snapshot3D_parallel(
 make_sub_snapshot_parallel = make_snapshot3D_parallel
 
 
-def _plot_sub_seg(scene: window.Scene, nii: NII, x, y, smoothing, orientation: VIEW):
+def _plot_sub_seg(scene: window.Scene, nii: NII, x: int, y: int, smoothing: int, orientation: VIEW) -> None:
+    """Render all labels from a segmentation NII into the fury scene at the given viewport offset."""
     if orientation == "A":
         #               [  axis1(w)   ]  [  axis2(h)   ]  [  view in ]
         affine = np.array([[0, 0, 1, 0], [0, 1, 0, 0], [1, 0, 0, 0], [0, 0, 0, 1]])
@@ -215,13 +225,14 @@ def _plot_sub_seg(scene: window.Scene, nii: NII, x, y, smoothing, orientation: V
 
 def _plot_mask(
     nii: NII,
-    affine,
-    x_current,
-    y_current,
-    smoothing=10,
+    affine: np.ndarray,
+    x_current: int,
+    y_current: int,
+    smoothing: int = 10,
     color: list | np.ndarray = _red,
-    opacity=1,
-):
+    opacity: float = 1,
+) -> vtk.vtkActor:
+    """Create a smoothed surface actor for a binary mask and position it in the scene."""
     mask = nii.get_seg_array()
     cont_actor = _contour_from_roi_smooth(mask, affine=affine, color=color, opacity=opacity, smoothing=smoothing)
     cont_actor.SetPosition(x_current, y_current, 0)
@@ -231,9 +242,10 @@ def _plot_mask(
 def _set_input(
     vtk_object: vtk.vtkImageReslice | vtk.vtkPolyData | vtk.vtkImageData | vtk.vtkAlgorithmOutput,
     inp: vtk.vtkImageData | vtk.vtkAlgorithmOutput,
-):
-    """Set Generic input function which takes into account VTK 5 or 6.
-    This function is copied from dipy.viz.utils
+) -> vtk.vtkImageReslice | vtk.vtkPolyData | vtk.vtkImageData | vtk.vtkAlgorithmOutput:
+    """Set input data on a VTK object, compatible with VTK 5 and 6+ APIs.
+
+    Copied from dipy.viz.utils.
     """
     if isinstance(inp, (vtk.vtkPolyData, vtk.vtkImageData)):
         vtk_object.SetInputData(inp)  # type: ignore
@@ -243,29 +255,31 @@ def _set_input(
     return vtk_object
 
 
-def _contour_from_roi_smooth(data: np.ndarray, affine=None, color: np.ndarray | list = _red, opacity=1, smoothing=0):
-    """Generates surface actor from a binary ROI.
-    Code from dipy, but added awesome smoothing!
+def _contour_from_roi_smooth(
+    data: np.ndarray,
+    affine: np.ndarray | None = None,
+    color: np.ndarray | list = _red,
+    opacity: float = 1,
+    smoothing: int = 0,
+) -> vtk.vtkActor:
+    """Generate a smoothed surface VTK actor from a binary 3-D ROI array.
 
-    Parameters
-    ----------
-    data : array, shape (X, Y, Z)
-        An ROI file that will be binarized and displayed.
-    affine : array, shape (4, 4)
-        Grid to space (usually RAS 1mm) transformation matrix. Default is None.
-        If None then the identity matrix is used.
-    color : (1, 3) ndarray
-        RGB values in [0,1].
-    opacity : float
-        Opacity of surface between 0 and 1.
-    smoothing: int
-        Smoothing factor e.g. 10.
-    Returns
-    -------
-    contour_assembly : vtkAssembly
-        ROI surface object displayed in space
-        coordinates as calculated by the affine parameter.
+    Adapted from dipy.viz.utils with added VTK poly-data smoothing.
 
+    Args:
+        data: Binary array of shape (X, Y, Z) representing the region of interest.
+        affine: 4x4 grid-to-space transformation matrix (RAS 1 mm convention).
+            If None the identity matrix is used.
+        color: RGB values in [0, 1] with shape (3,).
+        opacity: Surface opacity between 0 (transparent) and 1 (opaque).
+        smoothing: Number of VTK smoothing iterations. 0 disables smoothing.
+
+    Returns:
+        A vtkActor ready to be added to a VTK scene, positioned in world space
+        as defined by ``affine``.
+
+    Raises:
+        ValueError: If ``data`` is not a 3-D array.
     """
     major_version = vtk.vtkVersion.GetVTKMajorVersion()
 
