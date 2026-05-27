@@ -135,8 +135,12 @@ def save_poi(
             return str(o.absolute())
         raise TypeError(type(o))
 
-    with open(out_path, "w") as f:
-        json.dump(json_object, f, default=convert, indent=4)
+    try:
+        with open(out_path, "w") as f:
+            json.dump(json_object, f, default=convert, indent=4)
+    except TypeError:
+        Path(out_path).unlink(missing_ok=True)
+        raise
     log.print("POIs saved:", out_path, print_add, ltype=Log_Type.SAVE, verbose=verbose)
 
 
