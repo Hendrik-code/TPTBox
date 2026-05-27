@@ -26,8 +26,7 @@ def make_test_array_repeating(shape=(4, 4), labels=(0, 1, 2, 3)) -> np.ndarray:
 
 
 def make_labeled_3d_array() -> np.ndarray:
-    """
-    Create a small 3D array with labeled connected components.
+    """Create a small 3D array with labeled connected components.
     Components:
     - One block of 1s
     - One isolated voxel of 2

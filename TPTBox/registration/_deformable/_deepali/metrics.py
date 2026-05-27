@@ -87,10 +87,9 @@ def nmi_gauss(x1, x2, x1_bins, x2_bins, sigma=1e-3, e=1e-10):
 
 
 def calculate_dice(mask1, mask2, label_class=0):
-    """
-    from https://github.com/voxelmorph/
-    Dice score of a specified class between two label masks.
-    (classes are encoded but by label class number not one-hot )
+    """Compute the Dice score for a specified class between two label masks.
+
+    From https://github.com/voxelmorph/. Classes are encoded by label number, not one-hot.
 
     Args:
         mask1: (numpy.array, shape (N, 1, *sizes)) segmentation mask 1
@@ -116,9 +115,9 @@ def dice(a, b, label):
 
 
 def calculate_jacobian_metrics(disp):
-    """
-    Calculate Jacobian related regularity metrics.
-    from https://github.com/voxelmorph/
+    """Calculate Jacobian-based regularity metrics (folding ratio and gradient magnitude).
+
+    From https://github.com/voxelmorph/.
 
     Args:
         disp: (numpy.ndarray, shape (N, ndim, *sizes) Displacement field
@@ -138,9 +137,9 @@ def calculate_jacobian_metrics(disp):
 
 
 def calculate_jacobian_det(disp):
-    """
-    Calculate Jacobian determinant of displacement field of one image/volume (2D/3D)
-    from https://github.com/voxelmorph/
+    """Calculate the Jacobian determinant of a displacement field (2D or 3D).
+
+    From https://github.com/voxelmorph/.
 
     Args:
         disp: (numpy.ndarray, shape (*sizes, ndim)) Displacement field

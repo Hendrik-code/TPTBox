@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 import warnings
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import nibabel as nib
 import nibabel.orientations as nio
@@ -31,8 +31,11 @@ from .vert_constants import (
 )
 
 if TYPE_CHECKING:
+    from TPTBox import NII, POI
 
     class Grid_Proxy:
+        """Type-checking stub declaring the grid geometry attributes expected on NII and POI."""
+
         affine: AFFINE
         rotation: ROTATION
         zoom: ZOOMS
@@ -44,29 +47,45 @@ if TYPE_CHECKING:
 else:
 
     class Grid_Proxy:
-        pass
+        """Runtime placeholder for Grid_Proxy; real attribute declarations live in the TYPE_CHECKING branch."""
 
 
 class Has_Grid(Grid_Proxy):
-    """Parent class for methods that are shared by POI and NII"""
+    """Parent class for methods that are shared by POI and NII."""
 
     info: dict
 
     def to_gird(self) -> Grid:
+        """Convert this object's grid metadata into a standalone :class:`Grid` instance.
+
+        Returns:
+            Grid: A new ``Grid`` object populated with the same affine metadata.
+        """
         return Grid(**self._extract_affine())
 
     @property
-    def shape_int(self):
+    def shape_int(self) -> tuple[int, ...] | None:
+        """Return the image shape as a tuple of Python ints (rounded from float shapes).
+
+        Returns:
+            tuple[int, ...] | None: Integer shape tuple, or None if shape is not set.
+        """
         if self.shape is None:
             return None
         return tuple(np.rint(list(self.shape)).astype(int).tolist())
 
     @property
-    def spacing(self):
+    def spacing(self) -> ZOOMS:
+        """Voxel spacing (alias for :attr:`zoom`).
+
+        Returns:
+            ZOOMS: Voxel size in mm along each axis.
+        """
         return self.zoom
 
     @spacing.setter
     def spacing(self, value: ZOOMS):
+        """Set voxel spacing (alias for setting :attr:`zoom`)."""
         self.zoom = value
 
     def __str__(self) -> str:
@@ -83,7 +102,15 @@ class Has_Grid(Grid_Proxy):
         return f"shape={self.shape_int},spacing={zoom}, origin={origin}, ori={self.orientation}"  # type: ignore
 
     @property
-    def affine(self):
+    def affine(self) -> np.ndarray:
+        """Construct the 4x4 affine matrix from rotation, zoom, and origin.
+
+        Returns:
+            np.ndarray: 4x4 homogeneous affine matrix rounded to ``ROUNDING_LVL`` decimals.
+
+        Raises:
+            AssertionError: If any of ``zoom``, ``rotation``, or ``origin`` is not set.
+        """
         assert self.zoom is not None, "Attribute 'zoom' must be set before calling affine."
         assert self.rotation is not None, "Attribute 'rotation' must be set before calling affine."
         assert self.origin is not None, "Attribute 'origin' must be set before calling affine."
@@ -94,6 +121,11 @@ class Has_Grid(Grid_Proxy):
 
     @affine.setter
     def affine(self, affine: np.ndarray):
+        """Decompose a 4x4 affine matrix and store rotation, zoom, and origin.
+
+        Args:
+            affine (np.ndarray): 4x4 homogeneous affine matrix.
+        """
         rotation_zoom = affine[:3, :3]
         zoom = np.sqrt(np.sum(rotation_zoom * rotation_zoom, axis=0))
         rotation_zoom = affine[:3, :3]
@@ -104,6 +136,7 @@ class Has_Grid(Grid_Proxy):
         self.origin = origin.tolist()
 
     def _extract_affine(self: Has_Grid, rm_key=(), **args):
+        """Return a dict of affine metadata suitable for constructing a Grid or similar object."""
         shape = self.shape_int if self.shape is not None else None
         out = {
             "zoom": self.spacing,
@@ -124,9 +157,8 @@ class Has_Grid(Grid_Proxy):
         scaling=None,
         degrees=True,
         inplace=False,
-    ):
-        """
-        Apply a transformation (scaling, rotation, translation) to the affine matrix.
+    ) -> Self:
+        """Apply a transformation (scaling, rotation, translation) to the affine matrix.
 
         Assumptions
         -----------
@@ -161,7 +193,7 @@ class Has_Grid(Grid_Proxy):
         inplace : bool, default=False
             Whether to modify the object in place.
 
-        Returns
+        Returns:
         -------
         self or copy of self
             Object with updated affine.
@@ -195,7 +227,8 @@ class Has_Grid(Grid_Proxy):
         self.affine = transform @ self.affine
         return self
 
-    def change_affine_(self, translation=None, rotation_degrees=None, scaling=None, degrees=True):
+    def change_affine_(self, translation=None, rotation_degrees=None, scaling=None, degrees=True) -> Self:
+        """In-place variant of `change_affine`."""
         return self.change_affine(
             translation=translation,
             rotation_degrees=rotation_degrees,
@@ -205,6 +238,14 @@ class Has_Grid(Grid_Proxy):
         )
 
     def copy(self) -> Self:
+        """Return a deep copy of this object.
+
+        Returns:
+            Self: A new instance of the same type with the same attributes.
+
+        Raises:
+            NotImplementedError: Subclasses must override this method.
+        """
         raise NotImplementedError(
             "The copy method must be implemented in the subclass. It should return a new instance of the same type with the same attributes."
         )
@@ -225,8 +266,8 @@ class Has_Grid(Grid_Proxy):
         raise_error: bool = True,
         verbose: logging = False,
         text: str = "",
-    ):
-        """Checks if the different metadata is equal to some comparison entries
+    ) -> bool:
+        """Checks if the different metadata is equal to some comparison entries.
 
         Args:
             other (Has_Grid | None, optional): If set, will assert each entry of that object instead. Defaults to None.
@@ -323,6 +364,7 @@ class Has_Grid(Grid_Proxy):
                 - 'cor': Coronal plane (along the y-axis).
                 - 'sag': Sagittal plane (along the x-axis).
                 - 'iso': Isotropic plane (if the image has equal zoom values along all axes).
+
         Examples:
             >>> nii = NII(nib.load("my_image.nii.gz"))
             >>> nii.get_plane()
@@ -342,12 +384,32 @@ class Has_Grid(Grid_Proxy):
             plane = "iso"
         return plane
 
-    def get_axis(self, direction: DIRECTIONS = "S"):
+    def get_axis(self, direction: DIRECTIONS = "S") -> int:
+        """Return the axis index corresponding to the given anatomical direction.
+
+        If the exact direction is not found in the orientation tuple, the
+        opposite direction is used (e.g. "S" falls back to "I").
+
+        Args:
+            direction (DIRECTIONS, optional): Anatomical direction code (e.g. ``"S"``,
+                ``"R"``, ``"A"``). Defaults to ``"S"``.
+
+        Returns:
+            int: Zero-based axis index (0, 1, or 2).
+        """
         if direction not in self.orientation:
             direction = _same_direction[direction]
         return self.orientation.index(direction)
 
-    def make_empty_POI(self, points: dict | None = None):
+    def make_empty_POI(self, points: dict | None = None) -> POI:
+        """Create an empty POI object sharing the same grid metadata as this object.
+
+        Args:
+            points (dict | None, optional): Initial point dictionary. Defaults to an empty dict.
+
+        Returns:
+            POI: A new POI instance with the same orientation, zoom, shape, rotation and origin.
+        """
         from TPTBox import POI
 
         p = {} if points is None else points
@@ -366,7 +428,21 @@ class Has_Grid(Grid_Proxy):
             **args,
         )
 
-    def make_empty_nii(self, seg=False, _arr=None):
+    def make_empty_nii(self, seg=False, _arr=None) -> NII:
+        """Create a NII image filled with zeros (or a given array) using this object's grid.
+
+        Args:
+            seg (bool, optional): If True, mark the resulting NII as a segmentation.
+                Defaults to False.
+            _arr (np.ndarray | None, optional): Pre-built array to use as image data.
+                Must match ``shape_int`` if provided. Defaults to None (zeros).
+
+        Returns:
+            NII: New NII instance with the same affine and the given or zero-filled data.
+
+        Raises:
+            AssertionError: If ``_arr`` shape does not match ``shape_int``.
+        """
         from TPTBox import NII
 
         if _arr is None:
@@ -378,7 +454,7 @@ class Has_Grid(Grid_Proxy):
         nii = nib.Nifti1Image(_arr, affine=self.affine)
         return NII(nii, seg=seg)
 
-    def make_nii(self, arr: np.ndarray | None = None, seg=False):
+    def make_nii(self, arr: np.ndarray | None = None, seg=False) -> NII:
         """Make a nii with the same grid as object. Shape must fit the Grid.
 
         Args:
@@ -392,15 +468,52 @@ class Has_Grid(Grid_Proxy):
             arr = np.zeros(self.shape_int)
         return self.make_empty_nii(_arr=arr, seg=seg)
 
-    def global_to_local(self, x: COORDINATE):
+    def global_to_local(self, x: COORDINATE) -> tuple:
+        """Convert world (RAS/LPS) coordinates to voxel (local) coordinates.
+
+        Applies the inverse affine transform: rotation-transpose times
+        (world_point - origin), then divided by voxel spacing.
+
+        Args:
+            x (COORDINATE): World-space coordinate as a 3-element sequence.
+
+        Returns:
+            tuple: Voxel-space coordinate rounded to 7 decimal places.
+        """
         a = self.rotation.T @ (np.array(x) - self.origin) / np.array(self.zoom)
         return tuple(round(float(v), 7) for v in a)
 
-    def local_to_global(self, x: COORDINATE):
+    def local_to_global(self, x: COORDINATE) -> tuple:
+        """Convert voxel (local) coordinates to world (RAS/LPS) coordinates.
+
+        Applies the forward affine transform: rotation times
+        (voxel_point * spacing) plus origin.
+
+        Args:
+            x (COORDINATE): Voxel-space coordinate as a 3-element sequence.
+
+        Returns:
+            tuple: World-space coordinate rounded to 7 decimal places.
+        """
         a = self.rotation @ (np.array(x) * np.array(self.zoom)) + self.origin
         return tuple(round(float(v), 7) for v in a)
 
-    def to_deepali_grid(self, align_corners: bool = True):
+    def to_deepali_grid(self, align_corners: bool = True) -> Any:
+        """Convert the grid metadata to a DeepALI ``Grid`` object.
+
+        Coordinates are converted from the NIfTI RAS convention to the ITK/LPS
+        convention used by DeepALI (the first two axes are negated).
+
+        Args:
+            align_corners (bool, optional): Passed to ``grid.align_corners_()``.
+                Defaults to True.
+
+        Returns:
+            deepali.core.Grid: DeepALI grid in LPS convention.
+
+        Raises:
+            ImportError: If the ``hf-deepali`` package is not installed.
+        """
         try:
             from deepali.core import Grid
         except Exception:
@@ -431,6 +544,20 @@ class Has_Grid(Grid_Proxy):
 
     @classmethod
     def from_deepali_grid(cls, grid):
+        """Construct a :class:`Grid` from a DeepALI ``Grid`` object.
+
+        Coordinates are converted from the ITK/LPS convention used by DeepALI
+        back to the NIfTI RAS convention (the first two axes are negated).
+
+        Args:
+            grid (deepali.core.Grid): A DeepALI grid in LPS convention.
+
+        Returns:
+            Grid: A TPTBox ``Grid`` instance with RAS-convention affine metadata.
+
+        Raises:
+            ImportError: If the ``hf-deepali`` package is not installed.
+        """
         try:
             from deepali.core import Grid as dp_Grid
         except Exception:
@@ -453,12 +580,19 @@ class Has_Grid(Grid_Proxy):
 
         return grid
 
-    def get_num_dims(self):
+    def get_num_dims(self) -> int:
+        """Return the number of spatial dimensions.
+
+        Returns:
+            int: Number of dimensions (typically 3 for 3-D medical images).
+        """
         return len(self.shape)
 
 
 @dataclass
 class Grid(Has_Grid):
+    """Concrete grid geometry object constructed from affine, zoom, orientation, and related keyword arguments."""
+
     def __init__(self, **qargs) -> None:
         super().__init__()
         for k, v in qargs.items():

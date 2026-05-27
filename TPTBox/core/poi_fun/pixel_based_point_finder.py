@@ -15,16 +15,22 @@ _log = Print_Logger()
 
 
 #### Pixel Level functions ####
-def get_nearest_neighbor(p, sr_msk, region_label):
-    """
-    get the coordinates of point x from sr_mask's provided region_label which is closest to point p
+def get_nearest_neighbor(
+    p: np.ndarray,
+    sr_msk: np.ndarray,
+    region_label: int,
+) -> np.ndarray:
+    """Return the voxel in a label mask that is closest to a query point.
 
-    inputs:
-        p: the chose point of interest (as array)
-        sr_msk: an array containing the subregion mask
-        region_label: the label if the region of interest in sr_msk
-    output:
-        out_point: the point from sr_msk[region_label] closest to point p (as array)
+    Args:
+        p: Query point as a 1-D or column array of shape ``(3,)`` or ``(3, 1)``.
+        sr_msk: 3-D integer array containing segmentation labels.
+        region_label: Label value whose voxels are searched for the nearest
+            neighbour.
+
+    Returns:
+        1-D integer array ``(x, y, z)`` of the voxel in ``sr_msk`` with label
+        ``region_label`` that minimises the Euclidean distance to ``p``.
     """
     if len(p.shape) == 1:
         p = np.expand_dims(p, 1)
@@ -44,7 +50,7 @@ def max_distance_ray_cast_pixel_level(
     start_point: Location | np.ndarray = Location.Vertebra_Corpus,
     two_sided=False,
     log: Logger_Interface = _log,
-):
+) -> tuple[int, ...] | None:
     """Calculate the maximum distance ray cast in a region.
 
     Args:
@@ -87,27 +93,36 @@ def ray_cast_pixel_level_from_poi(
     normal_vector_points: tuple[Location, Location] | DIRECTIONS = "R",
     start_point: Location | np.ndarray = Location.Vertebra_Corpus,
     log: Logger_Interface = _log,
-    two_sided=False,
+    two_sided: bool = False,
 ) -> tuple[np.ndarray | None, np.ndarray | None]:
-    from TPTBox.core.poi_fun.ray_casting import ray_cast_pixel_lvl
+    """Perform pixel-level ray casting in a region using POI-derived direction.
 
-    """Perform ray casting in a region.
+    Resolves the ray start coordinate and direction vector from the ``POI``
+    object, then delegates to :func:`~TPTBox.core.poi_fun.ray_casting.ray_cast_pixel_lvl`
+    to enumerate all voxels along the ray at integer resolution.
 
     Args:
-        poi (POI): Point of interest.
-        region (NII): Region to cast rays in.
-        vert_id (int): Vertex ID.
-        bb (Tuple[slice, slice, slice]): Bounding box coordinates.
-        normal_vector_points (Union[Tuple[Location, Location], DIRECTIONS], optional):
-            Points defining the normal vector or the direction. Defaults to "R".
-        start_point (Union[Location, np.ndarray], optional): Starting point of the ray.
-            Defaults to Location.Vertebra_Corpus.
-        log (Logger_Interface, optional): Logger interface. Defaults to _log.
-        two_sided (bool, optional): Whether to perform two-sided ray casting. Defaults to False.
+        poi: ``POI`` object providing landmark coordinates and orientation.
+        region: ``NII`` image defining the volume shape for boundary clipping.
+        vert_id: Vertebra identifier (integer label).
+        bb: Bounding-box slices mapping global POI coordinates to local
+            sub-volume indices.
+        normal_vector_points: Ray direction — a ``DIRECTIONS`` string resolved
+            from the vertebra orientation, or a 2-tuple of ``Location`` members
+            whose difference defines the direction.  Defaults to ``"R"``.
+        start_point: Ray origin — a ``Location`` member resolved from ``poi``
+            or a pre-computed numpy coordinate.  Defaults to
+            ``Location.Vertebra_Corpus``.
+        log: Logger for warning and error messages.
+        two_sided: Cast the ray in both directions.  Defaults to ``False``.
 
     Returns:
-        Tuple[Optional[np.ndarray], Optional[np.ndarray]]: Plane coordinates and arange values.
+        ``(plane_coords, arange)`` where ``plane_coords`` is an integer array of
+        shape ``(N, 3)`` with visited voxel indices and ``arange`` is a float
+        array of distance values, or ``(None, None)`` on failure.
     """
+    from TPTBox.core.poi_fun.ray_casting import ray_cast_pixel_lvl
+
     start_point_np = to_local_np(start_point, bb, poi, vert_id, log) if isinstance(start_point, Location) else start_point
     if start_point_np is None:
         return None, None
@@ -134,22 +149,38 @@ def ray_cast_pixel_level_from_poi(
 def get_extreme_point_by_vert_direction(
     poi: POI,
     region: NII,
-    vert_id,
+    vert_id: int,
     direction: Sequence[DIRECTIONS] | DIRECTIONS | tuple[DIRECTIONS, float] | Sequence[tuple[DIRECTIONS, float]] = "I",
-):
-    """
-    Get the extreme point in a specified direction.
+) -> np.ndarray | None:
+    """Find the voxel in a binary region that is most extreme along a vertebra-relative direction.
+
+    Projects all nonzero voxels in ``region`` into the vertebra PIR frame and
+    returns the voxel index with the maximum weighted score along the requested
+    direction(s).
 
     Args:
-        poi (POI): The chosen point of interest represented as an array.
-        region (NII): An array containing the subregion mask.
-        vert_id: The ID of the vertex.
-        direction (Union[Sequence[DIRECTIONS], DIRECTIONS], optional): The direction(s) to search for the extreme point.
-            Defaults to "I" (positive direction along the secondary axis).
+        poi: ``POI`` object providing the vertebra orientation matrix for
+            ``vert_id``.
+        region: Binary ``NII`` image (value 1 for foreground) aligned to the
+            same space as ``poi``.
+        vert_id: Vertebra identifier used to look up the orientation matrix.
+        direction: Anatomical direction(s) to optimise.  May be:
+
+            * A single direction letter (e.g. ``"I"``).
+            * A sequence of direction letters (e.g. ``["P", "I"]``).
+            * A ``(direction, weight)`` tuple or a sequence of such tuples for
+              weighted combinations.
+
+            Defaults to ``"I"``.
+
+    Returns:
+        Integer voxel index array ``(x, y, z)`` of the most extreme point, or
+        ``None`` if the orientation matrix cannot be retrieved.
 
     Note:
-        Assumes `region` contains binary values indicating the presence of points.
-        Uses `_get_sub_array_by_direction` internally.
+        ``region`` must contain binary values (1 for foreground, 0 for
+        background).  Zoom scaling from ``poi`` is applied to ensure
+        physically meaningful distances.
     """
     direction_: Sequence[DIRECTIONS] | Sequence[tuple[DIRECTIONS, float]] = direction if isinstance(direction, Sequence) else (direction,)  # type: ignore
 
@@ -222,5 +253,18 @@ def project_pois_onto_set_of_points(poi: POI, point_set: list[COORDINATE]) -> PO
     return poi_n
 
 
-def cdist_to_point(point, a):
+def cdist_to_point(
+    point: COORDINATE | np.ndarray,
+    a: np.ndarray,
+) -> np.ndarray:
+    """Compute Euclidean distances from a single point to every row in an array.
+
+    Args:
+        point: Query point as a sequence or 1-D array of length 3.
+        a: Array of shape ``(N, 3)`` containing the candidate points.
+
+    Returns:
+        1-D float array of shape ``(N,)`` with the Euclidean distance from
+        ``point`` to each row of ``a``.
+    """
     return cdist([point], a)[0]

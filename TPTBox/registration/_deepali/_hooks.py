@@ -147,7 +147,6 @@ def print_step_loss_hook(level: int, max_steps: int) -> RegistrationStepHook:  #
 
 def print_step_loss_hook_tqdm(level: int, max_steps: int) -> RegistrationStepHook:  # noqa: ARG001
     r"""Get callback function for printing loss after each step."""
-
     from tqdm import tqdm
 
     bar = tqdm(range(max_steps))

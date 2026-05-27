@@ -13,9 +13,31 @@ def mip_shot(
     ct_ref: BIDS_FILE,
     vert_msk: Image_Reference,
     subreg_ctd: POI_Reference,
-    subreg_msk: Image_Reference = None,
-    out_path=None,
-):
+    subreg_msk: Image_Reference | None = None,
+    out_path: str | Path | None = None,
+) -> None:
+    """Save a multi-panel CT snapshot combining slice, mean-intensity, and coloured-depth MIP views.
+
+    Three frames are always included:
+
+    1. Standard CT slice view with vertebra segmentation and centroids
+       (sagittal + coronal).
+    2. Mean-intensity projection of the masked vertebra region only
+       (sagittal + coronal, no segmentation overlay).
+    3. Coloured-depth maximum-intensity projection of the bone above a 100 HU
+       threshold (coronal only).
+
+    An optional fourth frame with the subregion mask is appended when
+    ``subreg_msk`` is provided.
+
+    Args:
+        ct_ref: BIDS file pointing to the CT image.
+        vert_msk: Vertebra segmentation mask.
+        subreg_ctd: Subregion centroids (POI reference).
+        subreg_msk: Optional subregion segmentation mask for an extra frame.
+        out_path: Output file path.  When ``None`` the path is derived
+            automatically from ``ct_ref`` with ``desc=mip``.
+    """
     frames = [
         Snapshot_Frame(
             image=ct_ref,
@@ -87,8 +109,27 @@ def sacrum_shot(
     subreg_ctd: POI_Reference,
     add_ctd: list[POI_Reference] | None = None,
     mip_c: bool = False,
-    out_path=None,
-):
+    out_path: str | Path | None = None,
+) -> None:
+    """Save a CT snapshot focused on the sacrum region.
+
+    A primary sagittal + coronal frame is always created.  Additional coronal
+    frames are appended for each extra centroid file in ``add_ctd``.  When
+    ``mip_c`` is ``True`` a coloured-depth MIP coronal frame is added.
+
+    Args:
+        ct_ref: BIDS file pointing to the CT image.  If an instance of
+            :class:`~TPTBox.BIDS_FILE`, the image is pre-loaded and
+            reoriented.
+        vert_msk: Vertebra segmentation mask.
+        subreg_ctd: Primary subregion centroids (POI reference).
+        add_ctd: Optional list of additional centroid references, each
+            rendered as an extra coronal frame.
+        mip_c: When ``True`` a coloured-depth maximum-intensity projection
+            frame is appended.
+        out_path: Output file path.  When ``None`` the path is derived
+            automatically from ``ct_ref`` with ``desc=sacrum``.
+    """
     if isinstance(ct_ref, BIDS_FILE):
         ct_ref = ct_ref.open_nii().reorient_()
     frames = [
@@ -152,8 +193,24 @@ def spline_shot(
     subreg_ctd: POI_Reference,
     spline_nii: NII,
     add_info: str = "",
-    out_path=None,
-):
+    out_path: str | Path | None = None,
+) -> None:
+    """Save a two-frame CT snapshot showing the spinal spline interpolation result.
+
+    Frame 1 shows the original vertebra mask overlaid on the CT (sagittal
+    only).  Frame 2 shows the spline NIfTI segmentation overlaid on the CT
+    (sagittal + coronal) so that the spline quality can be assessed visually.
+
+    Args:
+        ct_ref: BIDS file pointing to the CT image.
+        vert_msk: Vertebra segmentation mask.
+        subreg_ctd: Subregion centroids (POI reference).
+        spline_nii: NIfTI image containing the fitted spline segmentation.
+        add_info: Optional string appended to the ``desc`` field of the
+            auto-generated output path.
+        out_path: Output file path.  When ``None`` the path is derived
+            automatically from ``ct_ref``.
+    """
     frames = [
         Snapshot_Frame(
             image=ct_ref,
@@ -189,11 +246,31 @@ def snapshot(
     ref: Image_Reference,
     vert_msk: Image_Reference,
     subreg_ctd: POI_Reference,
-    subreg_msk: Image_Reference = None,
+    subreg_msk: Image_Reference | None = None,
     out_path: str | Path | list[str | Path] | list[Path] | None = None,
-    mode="MINMAX",
-    crop=False,
-):
+    mode: str = "MINMAX",
+    crop: bool = False,
+) -> list[str | Path]:
+    """Save a standard vertebra snapshot, auto-detecting CT vs. MRI mode.
+
+    Delegates to :func:`mri_snapshot` after setting ``mode`` to ``"CT"`` for
+    BIDS CT files or ``"MRI"`` for all other BIDS files.
+
+    Args:
+        ref: Source image reference.  A :class:`~TPTBox.BIDS_FILE` whose
+            ``bids_format`` is ``"ct"`` is treated as CT; everything else
+            is treated as MRI.
+        vert_msk: Vertebra segmentation mask.
+        subreg_ctd: Subregion centroids (POI reference).
+        subreg_msk: Optional subregion segmentation mask for an extra frame.
+        out_path: Output path(s).  ``None`` triggers automatic path derivation.
+        mode: Intensity window mode passed to :class:`~.Snapshot_Frame` when
+            ``ref`` is not a :class:`~TPTBox.BIDS_FILE`.
+        crop: Whether to crop the output to the segmentation bounding box.
+
+    Returns:
+        List of saved output paths.
+    """
     if isinstance(ref, BIDS_FILE):
         mode = "CT" if ref.bids_format == "ct" else "MRI"
 
@@ -204,11 +281,32 @@ def mri_snapshot(
     mrt_ref: BIDS_FILE,
     vert_msk: Image_Reference,
     subreg_ctd: POI_Reference,
-    subreg_msk: Image_Reference = None,
+    subreg_msk: Image_Reference | None = None,
     out_path: str | Path | list[str | Path] | list[Path] | None = None,
-    mode="MRI",
-    crop=False,
-):
+    mode: str = "MRI",
+    crop: bool = False,
+) -> list[str | Path]:
+    """Save a two-frame (or three-frame) MRI vertebra snapshot.
+
+    Frame 1: image with centroids but without segmentation overlay (to
+    check centroid placement without clutter).
+    Frame 2: image with both centroids and segmentation overlay.
+    Frame 3 (optional): image with the subregion mask overlay, added when
+    ``subreg_msk`` is provided.
+
+    Args:
+        mrt_ref: BIDS file pointing to the MRI image.
+        vert_msk: Vertebra segmentation mask.
+        subreg_ctd: Subregion centroids (POI reference).
+        subreg_msk: Optional subregion segmentation mask for an extra frame.
+        out_path: Output path(s).  When ``None`` the path is derived
+            automatically from ``mrt_ref`` with ``desc=vert``.
+        mode: Intensity window mode; defaults to ``"MRI"``.
+        crop: Whether to crop output frames to the segmentation bounding box.
+
+    Returns:
+        List of saved output paths.
+    """
     frames = [
         Snapshot_Frame(
             image=mrt_ref,
@@ -260,9 +358,30 @@ def vibe_snapshot(
     subreg_ctd: POI_Reference,
     subreg_msk: Image_Reference,
     hide_centroids: bool = False,
-    out_path=None,
+    out_path: str | Path | None = None,
     verbose: bool = False,
-):
+) -> str | Path:
+    """Save a VIBE multi-contrast MRI snapshot with four Dixon phases.
+
+    Creates one sagittal frame for each of the four VIBE contrast phases in
+    ``mrt_ref``, all with the subregion mask overlay.  An optional fifth
+    frame shows the first phase in sagittal + coronal with the vertebra mask.
+
+    Args:
+        mrt_ref: Four-tuple of BIDS files corresponding to the VIBE Dixon
+            phases (e.g. in-phase, opposed-phase, water, fat).
+        vert_msk: Optional vertebra segmentation mask used for an extra
+            sagittal + coronal frame.  Skipped when ``None``.
+        subreg_ctd: Subregion centroids (POI reference).
+        subreg_msk: Subregion segmentation mask overlaid on all four phases.
+        hide_centroids: When ``True`` centroid markers are hidden.
+        out_path: Output file path.  When ``None`` the path is derived
+            automatically from ``mrt_ref[0]`` with ``desc=vibe``.
+        verbose: When ``True`` the saved path is printed to stdout.
+
+    Returns:
+        Path to the saved snapshot image.
+    """
     # print(type(mrt_ref[0]))
     frames = [
         Snapshot_Frame(
@@ -337,9 +456,30 @@ def ct_mri_snapshot(
     subreg_ctd_mrt: POI_Reference | None = None,
     vert_msk_ct: Image_Reference | None = None,
     subreg_ctd_ct: POI_Reference | None = None,
-    out_path=None,
-    return_frames=False,
-):
+    out_path: str | Path | None = None,
+    return_frames: bool = False,
+) -> list | str | Path:
+    """Save a two-frame snapshot comparing an MRI and a CT side by side.
+
+    Frame 1: MRI in ``"MRI"`` mode with optional vertebra mask and centroids.
+    Frame 2: CT in ``"CT"`` mode with optional vertebra mask and centroids.
+
+    Args:
+        mrt_ref: MRI image reference.
+        ct_ref: CT image reference.
+        vert_msk_mrt: Optional vertebra segmentation for the MRI frame.
+        subreg_ctd_mrt: Optional subregion centroids for the MRI frame.
+        vert_msk_ct: Optional vertebra segmentation for the CT frame.
+        subreg_ctd_ct: Optional subregion centroids for the CT frame.
+        out_path: Output file path.  When ``None`` the path is derived
+            automatically from ``mrt_ref`` (must be a :class:`~TPTBox.BIDS_FILE`).
+        return_frames: When ``True`` the list of
+            :class:`~.Snapshot_Frame` objects is returned without saving.
+
+    Returns:
+        The list of :class:`~.Snapshot_Frame` objects when ``return_frames``
+        is ``True``, otherwise the path to the saved snapshot image.
+    """
     frames = [
         Snapshot_Frame(
             image=mrt_ref,
@@ -375,8 +515,21 @@ def poi_snapshot(
     ct_nii: BIDS_FILE,
     vert_msk: Image_Reference | None,
     subreg_ctd: POI_Reference,
-    out_path=None,
-):
+    out_path: str | Path | None = None,
+) -> None:
+    """Save a multi-frame CT snapshot visualising ligament attachment-point POIs.
+
+    The POIs are partitioned into lateral groups (dorsal ``_D``, sinister
+    ``_S``, median) and ligament groups (ALL, PLL, FL).  Seven frames are
+    produced covering different sagittal and coronal views of these groups.
+
+    Args:
+        ct_nii: BIDS file pointing to the CT image.
+        vert_msk: Optional vertebra segmentation mask.
+        subreg_ctd: POI reference containing the ligament attachment points.
+        out_path: Output file path.  When ``None`` the path is derived
+            automatically from ``ct_nii`` with ``desc=poi``.
+    """
     # conversion_poi = {
     #    "SSL": 81,  # this POI is not included in our POI list
     #    "ALL_CR_S": 109,
@@ -505,7 +658,8 @@ if __name__ == "__main__":
     # poi_snapshot(ct_file, f, g)
     from pathlib import Path
 
-    def make_snap(file):
+    def make_snap(file) -> None:
+        """Generate a POI snapshot for the given file if it matches the expected subject index."""
         idx = file.stem
         if idx != "63":
             return

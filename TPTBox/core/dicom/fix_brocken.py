@@ -45,7 +45,8 @@ source_folders = {
 }
 
 
-def test_nii(path: Path | str | BIDS_FILE):
+def test_nii(path: Path | str | BIDS_FILE) -> bool:
+    """Return ``True`` when the NIfTI file at ``path`` can be loaded without errors."""
     if isinstance(path, str):
         path = Path(path)
     if path.exists():
@@ -56,7 +57,8 @@ def test_nii(path: Path | str | BIDS_FILE):
     return True
 
 
-def _find_all_broken(path: str = "TODO/dataset-nako/", parents=None):
+def _find_all_broken(path: str = "TODO/dataset-nako/", parents: list[str] | None = None) -> None:
+    """Scan a BIDS dataset for unreadable NIfTI files and append them to a pickle log."""
     brocken = []
     subj_id = 0
     with open("broken.pkl", "rb") as w:
@@ -86,7 +88,17 @@ source_folder_encrypted = Path("/media/veracrypt1/NAKO-732_MRT/")
 source_folder_encrypted_alternative = Path("Nachlieferung")
 
 
-def _test_and_replace(out_folder="~/dataset-nako"):
+def _test_and_replace(out_folder: str = "~/dataset-nako") -> None:
+    """Re-extract corrupted NIfTI files from the original DICOM archives.
+
+    Reads the list of broken files produced by :func:`_find_all_broken`,
+    locates the corresponding DICOM zip archive in the encrypted source
+    folders, re-extracts it, and verifies the result.
+
+    Args:
+        out_folder: Target BIDS dataset directory where re-extracted files are
+            written.
+    """
     from TPTBox.core.dicom.dicom_extract import extract_dicom_folder
 
     with open("TODO", "rb") as w:

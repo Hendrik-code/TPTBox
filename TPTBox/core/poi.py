@@ -6,7 +6,10 @@ from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TypeVar, Union
+from typing import TYPE_CHECKING, TypeVar, Union
+
+if TYPE_CHECKING:
+    from TPTBox.core.poi_fun.poi_global import POI_Global
 
 import nibabel as nib
 import nibabel.orientations as nio
@@ -51,8 +54,7 @@ POI_Reference = Union[
 
 @dataclass
 class POI(Abstract_POI, Has_Grid):
-    """
-    This class represents a collection of POIs used to define points of interest in medical imaging data.
+    """This class represents a collection of POIs used to define points of interest in medical imaging data.
 
     Attributes:
         orientation (Ax_Codes): A tuple of three string values representing the orientation of the image.
@@ -120,7 +122,8 @@ class POI(Abstract_POI, Has_Grid):
     _zoom: ZOOMS = field(init=False, default=(1, 1, 1), repr=False, compare=False)
     _vert_orientation_pir = {}  # Elusive; will not be saved; will not be copied. For Buffering results  # noqa: RUF012
 
-    def _set_inplace(self, poi: Self):
+    def _set_inplace(self, poi: Self) -> Self:
+        """Copy all grid/affine attributes and centroids from ``poi`` into ``self``."""
         self.orientation = poi.orientation
         self.centroids = poi.centroids
         self.zoom = poi.zoom
@@ -130,19 +133,23 @@ class POI(Abstract_POI, Has_Grid):
         return self
 
     @property
-    def is_global(self):
+    def is_global(self) -> bool:
+        """Always False for voxel-space POIs; True only for POI_Global objects."""
         return False
 
     @property
-    def rotation(self):
+    def rotation(self) -> ROTATION:
+        """3×3 rotation matrix of the image grid, or None if not set."""
         return self._rotation
 
     @property
-    def zoom(self):
+    def zoom(self) -> ZOOMS:
+        """Voxel spacing in mm along each axis, or None if not set."""
         return self._zoom
 
     @property
-    def spacing(self):
+    def spacing(self) -> ZOOMS:
+        """Alias for :attr:`zoom`."""
         return self._zoom
 
     @rotation.setter
@@ -167,7 +174,8 @@ class POI(Abstract_POI, Has_Grid):
     def spacing(self, value):
         self.zoom = value
 
-    def clone(self, **qargs):
+    def clone(self, **qargs) -> Self:
+        """Return a copy of this POI; alias for :meth:`copy`."""
         return self.copy(**qargs)
 
     __hash__ = None  # type: ignore # explicitly mark as unhashable
@@ -196,6 +204,7 @@ class POI(Abstract_POI, Has_Grid):
                 Defaults to Sentinel(), in which case the original rotation matrix will be used.
             origin (Coordinate | None | Sentinel, optional): The origin coordinates to use in the copied object.
                 Defaults to Sentinel(), in which case the original origin coordinates will be used.
+
         Returns:
             POI: A new POI object with the specified attribute overrides.
 
@@ -286,17 +295,18 @@ class POI(Abstract_POI, Has_Grid):
         o_shift: tuple[slice, slice, slice] | Sequence[slice],
         shape: tuple[int, int, int] | Sequence[int],
         inplace=False,
-    ):
-        """A Poi crop can be trivially reversed with out any loss. See apply_crop for more information"""
+    ) -> Self:
+        """A Poi crop can be trivially reversed with out any loss. See apply_crop for more information."""
         return self.apply_crop(
             tuple(slice(-shift.start, sh - shift.start) for shift, sh in zip_strict(o_shift, shape)),
             inplace=inplace,
         )
 
-    def apply_crop(self: Self, o_shift: tuple[slice, slice, slice] | Sequence[slice], inplace=False):
-        """When you crop an image, you have to also crop the POIs.
-        There are actually no boundary to be moved, but the origin must be moved to the new 0,0,0
-        Points outside the frame are NOT removed. See NII.compute_crop_slice()
+    def apply_crop(self: Self, o_shift: tuple[slice, slice, slice] | Sequence[slice], inplace=False) -> Self:
+        """Adjust POI coordinates after a crop operation by shifting the origin.
+
+        Points outside the cropped frame are NOT removed.
+        See :meth:`~TPTBox.NII.compute_crop_slice`.
 
         Args:
             o_shift (tuple[slice, slice, slice]): translation of the origin, cause by the crop
@@ -381,15 +391,30 @@ class POI(Abstract_POI, Has_Grid):
         out = self.copy(centroids=poi_out.centroids, shape=shape, rotation=self.rotation, origin=origin)
         return out
 
-    def apply_crop_(self, o_shift: tuple[slice, slice, slice] | Sequence[slice]):
+    def apply_crop_(self, o_shift: tuple[slice, slice, slice] | Sequence[slice]) -> Self:
+        """In-place variant of :meth:`apply_crop`."""
         return self.apply_crop(o_shift, inplace=True)
 
-    def shift_all_coordinates(self, translation_vector: tuple[slice, slice, slice] | Sequence[slice] | None, inplace=True, **kwargs):
+    def shift_all_coordinates(
+        self, translation_vector: tuple[slice, slice, slice] | Sequence[slice] | None, inplace=True, **kwargs
+    ) -> Self:
+        """Shift all POI coordinates by a translation expressed as crop slices.
+
+        Args:
+            translation_vector: Per-axis slices encoding the origin shift, or ``None``
+                to return ``self`` unchanged.
+            inplace (bool, optional): Whether to modify in place. Defaults to True.
+
+        Returns:
+            Self: The updated POI (same object when ``inplace=True``).
+        """
         if translation_vector is None:
             return self
         return self.apply_crop(translation_vector, inplace=inplace, **kwargs)
 
-    def reorient(self, axcodes_to: AX_CODES = ("P", "I", "R"), decimals=ROUNDING_LVL, verbose: logging = False, inplace=False, _shape=None):
+    def reorient(
+        self, axcodes_to: AX_CODES = ("P", "I", "R"), decimals=ROUNDING_LVL, verbose: logging = False, inplace=False, _shape=None
+    ) -> Self:
         """Reorients the POIs of an image from the current orientation to the specified orientation.
 
         This method updates the position of the POIs, zoom level, and shape of the image accordingly.
@@ -489,7 +514,8 @@ class POI(Abstract_POI, Has_Grid):
             return self
         return self.copy(orientation=axcodes_to, centroids=points, zoom=zoom, shape=shape, origin=origin, rotation=rotation)
 
-    def reorient_(self, axcodes_to: AX_CODES = ("P", "I", "R"), decimals=3, verbose: logging = False, _shape=None):
+    def reorient_(self, axcodes_to: AX_CODES = ("P", "I", "R"), decimals=3, verbose: logging = False, _shape=None) -> Self:
+        """In-place variant of :meth:`reorient`."""
         return self.reorient(axcodes_to, decimals=decimals, verbose=verbose, inplace=True, _shape=_shape)
 
     def rescale(self, voxel_spacing: ZOOMS = (1, 1, 1), decimals=ROUNDING_LVL, verbose: logging = True, inplace=False) -> Self:
@@ -546,9 +572,10 @@ class POI(Abstract_POI, Has_Grid):
         return self.copy(centroids=points, zoom=voxel_spacing, shape=shp)
 
     def rescale_(self, voxel_spacing: ZOOMS = (1, 1, 1), decimals=3, verbose: logging = False) -> Self:
+        """In-place variant of :meth:`rescale`."""
         return self.rescale(voxel_spacing=voxel_spacing, decimals=decimals, verbose=verbose, inplace=True)
 
-    def to_global(self, itk_coords=False):
+    def to_global(self, itk_coords=False) -> POI_Global:
         """Converts the Centroids object to a global POI_Global object.
 
         This method converts the local POI coordinates to global coordinates using the Centroids' zoom,
@@ -567,10 +594,19 @@ class POI(Abstract_POI, Has_Grid):
             self, itk_coords=itk_coords, level_one_info=self.level_one_info, level_two_info=self.level_two_info, info=self.info.copy()
         )
 
-    def resample_from_to(self, ref: Has_Grid):
+    def resample_from_to(self, ref: Has_Grid) -> POI:
+        """Resample this POI to the grid of another image by converting to global and back.
+
+        Args:
+            ref (Has_Grid): Target image grid (any object providing affine/orientation info).
+
+        Returns:
+            POI: A new POI in the voxel space of ``ref``.
+        """
         return self.to_global().to_other(ref)
 
-    def resample_from_to_(self, ref: Has_Grid):
+    def resample_from_to_(self, ref: Has_Grid) -> Self:
+        """In-place variant of :meth:`resample_from_to`."""
         return self._set_inplace(self.resample_from_to(ref))
 
     def save(
@@ -582,8 +618,7 @@ class POI(Abstract_POI, Has_Grid):
         resample_reference: Has_Grid | None = None,
         verbose: logging = True,
     ) -> None:
-        """
-        Saves the POIs to a JSON file.
+        """Saves the POIs to a JSON file.
 
         Args:
             out_path (Path | str): The path where the JSON file will be saved.
@@ -591,6 +626,7 @@ class POI(Abstract_POI, Has_Grid):
                 Defaults to False.
             verbose (bool, optional): If True, print status messages to the console. Defaults to True.
             save_hint: 0 Default, 1 Gruber, 2 POI (readable), 10 ISO-POI (outdated)
+
         Returns:
             None
 
@@ -605,7 +641,7 @@ class POI(Abstract_POI, Has_Grid):
             self, out_path, make_parents, additional_info, verbose=verbose, save_hint=save_hint, resample_reference=resample_reference
         )
 
-    def make_point_cloud_nii(self, affine=None, s=8, sphere=False):
+    def make_point_cloud_nii(self, affine=None, s=8, sphere=False) -> tuple[NII, NII]:
         """Create point cloud NIfTI images from the POI coordinates.
 
         This method generates two NIfTI images, one for the regions and another for the subregions,
@@ -627,7 +663,6 @@ class POI(Abstract_POI, Has_Grid):
             >>> neighborhood_size = 10
             >>> region_cloud, subregion_cloud = POI_obj.make_point_cloud_nii(s=neighborhood_size)
         """
-
         assert self.shape is not None, "need shape information"
         assert self.zoom is not None, "need shape information"
         if affine is None:
@@ -799,13 +834,15 @@ class POI(Abstract_POI, Has_Grid):
         return self.centroids == value2.centroids
 
 
-def _loc2int(i: int | Abstract_lvl):
+def _loc2int(i: int | Abstract_lvl) -> int:
+    """Convert a location enum member or integer to its integer value."""
     if isinstance(i, int):
         return i
     return i.value
 
 
-def _loc2int_list(i: int | Abstract_lvl | Sequence[int | Abstract_lvl]):
+def _loc2int_list(i: int | Abstract_lvl | Sequence[int | Abstract_lvl]) -> list[int]:
+    """Convert a location or sequence of locations to a list of integer values."""
     if isinstance(i, Sequence):
         return [_loc2int(j) for j in i]
     if isinstance(i, int):
@@ -816,6 +853,7 @@ def _loc2int_list(i: int | Abstract_lvl | Sequence[int | Abstract_lvl]):
 def _int2loc(
     i: int | Abstract_lvl | Sequence[int | Abstract_lvl] | Sequence[Abstract_lvl] | Sequence[int],
 ) -> Abstract_lvl | Sequence[Abstract_lvl]:
+    """Convert an integer (or sequence of integers) to the corresponding :class:`Location` enum member(s)."""
     if isinstance(i, Sequence):
         return [_int2loc(j) for j in i]  # type: ignore
     elif isinstance(i, int):
@@ -835,13 +873,10 @@ def calc_poi_from_two_segs(
     check_every_point=True,
     # use_vertebra_special_action=True,
 ) -> POI:
-    """
-    Computes the centroids of the given mask `msk_reference` with respect to the given subregion `subreg_reference`,
-    and saves them to a file at `out_path` (if `override=False` and the file already exists, the function loads and returns
-    the existing centroids from the file).
+    """Compute centroids of a mask within each subregion and optionally save/load from file.
 
-    If `out_path` is None and `msk_reference` is a `BIDS.bids_files.BIDS_FILE` object, the function generates a path to
-    save the centroids file based on the `label` attribute of the file and the given `subreg_id`.
+    If ``out_path`` is ``None`` and ``msk_reference`` is a :class:`~TPTBox.BIDS_FILE`, a path is
+    generated automatically from its label attribute and ``subreg_id``.
 
     If `subreg_reference` is None, the function computes the centroids using only `msk_reference`.
 
@@ -911,7 +946,13 @@ def calc_poi_from_two_segs(
 
 
 def _buffer_it(func):
-    """Decorator that reports the execution time."""
+    """Decorator that enables disk-based buffering of partial POI results.
+
+    If ``buffer_file`` kwarg points to an existing file the decorated function
+    loads the previously saved POI as ``extend_to`` before calling ``func``.
+    When ``save_buffer_file=True`` and the result has grown, it saves the result
+    back to ``buffer_file``.
+    """
 
     @functools.wraps(func)
     def wrap(*args, **kwargs):
@@ -952,8 +993,8 @@ def calc_poi_from_subreg_vert(
     _print_phases=False,
     _orientation_version=0,
 ) -> POI:
-    """
-    Calculates the POIs of a subregion within a vertebral mask. This function is spine opinionated, the general implementation is "calc_poi_from_two_masks".
+    """Calculates the POIs of a subregion within a vertebral mask. This function is spine opinionated, the general implementation is "calc_poi_from_two_masks".
+
     Args:
         vert_msk (Image_Reference): A vertebral mask image reference.
         subreg (Image_Reference): An image reference for the subregion of interest.
@@ -963,6 +1004,7 @@ def calc_poi_from_subreg_vert(
         verbose (bool, optional): Whether to print progress messages. Defaults to False.
         fixed_offset (int, optional): A fixed offset value to add to the calculated POI coordinates. Defaults to 0.
         extend_to (POI | None, optional): An existing POI object to extend with the new POI values. Defaults to None.
+
     Returns:
         POI: A POI object containing the calculated POI coordinates.
     """
@@ -1102,9 +1144,8 @@ def calc_centroids_from_two_masks(
     limit_ids_of_lvl_2: int | Sequence[int] | None = None,
     verbose: bool = True,
     extend_to: POI | None = None,
-):
-    """
-    Calculates the centroids of two masks, representing a hierarchical relationship.
+) -> POI:
+    """Calculates the centroids of two masks, representing a hierarchical relationship.
 
     Args:
         lvl_1_msk (Image_Reference): An image reference representing the higher-level mask (instance).
@@ -1162,7 +1203,12 @@ def calc_centroids_from_two_masks(
     return poi
 
 
-def _is_not_yet_computed(ids_in_arr: Sequence[int], extend_to: POI | None, subreg_id: int):
+def _is_not_yet_computed(ids_in_arr: Sequence[int], extend_to: POI | None, subreg_id: int) -> bool:
+    """Check whether any (region, subreg_id) pair in ``ids_in_arr`` is missing from ``extend_to``.
+
+    Returns True if at least one entry still needs to be computed, False if all
+    entries for ``subreg_id`` are already present in ``extend_to``.
+    """
     is_not_yet_computed = True
     if extend_to is not None and subreg_id in extend_to.centroids.keys_subregion():
         is_not_yet_computed = False
@@ -1186,8 +1232,7 @@ def calc_centroids(
     bar=False,
     _crop=True,
 ) -> POI:
-    """
-    Calculates the centroid coordinates of each region in the given mask image.
+    """Calculates the centroid coordinates of each region in the given mask image.
 
     Args:
         msk (Image_Reference): An `Image_Reference` object representing the input mask image.
@@ -1258,13 +1303,19 @@ def calc_centroids(
 
 
 def calc_poi_average(pois: list[POI], keep_points_not_present_in_all_pois: bool = False) -> POI:
-    """Calculates average of POI across list of POIs and removes all points that are not fully present in all given POIs
+    """Compute the element-wise average of POI coordinates across a list of POIs.
 
     Args:
-        pois (list[POI]): _description_
+        pois (list[POI]): List of POI objects to average.  All POIs must share the
+            same orientation, zoom, shape, and rotation.
+        keep_points_not_present_in_all_pois (bool, optional): If True, include
+            points that appear in at least one POI (missing entries are excluded
+            from the average for that key).  If False, only include points that
+            are present in every POI. Defaults to False.
 
     Returns:
-        POI: _description_
+        POI: A new POI whose coordinates are the mean of the corresponding
+            coordinates across all input POIs.
     """
     # Get the keys that are present in all POIs
     keys = set(pois[0].keys())
@@ -1282,7 +1333,8 @@ def calc_poi_average(pois: list[POI], keep_points_not_present_in_all_pois: bool 
     return POI(centroids=ctd, orientation=pois[0].orientation, zoom=pois[0].zoom, shape=pois[0].shape, rotation=pois[0].rotation)
 
 
-def _load_from_POI_spine_r(data: dict):
+def _load_from_POI_spine_r(data: dict) -> POI:
+    """Parse an old POI-spine-R JSON dict format and return a POI object."""
     orientation = None
     centroids = POI_Descriptor()
     for d in data["centroids"]["centroids"]:

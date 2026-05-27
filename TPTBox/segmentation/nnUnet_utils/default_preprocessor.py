@@ -20,11 +20,14 @@ from TPTBox.segmentation.nnUnet_utils.plans_handler import ConfigurationManager,
 
 
 class DefaultPreprocessor:
+    """Default nnU-Net preprocessor: crops, resamples, and normalises a single case.
+
+    All configuration is supplied at call time via the plans and configuration
+    managers; nothing dataset-specific is stored on the instance.
+    """
+
     def __init__(self, verbose: bool = True):
         self.verbose = verbose
-        """
-        Everything we need is in the plans. Those are given when run() is called
-        """
 
     def run_case_npy(
         self,
@@ -34,7 +37,28 @@ class DefaultPreprocessor:
         plans_manager: PlansManager,
         configuration_manager: ConfigurationManager,
         dataset_json: dict | str,
-    ):
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Preprocess one case given as numpy arrays.
+
+        Applies (in order): axis transposition, non-zero cropping, intensity
+        normalisation, and resampling to the target spacing.
+
+        Args:
+            data: Image array with shape ``(C, X, Y, Z)``.
+            seg: Segmentation array with shape ``(1, X, Y, Z)``, or ``None``
+                when no ground-truth is available.
+            properties: Mutable properties dict that will be updated in-place
+                with cropping / resampling metadata (required by the inference
+                pipeline to revert preprocessing).
+            plans_manager: Plans manager providing transpose directions and
+                intensity properties.
+            configuration_manager: Configuration-specific parameters such as
+                target spacing, normalization schemes, and resampling functions.
+            dataset_json: Parsed ``dataset.json`` dict, or a path to it.
+
+        Returns:
+            A tuple ``(data, seg)`` of preprocessed arrays ready for the network.
+        """
         # let's not mess up the inputs!
         data = np.copy(data)
         if seg is not None:
@@ -107,7 +131,8 @@ class DefaultPreprocessor:
     @staticmethod
     def _sample_foreground_locations(
         seg: np.ndarray, classes_or_regions: list[int] | list[tuple[int, ...]], seed: int = 1234, verbose: bool = False
-    ):
+    ) -> dict:
+        """Sample foreground voxel coordinates per class for oversampling during training."""
         num_samples = 10000
         min_percent_coverage = 0.01  # at least 1% of the class voxels need to be selected, otherwise it may be too
         # sparse
@@ -141,6 +166,7 @@ class DefaultPreprocessor:
         configuration_manager: ConfigurationManager,
         foreground_intensity_properties_per_channel: dict,
     ) -> np.ndarray:
+        """Apply per-channel intensity normalisation using the scheme specified in the configuration."""
         for c in range(data.shape[0]):
             scheme = configuration_manager.normalization_schemes[c]
 
@@ -165,6 +191,20 @@ class DefaultPreprocessor:
         dataset_json: dict,  # noqa: ARG002
         configuration_manager: ConfigurationManager,  # noqa: ARG002
     ) -> np.ndarray:
+        """Post-process the segmentation after resampling (identity by default).
+
+        Subclasses can override this to introduce label modifications (e.g.
+        sparse annotation experiments) without creating a new dataset.
+
+        Args:
+            seg: Resampled segmentation array.
+            plans_manager: Plans manager instance (unused in the base class).
+            dataset_json: Dataset metadata dict (unused in the base class).
+            configuration_manager: Configuration manager (unused in the base class).
+
+        Returns:
+            The (optionally modified) segmentation array.
+        """
         # this function will be called at the end of self.run_case. Can be used to change the segmentation
         # after resampling. Useful for experimenting with sparse annotations: I can introduce sparsity after resampling
         # and don't have to create a new dataset each time I modify my experiments
@@ -176,19 +216,36 @@ def compute_new_shape(
     old_spacing: tuple[float, ...] | list[float] | np.ndarray,
     new_spacing: tuple[float, ...] | list[float] | np.ndarray,
 ) -> np.ndarray:
+    """Compute the resampled image shape for a given spacing change.
+
+    Args:
+        old_shape: Spatial dimensions of the original image.
+        old_spacing: Voxel spacing (mm) of the original image.
+        new_spacing: Target voxel spacing (mm) after resampling.
+
+    Returns:
+        Integer array with the new spatial shape such that the physical extent
+        of the volume is preserved.
+    """
     assert len(old_spacing) == len(old_shape)
     assert len(old_shape) == len(new_spacing)
     new_shape = np.array([round(i / j * k) for i, j, k in zip(old_spacing, new_spacing, old_shape)])
     return new_shape
 
 
-def crop_to_nonzero(data, seg=None, nonzero_label=-1):
-    """
+def crop_to_nonzero(data: np.ndarray, seg: np.ndarray | None = None, nonzero_label: int = -1) -> tuple:
+    """Crop image and segmentation to the bounding box of non-zero image voxels.
 
-    :param data:
-    :param seg:
-    :param nonzero_label: this will be written into the segmentation map
-    :return:
+    Args:
+        data: Image array with shape ``(C, X, Y, Z)``.
+        seg: Optional segmentation array with the same spatial shape. Voxels
+            outside the non-zero mask receive ``nonzero_label``.
+        nonzero_label: Label value written into segmentation voxels that lie
+            outside the non-zero foreground mask.
+
+    Returns:
+        A tuple ``(data, seg, bbox)`` where ``data`` and ``seg`` are cropped
+        arrays and ``bbox`` is the bounding-box used for cropping.
     """
     nonzero_mask = create_nonzero_mask(data)
     bbox = get_bbox_from_mask(nonzero_mask)  # type: ignore
@@ -210,11 +267,16 @@ def crop_to_nonzero(data, seg=None, nonzero_label=-1):
     return data, seg, bbox
 
 
-def create_nonzero_mask(data):
-    """
+def create_nonzero_mask(data: np.ndarray) -> np.ndarray:
+    """Create a boolean mask that is ``True`` wherever any channel is non-zero.
 
-    :param data:
-    :return: the mask is True where the data is nonzero
+    Args:
+        data: Array with shape ``(C, X, Y, Z)`` or ``(C, X, Y)``.
+
+    Returns:
+        Boolean array with shape ``(X, Y, Z)`` (or ``(X, Y)``), filled with
+        ``True`` at voxels where at least one channel is non-zero. Holes in
+        the mask are filled with :func:`scipy.ndimage.binary_fill_holes`.
     """
     from scipy.ndimage import binary_fill_holes
 

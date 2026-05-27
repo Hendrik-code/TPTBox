@@ -25,22 +25,30 @@ def strategy_extreme_points(
     direction: Sequence[DIRECTIONS] | DIRECTIONS,
     vert_id: int,
     subreg_id: Location | list[Location],
-    bb,
-    log=_log,
-):
-    """Strategy function to update extreme points of a point of interest based on direction.
+    bb: tuple[slice, slice, slice] | None,
+    log: Logger_Interface = _log,
+) -> None:
+    """Strategy: place a POI at the anatomically extreme voxel of a subregion.
+
+    Extracts the label(s) ``subreg_id`` from ``current_subreg``, finds the
+    voxel most extreme in ``direction`` relative to the vertebra orientation,
+    and stores the result in ``poi``.
 
     Args:
-        poi (POI): The point of interest.
-        current_subreg (NII): The current subregion.
-        location (Location): The location to update in the point of interest.
-        direction (Union[Sequence[DIRECTIONS], DIRECTIONS]): Direction(s) to search for the extreme point.
-        vert_id (int): The vertex ID.
-        subreg_id (Location): The subregion ID.
-        bb: The bounding box.
-        log (Logger_Interface, optional): The logger interface. Defaults to _log.
+        poi: ``POI`` object that will receive the new landmark at
+            ``(vert_id, location.value)``.
+        current_subreg: Cropped subregion ``NII`` aligned to the vertebra
+            bounding box.
+        location: Target ``Location`` enum member identifying the landmark slot.
+        direction: Anatomical direction(s) to optimise.  Accepts a single
+            direction string, a sequence of strings, or weighted
+            ``(direction, weight)`` tuples.
+        vert_id: Vertebra identifier (integer label).
+        subreg_id: Label(s) to extract from ``current_subreg`` before
+            searching for the extreme point.
+        bb: Bounding-box slices mapping local to global voxel coordinates.
+        log: Logger for warning and error messages.
     """
-
     region = current_subreg.extract_label(subreg_id)
     if region.sum() == 0:
         log.on_fail(f"reg={vert_id},subreg={subreg_id} is missing (extreme_points); {current_subreg.unique()}")
@@ -62,9 +70,33 @@ def strategy_line_cast(
     start_point: Location | np.ndarray,
     regions_loc: list[Location] | Location,
     normal_vector_points: tuple[Location, Location] | DIRECTIONS,
-    bb,
+    bb: tuple[slice, slice, slice] | None,
     log: Logger_Interface = _log,
-):
+) -> None:
+    """Strategy: place a POI at the ray-cast exit point of a subregion surface.
+
+    Extracts the combined label mask for ``regions_loc``, then casts a ray
+    from ``start_point`` along ``normal_vector_points`` using
+    :func:`~TPTBox.core.poi_fun.ray_casting.max_distance_ray_cast_convex_poi`
+    and stores the resulting boundary coordinate in ``poi``.
+
+    Args:
+        poi: ``POI`` object that will receive the new landmark at
+            ``(vert_id, location.value)``.
+        vert_id: Vertebra identifier (integer label).
+        current_subreg: Cropped subregion ``NII`` aligned to the vertebra
+            bounding box.
+        location: Target ``Location`` enum member identifying the landmark slot.
+        start_point: Ray origin — a ``Location`` member resolved from ``poi`` or
+            a pre-computed numpy coordinate.
+        regions_loc: Label(s) to extract from ``current_subreg`` as the region
+            to cast the ray into.
+        normal_vector_points: Ray direction, given either as a ``DIRECTIONS``
+            string or a pair of ``Location`` members whose difference defines
+            the direction.
+        bb: Bounding-box slices mapping local to global voxel coordinates.
+        log: Logger for warning and error messages.
+    """
     region = current_subreg.extract_label(regions_loc)
     # if legacy_code:
     #    horizontal_plane_landmarks_old(poi, region, label_id, bb, log)
@@ -84,10 +116,37 @@ def strategy_find_corner(
     location: Location,
     vec1: Location,
     vec2: Location,
-    start_point=Location.Vertebra_Corpus,
+    start_point: Location | np.ndarray = Location.Vertebra_Corpus,
     log: Logger_Interface = _log,
     shift_direction: DIRECTIONS | None = None,
-):
+) -> None:
+    """Strategy: place a POI at the corner of a vertebral body defined by two direction vectors.
+
+    Shifts the start point laterally if ``shift_direction`` is given, then
+    uses a 2-D bisection search within the vertebral body (``Vertebra_Corpus``
+    and ``Vertebra_Corpus_border``) to find the furthest reachable corner in
+    the directions of ``vec1`` and ``vec2``.
+
+    Args:
+        poi: ``POI`` object that will receive the new landmark at
+            ``(vert_id, location.value)``.
+        current_subreg: Cropped subregion ``NII`` aligned to the vertebra
+            bounding box.
+        vert_id: Vertebra identifier (integer label).
+        bb: Bounding-box slices mapping local to global voxel coordinates.
+        location: Target ``Location`` enum member identifying the landmark slot.
+        vec1: First direction ``Location`` (e.g. anterior or superior edge
+            point).
+        vec2: Second direction ``Location`` (e.g. superior or inferior edge
+            point).
+        start_point: Ray origin — a ``Location`` member resolved from ``poi``
+            or a pre-computed numpy coordinate.  Defaults to
+            ``Location.Vertebra_Corpus``.
+        log: Logger for warning and error messages.
+        shift_direction: Optional lateral shift direction applied to
+            ``start_point`` before the corner search (e.g. ``"R"`` for right).
+            ``None`` skips the shift.
+    """
     if vert_id in sacrum_w_o_arcus:
         return
 
@@ -105,8 +164,18 @@ def strategy_find_corner(
 
 # @timing
 def _find_corner_point(
-    poi: POI, region, vert_id, bb, start_point, vec1, vec2, log: Logger_Interface = _log, delta=0.00000005, location=None
-):
+    poi: POI,
+    region: NII,
+    vert_id: int,
+    bb: tuple[slice, slice, slice] | None,
+    start_point: Location | np.ndarray,
+    vec1: Location,
+    vec2: Location,
+    log: Logger_Interface = _log,
+    delta: float = 0.00000005,
+    location: Location | None = None,
+) -> np.ndarray | None:
+    """Bisection search for the corner point furthest along two direction vectors inside a region."""
     # Convert start point and vectors to local numpy coordinates
     start_point_np = to_local_np(start_point, bb, poi, vert_id, log) if isinstance(start_point, Location) else start_point
     if start_point_np is None:
@@ -169,10 +238,35 @@ def strategy_ligament_attachment_point_flava(
     location: Location,
     goal: Location | np.ndarray,
     log: Logger_Interface = _log,
-    delta=0.0000001,
+    delta: float = 0.0000001,
     shift_direction: Literal["S", "I"] = "S",
     dir2: Literal["A"] = "A",
-):
+) -> None:
+    """Strategy: place a ligamentum-flavum attachment POI on the arcus / spinosus surface.
+
+    Starting from the spinosus process (or arcus if spinosus is absent),
+    performs a 2-D bisection search moving in ``shift_direction`` and ``dir2``
+    while staying inside the arcus/spinosus mask and approaching ``goal``.
+    The search stops when the bracket width falls below ``delta``.
+
+    Args:
+        poi: ``POI`` object that will receive the new landmark at
+            ``(vert_id, location)``.
+        current_subreg: Cropped subregion ``NII`` aligned to the vertebra
+            bounding box (must contain arcus and spinosus labels).
+        vert_id: Vertebra identifier (integer label).
+        bb: Bounding-box slices mapping local to global voxel coordinates.
+        location: Target ``Location`` enum member identifying the landmark slot.
+        goal: Target ``Location`` or pre-computed coordinate toward which the
+            search advances (e.g. an anterior longitudinal ligament point).
+        log: Logger for warning and error messages.
+        delta: Convergence threshold for the bisection loop.
+            Defaults to 0.0000001.
+        shift_direction: Primary direction of search along the arcus
+            (``"S"`` = superior, ``"I"`` = inferior).  Defaults to ``"S"``.
+        dir2: Secondary search direction (always anterior, ``"A"``).
+            Defaults to ``"A"``.
+    """
     if vert_id in sacrum_w_o_arcus:
         return
     try:
@@ -239,14 +333,40 @@ def strategy_shifted_line_cast(
     current_subreg: NII,
     location: Location,
     vert_id: int,
-    bb,
+    bb: tuple[slice, slice, slice] | None,
     regions_loc: list[Location] | Location,
     normal_vector_points: tuple[Location, Location] | DIRECTIONS,
     start_point: Location = Location.Vertebra_Corpus,
-    log=_log,
+    log: Logger_Interface = _log,
     direction: DIRECTIONS = "R",
-    do_shift=True,
-):
+    do_shift: bool = True,
+) -> None:
+    """Strategy: lateral-shift a start point then ray-cast to the subregion surface.
+
+    Optionally displaces ``start_point`` laterally by a vertebra-width fraction
+    via :func:`~TPTBox.core.poi_fun.ray_casting.shift_point`, then delegates to
+    :func:`strategy_line_cast` to find the boundary along ``normal_vector_points``.
+
+    Args:
+        poi: ``POI`` object that will receive the new landmark at
+            ``(vert_id, location.value)``.
+        current_subreg: Cropped subregion ``NII`` aligned to the vertebra
+            bounding box.
+        location: Target ``Location`` enum member identifying the landmark slot.
+        vert_id: Vertebra identifier (integer label).
+        bb: Bounding-box slices mapping local to global voxel coordinates.
+        regions_loc: Label(s) to extract from ``current_subreg`` as the target
+            region for the ray cast.
+        normal_vector_points: Ray direction — a ``DIRECTIONS`` string or a pair
+            of ``Location`` members.
+        start_point: Ray origin before shifting.  Defaults to
+            ``Location.Vertebra_Corpus``.
+        log: Logger for warning and error messages.
+        direction: Lateral direction for the shift (``"R"`` or ``"L"``).
+            Defaults to ``"R"``.
+        do_shift: When ``False``, skip the lateral shift and use ``start_point``
+            directly.  Defaults to ``True``.
+    """
     if vert_id in sacrum_w_o_arcus:
         return
     try:

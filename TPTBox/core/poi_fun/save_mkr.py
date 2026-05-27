@@ -22,6 +22,8 @@ VolumeUnit = Literal["mm3", "cm3"]
 
 
 class MKR_Display(TypedDict, total=False):
+    """TypedDict for 3D Slicer markup display properties."""
+
     visibility: NotRequired[bool]
     opacity: NotRequired[float]
     color: NotRequired[list[float]]
@@ -53,6 +55,8 @@ class MKR_Display(TypedDict, total=False):
 
 
 class ControlPoint(TypedDict, total=False):
+    """TypedDict representing a single Slicer markup control point."""
+
     id: str
     label: str
     description: str
@@ -66,6 +70,8 @@ class ControlPoint(TypedDict, total=False):
 
 
 class MKR_Lines(TypedDict):
+    """TypedDict defining a Slicer line markup connecting a list of POI key points."""
+
     key_points: list[tuple[int, int]]
     color: NotRequired[list[float]]
     name: NotRequired[str]
@@ -74,6 +80,8 @@ class MKR_Lines(TypedDict):
 
 
 class Markup(TypedDict, total=False):
+    """TypedDict representing a single 3D Slicer markup node."""
+
     type: MarkupType
     name: str
     coordinateSystem: CoordinateSystem
@@ -102,6 +110,8 @@ class Markup(TypedDict, total=False):
 
 
 class MeasurementVolumeMarkup(Markup, total=False):
+    """Markup subtype carrying volume, surface area, and bounding-box measurements."""
+
     type: Literal["MeasurementVolume"]
     volume: float
     volumeUnit: VolumeUnit
@@ -114,12 +124,30 @@ MKR_DEFINITION = Union[MKR_Lines, dict]
 
 def _get_display_dict(
     display: MKR_Display | dict,
-    color=None,
-    selectedColor=None,
-    activeColor=None,
-    pointLabelsVisibility=False,
-    glyphScale=1.0,
-):
+    color: list[float] | None = None,
+    selectedColor: list[float] | None = None,
+    activeColor: list[float] | None = None,
+    pointLabelsVisibility: bool = False,
+    glyphScale: float = 1.0,
+) -> dict:
+    """Build a complete Slicer markup display dict with sensible defaults.
+
+    Args:
+        display: Partial display dict whose entries take precedence over the
+            defaults.
+        color: Default fiducial colour as an RGB list in ``[0, 1]`` range.
+            Defaults to cyan ``[0.4, 1.0, 1.0]``.
+        selectedColor: Colour when the point is selected.  Defaults to
+            ``[1.0, 0.5, 0.5]``.
+        activeColor: Colour when the point is active.  Defaults to
+            ``[0.4, 1.0, 0.0]``.
+        pointLabelsVisibility: Whether to show point labels in the 3D view.
+            Defaults to ``False``.
+        glyphScale: Glyph scale factor.  Defaults to ``1.0``.
+
+    Returns:
+        Complete ``MKR_Display``-compatible dict with all Slicer-required keys.
+    """
     if activeColor is None:
         activeColor = [0.4, 1.0, 0.0]
     if selectedColor is None:
@@ -162,11 +190,30 @@ def _get_display_dict(
 
 def _get_markup_color(
     definition: MKR_DEFINITION,
-    region,
-    subregion,
-    split_by_region=False,
-    split_by_subregion=False,
-):
+    region: int,
+    subregion: int,
+    split_by_region: bool = False,
+    split_by_subregion: bool = False,
+) -> list[float]:
+    """Resolve the display colour for a POI markup group.
+
+    Priority: explicit colour in ``definition`` > colour derived from region or
+    subregion ID > random colour.
+
+    Args:
+        definition: Markup definition dict that may contain a ``"color"`` key.
+        region: Region (vertebra) integer label used when
+            ``split_by_region`` is ``True``.
+        subregion: Subregion integer label used when ``split_by_subregion`` is
+            ``True``.
+        split_by_region: Assign distinct colours per region.
+            Defaults to ``False``.
+        split_by_subregion: Assign distinct colours per subregion.
+            Defaults to ``False``.
+
+    Returns:
+        RGB colour as a list of three floats in the ``[0.0, 1.0]`` range.
+    """
     color = definition.get("color", None)
     if color is None:
         if split_by_region:
@@ -184,7 +231,30 @@ def _get_markup_color(
     return color
 
 
-def _get_control_point(cp: ControlPoint, position, id_name="", label="", name="", name2="") -> ControlPoint:
+def _get_control_point(
+    cp: ControlPoint,
+    position: list[float],
+    id_name: str = "",
+    label: str = "",
+    name: str = "",
+    name2: str = "",
+) -> ControlPoint:
+    """Build a Slicer markup control-point dict, falling back to provided defaults.
+
+    Args:
+        cp: Partial ``ControlPoint`` dict whose entries take precedence over the
+            defaults below.
+        position: 3-element ``[x, y, z]`` coordinate list in the markup's
+            coordinate system.
+        id_name: Default control-point ID string.
+        label: Default short label shown in the viewer.
+        name: Default description string (used as ``description`` field).
+        name2: Default ``associatedNodeID`` string.
+
+    Returns:
+        Complete ``ControlPoint`` dict ready for inclusion in a markup's
+        ``controlPoints`` list.
+    """
     return {
         "id": cp.get("id", id_name),
         "label": cp.get("label", label),
@@ -201,11 +271,27 @@ def _get_control_point(cp: ControlPoint, position, id_name="", label="", name=""
 
 def _make_default_markup(
     markup_type: MarkupType,
-    name,
+    name: str | None,
     coordinateSystem: CoordinateSystem,
-    controlPoints=None,
-    display=None,
+    controlPoints: list[ControlPoint] | None = None,
+    display: MKR_Display | dict | None = None,
 ) -> Markup | MeasurementVolumeMarkup:
+    """Construct a default Slicer markup dict for the given type.
+
+    Args:
+        markup_type: Slicer markup type string (e.g. ``"Fiducial"``,
+            ``"Line"``, ``"ROI"``, ``"Plane"``, ``"MeasurementVolume"``).
+        name: Optional markup name shown in the Slicer hierarchy.
+        coordinateSystem: Coordinate system of the control points
+            (``"LPS"`` or ``"RAS"``).
+        controlPoints: Initial list of control points.  Defaults to an empty
+            list.
+        display: Optional display property dict merged into the markup.
+
+    Returns:
+        A ``Markup`` or ``MeasurementVolumeMarkup`` dict ready for serialisation
+        into a ``.mrk.json`` file.
+    """
     if controlPoints is None:
         controlPoints = []
     base: Markup = {
@@ -250,10 +336,27 @@ def _get_markup_lines(
     definition: MKR_Lines,
     poi: POI_Global,
     coordinate_system: Literal["LPS", "RAS"],
-    split_by_region=False,
-    split_by_subregion=False,
-    display=None,
-):
+    split_by_region: bool = False,
+    split_by_subregion: bool = False,
+    display: MKR_Display | dict | None = None,
+) -> Markup:
+    """Build a Slicer ``"Line"`` markup dict from a ``MKR_Lines`` definition.
+
+    Args:
+        definition: Line definition containing ``key_points``, and optionally
+            ``color``, ``name``, and ``display`` overrides.
+        poi: ``POI_Global`` object providing coordinates and label metadata.
+        coordinate_system: Coordinate system of the POI data
+            (``"LPS"`` or ``"RAS"``).
+        split_by_region: Colour lines by region ID.  Defaults to ``False``.
+        split_by_subregion: Colour lines by subregion ID.  Defaults to
+            ``False``.
+        display: Base display properties to merge with ``definition``'s display
+            overrides.  Defaults to ``{}``.
+
+    Returns:
+        A ``Markup`` dict of type ``"Line"`` ready for serialisation.
+    """
     if display is None:
         display = {}
     key_points = definition.get("key_points")
@@ -283,7 +386,24 @@ def _get_markup_lines(
     )
 
 
-def get_desc(self: POI_Global, region, subregion):
+def get_desc(self: POI_Global, region: int, subregion: int) -> tuple[str, str, str]:
+    """Resolve the human-readable description strings for a POI.
+
+    Looks up the label name from ``self.info["label_name"]`` if available,
+    then falls back to the level-two-info enum name or the raw integer.
+    The group name (region) is resolved similarly from ``self.info["label_group_name"]``
+    or the level-one-info enum name.
+
+    Args:
+        self: The ``POI_Global`` instance providing ``info``,
+            ``level_one_info``, and ``level_two_info``.
+        region: Region (vertebra) integer label.
+        subregion: Subregion integer label.
+
+    Returns:
+        Tuple ``(name, name2, label)`` where ``name`` and ``name2`` are the
+        group/region name and ``label`` is the subregion label string.
+    """
     label = self.info.get("label_name", {}).get(str((region, subregion)))
     if label is None:
         label = str(subregion)
@@ -309,7 +429,25 @@ def get_desc(self: POI_Global, region, subregion):
     return name, name2, label
 
 
-def _get_key(region, subregion, split_by_region, split_by_subregion, main_key="POI"):
+def _get_key(
+    region: int,
+    subregion: int,
+    split_by_region: bool,
+    split_by_subregion: bool,
+    main_key: str = "POI",
+) -> str:
+    """Build the markup group key string for a (region, subregion) pair.
+
+    Args:
+        region: Region (vertebra) integer label.
+        subregion: Subregion integer label.
+        split_by_region: Append the region ID to the key.
+        split_by_subregion: Append the subregion ID to the key.
+        main_key: Base key string.  Defaults to ``"POI"``.
+
+    Returns:
+        Group key string used as the ``name`` field for the Slicer markup group.
+    """
     key = main_key
     if split_by_region:
         key += str(region) + "_"
@@ -322,22 +460,47 @@ def _get_key(region, subregion, split_by_region, split_by_subregion, main_key="P
 def _save_mrk(
     poi: POI_Global,
     filepath: str | Path,
-    color=None,
-    split_by_region=True,
-    split_by_subregion=False,
+    color: list[float] | None = None,
+    split_by_region: bool = True,
+    split_by_subregion: bool = False,
     add_points: bool = True,
     add_lines: list[MKR_Lines] | None = None,
     display: MKR_Display | dict = None,  # type: ignore
-    pointLabelsVisibility=False,
-    glyphScale=1.0,
-    main_key="P",
+    pointLabelsVisibility: bool = False,
+    glyphScale: float = 1.0,
+    main_key: str = "P",
     **args,
-):
-    """
-    Save the POI data to a .mrk.json file in Slicer Markups format.
-    Automatically sets coordinate system based on itk_coords.
-    Includes level_one_info and level_two_info in the description.
-    Preserves metadata from `info` dictionary.
+) -> None:
+    """Save a ``POI_Global`` to a 3D Slicer ``.mrk.json`` markup file.
+
+    The coordinate system is derived from ``poi.itk_coords`` (``"LPS"`` when
+    ``True``, ``"RAS"`` otherwise).  ``level_one_info`` and ``level_two_info``
+    names are embedded in the control-point description fields.  Metadata from
+    ``poi.info`` is not written to the file but the display colour and label
+    dictionaries are preserved.
+
+    Args:
+        poi: ``POI_Global`` object to serialise.
+        filepath: Output path.  The extension is forced to ``.mrk.json`` if not
+            already present.
+        color: Default colour for all markup groups (RGB in ``[0, 1]`` range).
+            When ``None`` the colour is derived from ``split_by_*`` flags or
+            set randomly per group.
+        split_by_region: Create a separate markup group per region (vertebra).
+            Defaults to ``True``.
+        split_by_subregion: Create a separate markup group per subregion.
+            Defaults to ``False``.
+        add_points: Include Fiducial control-point markups.
+            Defaults to ``True``.
+        add_lines: Optional list of ``MKR_Lines`` definitions to add as
+            ``"Line"`` markups.  Defaults to ``None`` (no lines).
+        display: Base display property overrides applied to every markup group.
+            Defaults to ``{}``.
+        pointLabelsVisibility: Show point label text in the 3D view.
+            Defaults to ``False``.
+        glyphScale: Glyph size scale factor.  Defaults to ``1.0``.
+        main_key: Base group key string.  Defaults to ``"P"``.
+        **args: Additional key-value pairs merged into the display dict.
     """
     if display is None:
         display = {}
