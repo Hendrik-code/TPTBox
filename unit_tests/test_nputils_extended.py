@@ -271,5 +271,207 @@ class Test_np_calc_overlapping_labels(unittest.TestCase):
         self.assertNotIn((1, 2), result)
 
 
+class Test_np_bbox_binary(unittest.TestCase):
+    """Tests for np_bbox_binary — tight bounding box of all non-zero voxels."""
+
+    def test_basic_cube(self):
+        arr = np.zeros((10, 10, 10), dtype=np.uint8)
+        arr[2:6, 3:7, 1:5] = 1
+        slices = np_utils.np_bbox_binary(arr)
+        self.assertEqual(slices[0].start, 2)
+        self.assertEqual(slices[0].stop, 6)
+        self.assertEqual(slices[1].start, 3)
+        self.assertEqual(slices[1].stop, 7)
+        self.assertEqual(slices[2].start, 1)
+        self.assertEqual(slices[2].stop, 5)
+
+    def test_single_voxel(self):
+        arr = np.zeros((8, 8, 8), dtype=np.uint8)
+        arr[4, 5, 6] = 1
+        slices = np_utils.np_bbox_binary(arr)
+        self.assertEqual(slices[0].start, 4)
+        self.assertEqual(slices[0].stop, 5)
+        self.assertEqual(slices[1].start, 5)
+        self.assertEqual(slices[1].stop, 6)
+
+    def test_empty_raises(self):
+        arr = np.zeros((5, 5, 5), dtype=np.uint8)
+        with self.assertRaises(ValueError):
+            np_utils.np_bbox_binary(arr, raise_error=True)
+
+    def test_with_padding_expands_box(self):
+        arr = np.zeros((10, 10, 10), dtype=np.uint8)
+        arr[4:6, 4:6, 4:6] = 1
+        no_pad = np_utils.np_bbox_binary(arr, px_dist=0)
+        with_pad = np_utils.np_bbox_binary(arr, px_dist=1)
+        self.assertLessEqual(with_pad[0].start, no_pad[0].start)
+        self.assertGreaterEqual(with_pad[0].stop, no_pad[0].stop)
+
+
+class Test_np_point_coordinates(unittest.TestCase):
+    """Tests for np_point_coordinates — non-zero voxel coordinates in 3D."""
+
+    def test_single_point(self):
+        arr = np.zeros((5, 5, 5), dtype=np.uint8)
+        arr[2, 3, 4] = 1
+        coords = np_utils.np_point_coordinates(arr)
+        self.assertEqual(len(coords), 1)
+        self.assertEqual(coords[0], (2, 3, 4))
+
+    def test_multiple_points(self):
+        arr = np.zeros((5, 5, 5), dtype=np.uint8)
+        arr[1, 1, 1] = 1
+        arr[3, 3, 3] = 1
+        coords = np_utils.np_point_coordinates(arr)
+        self.assertEqual(len(coords), 2)
+        self.assertIn((1, 1, 1), coords)
+        self.assertIn((3, 3, 3), coords)
+
+    def test_empty_array(self):
+        arr = np.zeros((4, 4, 4), dtype=np.uint8)
+        coords = np_utils.np_point_coordinates(arr)
+        self.assertEqual(len(coords), 0)
+
+    def test_requires_3d(self):
+        arr = np.zeros((4, 4), dtype=np.uint8)
+        with self.assertRaises(AssertionError):
+            np_utils.np_point_coordinates(arr)
+
+
+class Test_np_translate_to_center(unittest.TestCase):
+    """Tests for np_translate_to_center_of_array — moves content toward array center."""
+
+    def test_output_shape_preserved(self):
+        arr = np.zeros((10, 10, 10), dtype=np.uint8)
+        arr[1, 1, 1] = 1
+        out = np_utils.np_translate_to_center_of_array(arr)
+        self.assertEqual(out.shape, arr.shape)
+
+    def test_sum_preserved(self):
+        arr = np.zeros((12, 12, 12), dtype=np.uint8)
+        arr[1:4, 1:4, 1:4] = 1
+        out = np_utils.np_translate_to_center_of_array(arr)
+        self.assertEqual(int(out.sum()), int(arr.sum()))
+
+    def test_content_moves_toward_center(self):
+        arr = np.zeros((20, 20, 20), dtype=np.uint8)
+        arr[0, 0, 0] = 1
+        out = np_utils.np_translate_to_center_of_array(arr)
+        xs, ys, zs = np.where(out)
+        if len(xs) > 0:
+            self.assertGreater(xs[0], 0)
+
+
+class Test_np_calc_convex_hull(unittest.TestCase):
+    """Tests for np_calc_convex_hull — fills the convex hull of non-zero voxels."""
+
+    def test_2d_output_shape(self):
+        arr = np.zeros((10, 10), dtype=np.uint8)
+        arr[2:8, 2:8] = 1
+        hull = np_utils.np_calc_convex_hull(arr)
+        self.assertEqual(hull.shape, arr.shape)
+
+    def test_hull_contains_original(self):
+        # need > 3 non-zero points so ConvexHull can construct a hull
+        arr = np.zeros((12, 12), dtype=np.uint8)
+        arr[1, 6] = 1
+        arr[6, 1] = 1
+        arr[6, 11] = 1
+        arr[11, 6] = 1
+        hull = np_utils.np_calc_convex_hull(arr)
+        self.assertEqual(hull.shape, arr.shape)
+        self.assertTrue(np.all(hull[arr > 0] > 0))
+
+    def test_3d_output_same_shape(self):
+        arr = np.zeros((8, 8, 8), dtype=np.uint8)
+        arr[2:6, 2:6, 2:6] = 1
+        hull = np_utils.np_calc_convex_hull(arr)
+        self.assertEqual(hull.shape, arr.shape)
+
+    def test_hull_not_smaller_than_input(self):
+        arr = np.zeros((10, 10), dtype=np.uint8)
+        arr[2:8, 2:8] = 1
+        hull = np_utils.np_calc_convex_hull(arr)
+        self.assertGreaterEqual(int(hull.sum()), int(arr.sum()))
+
+
+class Test_np_betti_numbers(unittest.TestCase):
+    """Tests for np_betti_numbers — topological descriptors B0, B1, B2."""
+
+    def test_single_ball_b0_is_1(self):
+        arr = np.zeros((10, 10, 10), dtype=np.uint8)
+        arr[2:8, 2:8, 2:8] = 1
+        b0, _b1, _b2 = np_utils.np_betti_numbers(arr)
+        self.assertEqual(b0, 1)
+
+    def test_two_components_b0_is_2(self):
+        arr = np.zeros((15, 15, 15), dtype=np.uint8)
+        arr[1:4, 1:4, 1:4] = 1
+        arr[10:13, 10:13, 10:13] = 1
+        b0, _b1, _b2 = np_utils.np_betti_numbers(arr)
+        self.assertEqual(b0, 2)
+
+    def test_empty_b0_is_0(self):
+        arr = np.zeros((6, 6, 6), dtype=np.uint8)
+        b0, _b1, _b2 = np_utils.np_betti_numbers(arr)
+        self.assertEqual(b0, 0)
+
+    def test_returns_three_ints(self):
+        arr = np.zeros((8, 8, 8), dtype=np.uint8)
+        arr[2:6, 2:6, 2:6] = 1
+        result = np_utils.np_betti_numbers(arr)
+        self.assertEqual(len(result), 3)
+        for val in result:
+            self.assertIsInstance(val, int)
+
+
+class Test_np_majority_label_overlap(unittest.TestCase):
+    """Tests for np_map_labels_based_on_majority_label_mask_overlap."""
+
+    def test_simple_remap(self):
+        arr = np.zeros((10, 10, 10), dtype=np.uint8)
+        arr[3:7, 3:7, 3:7] = 1
+        label_mask = np.zeros_like(arr)
+        label_mask[2:8, 2:8, 2:8] = 5
+        result = np_utils.np_map_labels_based_on_majority_label_mask_overlap(arr, label_mask)
+        self.assertIn(5, np_utils.np_unique_withoutzero(result))
+        self.assertNotIn(1, np_utils.np_unique(result))
+
+    def test_no_overlap_maps_to_zero(self):
+        arr = np.zeros((10, 10, 10), dtype=np.uint8)
+        arr[1:3, 1:3, 1:3] = 1
+        label_mask = np.zeros_like(arr)
+        result = np_utils.np_map_labels_based_on_majority_label_mask_overlap(arr, label_mask, no_match_label=0)
+        self.assertNotIn(1, np_utils.np_unique(result))
+
+    def test_inplace(self):
+        arr = np.zeros((10, 10, 10), dtype=np.uint8)
+        arr[3:7, 3:7, 3:7] = 2
+        label_mask = np.zeros_like(arr)
+        label_mask[2:8, 2:8, 2:8] = 9
+        result = np_utils.np_map_labels_based_on_majority_label_mask_overlap(arr, label_mask, inplace=True)
+        self.assertIs(result, arr)
+
+
+class Test_np_find_index_of_k_max_values(unittest.TestCase):
+    """Tests for np_find_index_of_k_max_values — indices of k largest values."""
+
+    def test_top1(self):
+        arr = np.array([3.0, 1.0, 9.0, 5.0])
+        idx = np_utils.np_find_index_of_k_max_values(arr, k=1)
+        self.assertEqual(idx[0], 2)
+
+    def test_top2_order(self):
+        arr = np.array([1.0, 7.0, 3.0, 9.0, 2.0])
+        idx = np_utils.np_find_index_of_k_max_values(arr, k=2)
+        self.assertEqual(idx[0], 3)
+        self.assertEqual(idx[1], 1)
+
+    def test_default_k_returns_two(self):
+        arr = np.array([5.0, 1.0, 3.0])
+        idx = np_utils.np_find_index_of_k_max_values(arr)
+        self.assertEqual(len(idx), 2)
+
+
 if __name__ == "__main__":
     unittest.main()
