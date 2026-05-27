@@ -13,17 +13,46 @@ logger = No_Logger()
 def stitching(
     bids_files: list[BIDS_FILE | NII | str | Path] | list,
     out: BIDS_FILE | str | Path,
-    is_seg=False,
+    is_seg: bool = False,
     is_ct: bool = False,
-    verbose_stitching=False,
-    bias_field=False,
-    kick_out_fully_integrated_images=True,
-    verbose=True,
+    verbose_stitching: bool = False,
+    bias_field: bool = False,
+    kick_out_fully_integrated_images: bool = True,
+    verbose: bool = True,
     dtype: type = float,
-    match_histogram=False,
-    store_ramp=False,
+    match_histogram: bool = False,
+    store_ramp: bool = False,
     ramp_path=None,
-):
+) -> tuple:
+    """Stitch a list of BIDS/NII volumes into a single output NIfTI file.
+
+    Convenience wrapper around :func:`stitching_raw` that accepts BIDS_FILE
+    objects, NII instances, or raw file paths and resolves the output path from
+    a BIDS_FILE if necessary.
+
+    Args:
+        bids_files: Input volumes to stitch.  Accepts any mix of
+            :class:`BIDS_FILE`, :class:`NII`, ``str``, or :class:`Path`.
+        out: Destination path for the stitched volume. When a
+            :class:`BIDS_FILE` is provided, the ``"nii.gz"`` file path is used.
+        is_seg: If True, treats the inputs as segmentation images (disables
+            bias field and histogram matching, uses integer dtypes).
+        is_ct: If True, sets the background ``min_value`` to ``-1024`` (CT
+            air) instead of ``0`` (MRI).
+        verbose_stitching: If True, forwards verbose output from the low-level
+            stitching routine.
+        bias_field: If True, applies N4 bias-field correction to each input.
+        kick_out_fully_integrated_images: If True, removes volumes that are
+            fully contained within another volume before stitching.
+        verbose: If True, logs the output path before stitching.
+        dtype: NumPy dtype for the output array.
+        match_histogram: If True, matches histograms between consecutive inputs.
+        store_ramp: If True, also returns the per-volume blending weight array.
+
+    Returns:
+        A 2-tuple ``(stitched_nii, ramp_nii)`` as returned by
+        :func:`stitching_raw`.
+    """
     out = str(out.file["nii.gz"]) if isinstance(out, BIDS_FILE) else str(out)
     files = [to_nii(bf).nii for bf in bids_files]
     logger.print("stitching", out, verbose=verbose)
@@ -43,6 +72,7 @@ def stitching(
 
 
 def _crop_borders(nii: NII, chunk_info: str, cut: dict[str, tuple[slice, slice, slice]]) -> NII:
+    """Crop a NII volume to predefined borders for a given spine-chunk key."""
     if chunk_info not in cut:
         logger.print("chunk_info must be in [HWS, BWS, LWS]")
     ori = nii.orientation
@@ -59,8 +89,9 @@ def GNC_stitch_T2w(
     #    "BWS": (slice(None), slice(80, 400), slice(None)),
     #    "LWS": (slice(None), slice(48, 448), slice(None)),
     # },
-):
-    """Preprocessing steps where n4 each chunk, then stitch, then n4
+) -> NII:
+    """Apply N4 bias correction to each chunk, stitch them, then apply N4 again.
+
     Args:
         HWS (NII | str | Path): Cervical region
         BWS (NII | str | Path): Thoracic region
@@ -107,7 +138,26 @@ def n4_bias(
     spline_param: int = 200,
     dtype2nii: bool = False,
     norm: int = -1,
-):
+) -> tuple[NII, NII]:
+    """Apply N4 bias-field correction to a NII image with automatic mask generation.
+
+    Voxels below ``threshold`` are excluded from the bias estimation via a
+    dilated binary mask.
+
+    Args:
+        nii: Input image to correct.
+        threshold: Intensity threshold below which voxels are excluded from
+            the bias estimation mask.
+        spline_param: B-spline control point spacing for the bias field model.
+        dtype2nii: If True, casts the corrected image back to the original
+            dtype of ``nii``.
+        norm: If != -1, normalizes the corrected image so its maximum equals
+            ``norm``.
+
+    Returns:
+        A 2-tuple ``(n4_corrected_nii, mask_nii)`` where ``mask_nii`` is the
+        dilated binary mask used during correction.
+    """
     from ants.utils.convert_nibabel import from_nibabel
 
     # print("n4 bias", nii.dtype)
@@ -125,8 +175,8 @@ def n4_bias(
     return n4, mask_nii
 
 
-def _center_frontal(size):
-    """Calculating the location of the frontalplain +- 256"""
+def _center_frontal(size: int) -> slice:
+    """Compute a slice centred on the frontal plane of a spinal MRI volume."""
     # The multiplicator-factor was empirically evaluated in an excel sheet with 11 random MRIs
     lower_bound = size * 0.2
     upper_bound = size * 0.75

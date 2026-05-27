@@ -55,7 +55,7 @@ def main_vert_test():
 
 
 def get_femurs(img: Image_Reference, seg_id=13):
-    """Returns left (2) and right (1)
+    """Returns left (2) and right (1).
 
     Args:
         img (Image_Reference): _description_

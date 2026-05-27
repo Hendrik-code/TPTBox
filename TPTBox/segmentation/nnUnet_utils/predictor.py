@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import time
 import traceback
+from collections.abc import Generator
 from dataclasses import dataclass, field
 from math import ceil, floor
 
@@ -26,19 +27,51 @@ from TPTBox.segmentation.nnUnet_utils.plans_handler import PlansManager
 from TPTBox.segmentation.nnUnet_utils.sliding_window_prediction import compute_gaussian, compute_steps_for_sliding_window
 
 
-def get_gpu_memory_MB(device):
+def get_gpu_memory_MB(device) -> float:
+    """Return the amount of free GPU memory in megabytes for the given device."""
     free, total = torch.cuda.mem_get_info(device)
     # print(f"{free=}", f"{total=}")
     return free / 1024**2
 
 
-def get_gpu_util(device):
+def get_gpu_util(device) -> float:
+    """Return the fraction of GPU memory currently in use (0.0 = idle, 1.0 = full)."""
     free, total = torch.cuda.mem_get_info(device)
     # print(f"{free=}", f"{total=}")
     return 1 - free / total
 
 
 class nnUNetPredictor:
+    """Sliding-window inference engine for nnU-Net v2 (and legacy v1) models.
+
+    Handles model loading, fold averaging, GPU memory management (automatic
+    fall-back to CPU), optional test-time mirroring, and conversion of raw
+    logits back to label maps in the original image space.
+
+    Args:
+        tile_step_size: Fractional step between consecutive sliding-window tiles
+            (0 < value <= 1). Smaller values yield more overlap and smoother
+            predictions at the cost of speed.
+        use_gaussian: If ``True``, weight predictions by a Gaussian kernel to
+            up-weight the tile center and down-weight borders.
+        use_mirroring: If ``True``, apply test-time augmentation by averaging
+            predictions over all axis flips defined in
+            ``allowed_mirroring_axes``.
+        perform_everything_on_gpu: If ``True``, keep aggregation tensors on the
+            GPU. Falls back to CPU on ``RuntimeError`` (OOM).
+        device: PyTorch device to run inference on.
+        cuda_id: CUDA device index (used when ``device`` is ``"cuda"``).
+        verbose: Print progress messages during inference.
+        verbose_preprocessing: Print preprocessing details.
+        allow_tqdm: Show a tqdm progress bar during sliding-window inference.
+        memory_base: Minimum GPU memory (MB) required before scheduling a tile.
+        memory_factor: Scales the estimated memory footprint with
+            ``np.prod(shape) / 1e6 * memory_factor``.
+        memory_max: Clamp on maximum GPU memory (MB) to assume available.
+        wait_till_gpu_percent_is_free: Fraction of GPU memory that must be free
+            before inference starts. Waits up to 40 minutes.
+    """
+
     def __init__(
         self,
         tile_step_size: float = 0.5,
@@ -92,9 +125,23 @@ class nnUNetPredictor:
         use_folds: tuple[int | str, ...] | None,
         checkpoint_name: str = "checkpoint_final.pth",
         cache_state_dicts: bool = True,
-    ):
-        """
-        This is used when making predictions with a trained model
+    ) -> None:
+        """Load model weights and plans from a trained nnU-Net output directory.
+
+        Supports both nnU-Net v1 (``plans.pkl``) and v2 (``plans.json``) models.
+        After calling this method the predictor is ready for inference.
+
+        Args:
+            model_training_output_dir: Root directory of the trained model
+                (contains ``plans.json``/``plans.pkl`` and per-fold sub-directories).
+            use_folds: Tuple of fold identifiers (int or ``"all"``) whose
+                checkpoints are averaged during inference. If ``None``, folds
+                0-4 are used.
+            checkpoint_name: Filename of the checkpoint inside each fold
+                directory.
+            cache_state_dicts: If ``True``, load all fold weights onto the
+                device up-front and cache the network instances. Reduces
+                per-sample latency at the cost of GPU memory.
         """
         if isinstance(use_folds, str):
             use_folds = [use_folds]  # type: ignore
@@ -252,9 +299,23 @@ class nnUNetPredictor:
                 self.loaded_networks.append(self.network)
         # print(type(self.loaded_networks[0]))
 
-    def predict_single_npy_array(self, input_image: np.ndarray, image_properties: dict, save_or_return_probabilities: bool = False):
-        """
-        image_properties must only have a 'spacing' key!
+    def predict_single_npy_array(
+        self, input_image: np.ndarray, image_properties: dict, save_or_return_probabilities: bool = False
+    ) -> np.ndarray:
+        """Run full inference on a single numpy image array.
+
+        Args:
+            input_image: Image array with shape ``(C, X, Y, Z)`` where ``C`` is
+                the number of input channels.
+            image_properties: Dictionary that must contain a ``'spacing'`` key
+                with the voxel spacing in mm (list/tuple of floats).
+            save_or_return_probabilities: If ``True``, also return softmax
+                probabilities in addition to the label map. Currently raises
+                :class:`NotImplementedError` inside the conversion step.
+
+        Returns:
+            The predicted segmentation array (or a tuple with probabilities if
+            ``save_or_return_probabilities`` is ``True``).
         """
         segmentation_previous_stage: np.ndarray = None  # type: ignore # Was previously a parameter
 
@@ -292,13 +353,27 @@ class nnUNetPredictor:
 
         return ret
 
-    def predict_logits_from_preprocessed_data(self, data: torch.Tensor, attempts=10) -> torch.Tensor:
-        """
-        IMPORTANT! IF YOU ARE RUNNING THE CASCADE, THE SEGMENTATION FROM THE PREVIOUS STAGE MUST ALREADY BE STACKED ON
-        TOP OF THE IMAGE AS ONE-HOT REPRESENTATION! SEE PreprocessAdapter ON HOW THIS SHOULD BE DONE!
+    def predict_logits_from_preprocessed_data(self, data: torch.Tensor, attempts: int = 10) -> torch.Tensor:
+        """Run sliding-window inference on already-preprocessed data and average across folds.
 
-        RETURNED LOGITS HAVE THE SHAPE OF THE INPUT. THEY MUST BE CONVERTED BACK TO THE ORIGINAL IMAGE SIZE.
-        SEE convert_predicted_logits_to_segmentation_with_correct_shape
+        If running the cascade, the previous-stage segmentation must already be
+        stacked on top of the image as a one-hot representation (see
+        :class:`PreprocessAdapterFromNpy`).
+
+        The returned logits have the shape of the (preprocessed) input and must
+        be converted back to the original image size via
+        :func:`convert_predicted_logits_to_segmentation_with_correct_shape`.
+
+        Args:
+            data: Preprocessed image tensor with shape ``(C, X, Y, Z)``.
+            attempts: Number of retry attempts on GPU OOM before raising.
+
+        Returns:
+            Averaged raw logits tensor with shape
+            ``(num_classes, X, Y, Z)`` on CPU.
+
+        Raises:
+            RuntimeError: If inference fails even after all retry attempts.
         """
         # USED
 
@@ -386,6 +461,7 @@ class nnUNetPredictor:
         return prediction  # type: ignore
 
     def _internal_get_sliding_window_slicers(self, image_size: tuple[int, ...]) -> list[tuple[slice, ...]]:
+        """Compute all tile slicers needed to cover the image with the configured patch size and step."""
         # USED
         slicers = []
         assert self.configuration_manager is not None
@@ -428,6 +504,7 @@ class nnUNetPredictor:
         return slicers
 
     def _internal_maybe_mirror_and_predict(self, x: torch.Tensor, network) -> torch.Tensor:
+        """Run network forward pass and optionally accumulate flipped predictions for TTA."""
         if self.do_not_use_half_precision:
             x = x.float()
         # USED
@@ -458,6 +535,17 @@ class nnUNetPredictor:
         return prediction
 
     def predict_sliding_window_return_logits(self, input_image: torch.Tensor, network=None) -> np.ndarray | torch.Tensor:
+        """Tile the input image and aggregate per-tile logits into a full-volume prediction.
+
+        Args:
+            input_image: Image tensor with shape ``(C, X, Y, Z)``.
+            network: Optional network instance to use. Defaults to
+                ``self.network``.
+
+        Returns:
+            Aggregated logit array with shape ``(num_classes, X, Y, Z)``
+            cropped back to the original (un-padded) image size.
+        """
         # USED
         assert isinstance(input_image, torch.Tensor)
         if network is None:
@@ -572,6 +660,7 @@ class nnUNetPredictor:
         slicers: list[tuple[slice, ...]],
         pbar: tqdm,
     ):
+        """Run tiled inference by splitting the volume into spatial chunks to fit GPU memory."""
         widths = [ceil(s / sp) for s, sp in zip(global_shape, splits)]
         inter_mediate_slice: list[intermediate_slice] = []
         pbar.desc = "split in to GPU chunks"
@@ -614,7 +703,8 @@ class nnUNetPredictor:
         empty_cache(self.device)
         return predicted_logits
 
-    def _allocate(self, data: torch.Tensor, results_device, pbar: tqdm, gauss=True):
+    def _allocate(self, data: torch.Tensor, results_device, pbar: tqdm, gauss: bool = True):
+        """Pre-allocate output logit and count tensors; falls back to CPU on OOM."""
         pbar.desc = "preallocating arrays"
         pbar.update(0)
         try:
@@ -658,7 +748,8 @@ class nnUNetPredictor:
         #    empty_cache(self.device)
         return predicted_logits, n_predictions, gaussian, results_device
 
-    def _run_sub(self, data: torch.Tensor, network, results_device, slicers, pbar: tqdm, addendum=""):
+    def _run_sub(self, data: torch.Tensor, network, results_device, slicers, pbar: tqdm, addendum: str = ""):
+        """Iterate over slicers, run inference per tile, and accumulate results."""
         try:
             data = data.to(self.device)  # type: ignore
             predicted_logits, n_predictions, gaussian, results_device = self._allocate(data, results_device, pbar)
@@ -690,12 +781,26 @@ class nnUNetPredictor:
 
 @dataclass
 class intermediate_slice:
+    """Accumulator for sliding-window slicers that fall within a spatial chunk.
+
+    Used by :meth:`nnUNetPredictor._run_prediction_splits` to group tile slicers
+    into GPU-sized spatial blocks. Tracks the bounding box of all accumulated
+    slicers so the minimal sub-volume of data can be transferred to the GPU.
+
+    Attributes:
+        meta_slice: Spatial extent of this chunk (one slice per spatial axis).
+        slicers: All tile slicers whose starting coordinates lie within this chunk.
+        min_s: Minimum start index per axis across all added slicers.
+        max_s: Maximum stop index per axis across all added slicers.
+    """
+
     meta_slice: list[slice]
     slicers: list[tuple[slice, ...]] = field(default_factory=list)
     min_s: list[int] | None = None
     max_s: list[int] | None = None
 
-    def is_in(self, s: tuple[slice, ...]):
+    def is_in(self, s: tuple[slice, ...]) -> bool:
+        """Return ``True`` if slicer ``s`` belongs to this chunk's spatial extent."""
         assert len(s) - 1 == len(self.meta_slice), (s, self.meta_slice)
         for ref, given in zip(s[1:], self.meta_slice):
             if ref.start < given.start:
@@ -704,7 +809,8 @@ class intermediate_slice:
                 return False
         return True
 
-    def add_slicer(self, s: tuple[slice, ...]):
+    def add_slicer(self, s: tuple[slice, ...]) -> None:
+        """Register slicer ``s`` and expand the tracked bounding box accordingly."""
         if self.min_s is None:
             self.min_s = [s.start for s in s[1:]]
         else:
@@ -717,7 +823,8 @@ class intermediate_slice:
         assert len(s) - 1 == len(self.meta_slice)
         self.slicers.append(s)
 
-    def get_intermediate(self):
+    def get_intermediate(self) -> tuple[slice, ...] | None:
+        """Return a slicer covering the bounding box of all registered slicers, or ``None``."""
         if self.min_s is None or self.max_s is None:
             return None
         return (
@@ -725,7 +832,8 @@ class intermediate_slice:
             *tuple(slice(mi, ma) for mi, ma in zip(self.min_s, self.max_s)),
         )  # type: ignore
 
-    def get_slices(self):
+    def get_slices(self) -> Generator[tuple[slice, ...], None, None]:
+        """Yield each registered slicer adjusted to be relative to this chunk's origin."""
         assert self.min_s is not None
         for s in self.slicers:
             yield (
@@ -734,7 +842,14 @@ class intermediate_slice:
             )
 
 
-def empty_cache(device: torch.device):
+def empty_cache(device: torch.device) -> None:
+    """Free the memory cache of the given device (CUDA or MPS).
+
+    Args:
+        device: The device whose cache should be cleared. Accepts a
+            :class:`torch.device` object or a string device identifier.
+            CPU devices are silently ignored.
+    """
     if isinstance(device, str):
         device = torch.device(device)
     if device.type == "cuda":
@@ -748,6 +863,8 @@ def empty_cache(device: torch.device):
 
 
 class dummy_context:
+    """No-op context manager used as a drop-in for :func:`torch.autocast` on non-CUDA devices."""
+
     def __enter__(self):
         pass
 
