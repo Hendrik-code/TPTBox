@@ -94,6 +94,7 @@ def run_inference_on_file(
     verbose: bool = True,
     auto_download: bool = False,
     _key_ResEnc: str = "__nnUNet*ResEnc",
+    fail_on_missing_memory=False,
     logger=logger,
 ) -> tuple[Image_Reference, np.ndarray | None]:
     """Load a VibeSeg model and run inference on the supplied NIfTI images.
@@ -207,6 +208,7 @@ def run_inference_on_file(
         memory_factor=memory_factor,
         memory_max=memory_max,
         wait_till_gpu_percent_is_free=wait_till_gpu_percent_is_free,
+        fail_on_missing_memory=fail_on_missing_memory,
     )
 
     #    _unets[idx] = nnunet
