@@ -33,7 +33,8 @@ from TPTBox.core.dicom.dicom2nii_utils import get_json_from_dicom, load_json, sa
 logger = Print_Logger()
 
 
-def _inc_key(keys, inc=1):
+def _inc_key(keys: dict, inc: int = 1) -> None:
+    """Increment the sequence key inside *keys* by *inc*."""
     k = "sequ"
     if k not in keys:
         keys[k] = 0
@@ -52,8 +53,7 @@ def _inc_key(keys, inc=1):
 def _generate_bids_path(
     dataset_nifti_dir, keys: dict, mri_format, simp_json, make_subject_chunks: int, parent="rawdata", _subject_folder_prefix="sub-"
 ):
-    """
-    Generate a BIDS-compatible file path for NIfTI outputs based on extracted keys from DICOM headers.
+    """Generate a BIDS-compatible file path for NIfTI outputs based on extracted keys from DICOM headers.
 
     Args:
         nifti_dir (str | Path): Directory where the NIfTI file will be stored.
@@ -67,7 +67,6 @@ def _generate_bids_path(
     Returns:
         Path: Path object for the BIDS-compliant file name.
     """
-
     assert "sub" in keys, keys
     ses = keys.get("ses")
     ses = f"ses-{ses}" if ses is not None else ""
@@ -88,7 +87,14 @@ def _generate_bids_path(
     return fname.file["json"], fname
 
 
-def dicom_to_nifti_multiframe_2d(ds, nii_path, pixel_array):
+def dicom_to_nifti_multiframe_2d(ds, nii_path, pixel_array) -> None:
+    """Convert a 2D multiframe DICOM dataset to a NIfTI file using its affine metadata.
+
+    Args:
+        ds: pydicom FileDataset object containing the DICOM header.
+        nii_path: Destination path for the output NIfTI file.
+        pixel_array: Pixel data array extracted from the DICOM dataset.
+    """
     if hasattr(ds, "PixelSpacing"):
         dy, dx = map(float, ds.PixelSpacing)
         affine = np.eye(4)
@@ -119,7 +125,25 @@ def dicom_to_nifti_multiframe_2d(ds, nii_path, pixel_array):
     return nii_path
 
 
-def dicom_to_nifti_multiframe(ds, nii_path):
+def dicom_to_nifti_multiframe(ds: pydicom.FileDataset, nii_path: str | Path) -> str | Path:
+    """Convert a multi-frame DICOM dataset to a NIfTI file.
+
+    Builds a proper NIfTI affine matrix from the DICOM spatial metadata
+    (``PixelSpacing``, ``ImageOrientationPatient``, ``ImagePositionPatient``) and
+    saves the result via nibabel.
+
+    Args:
+        ds: A single pydicom ``FileDataset`` that contains multi-frame pixel data.
+        nii_path: Destination path for the output NIfTI file.
+
+    Returns:
+        The path to the saved NIfTI file (*nii_path*).
+
+    Raises:
+        ValueError: If the pixel array does not have 3 or 4 dimensions.
+        NotImplementedError: If no supported spatial metadata is found to build
+            an affine matrix.
+    """
     pixel_array = ds.pixel_array
     if len(pixel_array.shape) == 2:
         return dicom_to_nifti_multiframe_2d(ds, nii_path, pixel_array)
@@ -252,8 +276,7 @@ def _extract_txt_from_dicom(dcm_path, out_txt):
 
 
 def _extract_nii_from_dicom(dicom_out_path, nii_path):
-    """
-    Convert DICOM files to NIfTI format and handle common conversion errors.
+    """Convert DICOM files to NIfTI format and handle common conversion errors.
 
     Args:
         dicom_out_path (list | str | Path): List of DICOM `FileDataset` objects or path to a DICOM directory.
@@ -267,7 +290,6 @@ def _extract_nii_from_dicom(dicom_out_path, nii_path):
         FunctionTimedOut: Raised if the DICOM-to-NIfTI conversion times out.
         ValueError: Raised for generic validation failures.
     """
-
     try:
         if isinstance(dicom_out_path, list):
             try:
@@ -319,15 +341,38 @@ def _get_paths(
     simp_json: dict,
     dcm_data_l: list[pydicom.FileDataset] | NII | Path,
     dataset_nifti_dir: str | Path,
-    make_subject_chunks=0,
-    use_session=False,
+    make_subject_chunks: int = 0,
+    use_session: bool = False,
     parts: list | None = None,
     map_series_description_to_file_format=None,
     override_subject_name: Callable[[dict, Path], str] | None = None,
     chunk: int | str | None = None,
     keys: dict[str, str | None] | None = None,
-    parent="rawdata",
-):
+    parent: str = "rawdata",
+) -> tuple:
+    """Derive BIDS-compliant JSON and NIfTI output paths for a single DICOM series.
+
+    Args:
+        simp_json: Simplified JSON metadata dictionary extracted from the DICOM header.
+        dcm_data_l: DICOM data (list of datasets, NII object, or path).
+        dataset_nifti_dir: Root directory of the output BIDS dataset.
+        make_subject_chunks: Number of leading subject-ID characters used for sub-folder grouping.
+        use_session: Include session information in the output path when ``True``.
+        parts: List of image-part identifiers (e.g. ``["fat", "water"]``).
+        map_series_description_to_file_format: Optional callable or mapping to override the automatic
+            series-description-to-format conversion.
+        override_subject_name: Optional callable ``(dict, Path) -> str`` that returns a custom
+            subject name.
+        chunk: Chunk index used when a series is split into multiple spatial stacks.
+        keys: Additional BIDS key-value pairs to inject into the filename.
+        parent: BIDS parent directory name (e.g. ``"rawdata"``).
+
+    Returns:
+        A 3-tuple ``(json_file_name, json_bids_name, nii_path)`` where
+        *json_file_name* is the path to the sidecar JSON, *json_bids_name* is the
+        corresponding ``BIDS_FILE`` object, and *nii_path* is the path for the
+        NIfTI output.
+    """
     if keys is None:
         keys = {}
     (mri_format, keys, ending) = extract_keys_from_json(
@@ -347,7 +392,8 @@ def _get_paths(
     return json_file_name, json_bids_name, nii_path
 
 
-def _filter_dicom(dcm_data_l: list[pydicom.FileDataset]):
+def _filter_dicom(dcm_data_l: list[pydicom.FileDataset]) -> list[pydicom.FileDataset]:
+    """Filter DICOM datasets to retain only those with spatial orientation metadata."""
     if len(dcm_data_l) == 1:
         return dcm_data_l
     dcm_data_l = [d for d in dcm_data_l if hasattr(d, "ImageOrientationPatient")]
@@ -358,16 +404,37 @@ def _from_dicom_to_nii(
     dcm_data_l: list[pydicom.FileDataset],
     nifti_dir: str | Path,
     make_subject_chunks: int = 0,
-    use_session=False,
-    verbose=True,
+    use_session: bool = False,
+    verbose: bool = True,
     parts: list | None = None,
     map_series_description_to_file_format=None,
     override_subject_name: Callable[[dict, Path], str] | None = None,
-    chunk=None,
-    skip_localizer=False,
+    chunk: int | str | None = None,
+    skip_localizer: bool = False,
     parent="rawdata",
     censor_list=None,
 ):
+    """Convert a list of DICOM datasets for one series to a NIfTI file.
+
+    Handles spatial-stack splitting, metadata extraction, BIDS path generation,
+    and the actual DICOM-to-NIfTI conversion.
+
+    Args:
+        dcm_data_l: Sorted list of pydicom ``FileDataset`` objects for one series.
+        nifti_dir: Root output directory for the BIDS dataset.
+        make_subject_chunks: Number of leading subject-ID characters for sub-folder grouping.
+        use_session: Include session information in the path when ``True``.
+        verbose: Print progress messages when ``True``.
+        parts: Image-part identifiers (e.g. ``["fat", "water"]``).
+        map_series_description_to_file_format: Optional override for series-description mapping.
+        override_subject_name: Optional callable that returns a custom subject name.
+        chunk: Chunk index for multi-stack series; ``None`` triggers automatic splitting.
+        skip_localizer: Skip localizer series when ``True``.
+
+    Returns:
+        Path to the generated NIfTI file, ``None`` on failure, or a list of paths
+        when the series was automatically split into multiple stacks.
+    """
     if censor_list is None:
         censor_list = [
             "StudyDate",
@@ -443,7 +510,18 @@ def _from_dicom_to_nii(
     return nii_path if add_grid else None
 
 
-def _add_grid_info_to_json(nii_path: Path | str, simp_json: Path | str, force_update=False, add=True):
+def _add_grid_info_to_json(nii_path: Path | str, simp_json: Path | str, force_update: bool = False, add: bool = True) -> dict:
+    """Append grid metadata (shape, spacing, orientation, affine) to a sidecar JSON file.
+
+    Args:
+        nii_path: Path to the NIfTI file from which grid info is read.
+        simp_json: Path to the JSON sidecar file to update.
+        force_update: Re-compute and overwrite existing grid info when ``True``.
+        add: Write the updated dictionary back to disk when ``True``.
+
+    Returns:
+        The updated JSON dictionary including the ``"grid"`` key.
+    """
     json_dict = load_json(simp_json) if Path(simp_json).exists() else {}
     if "grid" in json_dict and not force_update:
         return json_dict
@@ -462,9 +540,8 @@ def _add_grid_info_to_json(nii_path: Path | str, simp_json: Path | str, force_up
     return json_dict
 
 
-def _find_all_files(dcm_dirs: Path | list[Path],verbose=False):
-    """
-    Recursively find all DICOM directories or files in the given paths.
+def _find_all_files(dcm_dirs: Path | list[Path], verbose=False):
+    """Recursively find all DICOM directories or files in the given paths.
 
     Args:
         dcm_dirs (Path | list[Path]): A directory or list of directories to search for DICOM files.
@@ -484,13 +561,13 @@ def _find_all_files(dcm_dirs: Path | list[Path],verbose=False):
                 for file in files:
                     if Path(file).is_file():  # str(file).endswith(".dcm") or str(file).endswith(".ima")
                         if verbose:
-                            logger.on_neutral("File ",i,end="\r")
+                            logger.on_neutral("File ", i, end="\r")
                             i += 1
                         yield Path(root, file).absolute().parent
                         break
                     else:
                         if verbose:
-                            logger.on_neutral("File ",i,end="\r")
+                            logger.on_neutral("File ", i, end="\r")
                             i += 1
                         yield Path(root, file)
                 # if "." not in str(file):
@@ -503,6 +580,7 @@ def _find_all_files(dcm_dirs: Path | list[Path],verbose=False):
 
 
 def _unzip_files(dicom_zip_path: Path, out_dir: str | Path) -> Path:
+    """Extract a ZIP archive containing DICOM files to a temporary directory."""
     with zipfile.ZipFile(dicom_zip_path, "r") as zip_ref:
         dicom_out_path = Path(out_dir, dicom_zip_path.stem)
         zip_ref.extractall(dicom_out_path)
@@ -510,8 +588,7 @@ def _unzip_files(dicom_zip_path: Path, out_dir: str | Path) -> Path:
 
 
 def _read_dicom_files(dicom_out_path: Path) -> tuple[dict[str, list[FileDataset]], dict[str, list[str]]]:
-    """
-    Read DICOM files from a directory and categorize them based on SeriesInstanceUID and type.
+    """Read DICOM files from a directory and categorize them based on SeriesInstanceUID and type.
 
     Args:
         dicom_out_path (Path): Path to the directory containing DICOM files.
@@ -559,10 +636,19 @@ def _read_dicom_files(dicom_out_path: Path) -> tuple[dict[str, list[FileDataset]
 
 
 def _classic_get_grouped_dicoms(dicom_input: list[FileDataset]) -> list[list[FileDataset]]:
-    """
-    Search all dicoms in the dicom directory, sort and validate them
+    """Group DICOM slices into spatially contiguous stacks by analysing slice direction.
 
-    fast_read = True will only read the headers not the data
+    Slices are first sorted by ``InstanceNumber``.  A new stack is started whenever
+    the inter-slice direction vector changes significantly, indicating a different
+    spatial acquisition stack.  Groups with three or fewer slices are collected
+    into a single catch-all group at the end.
+
+    Args:
+        dicom_input: Flat list of pydicom ``FileDataset`` objects for a single series.
+
+    Returns:
+        List of groups, where each group is a list of ``FileDataset`` objects
+        belonging to the same spatial stack.
     """
     # Order all dicom files by InstanceNumber
     dicoms = sorted(dicom_input, key=lambda x: x.InstanceNumber)
@@ -609,7 +695,18 @@ def _classic_get_grouped_dicoms(dicom_input: list[FileDataset]) -> list[list[Fil
     return out
 
 
-def _filter_file_type(dicom_types: dict[str, list[str]]):
+def _filter_file_type(dicom_types: dict[str, list[str]]) -> dict[str, list[str]]:
+    """Identify per-series DICOM ImageType tokens that uniquely distinguish sub-series.
+
+    Args:
+        dicom_types: Mapping of ``SeriesInstanceUID`` to a list of ImageType strings
+            found within that series.
+
+    Returns:
+        A dictionary mapping ``"{SeriesInstanceUID}_{type_string}"`` keys to the
+        list of unique ImageType tokens that distinguish this sub-series from its
+        siblings.
+    """
     dicom_parts: dict[str, list[str]] = {}
     for k, v in dicom_types.items():
         if len(v) == 1:
@@ -656,11 +753,10 @@ def extract_dicom_folder(
     n_cpu: int | None = 1,
     override_subject_name: Callable[[dict, Path], str] | None = None,
     skip_localizer=True,
-    parent="rawdata",
+    parent: str = "rawdata",
     censor_list: list | None = None,
-):
-    """
-    Extract DICOM files from a directory or list of directories, convert them to NIfTI format, and store the output.
+) -> dict:
+    """Extract DICOM files from a directory or list of directories, convert them to NIfTI format, and store the output.
 
     Args:
         dicom_folder (Union[Path, list[Path]]): Path to a directory or list of directories containing DICOM files or compressed DICOM archives.
@@ -687,7 +783,7 @@ def extract_dicom_folder(
         convert_dicom.settings.disable_validate_slice_increment()
     outs = {}
 
-    for p in _find_all_files(dicom_folder,verbose=verbose):
+    for p in _find_all_files(dicom_folder, verbose=verbose):
         dicom_path = p
 
         if str(dicom_path).endswith(".pkl"):
@@ -752,7 +848,6 @@ if __name__ == "__main__":
         extract_dicom_folder(
             p, Path("/media/data/robert/datasets", "dataset-Durchleuchtung222"), False, False, validate_slice_increment=False
         )
-
 
     sys.exit()
     # s = "/home/robert/Downloads/bein/dataset-oberschenkel/rawdata/sub-1-3-46-670589-11-2889201787-2305829596-303261238-2367429497/mr/sub-1-3-46-670589-11-2889201787-2305829596-303261238-2367429497_sequ-406_mr.nii.gz"

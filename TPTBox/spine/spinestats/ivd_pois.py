@@ -15,7 +15,34 @@ from TPTBox.core.vert_constants import Location
 _log = Print_Logger()
 
 
-def strategy_calculate_up_vector(poi: POI, current_vert: NII, vert_id: int, bb, log=_log):
+def strategy_calculate_up_vector(
+    poi: POI,
+    current_vert: NII,
+    vert_id: int,
+    bb: tuple,
+    log: object = _log,
+) -> POI:
+    """Compute IVD superior and inferior extreme points via PCA-based normal estimation.
+
+    Fits a principal component axis through the IVD label (``vert_id + 100``)
+    to determine the superior–inferior direction of the disc, then ray-casts to
+    the extreme points along that axis.  The results are stored as
+    :attr:`~TPTBox.Location.Vertebra_Disc_Inferior` and
+    :attr:`~TPTBox.Location.Vertebra_Disc_Superior` in ``poi``.
+
+    Args:
+        poi: POI object that already contains the IVD centroid for ``vert_id``.
+            Updated in place and returned.
+        current_vert: Cropped vertebra NIfTI used for PCA and ray casting.
+        vert_id: Integer vertebra region ID whose IVD label is ``vert_id + 100``.
+        bb: Bounding-box slices (as returned by
+            :meth:`~TPTBox.NII.compute_crop`) used to convert local
+            coordinates back to the full image space.
+        log: Logger instance used for progress / warning messages.
+
+    Returns:
+        The updated :class:`~TPTBox.POI` object.
+    """
     center = to_local_np(Location.Vertebra_Disc, bb, poi, vert_id, log)
     if center is None:
         return poi
@@ -45,7 +72,14 @@ def strategy_calculate_up_vector(poi: POI, current_vert: NII, vert_id: int, bb, 
     return poi
 
 
-def _crop(i: int, verts_ids: list[int], vert_full: NII, spine_full: NII, poi: POI):
+def _crop(
+    i: int,
+    verts_ids: list[int],
+    vert_full: NII,
+    spine_full: NII,
+    poi: POI,
+) -> tuple | None:
+    """Crop the vertebra and spine volumes around vertebra ``i`` and its neighbour."""
     if i >= 100 or (i + 100 in verts_ids):
         return None
     next_id = Vertebra_Instance(i).get_next_poi(verts_ids)
@@ -58,7 +92,8 @@ def _crop(i: int, verts_ids: list[int], vert_full: NII, spine_full: NII, poi: PO
     return i, verts_ids, vert, spine, poi, crop, next_id
 
 
-def _process_vertebra_A(idx, vert: NII, spine: NII, next_id, poi) -> NII | None:
+def _process_vertebra_A(idx: int, vert: NII, spine: NII, next_id: int, poi: POI) -> NII | None:
+    """Generate the IVD mask between vertebra ``idx`` and ``next_id`` using endplate extraction."""
     from TPTBox.spine.spinestats import endplate_extraction
 
     try:
@@ -83,7 +118,8 @@ def _process_vertebra_A(idx, vert: NII, spine: NII, next_id, poi) -> NII | None:
     return ivd
 
 
-def _process_vertebra_B(idx: int, vert: NII, spine: NII, next_id, dilate=1):
+def _process_vertebra_B(idx: int, vert: NII, spine: NII, next_id: Vertebra_Instance, dilate: int = 1) -> NII:
+    """Generate the IVD mask between vertebra ``idx`` and ``next_id`` using convex-hull morphology."""
     spine = spine.extract_label([49, 50, 26])
     spine_full = spine.extract_label([49, 50, 26, 41, 43, 44])
     spine_full = spine_full.calc_convex_hull("S")
@@ -121,9 +157,14 @@ def _process_vertebra_B(idx: int, vert: NII, spine: NII, next_id, dilate=1):
 
 
 def _process_vertebra(
-    idx: int, verts_ids: list[int], vert: NII, spine: NII, poi: POI, dilate=1
+    idx: int,
+    verts_ids: list[int],
+    vert: NII,
+    spine: NII,
+    poi: POI,
+    dilate: int = 1,
 ) -> tuple[NII, tuple[slice, slice, slice]] | None:
-    """Process a single vertebra index."""
+    """Compute the synthetic IVD mask for a single vertebra and return it with its crop slices."""
     # POI is not cropped, as we only need the vertebra direction
     result = _crop(idx, verts_ids, vert, spine, poi)
     if result is None:
@@ -198,7 +239,27 @@ def _process_vertebra(
     return ivd_2, crop
 
 
-def compute_fake_ivd(vert_full: NII, subreg_full: NII, poi: POI, dilate=1):
+def compute_fake_ivd(vert_full: NII, subreg_full: NII, poi: POI, dilate: int = 1) -> NII:
+    """Add synthetic intervertebral disc (IVD) labels to the vertebra segmentation.
+
+    For every adjacent vertebra pair a synthetic IVD mask is computed using
+    morphological operations on the subregion labels.  The disc for vertebra
+    ``i`` is assigned label ``100 + i`` in the output.  The computation is
+    parallelised over vertebrae using a :class:`~concurrent.futures.ProcessPoolExecutor`.
+
+    Args:
+        vert_full: Vertebra segmentation NIfTI; each vertebra has a unique
+            integer label.  Modified in place and returned.
+        subreg_full: Subregion segmentation NIfTI containing spine body labels
+            (e.g. 49, 50).
+        poi: POI object used to ensure that
+            :attr:`~TPTBox.Location.Vertebra_Corpus` centroids are available.
+        dilate: Morphological dilation radius applied when building the IVD
+            hull mask.
+
+    Returns:
+        The updated ``vert_full`` NIfTI with synthetic IVD labels added.
+    """
     subreg_ids_required_for_ivd_generation = [
         # Location.Inferior_Articular_Left,
         # Location.Inferior_Articular_Right,
@@ -245,7 +306,34 @@ def compute_fake_ivd(vert_full: NII, subreg_full: NII, poi: POI, dilate=1):
     return vert_full
 
 
-def calculate_IVD_POI(vert: NII, subreg: NII, poi: POI, ivd_location: set[Location] | None = None):
+def calculate_IVD_POI(
+    vert: NII,
+    subreg: NII,
+    poi: POI,
+    ivd_location: set[Location] | None = None,
+) -> POI:
+    """Compute IVD-related Points of Interest and add them to ``poi``.
+
+    If the subregion image does not yet contain IVD labels (label 100),
+    :func:`compute_fake_ivd` is called first to synthesise them.  Centroid
+    POIs at label 100 are then computed for all vertebrae and optionally
+    extended with superior / inferior extreme disc points via
+    :func:`strategy_calculate_up_vector`.
+
+    Args:
+        vert: Vertebra segmentation NIfTI.
+        subreg: Subregion segmentation NIfTI; updated in place when IVD labels
+            are synthesised.
+        poi: POI object to extend.  Updated in place and returned.
+        ivd_location: Set of :class:`~TPTBox.Location` values to compute.
+            Defaults to
+            ``{Location.Vertebra_Disc_Superior, Location.Vertebra_Disc}``.
+            Pass an empty set to skip computation entirely.
+
+    Returns:
+        The updated :class:`~TPTBox.POI` object with IVD-related locations
+        added.
+    """
     if ivd_location is None:
         ivd_location = {Location.Vertebra_Disc_Superior, Location.Vertebra_Disc}
     # Note: currently we always need point 100, so it is computed if any Location is in ivd_location

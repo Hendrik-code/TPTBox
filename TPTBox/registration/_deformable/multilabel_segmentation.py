@@ -13,12 +13,11 @@ from TPTBox.registration._ridged_points.point_registration import Point_Registra
 
 
 class Template_Registration:
-    """
-    Class to perform multi-stage registration between two multi-label segmentations, including optional
-    landmark (point-of-interest, POI) alignment and deformable registration. If not provided they will be computed on the fly.
+    """Multi-stage registration between two multi-label segmentations.
 
-    This is especially useful for aligning anatomical segmentations from MRI or CT between a target and an atlas,
-    optionally considering left/right flipping if segmentations are from different body sides.
+    Supports optional POI landmark alignment and deformable registration; landmarks are computed
+    on the fly if not provided.  Particularly useful for MRI/CT atlas alignment with optional
+    body-side flip handling.
 
     Attributes:
         same_side (bool): Whether the target and atlas represent the same anatomical side (e.g., both right sides).
@@ -57,8 +56,7 @@ class Template_Registration:
         change_after_point_reg=lambda x, y, z, w: (x, y, z, w),
         **args,
     ):
-        """
-        Initialize a multi-stage registration pipeline from an atlas to a target image.
+        """Initialize a multi-stage registration pipeline from an atlas to a target image.
 
         Args:
             target (NII): Target image segmentation (e.g., from a subject).
@@ -81,6 +79,7 @@ class Template_Registration:
             cms_ids (list | None): List of segmentation labels used to extract POI centroids.
             poi_target_cms (POI | None): Optional precomputed centroids for the target image.
             **args: Additional keyword arguments passed to Deformable_Registration.
+
         Raises:
             ValueError: If an invalid axis is detected during flipping.
         """
@@ -240,13 +239,12 @@ class Template_Registration:
             **args,
         )
 
-    def get_dump(self):
-        """
-        Collect serializable state of the registration object.
+    def get_dump(self) -> tuple:
+        """Collect the serialisable state of this registration object.
 
         Returns:
-            tuple: Serialized components including version, rigid registration state, deformable state,
-                   and spatial metadata.
+            A tuple containing the version tag followed by all state components
+            needed to reconstruct the object via :meth:`load_`.
         """
         return (
             1,  # version
@@ -261,40 +259,37 @@ class Template_Registration:
             ),
         )
 
-    def save(self, path: str | Path):
-        """
-        Save the registration state to a file.
+    def save(self, path: str | Path) -> None:
+        """Serialise the registration state to a pickle file.
 
         Args:
-            path (str | Path): Path to save the pickle file.
+            path: Destination file path.
         """
         with open(path, "wb") as w:
             pickle.dump(self.get_dump(), w)
 
     @classmethod
-    def load(cls, path):
-        """
-        Load a previously saved registration state from a file.
+    def load(cls, path: str | Path) -> Template_Registration:
+        """Load a previously saved registration state from a pickle file.
 
         Args:
-            path (str | Path): Path to the pickle file.
+            path: Path to the pickle file created by :meth:`save`.
 
         Returns:
-            Register_Multi_Seg: Reconstructed instance of the class.
+            Reconstructed ``Template_Registration`` instance.
         """
         with open(path, "rb") as w:
             return cls.load_(pickle.load(w))
 
     @classmethod
-    def load_(cls, w):
-        """
-        Load a registration object from a deserialized state (as returned by `get_dump()`).
+    def load_(cls, w: tuple) -> Template_Registration:
+        """Reconstruct a ``Template_Registration`` from a raw state tuple (as returned by :meth:`get_dump`).
 
         Args:
-            w (tuple): Serialized state.
+            w: Serialised state tuple.
 
         Returns:
-            Register_Multi_Seg: Reconstructed instance of the class.
+            Reconstructed ``Template_Registration`` instance.
         """
         (version, t0, t1, x) = w
         assert version == 1, f"Version mismatch {version=}"
@@ -311,17 +306,17 @@ class Template_Registration:
 
         return self
 
-    def transform_nii(self, nii_atlas: NII, allow_only_same_grid_as_moving=True, only_rigid=False):
-        """
-        Apply both rigid and deformable registration to a new NII object.
+    def transform_nii(self, nii_atlas: NII, allow_only_same_grid_as_moving: bool = True, only_rigid=False) -> NII:
+        """Apply both rigid and deformable registration to a NII image.
 
         Args:
-            nii_atlas (NII): New atlas image to be transformed.
+            nii_atlas: Atlas image to be transformed (must share the atlas grid).
+            allow_only_same_grid_as_moving: If True, assert that *nii_atlas* matches
+                the grid of the moving image used during point registration.
 
         Returns:
-            NII: Transformed image aligned with the original target image.
+            Transformed ``NII`` aligned with the original target image space.
         """
-
         nii_atlas = self.reg_point.transform_nii(nii_atlas, allow_only_same_grid_as_moving=allow_only_same_grid_as_moving)
         if only_rigid:
             return nii_atlas
@@ -330,7 +325,7 @@ class Template_Registration:
         nii_reg = self.reg_deform.transform_nii(nii_atlas)
         if nii_reg.seg:
             nii_reg.set_dtype_("smallest_uint")
-        out = nii_reg.resample_from_to(self.target_grid_org)
+        out = nii_reg.resample_from_to(self.target_grid_org, mode="constant")
         if self.same_side:
             return out
         axis = out.get_axis("R")
@@ -345,15 +340,14 @@ class Template_Registration:
 
         return target
 
-    def transform_poi(self, poi_atlas: POI_Global | POI):
-        """
-        Apply both rigid and deformable registration to a POI (landmark) object.
+    def transform_poi(self, poi_atlas: POI_Global | POI) -> POI:
+        """Apply both rigid and deformable registration to a POI landmark set.
 
         Args:
-            poi_atlas (POI_Global | POI): Atlas landmarks to be transformed.
+            poi_atlas: Atlas landmarks to be transformed (defined in the atlas space).
 
         Returns:
-            POI: Transformed POIs aligned to the target space.
+            Transformed ``POI`` landmarks aligned to the target image space.
         """
         poi_atlas = poi_atlas.resample_from_to(self.atlas_org)
 
@@ -383,8 +377,7 @@ class Template_Registration:
         return poi_reg_flip
 
     def transform_poi_inverse(self, poi_target: POI_Global | POI):
-        """
-        Transform POIs from target space back into atlas space.
+        """Transform POIs from target space back into atlas space.
 
         Args:
             poi_target (POI_Global | POI): POIs defined in target space.
@@ -392,7 +385,6 @@ class Template_Registration:
         Returns:
             POI: POIs mapped back into atlas space.
         """
-
         poi = poi_target.copy()
 
         # --- undo left/right flip if needed ---

@@ -15,7 +15,34 @@ sacrum_w_o_arcus = (Vertebra_Instance.COCC.value, Vertebra_Instance.S6.value, Ve
 sacrum_w_o_direction = (Vertebra_Instance.COCC.value,)
 
 
-def to_local_np(loc: Location, bb: tuple[slice, slice, slice] | None, poi: POI, label, log: Logger_Interface, verbose=True):
+def to_local_np(
+    loc: Location,
+    bb: tuple[slice, slice, slice] | None,
+    poi: POI,
+    label: int,
+    log: Logger_Interface,
+    verbose: bool = True,
+) -> np.ndarray | None:
+    """Retrieve a POI coordinate in local (bounding-box) voxel space.
+
+    Looks up ``(label, loc.value)`` in ``poi``.  When a bounding box ``bb`` is
+    provided the global coordinate is shifted to the local sub-volume origin by
+    subtracting each slice's start.
+
+    Args:
+        loc: ``Location`` enum member identifying the subregion.
+        bb: Bounding-box slices used to convert global to local coordinates.
+            Pass ``None`` to return the raw global coordinate.
+        poi: ``POI`` object containing the landmark data.
+        label: Region (vertebra) integer label.
+        log: Logger used for failure messages.
+        verbose: Emit a failure log message when the POI is missing.
+            Defaults to ``True``.
+
+    Returns:
+        1-D numpy array ``(x, y, z)`` in local coordinates, or ``None`` when
+        the requested POI is not present in ``poi``.
+    """
     if (label, loc.value) in poi:
         if bb is None:
             return np.asarray(poi[label, loc.value])
@@ -26,7 +53,31 @@ def to_local_np(loc: Location, bb: tuple[slice, slice, slice] | None, poi: POI, 
     return None
 
 
-def paint_into_NII(poi: POI, a: NII, l=None, idxs=None, rays: None | list[tuple[Location, Location]] = None):
+def paint_into_NII(
+    poi: POI,
+    a: NII,
+    l: list[Location] | None = None,
+    idxs: list[int] | None = None,
+    rays: list[tuple[Location, Location]] | None = None,
+) -> NII:
+    """Paint POI landmarks and connecting rays into a segmentation NII image.
+
+    Draws centroid markers for each location in ``l`` and (optionally) rays
+    connecting pairs of POI locations onto ``a``.
+
+    Args:
+        poi: ``POI`` object with the landmarks to draw.
+        a: Target ``NII`` image that will be modified in place.
+        l: List of ``Location`` members whose centroids are drawn.  Defaults to
+            ``[Location.Vertebra_Disc_Inferior, Location.Vertebra_Disc_Superior]``.
+        idxs: Region (vertebra) labels to include.  Defaults to all regions
+            in ``poi``, sorted.
+        rays: List of ``(start_loc, end_loc)`` pairs that define direction rays
+            to paint.  Defaults to IVD disc start/end connections.
+
+    Returns:
+        The modified ``NII`` image ``a`` with landmarks and rays painted in.
+    """
     from TPTBox.core.poi_fun.ray_casting import add_ray_to_img
 
     if l is None:
@@ -64,6 +115,8 @@ def paint_into_NII(poi: POI, a: NII, l=None, idxs=None, rays: None | list[tuple[
 
 
 def timing(f):
+    """Decorator that logs the wall-clock execution time of the wrapped function."""
+
     @wraps(f)
     def wrap(*args, **kw):
         ts = time()
@@ -75,7 +128,19 @@ def timing(f):
     return wrap
 
 
-def make_spine_plot(pois: POI, body_spline, vert_nii: NII, filenames):
+def make_spine_plot(pois: POI, body_spline: np.ndarray, vert_nii: NII, filenames: str) -> None:
+    """Render a 2-D maximum-intensity-projection plot of the spine with the fitted spline.
+
+    Projects the vertebra mask onto the sagittal plane and overlays the POI
+    centroid positions and the spline curve.  The figure is saved to ``filenames``.
+
+    Args:
+        pois: ``POI`` object with vertebra centroids.
+        body_spline: Array of shape ``(N, 3)`` with the spline sample points in
+            isotropic reoriented space.
+        vert_nii: Vertebra segmentation ``NII`` used as the background image.
+        filenames: Output file path passed to ``matplotlib.pyplot.savefig``.
+    """
     from matplotlib import pyplot as plt
 
     pois = pois.reorient()

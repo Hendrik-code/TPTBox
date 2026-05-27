@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 
-def zip_strict(*iterables):
-    """
-    A strict version of zip that raises a ValueError if the input iterables have different lengths.
+def zip_strict(*iterables) -> zip:
+    """A strict version of zip that raises a ValueError if the input iterables have different lengths.
 
     Converts each iterable to a list to check lengths. This assumes all iterables are finite.
 

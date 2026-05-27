@@ -44,7 +44,13 @@ class Example:
     outfolder: Path
 
 
-def set_seed(seed):
+def set_seed(seed: int) -> None:
+    """Fix random seeds for reproducible registration experiments.
+
+    Args:
+        seed: Integer seed applied to PyTorch (CPU + CUDA), NumPy, and Python's
+            ``random`` module; also forces cuDNN into deterministic mode.
+    """
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     np.random.seed(seed)
@@ -53,7 +59,19 @@ def set_seed(seed):
     torch.backends.cudnn.benchmark = False
 
 
-def update_config(config, loss, be, stride, lr):
+def update_config(config: dict, loss: str, be: float, stride: int, lr: float) -> dict:
+    """Patch a deformable registration config dict with the given hyper-parameters.
+
+    Args:
+        config: Base configuration dictionary loaded from a JSON settings file.
+        loss: Name of the image similarity loss term (e.g. ``"LNCC"``).
+        be: Weight for the BSpline bending energy regularisation term.
+        stride: Control-point stride for the deformation field.
+        lr: Optimiser learning rate.
+
+    Returns:
+        The updated configuration dictionary (mutated in place and returned).
+    """
     config["loss"]["config"]["seg"]["name"] = loss
     config["loss"]["weights"]["be"] = be
     config["model"]["args"]["stride"] = stride
@@ -62,7 +80,30 @@ def update_config(config, loss, be, stride, lr):
 
 
 @torch.no_grad()
-def pairwise(fixed, warped, fixed_seg, warped_seg, transform):
+def pairwise(
+    fixed: Image,
+    warped: Image,
+    fixed_seg: Image | None,
+    warped_seg: Image | None,
+    transform: Tensor,
+) -> dict:
+    """Compute pairwise image quality and deformation metrics between two images.
+
+    Evaluates PSNR, SSIM, NMI, Jacobian determinant statistics, and per-label
+    Dice scores (when segmentations are provided).
+
+    Args:
+        fixed: Fixed reference image (deepali ``Image``).
+        warped: Warped moving image aligned to *fixed*.
+        fixed_seg: Segmentation mask of the fixed image, or None.
+        warped_seg: Segmentation mask of the warped moving image, or None.
+        transform: Deformation field tensor used to compute Jacobian metrics.
+
+    Returns:
+        Dictionary with keys ``"psnr"``, ``"ssim"``, ``"nmi"``,
+        ``"folding_ratio"``, ``"jacobian"``, ``"dice scores"``, and
+        ``"avg_dice"``.
+    """
     # print(fixed.shape, warped.shape, fixed_seg.shape, warped_seg.shape)
     # print(type(fixed), type(warped), type(fixed_seg), type(warped_seg))
     fixed = np.expand_dims(fixed.numpy(), 0)
@@ -99,25 +140,26 @@ def pairwise(fixed, warped, fixed_seg, warped_seg, transform):
 
 def run_all(
     e: Example,
-    losses=(
-        # "SSD",
-        # "NMI",
-        # "HuberImageLoss",
-        "LNCC",
-        # "MSE",
-    ),
-    bes=(
-        1e-2,
-        # 1e-3,
-    ),
-    strides=(4, 8, 16),
-    lrs=(
-        # 1e-2,
-        1e-3,
-        1e-4,
-    ),
-    spacings=([], [2], [3], [4]),
-):
+    losses: tuple[str, ...] = ("LNCC",),
+    bes: tuple[float, ...] = (1e-2,),
+    strides: tuple[int, ...] = (4, 8, 16),
+    lrs: tuple[float, ...] = (1e-3, 1e-4),
+    spacings: tuple = ([], [2], [3], [4]),
+) -> None:
+    """Run an exhaustive grid search over deformable registration hyper-parameters.
+
+    All combinations of *losses*, *bes*, *strides* (applied identically to all
+    three spatial dimensions), *lrs*, and *spacings* are evaluated.  Results are
+    cached to a pickle buffer and exported to an Excel file after each run.
+
+    Args:
+        e: ``Example`` dataclass describing the image pair and output folder.
+        losses: Sequence of image similarity loss names to sweep.
+        bes: Sequence of bending-energy regularisation weights to sweep.
+        strides: Sequence of control-point strides (applied to each axis) to sweep.
+        lrs: Sequence of learning rates to sweep.
+        spacings: Sequence of spacing configurations to sweep.
+    """
     tests = []
     for loss in losses:
         for be in bes:
@@ -174,7 +216,21 @@ def run_all(
         df_.to_excel(e.outfolder / f"results_{e.name}.xlsx", index=False)
 
 
-def run(e: Example, loss, be, stride, lr, spacing=1, save=False):
+def run(e: Example, loss: str, be: float, stride: int | tuple, lr: float, spacing: int = 1, save: bool = False) -> dict:
+    """Run a single deformable registration experiment and return evaluation metrics.
+
+    Args:
+        e: ``Example`` dataclass describing the image pair and output folder.
+        loss: Image similarity loss name (e.g. ``"LNCC"``).
+        be: Bending-energy regularisation weight.
+        stride: Control-point stride (scalar or per-axis tuple).
+        lr: Optimiser learning rate.
+        spacing: Pyramid spacing type passed to ``Deformable_Registration``.
+        save: If True, save the warped images and segmentations to *e.outfolder*.
+
+    Returns:
+        Dictionary of evaluation metrics as returned by :func:`pairwise`.
+    """
     PATH_CONFIG = Path(__file__).parent / "settings.json"  # noqa: N806
     deformable_config = _load_config(PATH_CONFIG)
     deformable_config = update_config(deformable_config, loss, be, stride, lr)

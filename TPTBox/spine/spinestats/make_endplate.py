@@ -25,7 +25,8 @@ vertebra_body = (
 )
 
 
-def _dilate_erode_special(np_array: np.ndarray, ball_size=3, normal: None | np.ndarray = None) -> np.ndarray:
+def _dilate_erode_special(np_array: np.ndarray, ball_size: int = 3, normal: np.ndarray | None = None) -> np.ndarray:
+    """Apply a morphological open (dilate then erode) with an axis-aligned or isotropic structuring element."""
     if normal is None:
         struct = ball(ball_size)
     else:
@@ -38,14 +39,14 @@ def _dilate_erode_special(np_array: np.ndarray, ball_size=3, normal: None | np.n
 
 
 def _get_largest_CC(segmentation: np.ndarray) -> np.ndarray:
-    """
-    Extracts the largest connected component from a binary segmentation.
+    """Extract the largest connected component from a binary segmentation.
 
-    Parameters:
-    - segmentation (np.ndarray): Input binary segmentation array.
+    Args:
+        segmentation: Input binary segmentation array of any dimensionality.
 
     Returns:
-    - np.ndarray: Binary array of the largest connected component.
+        Binary integer array of the same shape containing only the largest
+        connected component (background label 0 is excluded).
     """
     labels = label(segmentation)
     unique, counts = np.unique(labels, return_counts=True)  # type: ignore
@@ -53,12 +54,21 @@ def _get_largest_CC(segmentation: np.ndarray) -> np.ndarray:
     return (labels == largest_label).astype(int)
 
 
-def _get_endplate(body, mult, axis=1):
-    """
-    calculating the endplates using projection method
-    mult variable is a 3D numpy array of indices with the same size as body,
-    descending and ascending indices determents wether we are extracting the
-    upper or lower endplate.
+def _get_endplate(body: np.ndarray, mult: np.ndarray, axis: int = 1) -> np.ndarray:
+    """Extract a single endplate surface from a vertebra body via projection and K-means clustering.
+
+    The ``mult`` array encodes depth along the normal direction.  K-means
+    with three clusters is applied to the per-pixel argmax values to separate
+    the true endplate layer from noise and the opposite surface.
+
+    Args:
+        body: 3-D binary array of the vertebral body voxels.
+        mult: 3-D integer array of the same shape as ``body`` containing
+            depth indices along the projection axis.
+        axis: Image axis along which the projection (argmax) is taken.
+
+    Returns:
+        3-D binary array marking the extracted endplate voxels.
     """
     body = body * mult
 
@@ -98,15 +108,19 @@ def _get_endplate(body, mult, axis=1):
 
 
 def _extract_endplate_np(body: np.ndarray, projected: np.ndarray, normal: np.ndarray, lower: bool = False) -> np.ndarray:
-    """
-    Extracts the upper or lower endplate of the given body.
+    """Extract the superior or inferior endplate from a body array.
 
-    Parameters:
-    - body (np.ndarray): 3D binary array representing the segmented body.
-    - lower (bool): If True, extracts the lower endplate. Otherwise, extracts the upper endplate.
+    Args:
+        body: 3-D binary array of the segmented vertebral body.
+        projected: 3-D integer depth-index array aligned with the vertebra
+            normal direction.
+        normal: Normal vector of the endplate plane, used to choose the
+            structuring element orientation for morphological smoothing.
+        lower: When ``True`` the inferior (lower) endplate is extracted;
+            otherwise the superior (upper) endplate is returned.
 
     Returns:
-    - np.ndarray: Binary mask representing the extracted endplate.
+        3-D binary array marking the extracted endplate voxels.
     """
     # Adjust projection for lower endplate if needed
     if lower:
@@ -117,15 +131,24 @@ def _extract_endplate_np(body: np.ndarray, projected: np.ndarray, normal: np.nda
     return endplate_mask
 
 
-def _endplate_extraction_msk(subreg_tmp: NII, normal: np.ndarray, _extract=True) -> NII:
-    """
-    Extracts upper and lower endplates from the given NII object and labels them.
+def _endplate_extraction_msk(subreg_tmp: NII, normal: np.ndarray, _extract: bool = True) -> NII:
+    """Extract superior and inferior endplates from a NIfTI segmentation and label them.
 
-    Parameters:
-    - subreg_tmp (NII): Input NII object containing the body segmentation.
+    Projects the body along the vertebra normal vector, then calls
+    :func:`_extract_endplate_np` twice (for superior and inferior surfaces).
+    Labels are set to
+    :attr:`~TPTBox.Location.Vertebral_Body_Endplate_Superior` and
+    :attr:`~TPTBox.Location.Vertebral_Body_Endplate_Inferior`.
+
+    Args:
+        subreg_tmp: NIfTI segmentation containing vertebra body labels.
+        normal: Normal vector of the endplate plane used to orient the
+            projection and structuring element.
+        _extract: When ``True`` only voxels belonging to ``vertebra_body``
+            labels are considered; when ``False`` all non-zero voxels are used.
 
     Returns:
-    - NII: Updated NII object with labeled endplates.
+        Updated :class:`~TPTBox.NII` with endplate labels set.
     """
     out_arr = np.zeros_like(subreg_tmp.get_array())
     if _extract:
@@ -146,12 +169,32 @@ def _endplate_extraction_msk(subreg_tmp: NII, normal: np.ndarray, _extract=True)
     return subreg_tmp.set_array(out_arr)
 
 
-def endplate_extraction(idx, vert: NII, subreg: NII, poi: POI) -> NII | None:
-    """
-    Retrospectively computes an endplate to a vertebra (Two-Sided).
+def endplate_extraction(
+    idx: int | Enum,
+    vert: NII,
+    subreg: NII,
+    poi: POI,
+) -> NII | None:
+    """Compute the superior and inferior endplates for a single vertebra.
+
+    The vertebra is reoriented to a canonical orientation, cropped, and
+    the endplate surfaces are extracted using projection and K-means
+    clustering along the superior–inferior normal direction.  Sacral
+    vertebrae (except S1) are skipped.
+
+    Args:
+        idx: Vertebra region label (integer or :class:`~enum.Enum` subtype).
+        vert: Full vertebra segmentation NIfTI.
+        subreg: Subregion segmentation NIfTI containing vertebra body labels.
+        poi: POI object used to retrieve the superior–inferior direction for
+            the vertebra.
 
     Returns:
-    - NII: endplates labeled 52, 53.
+        A :class:`~TPTBox.NII` with endplate labels set to
+        :attr:`~TPTBox.Location.Vertebral_Body_Endplate_Superior` and
+        :attr:`~TPTBox.Location.Vertebral_Body_Endplate_Inferior`, or
+        ``None`` when the vertebra is a sacral level or no direction POI is
+        available.
     """
     if isinstance(idx, Enum):
         idx = idx.value

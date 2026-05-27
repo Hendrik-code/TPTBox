@@ -8,19 +8,23 @@ if TYPE_CHECKING:
     from nibabel.nifti1 import Nifti1Image
 
 
-def nifti_to_ants(nib_image: Nifti1Image, **args):
-    """
-    Convert a Nifti image to an ANTsPy image.
+def nifti_to_ants(nib_image: Nifti1Image, **args) -> object:
+    """Convert a NiBabel NIfTI image to an ANTsPy image.
 
-    Parameters
-    ----------
-    nib_image : Nifti1Image
-        The Nifti image to be converted.
+    First attempts to use :func:`ants.utils.from_nibabel_nifti`. Falls back to
+    manually constructing the ANTs image from the q-form affine when the built-in
+    conversion raises an exception (e.g. for non-3D images or unusual metadata).
 
-    Returns
-    -------
-    ants_image : ants.ANTsImage
-        The converted ANTs image.
+    Args:
+        nib_image: The NiBabel NIfTI image to convert.
+        **args: Additional keyword arguments forwarded to
+            :func:`ants.utils.from_nibabel_nifti` when available.
+
+    Returns:
+        The converted ``ants.ANTsImage``.
+
+    Raises:
+        NotImplementedError: If the image has fewer than 3 spatial dimensions.
     """
     import ants
 
@@ -53,18 +57,24 @@ def nifti_to_ants(nib_image: Nifti1Image, **args):
 
 
 def get_ras_affine_from_ants(ants_img) -> np.ndarray:
-    """
-    Convert ANTs image affine to RAS coordinate system.
-    Source: https://github.com/fepegar/torchio/blob/main/src/torchio/data/io.py
-    Parameters
-    ----------
-    ants_img : ants.ANTsImage
-        The ANTs image whose affine is to be converted.
+    """Convert an ANTs image affine matrix to the RAS coordinate system.
 
-    Returns
-    -------
-    affine : np.ndarray
-        The affine matrix in RAS coordinates.
+    Adapted from
+    https://github.com/fepegar/torchio/blob/main/src/torchio/data/io.py.
+    Handles 3-D (direction length 9), 2-D (direction length 4), and
+    degenerate 4-D (direction length 16) cases.
+
+    Args:
+        ants_img: An ``ants.ANTsImage`` whose LPS-convention affine is to be
+            converted.
+
+    Returns:
+        A ``(4, 4)`` NumPy affine matrix in RAS coordinates compatible with
+        NiBabel conventions.
+
+    Raises:
+        NotImplementedError: If the direction matrix has an unexpected number
+            of elements.
     """
     spacing = np.array(ants_img.spacing)
     direction_lps = np.array(ants_img.direction)
@@ -97,20 +107,20 @@ def get_ras_affine_from_ants(ants_img) -> np.ndarray:
 
 
 def ants_to_nifti(img, header=None) -> Nifti1Image:
-    """
-    Convert an ANTs image to a Nifti image.
+    """Convert an ANTsPy image to a NiBabel NIfTI image.
 
-    Parameters
-    ----------
-    img : ants.ANTsImage
-        The ANTs image to be converted.
-    header : Nifti1Header, optional
-        Optional header to use for the Nifti image.
+    First attempts to use :func:`ants.utils.to_nibabel_nifti`. Falls back to
+    manually building a :class:`~nibabel.nifti1.Nifti1Image` from the RAS affine
+    when the built-in conversion raises an exception.
 
-    Returns
-    -------
-    img : Nifti1Image
-        The converted Nifti image.
+    Args:
+        img: An ``ants.ANTsImage`` to convert.
+        header: Optional :class:`~nibabel.nifti1.Nifti1Header` to attach to the
+            output image. The data dtype is updated to match the array dtype when
+            provided.
+
+    Returns:
+        The converted :class:`~nibabel.nifti1.Nifti1Image`.
     """
     import ants
 

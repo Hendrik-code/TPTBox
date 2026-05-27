@@ -16,14 +16,14 @@ VERT_START_COBB = Vertebra_Instance.C2
 
 
 class MoveTo(Enum):
+    """Enum selecting which endplate or centre point of a vertebra is used as the measurement anchor."""
+
     TOP = auto()
     BOTTOM = auto()
     CENTER = auto()
 
-    def has_point(self, v: Vertebra_Instance | int, poi: POI):
-        """
-        Checks if the given vertebra instance or ID has a specific point
-        of interest (POI) based on the current MoveTo position.
+    def has_point(self, v: Vertebra_Instance | int, poi: POI) -> bool:
+        """Check if the given vertebra has a specific POI at the current MoveTo position.
 
         Args:
             v (Vertebra_Instance | int): The vertebra instance or its ID.
@@ -40,10 +40,8 @@ class MoveTo(Enum):
             return False
         return True
 
-    def get_location(self, v: Vertebra_Instance | int, poi: POI):
-        """
-        Determines the anatomical location of a point of interest (POI)
-        in a vertebra based on the MoveTo position.
+    def get_location(self, v: Vertebra_Instance | int, poi: POI) -> tuple:
+        """Determine the anatomical POI coordinates for the current MoveTo position in a vertebra.
 
         Args:
             v (Vertebra_Instance | int): The vertebra instance or its ID.
@@ -88,10 +86,8 @@ class MoveTo(Enum):
                 return (v, subreg, prev_vert, subreg)
         return (v, 50)
 
-    def get_point(self, v: Vertebra_Instance | int, poi: POI):
-        """
-        Retrieves the 3D coordinates of a specific point of interest (POI)
-        in a vertebra based on the MoveTo position.
+    def get_point(self, v: Vertebra_Instance | int, poi: POI) -> np.ndarray:
+        """Retrieve the 3D coordinates of a POI in a vertebra at the current MoveTo position.
 
         Args:
             v (Vertebra_Instance | int): The vertebra instance or its ID.
@@ -111,14 +107,20 @@ class MoveTo(Enum):
         raise NotImplementedError(v, poi)
 
 
-def unit_vector(vector):
-    """Returns the unit vector of the vector."""
+def unit_vector(vector: np.ndarray) -> np.ndarray:
+    """Return the unit vector of the input vector.
+
+    Args:
+        vector: Any non-zero numeric array.
+
+    Returns:
+        Array with the same direction as ``vector`` but unit length.
+    """
     return vector / np.linalg.norm(vector)
 
 
-def angle_between(v1, v2):
-    """
-    Calculates the angle in radians between two vectors.
+def angle_between(v1, v2) -> float:
+    """Calculates the angle in radians between two vectors.
 
     Args:
         v1 (tuple): The first vector.
@@ -140,10 +142,8 @@ def angle_between(v1, v2):
     return np.arccos(np.clip(np.dot(v1_u, v2_u), -1.0, 1.0))
 
 
-def get_to_space(a, b, c):
-    """
-    Computes the transformation matrices from the input coordinate space to the canonical space
-    defined by orthogonal vectors a, b, and c, and vice versa.
+def get_to_space(a, b, c) -> tuple[np.ndarray, np.ndarray]:
+    """Compute forward and inverse transformation matrices for the space defined by three orthogonal vectors.
 
     Args:
         a (np.ndarray): First orthogonal vector.
@@ -160,9 +160,8 @@ def get_to_space(a, b, c):
     return to_space, from_space
 
 
-def cosine_distance(a, b):
-    """
-    Computes the cosine distance between two vectors.
+def cosine_distance(a, b) -> float:
+    """Computes the cosine distance between two vectors.
 
     Args:
         a (np.ndarray): The first vector.
@@ -184,10 +183,10 @@ def compute_angel_between_two_points_(
     project_2D=False,
     use_ivd_direction=False,
 ) -> float | None:
-    """
-    Computes the 2D and 3D angles between two points in a given anatomical structure,
-    such as vertebrae, based on specified directions. This function is particularly
-    useful for calculating coplanar angles, lordosis, and kyphosis, depending on the direction specified.
+    """Compute the 2D or 3D angle between two anatomical landmarks.
+
+    Useful for calculating coplanar angles, lordosis, and kyphosis depending on
+    the direction specified.
 
     Args:
         poi (POI): An object representing a point of interest that supports indexing
@@ -325,9 +324,8 @@ def compute_angel_between_two_points_(
     return angle_2D / np.pi * 180
 
 
-def compute_lordosis_and_kyphosis(poi: POI, project_2D=True):
-    """
-    Calculates the angles of cervical lordosis, thoracic kyphosis, and lumbar lordosis based on the given points of interest (POI).
+def compute_lordosis_and_kyphosis(poi: POI, project_2D=True) -> dict[str, float | None]:
+    """Calculates the angles of cervical lordosis, thoracic kyphosis, and lumbar lordosis based on the given points of interest (POI).
 
     This function determines the angles formed by specific vertebrae along the spine, which are indicative of spinal curvatures.
     The angles are calculated for three key regions: cervical, thoracic, and lumbar, representing lordosis and kyphosis.
@@ -350,6 +348,7 @@ def compute_lordosis_and_kyphosis(poi: POI, project_2D=True):
         - It is essential that the `poi` contains the posterior vertebra direction for accurate angle calculations.
         - Thoracic kyphosis is calculated from T1 to the last thoracic vertebra identified in the POI.
         - Lumbar lordosis is calculated from L1 to the last lumbar vertebra identified in the POI.
+
     Example:
         To compute the spinal angles for a given POI object:
 
@@ -381,7 +380,8 @@ def compute_lordosis_and_kyphosis(poi: POI, project_2D=True):
     }
 
 
-def _get_norm(poi: POI, id1, mv: MoveTo, location: Location, inv=1):  # noqa: ARG001
+def _get_norm(poi: POI, id1: int | Vertebra_Instance, mv: MoveTo, location: Location, inv: int = 1) -> np.ndarray | None:  # noqa: ARG001
+    """Return the normalised direction vector from a location POI to the vertebra centroid."""
     if isinstance(id1, int):
         id1 = Vertebra_Instance(id1)
     subreg = 50
@@ -410,16 +410,16 @@ def _get_norm(poi: POI, id1, mv: MoveTo, location: Location, inv=1):  # noqa: AR
     return norm1_vert
 
 
-def _get_last_lumbar(poi: POI):
-    # if Vertebra_Instance.S1.value not in poi.keys_region():
-    #    return None
+def _get_last_lumbar(poi: POI) -> Vertebra_Instance | None:
+    """Return the most inferior lumbar vertebra that has a centroid in ``poi``."""
     for i in list(reversed(Vertebra_Instance.lumbar()))[:5]:
         if (i.value, 50) in poi:
             return i
     return None
 
 
-def _get_last_thoracic(poi: POI):
+def _get_last_thoracic(poi: POI) -> Vertebra_Instance | None:
+    """Return the most inferior thoracic vertebra that has a centroid in ``poi``."""
     for i in list(reversed(Vertebra_Instance.thoracic()))[:3]:
         if (i.value, 50) in poi:
             return i
@@ -433,9 +433,8 @@ def compute_max_cobb_angle(
     vert_id2_mv: MoveTo = MoveTo.BOTTOM,
     project_2D=True,
     use_ivd_direction=False,
-):
-    """
-    Calculates the maximum Cobb angle from a list of vertebrae using the points of interest (POI).
+) -> tuple[float, int | None, int | None, int | None]:
+    """Calculates the maximum Cobb angle from a list of vertebrae using the points of interest (POI).
 
     The Cobb angle is a measure commonly used to quantify the degree of spinal curvature, particularly for scoliosis.
     This function identifies the maximum Cobb angle by comparing angles between pairs of vertebrae in the specified list.
@@ -450,6 +449,7 @@ def compute_max_cobb_angle(
         poi = calc_poi_from_subreg_vert(nii, nii_subreg, subreg_id=[Location.Vertebra_Corpus,Location.Vertebra_Direction_Right,Location.Vertebra_Disc,Location.Vertebra_Disc_Superior])
         ivd (Vertebra_Disc) will be computed by the segmentation
         + use_ivd_direction = True will use the disc direction and will note if there is a large shift between vertebra without rotation.
+
     Args:
         poi (POI): The points of interest object containing 3D coordinates for various vertebrae.
         vertebrae_list (list, optional): A list of vertebra instances to consider for Cobb angle calculation.
@@ -542,9 +542,8 @@ def compute_max_cobb_angle_multi(
     vert_id2_mv: MoveTo = MoveTo.BOTTOM,
     use_ivd_direction=False,
     project_2D=True,
-):
-    """
-    Identifies multiple Cobb angles along the spine that exceed a given threshold.
+) -> list[tuple[float, int, int, int | None]]:
+    """Identifies multiple Cobb angles along the spine that exceed a given threshold.
 
     This function calculates Cobb angles for a list of vertebrae and recursively finds multiple
     spinal curvatures that are large enough, as determined by a threshold angle. It is useful for
@@ -560,6 +559,7 @@ def compute_max_cobb_angle_multi(
         poi = calc_poi_from_subreg_vert(nii, nii_subreg, subreg_id=[Location.Vertebra_Corpus,Location.Vertebra_Direction_Right,Location.Vertebra_Disc,Location.Vertebra_Disc_Inferior])
         ivd (Vertebra_Disc) will be computed by the segmentation
         + use_ivd_direction = True will use the disc direction and will note if there is a large shift between vertebra without rotation.
+
     Args:
         poi (POI): The points of interest object containing 3D coordinates for various vertebrae.
         vertebrae_list (list, optional): A list of vertebra instances to consider for Cobb angle calculation.
@@ -593,7 +593,6 @@ def compute_max_cobb_angle_multi(
         Angle: 18.2, From: 2, To: 6, Apex: 4
         Angle: 12.4, From: 7, To: 10, Apex: 8
     """
-
     if out_list is None:
         out_list = []
     if vertebrae_list is None:
@@ -641,7 +640,8 @@ def compute_max_cobb_angle_multi(
     return out_list
 
 
-def _add_artificial_ivd(poi: POI):
+def _add_artificial_ivd(poi: POI) -> POI:
+    """Insert synthetic IVD centroids midway between adjacent vertebra centroids if missing."""
     ## ADD IVD if nessasary
     if 100 not in poi.keys_subregion():
         last = None
@@ -664,9 +664,8 @@ def plot_compute_lordosis_and_kyphosis(
     seg: Image_Reference | None = None,
     line_len=100,
     project_2D=True,
-):
-    """
-    Plots and computes the angles of lordosis and kyphosis on a spinal image.
+) -> tuple[dict[str, float | None], Snapshot_Frame]:
+    """Plots and computes the angles of lordosis and kyphosis on a spinal image.
 
     This function calculates cervical lordosis, thoracic kyphosis, and lumbar lordosis angles
     based on the provided Points of Interest (POI) object. It visualizes these angles on the
@@ -724,9 +723,7 @@ def plot_compute_lordosis_and_kyphosis(
         out.append((id1.value, s, (-a[0] * line_len * 3, -a[1] * line_len * 3)))
     out2 = compute_lordosis_and_kyphosis(poi, project_2D=project_2D)
     for (name, v), id1, id2 in zip_strict(
-        out2.items(),
-        [Vertebra_Instance.C7, last_t, last_l],
-        [Vertebra_Instance.C2, Vertebra_Instance.C7, last_t]
+        out2.items(), [Vertebra_Instance.C7, last_t, last_l], [Vertebra_Instance.C2, Vertebra_Instance.C7, last_t]
     ):
         if v is None:
             continue
@@ -758,10 +755,8 @@ def plot_cobb_angle(
     vert_id2_mv: MoveTo = MoveTo.BOTTOM,
     use_ivd_direction=False,
     project_2D=True,
-):
-    """
-    Visualizes the cobb angles for a given spinal image by plotting the angle measurements on the image.
-    The function calculates the maximum cobb angles across the spine and displays the results on the image.
+) -> tuple[list[tuple[float, int, int, int | None]], Snapshot_Frame]:
+    """Visualize Cobb angles on a spinal image by plotting the maximum angles across the spine.
 
     Args:
         img_path (str | Path | None): The file path where the output image with plotted angles should be saved.
@@ -849,9 +844,8 @@ def plot_cobb_and_lordosis_and_kyphosis(
     line_len=100,
     threshold_deg=10,
     project_2D=True,
-):
-    """
-    Plots Cobb angles and lordosis/kyphosis angles on a spinal image.
+) -> tuple[list, dict[str, float | None], list[Snapshot_Frame]]:
+    """Plots Cobb angles and lordosis/kyphosis angles on a spinal image.
 
     This function calculates and visualizes both the Cobb angles for spinal curvature and the angles
     of cervical lordosis, thoracic kyphosis, and lumbar lordosis. It overlays these visualizations
