@@ -1030,12 +1030,16 @@ class Abstract_POI:
             Self: The combined set of centroids, either in-place or as a new set, depending on the 'inplace' parameter.
         """
         ctd_list = self.centroids
+        if "label_name" in pois.info and "label_name" not in self.info:
+            self.info["label_name"] = {}
         if not inplace:
             ctd_list = ctd_list.copy()
         for x, y, c in pois.items():
             if (x, y) in self and not _right_join:
                 continue
             ctd_list[x, y] = c
+            if "label_name" in pois.info and f"({x}, {y})" in pois.info["label_name"]:
+                self.info["label_name"][f"({x}, {y})"] = pois.info["label_name"][f"({x}, {y})"]
         if inplace:
             return self
         return self.copy(ctd_list)
