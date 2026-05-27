@@ -2052,7 +2052,7 @@ class NII(NII_Math):
 
     def to_stl(
         self: NII,
-        label: int,
+        label: int|Enum|Sequence[int]|Sequence[Enum],
         out_path: Path | dict[int, Path] | None = None,
         bb: tuple | None = None,
         to_world: bool = True,
@@ -2107,7 +2107,6 @@ class NII(NII_Math):
         """
 
         from stl import mesh
-
         seg = self.extract_label(label)
         # Prepare binary mask
         seg_arr = np.pad(seg.clamp(0, 1).get_array(), 1)
