@@ -215,13 +215,21 @@ convention = "google"
 # Flag errors (`C901`) whenever the complexity level exceeds 5.
 max-complexity = 20
 
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::FutureWarning",
+]
+
 [tool.coverage.report]
 exclude_lines = [
     "pragma: no cover",
     "if __name__ == .__main__.:",
     "def __repr__",
     "except",
-    "warnings.warn",
+    "import warnings",
+    "warnings\\.warn",
+    "warnings\\.filter",
     "print\\(f?\"\\[!\\].*",
     "def __str__(self):",
     "def __hash__(self) -> int:",
