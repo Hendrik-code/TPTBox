@@ -325,7 +325,7 @@ class Template_Registration:
         nii_reg = self.reg_deform.transform_nii(nii_atlas)
         if nii_reg.seg:
             nii_reg.set_dtype_("smallest_uint")
-        out = nii_reg.resample_from_to(self.target_grid_org)
+        out = nii_reg.resample_from_to(self.target_grid_org, mode="constant")
         if self.same_side:
             return out
         axis = out.get_axis("R")
