@@ -86,6 +86,7 @@ class nnUNetPredictor:
         memory_base=5000,  # Base memory in MB, default is 5GB
         memory_factor=160,  # prod(shape)*memory_factor / 1000, 160 ~> 30 GB
         memory_max: int = 160000,  # in MB, default is 160GB
+        fail_on_missing_memory=False,
         wait_till_gpu_percent_is_free=0.3,
     ):
         self.verbose = verbose
@@ -114,6 +115,7 @@ class nnUNetPredictor:
             perform_everything_on_gpu = False
         self.device = device
         self.perform_everything_on_gpu = perform_everything_on_gpu
+        self.fail_on_missing_memory = fail_on_missing_memory
         self.memory_base = memory_base
         self.memory_factor = memory_factor
         self.memory_max = memory_max
@@ -416,7 +418,7 @@ class nnUNetPredictor:
                 prediction = None
                 self.perform_everything_on_gpu = False
                 empty_cache(self.device)
-                if attempts == 0:
+                if attempts == 0 or self.fail_on_missing_memory:
                     raise
 
                 return self.predict_logits_from_preprocessed_data(data, attempts=attempts - 1)
