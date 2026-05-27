@@ -1,21 +1,12 @@
-# Call 'python -m unittest' on this folder
-# coverage run -m unittest
-# coverage report
-# coverage html
 from __future__ import annotations
 
-import sys
-from pathlib import Path
+import random
+import unittest
 
-file = Path(__file__).resolve()
-sys.path.append(str(file.parents[2]))
-import random  # noqa: E402
-import unittest  # noqa: E402
+import numpy as np
 
-import numpy as np  # noqa: E402
-
-from TPTBox.core import np_utils  # noqa: E402
-from TPTBox.tests.test_utils import get_nii, repeats  # noqa: E402
+from TPTBox.core import np_utils
+from TPTBox.tests.test_utils import get_nii, repeats
 
 
 def make_test_array_repeating(shape=(4, 4), labels=(0, 1, 2, 3)) -> np.ndarray:

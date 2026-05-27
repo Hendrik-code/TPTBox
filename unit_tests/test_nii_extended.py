@@ -384,9 +384,85 @@ class Test_NII_Reorient_Rescale(unittest.TestCase):
         arr[3:7, 3:9, 3:11] = 1
         nii = _make_nii(arr, zoom=(1.0, 1.0, 1.0))
         nii2 = nii.rescale((2.0, 2.0, 2.0)).rescale((1.0, 1.0, 1.0))
-        # shape should approximately return to original after double rescale
         for orig_s, new_s in zip(nii.shape, nii2.shape):
             self.assertAlmostEqual(orig_s, new_s, delta=2)
+
+
+class Test_NII_MorphologyStd(unittest.TestCase):
+    """Tests for standard (non-Euclidean) NII.erode_msk and NII.dilate_msk."""
+
+    @staticmethod
+    def _make_cube_seg(cube_size=8, shape=(20, 20, 20)):
+        arr = np.zeros(shape, dtype=np.uint8)
+        c = shape[0] // 2
+        h = cube_size // 2
+        arr[c - h : c + h, c - h : c + h, c - h : c + h] = 1
+        return _make_nii(arr)
+
+    def test_erode_reduces_volume(self):
+        nii = self._make_cube_seg()
+        eroded = nii.erode_msk(n_pixel=1)
+        self.assertLess(int((eroded.get_array() > 0).sum()), int((nii.get_array() > 0).sum()))
+
+    def test_dilate_increases_volume(self):
+        nii = self._make_cube_seg()
+        dilated = nii.dilate_msk(n_pixel=1)
+        self.assertGreater(int((dilated.get_array() > 0).sum()), int((nii.get_array() > 0).sum()))
+
+    def test_erode_inplace(self):
+        nii = self._make_cube_seg()
+        vol_before = int((nii.get_array() > 0).sum())
+        nii.erode_msk_(n_pixel=1)
+        self.assertLess(int((nii.get_array() > 0).sum()), vol_before)
+
+    def test_dilate_inplace(self):
+        nii = self._make_cube_seg()
+        vol_before = int((nii.get_array() > 0).sum())
+        nii.dilate_msk_(n_pixel=1)
+        self.assertGreater(int((nii.get_array() > 0).sum()), vol_before)
+
+
+class Test_NII_FillHoles(unittest.TestCase):
+    """Tests for NII.fill_holes and NII.fill_holes_."""
+
+    def test_hollow_cube_filled(self):
+        arr = np.zeros((15, 15, 15), dtype=np.uint8)
+        arr[2:13, 2:13, 2:13] = 1
+        arr[5:10, 5:10, 5:10] = 0
+        nii = _make_nii(arr)
+        filled = nii.fill_holes()
+        self.assertEqual(filled.get_array()[7, 7, 7], 1)
+
+    def test_no_holes_volume_unchanged(self):
+        arr = np.zeros((10, 10, 10), dtype=np.uint8)
+        arr[2:8, 2:8, 2:8] = 1
+        nii = _make_nii(arr)
+        vol_before = int((nii.get_array() > 0).sum())
+        filled = nii.fill_holes()
+        self.assertGreaterEqual(int((filled.get_array() > 0).sum()), vol_before)
+
+    def test_fill_holes_inplace(self):
+        arr = np.zeros((12, 12, 12), dtype=np.uint8)
+        arr[1:11, 1:11, 1:11] = 1
+        arr[4:8, 4:8, 4:8] = 0
+        nii = _make_nii(arr)
+        nii.fill_holes_()
+        self.assertEqual(nii.get_array()[6, 6, 6], 1)
+
+
+class Test_NII_GetSegArray(unittest.TestCase):
+    """Tests for NII.get_seg_array, including the warning path for non-seg NIIs."""
+
+    def test_returns_correct_array_when_seg(self):
+        arr = np.array([[[0, 1], [2, 3]]], dtype=np.int16)
+        nii = _make_nii(arr, seg=True)
+        np.testing.assert_array_equal(nii.get_seg_array(), arr)
+
+    def test_returns_array_when_not_seg(self):
+        arr = np.ones((4, 4, 4), dtype=np.float32)
+        nii = _make_nii(arr, seg=False)
+        result = nii.get_seg_array()
+        self.assertEqual(result.shape, arr.shape)
 
 
 if __name__ == "__main__":

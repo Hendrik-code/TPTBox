@@ -6,9 +6,7 @@ from __future__ import annotations
 
 import operator
 import random
-import sys
 import unittest
-from pathlib import Path
 
 import nibabel as nib
 import numpy as np
@@ -46,8 +44,6 @@ class TestNII_MathOperators(unittest.TestCase):
     def make_nii(shape=(8, 9, 10), seed=0, dtype=float):
         rng = np.random.default_rng(seed)
         arr = rng.normal(size=shape) if dtype is float else rng.integers(0, 8, size=shape, dtype=dtype)
-        import nibabel as nib
-
         nii = NII((arr, np.eye(4), nib.nifti1.Nifti1Header()))
         return nii
 
