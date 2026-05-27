@@ -171,15 +171,19 @@ def calc_orientation_of_vertebra_PIR(
 
 
 def _get_sub_array_by_direction(d: DIRECTIONS, cords: np.ndarray) -> np.ndarray:
-    """Get the sub-array of coordinates along a specified direction.
-    cords must be in PIR direction
+    """Return the signed row of ``cords`` corresponding to the anatomical direction ``d``.
+
+    Args:
+        d: Anatomical direction letter (``"P"``, ``"A"``, ``"I"``, ``"S"``,
+            ``"R"``, or ``"L"``).
+        cords: Coordinate array of shape ``(3, N)`` expressed in PIR
+            (Posterior-Inferior-Right) vertebra frame.
+
     Returns:
-        np.ndarray: Sub-array of coordinates along the specified direction.
+        1-D array of length ``N`` with signed projections along ``d``.
 
     Raises:
-        ValueError: If an invalid direction is provided.
-    Note:
-        Assumes the input `cords` array has shape (3, n), where n is the number of coordinates.
+        ValueError: If an unrecognised direction is provided.
     """
     if d == "P":
         return cords[0]
@@ -197,16 +201,26 @@ def _get_sub_array_by_direction(d: DIRECTIONS, cords: np.ndarray) -> np.ndarray:
         never_called(d)
 
 
-def get_direction(d: DIRECTIONS, poi: POI, vert_id: int, verbose=True) -> np.ndarray:
-    """Get the sub-array of coordinates along a specified direction.
-    cords must be in PIR direction
+def get_direction(d: DIRECTIONS, poi: POI, vert_id: int, verbose: bool = True) -> np.ndarray:
+    """Return the unit vector for an anatomical direction of a vertebra.
+
+    Retrieves the pre-computed PIR orientation vectors for vertebra ``vert_id``
+    from ``poi`` and returns the one corresponding to direction ``d``.  C1 has
+    no independent direction and falls back to C2.
+
+    Args:
+        d: Anatomical direction letter (``"P"``, ``"A"``, ``"I"``, ``"S"``,
+            ``"R"``, or ``"L"``).
+        poi: ``POI`` object with pre-computed ``Vertebra_Direction_*`` landmarks.
+        vert_id: Vertebra identifier.  If 1 (C1), direction is taken from C2.
+        verbose: Emit a warning when C1 falls back to C2.  Defaults to ``True``.
+
     Returns:
-        np.ndarray: Sub-array of coordinates along the specified direction.
+        Unit vector (3-element numpy array) pointing in direction ``d`` in the
+        image coordinate frame.
 
     Raises:
-        ValueError: If an invalid direction is provided.
-    Note:
-        Assumes the input `cords` array has shape (3, n), where n is the number of coordinates.
+        KeyError: If orientation data for the requested vertebra is absent.
     """
     if vert_id == 1:
         _log.on_warning("C1 has no direction computation use C2 as direction", verbose=verbose)
@@ -228,8 +242,28 @@ def get_direction(d: DIRECTIONS, poi: POI, vert_id: int, verbose=True) -> np.nda
         never_called(d)
 
 
-def get_vert_direction_PIR(poi: POI, vert_id, do_norm=True, to_pir=True) -> Vertebra_Orientation:
-    """Retive the vertebra orientation from the POI. Must be computed by calc_orientation_of_vertebra_PIR first."""
+def get_vert_direction_PIR(poi: POI, vert_id: int, do_norm: bool = True, to_pir: bool = True) -> Vertebra_Orientation:
+    """Retrieve the vertebra orientation vectors from the POI.
+
+    Must be called after :func:`calc_orientation_of_vertebra_PIR` has populated
+    the ``Vertebra_Direction_*`` POI entries.
+
+    Args:
+        poi: ``POI`` object with ``Vertebra_Corpus``,
+            ``Vertebra_Direction_Posterior``, ``Vertebra_Direction_Inferior``,
+            and ``Vertebra_Direction_Right`` entries for the given vertebra.
+        vert_id: Vertebra identifier (integer label).
+        do_norm: Normalise each direction vector to unit length.
+            Defaults to ``True``.
+        to_pir: Rescale and reorient the POI to isotropic PIR space before
+            computing the directions.  When ``True`` the result is also cached
+            in ``poi._vert_orientation_pir``.  Defaults to ``True``.
+
+    Returns:
+        Tuple of three unit vectors ``(P, I, R)`` representing the Posterior,
+        Inferior, and Right directions of the vertebra in the (optionally
+        reoriented) coordinate frame.
+    """
     if vert_id in poi._vert_orientation_pir and to_pir:
         return poi._vert_orientation_pir[vert_id]  # Elusive buffer of iso/PIR directions.
     poi = poi.extract_subregion(
@@ -255,7 +289,23 @@ def get_vert_direction_PIR(poi: POI, vert_id, do_norm=True, to_pir=True) -> Vert
     return out
 
 
-def get_vert_direction_matrix(poi: POI, vert_id: int, to_pir=False):
+def get_vert_direction_matrix(poi: POI, vert_id: int, to_pir: bool = False) -> tuple[np.ndarray, np.ndarray]:
+    """Return the change-of-basis matrices between the image frame and the vertebra PIR frame.
+
+    Args:
+        poi: ``POI`` object with pre-computed vertebra direction landmarks.
+        vert_id: Vertebra identifier (integer label).
+        to_pir: Whether to convert the POI to isotropic PIR space before
+            computing.  Defaults to ``False``.
+
+    Returns:
+        A tuple ``(to_vert_orient, from_vert_orient)`` where
+
+        * ``to_vert_orient`` transforms image-frame vectors into the vertebra
+          PIR frame (shape ``(3, 3)``).
+        * ``from_vert_orient`` transforms vertebra-frame vectors back into the
+          image frame (shape ``(3, 3)``).
+    """
     P, I, R = get_vert_direction_PIR(poi, vert_id=vert_id, to_pir=to_pir)  # noqa: N806
     from_vert_orient = np.stack([P, I, R], axis=1)
     to_vert_orient = np.linalg.inv(from_vert_orient)
@@ -272,8 +322,7 @@ def calc_center_spinal_cord(
     _fill_inplace: NII | None = None,
     add_dense=False,
 ) -> POI:
-    """
-    Calculate the center of the spinal cord within a specified region.
+    """Calculate the center of the spinal cord within a specified region.
 
     Parameters:
     - poi (POI): Point of Interest object containing relevant data.

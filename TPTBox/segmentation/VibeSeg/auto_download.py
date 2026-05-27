@@ -29,7 +29,21 @@ WEIGHTS_URL_ = "https://github.com/robert-graf/VibeSegmentator/releases/download
 env_name = "VIBESEG_WEIGHTS_PATH"
 
 
-def get_weights_dir(idx, model_path: Path | None = None) -> Path:
+def get_weights_dir(idx: int, model_path: Path | None = None) -> Path:
+    """Resolve and return the directory where model weights for dataset ``idx`` are stored.
+
+    Priority: environment variable ``VIBESEG_WEIGHTS_PATH`` > ``model_path``
+    argument > default path relative to this file.
+
+    Args:
+        idx: Numeric dataset identifier (e.g. ``85`` for Dataset085).
+        model_path: Optional override for the base weights directory. Ignored
+            when the environment variable is set.
+
+    Returns:
+        Path to the dataset-specific weights directory (``<base>/Dataset<idx:03>``).
+        The directory and its parent are created if they do not exist.
+    """
     if env_name in os.environ:
         weights_dir: Path = Path(os.environ[env_name])
     elif model_path is not None and model_path.exists():
@@ -46,7 +60,16 @@ def get_weights_dir(idx, model_path: Path | None = None) -> Path:
     return weights_dir
 
 
-def read_config(idx) -> dict[str, float]:
+def read_config(idx: int) -> dict[str, float]:
+    """Read the ``dataset.json`` configuration for the given dataset index.
+
+    Args:
+        idx: Numeric dataset identifier.
+
+    Returns:
+        Parsed configuration dict, or ``{'dataset_release': 0.0}`` when the
+        file does not yet exist (weights not downloaded).
+    """
     weights_dir = get_weights_dir(idx)
     ds_path = weights_dir / "dataset.json"
     if ds_path.exists():
@@ -57,7 +80,8 @@ def read_config(idx) -> dict[str, float]:
         return {"dataset_release": 0.0}
 
 
-def _download_weights(idx=85, addendum="", first=True) -> None:
+def _download_weights(idx: int = 85, addendum: str = "", first: bool = True) -> None:
+    """Download and extract the zip archive for dataset ``idx`` from the release URL."""
     weights_dir = get_weights_dir(idx)
     weights_url = WEIGHTS_URL_ + f"{idx:03}{addendum}.zip"
     _download(weights_url, weights_dir, text="pretrained weights")
@@ -65,7 +89,8 @@ def _download_weights(idx=85, addendum="", first=True) -> None:
         addendum_download(idx)
 
 
-def _download(weights_url, weights_dir, text="", is_zip=True) -> None:
+def _download(weights_url: str, weights_dir: Path, text: str = "", is_zip: bool = True) -> None:
+    """Download a file from ``weights_url`` into ``weights_dir``, optionally extracting it."""
     try:
         # Retrieve file size
         with urllib.request.urlopen(str(weights_url)) as response:
@@ -92,7 +117,12 @@ def _download(weights_url, weights_dir, text="", is_zip=True) -> None:
         os.remove(zip_path)  # noqa: PTH107
 
 
-def addendum_download(idx):
+def addendum_download(idx: int) -> None:
+    """Download any additional weight archives listed in ``other_downloads.json``.
+
+    Args:
+        idx: Numeric dataset identifier whose weights directory is inspected.
+    """
     weights_dir = get_weights_dir(idx)
     next_zip = weights_dir / "other_downloads.json"
     if next_zip.exists():
@@ -102,7 +132,16 @@ def addendum_download(idx):
         next_zip.unlink()
 
 
-def download_weights(idx, model_path: Path | None = None) -> Path:
+def download_weights(idx: int, model_path: Path | None = None) -> Path:
+    """Ensure model weights for dataset ``idx`` are present locally, downloading if needed.
+
+    Args:
+        idx: Numeric dataset identifier.
+        model_path: Optional base directory override for weight storage.
+
+    Returns:
+        Path to the dataset-specific weights directory.
+    """
     weights_dir = get_weights_dir(idx, model_path)
 
     # Check if weights are downloaded

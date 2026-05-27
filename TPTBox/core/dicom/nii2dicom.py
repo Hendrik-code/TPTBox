@@ -14,7 +14,21 @@ from pydicom.tag import Tag
 from TPTBox import Print_Logger
 
 
-def writeSlices(series_tag_values: dict, new_img: sitk.Image, i, out_dir: str | Path, name="slice"):
+def writeSlices(series_tag_values: dict, new_img: sitk.Image, i: int, out_dir: str | Path, name: str = "slice") -> None:
+    """Write a single axial slice of a SimpleITK image as a DICOM file.
+
+    Applies shared series-level DICOM tags and slice-specific tags (instance
+    creation date/time, image position, instance number) before writing.
+
+    Args:
+        series_tag_values: Dict of DICOM tag keys (e.g. ``"0008|0060"``) to
+            values that are shared by all slices in the series.
+        new_img: 3-D SimpleITK image from which the slice is extracted.
+        i: Zero-based slice index along the Z axis.
+        out_dir: Directory where the DICOM file is written.
+        name: Filename prefix; the output file is named
+            ``<name><i:04d>.dcm``.
+    """
     image_slice: sitk.Image = new_img[:, :, i]
     writer = sitk.ImageFileWriter()
     writer.KeepOriginalImageUIDOn()
@@ -41,17 +55,34 @@ def writeSlices(series_tag_values: dict, new_img: sitk.Image, i, out_dir: str | 
 
 
 def nifti2dicom_1file(
-    in_nii: str | Path, out_dir: str | Path, no_json_ok=False, secondary=False, json_path: None | str | Path = None, out_name="slice"
-):
-    """
-    This function converts one NIfTI file into a DICOM series.
+    in_nii: str | Path,
+    out_dir: str | Path,
+    no_json_ok: bool = False,
+    secondary: bool = False,
+    json_path: None | str | Path = None,
+    out_name: str = "slice",
+) -> None:
+    r"""Convert a single NIfTI file to a DICOM series.
 
-    Parameters:
-    - in_nii: Path to the NIfTI file
-    - out_dir: Path to the output directory
-    - no_json_ok: Whether to proceed without a JSON metadata file
-    - secondary: Whether the images are derived/secondary
-    - json_path: Optional path to the JSON metadata file
+    Reads DICOM metadata from a sidecar JSON file (BIDSy format) when
+    available, generates unique Series/Study Instance UIDs, and writes one
+    DICOM file per axial slice.
+
+    Args:
+        in_nii: Path to the input NIfTI file.
+        out_dir: Output directory; created automatically if it does not exist.
+        no_json_ok: If ``True``, proceed even when no JSON sidecar is found.
+            If ``False``, raises :class:`FileNotFoundError` when the sidecar
+            is missing.
+        secondary: If ``True``, marks the DICOM series as
+            ``DERIVED\\SECONDARY``.
+        json_path: Explicit path to the JSON metadata file. Defaults to the
+            NIfTI stem with ``.json`` extension.
+        out_name: Filename prefix for the individual DICOM slice files.
+
+    Raises:
+        FileNotFoundError: If the JSON sidecar is not found and
+            ``no_json_ok`` is ``False``.
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(exist_ok=True)
@@ -108,15 +139,16 @@ def nifti2dicom_1file(
         writeSlices(series_tag_values, new_img, i, out_dir, name=out_name)
 
 
-def nifti2dicom_mfiles(nifti_dir, out_dir=""):
-    """
-    This function converts multiple NIfTI files into DICOM series.
+def nifti2dicom_mfiles(nifti_dir: str | Path, out_dir: str | Path = "") -> None:
+    """Convert all NIfTI files in a directory to individual DICOM series.
 
-    Parameters:
-    - nifti_dir: Path to the directory containing NIfTI files
-    - out_dir: Path to the output directory
+    Each ``.nii.gz`` file in ``nifti_dir`` is converted by calling
+    :func:`nifti2dicom_1file`. Output sub-directories are created automatically.
 
-    Each NIfTI file's folder will be created automatically, so no need to create an empty folder for each patient.
+    Args:
+        nifti_dir: Directory containing ``.nii.gz`` files to convert.
+        out_dir: Root output directory. Each NIfTI file's series is placed in
+            a sub-directory named after the file stem.
     """
     images = glob(nifti_dir + "/*.nii.gz")  # noqa: PTH207
 

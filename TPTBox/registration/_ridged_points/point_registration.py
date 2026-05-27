@@ -128,7 +128,17 @@ class Point_Registration:
         self.input_poi: Has_Grid = poi_moving.to_gird()
         self.out_poi: Has_Grid = poi_fixed.to_gird()
 
-    def get_resampler(self, seg, c_val, output_space: NII | None = None) -> sitk.ResampleImageFilter:
+    def get_resampler(self, seg: bool, c_val: float, output_space: NII | None = None) -> sitk.ResampleImageFilter:
+        """Build a configured SimpleITK resampler for this registration transform.
+
+        Args:
+            seg: If True, use nearest-neighbour interpolation (segmentation mode).
+            c_val: Default fill value for background voxels (ignored when seg=True).
+            output_space: Optional target image space. Defaults to the fixed image space.
+
+        Returns:
+            A configured ``sitk.ResampleImageFilter`` ready to be executed.
+        """
         resampler: sitk.ResampleImageFilter = sitk.ResampleImageFilter()
         if output_space is None:
             resampler.SetReferenceImage(self._img_fixed)
@@ -144,13 +154,40 @@ class Point_Registration:
         return resampler
 
     def transform(self, x: NII_or_POI) -> NII_or_POI:
+        """Apply the registration transform to a NII image or a POI landmark set.
+
+        Args:
+            x: A ``NII`` image or ``POI`` landmark set to transform.
+
+        Returns:
+            Transformed object of the same type as the input.
+
+        Raises:
+            ValueError: If *x* is neither a ``NII`` nor a ``POI``.
+        """
         if isinstance(x, POI):
             return self.transform_poi(x)
         if isinstance(x, NII):
             return self.transform_nii(x)
         raise ValueError
 
-    def transform_poi(self, poi_moving: POI, allow_only_same_grid_as_moving=True, output_space=None):
+    def transform_poi(
+        self,
+        poi_moving: POI,
+        allow_only_same_grid_as_moving: bool = True,
+        output_space: NII | POI | None = None,
+    ) -> POI:
+        """Transform a set of landmarks (POI) from the moving to the fixed image space.
+
+        Args:
+            poi_moving: Landmark set defined in the moving image space.
+            allow_only_same_grid_as_moving: If True, assert that *poi_moving* shares
+                the grid of the moving image used during registration.
+            output_space: Optional target space to resample the result into.
+
+        Returns:
+            Transformed ``POI`` in the fixed (or *output_space*) coordinate frame.
+        """
         # output_space: POI | NII | None = None,
         if allow_only_same_grid_as_moving:
             text = "input image must be in the same space as moving.  If you sure that this input is in same space as the moving image you can turn of 'only_allow_grid_as_moving'"
@@ -184,7 +221,17 @@ class Point_Registration:
             poi = poi.resample_from_to(output_space)
         return poi
 
-    def transform_cord(self, cord: tuple[float, ...], out: sitk.Image | None = None):
+    def transform_cord(self, cord: tuple[float, ...], out: sitk.Image | None = None) -> np.ndarray:
+        """Transform a single voxel coordinate from moving to fixed image space.
+
+        Args:
+            cord: Voxel coordinate (x, y, z) in the moving image.
+            out: Reference SimpleITK image defining the output space.
+                Defaults to the fixed image used during registration.
+
+        Returns:
+            Transformed coordinate as a NumPy array of shape (3,).
+        """
         if out is None:
             out = self._img_fixed
         ctr_b = self._img_moving.TransformContinuousIndexToPhysicalPoint(cord)
@@ -192,7 +239,17 @@ class Point_Registration:
         ctr_b = out.TransformPhysicalPointToContinuousIndex(ctr_b)
         return np.array(ctr_b)
 
-    def transform_cord_inverse(self, cord: tuple[float, ...], out: sitk.Image | None = None):
+    def transform_cord_inverse(self, cord: tuple[float, ...], out: sitk.Image | None = None) -> np.ndarray:
+        """Transform a single voxel coordinate from fixed to moving image space (inverse direction).
+
+        Args:
+            cord: Voxel coordinate (x, y, z) in the fixed image.
+            out: Reference SimpleITK image defining the output space.
+                Defaults to the fixed image used during registration.
+
+        Returns:
+            Transformed coordinate as a NumPy array of shape (3,).
+        """
         if out is None:
             out = self._img_fixed
         ctr_b = out.TransformContinuousIndexToPhysicalPoint(cord)
@@ -203,10 +260,24 @@ class Point_Registration:
     def transform_nii(
         self,
         moving_img_nii: NII,
-        allow_only_same_grid_as_moving=True,
+        allow_only_same_grid_as_moving: bool = True,
         output_space: NII | None = None,
         c_val: float | None = None,
-    ):
+    ) -> NII:
+        """Resample a NII image from the moving into the fixed image space.
+
+        Args:
+            moving_img_nii: Image defined in the moving image space.
+            allow_only_same_grid_as_moving: If True, assert that *moving_img_nii*
+                shares the grid of the moving image used during registration.
+            output_space: Optional target space for the resampled output.
+                Defaults to the fixed image space.
+            c_val: Background fill value. Derived from the image automatically
+                when not provided.
+
+        Returns:
+            Resampled ``NII`` in the fixed (or *output_space*) coordinate frame.
+        """
         if allow_only_same_grid_as_moving:
             text = "input image must be in the same space as moving.  If you sure that this input is in same space as the moving image you can turn of 'only_allow_grid_as_moving'"
             moving_img_nii.assert_affine(self.input_poi, text=text, shape_tolerance=0.9)
@@ -219,7 +290,15 @@ class Point_Registration:
             transformed_img = sitk.Round(transformed_img)
         return sitk_to_nii(transformed_img, seg=moving_img_nii.seg)
 
-    def get_affine(self):
+    def get_affine(self) -> np.ndarray:
+        """Return the 4x4 affine matrix corresponding to the rigid registration transform.
+
+        The matrix follows the convention:
+            T(x) = A(x - c) + (t + c)
+
+        Returns:
+            A (4, 4) NumPy array representing the homogeneous affine transform.
+        """
         # VersorRigid3DTransform
         # T(x) = A ( x - c ) + (t + c)
         # T(x) = Ax (- Ac + t + c)
@@ -235,7 +314,13 @@ class Point_Registration:
         A[:3, 3] = trans  # Set translation part
         return A
 
-    def get_dump(self):
+    def get_dump(self) -> tuple:
+        """Collect the serialisable state of this registration object.
+
+        Returns:
+            A tuple containing the version tag followed by all state components
+            needed to reconstruct the object via :meth:`load_`.
+        """
         return (
             1,  # version
             sitk_to_nii(self._img_moving, True).to_gird(),
@@ -247,17 +332,38 @@ class Point_Registration:
             self.out_poi,
         )
 
-    def save(self, path: str | Path):
+    def save(self, path: str | Path) -> None:
+        """Serialise the registration state to a pickle file.
+
+        Args:
+            path: Destination file path.
+        """
         with open(path, "wb") as w:
             pickle.dump(self.get_dump(), w)
 
     @classmethod
-    def load(cls, path):
+    def load(cls, path: str | Path) -> Point_Registration:
+        """Load a ``Point_Registration`` from a previously saved pickle file.
+
+        Args:
+            path: Path to the pickle file created by :meth:`save`.
+
+        Returns:
+            Reconstructed ``Point_Registration`` instance.
+        """
         with open(path, "rb") as w:
             return cls.load_(pickle.load(w))
 
     @classmethod
-    def load_(cls, w):
+    def load_(cls, w: tuple) -> Point_Registration:
+        """Reconstruct a ``Point_Registration`` from a raw state tuple (as returned by :meth:`get_dump`).
+
+        Args:
+            w: Serialised state tuple.
+
+        Returns:
+            Reconstructed ``Point_Registration`` instance.
+        """
         self = cls.__new__(cls)
         (
             version,
@@ -294,14 +400,32 @@ class Point_Registration:
 def ridged_points_from_poi(
     poi_fixed: POI,
     poi_moving: POI,
-    exclusion=None,
+    exclusion: list | None = None,
     log: Logger_Interface = No_Logger(),  # noqa: B008
-    verbose=True,
+    verbose: bool = True,
     ax_code=None,
     zooms=None,
-    c_val=None,
-    leave_worst_percent_out=0.0,
+    c_val: float | None = None,
+    leave_worst_percent_out: float = 0.0,
 ) -> Point_Registration:
+    """Compute a rigid point-based registration from two POI landmark sets.
+
+    Args:
+        poi_fixed: Landmark set in the fixed (target) image space.
+        poi_moving: Landmark set in the moving (source) image space.
+        exclusion: List of landmark keys to exclude from the alignment.
+        log: Logger used for progress and diagnostic output.
+        verbose: If True, print detailed per-landmark information.
+        ax_code: Optional orientation code to reorient *poi_fixed* before registration.
+        zooms: Optional target voxel spacing to rescale *poi_fixed* before registration.
+        c_val: Deprecated. Background fill value — has no effect and will trigger a
+            ``DeprecationWarning`` if supplied.
+        leave_worst_percent_out: Fraction (0–1) of worst-fitting landmarks to discard
+            before computing the final transform.
+
+    Returns:
+        Fitted ``Point_Registration`` object.
+    """
     if c_val is not None:
         warnings.warn(
             "c_val of ridged_points_from_poi is never used.",
@@ -326,12 +450,34 @@ def ridged_points_from_subreg_vert(
     subreg: POI_Reference,
     poi_target_buffer: Path | str | None = None,
     orientation=None,
-    zoom=(-1, -1, -1),
+    zoom: tuple[float, float, float] = (-1, -1, -1),
     subreg_id: int | Location | list[int | Location] | list[Location] | list[int] = 50,
-    c_val=-1050,
-    verbose=True,
-    save_buffer_file=True,
+    c_val: float = -1050,
+    verbose: bool = True,
+    save_buffer_file: bool = True,
 ) -> Point_Registration:
+    """Compute a rigid point-based registration using vertebra sub-region centroids.
+
+    Derives a fixed-space POI from instance and semantic segmentation masks, then
+    aligns it to a pre-computed moving-space POI.
+
+    Args:
+        poi_moving: POI landmark set (or loadable reference) for the moving image.
+        vert: Instance (vertebra label) segmentation in the fixed image space.
+        subreg: Semantic sub-region segmentation in the fixed image space.
+        poi_target_buffer: Optional path to cache / load the computed fixed POI.
+        orientation: Optional orientation code to reorient the fixed POI.
+        zoom: Target voxel spacing for rescaling the fixed POI.
+            Pass ``(-1, -1, -1)`` to skip rescaling.
+        subreg_id: Sub-region label(s) used to extract centroid landmarks.
+        c_val: Background fill value forwarded to the registration (currently unused
+            internally; kept for API compatibility).
+        verbose: If True, print progress information.
+        save_buffer_file: If True, save the computed fixed POI to *poi_target_buffer*.
+
+    Returns:
+        Fitted ``Point_Registration`` object.
+    """
     if not isinstance(subreg_id, (list, tuple)):
         subreg_id = [subreg_id]
     instance_nii = to_nii(vert, True).copy()
@@ -361,9 +507,10 @@ def _compute_versor(
     img_fixed: sitk.Image,
     ctd_m: POI,
     img_moving: sitk.Image,
-    verbose=False,
+    verbose: bool = False,
     log: Logger_Interface = No_Logger(),  # noqa: B008
-):
+) -> tuple[sitk.VersorRigid3DTransform, float, float, dict[tuple[int, int], float]]:
+    """Fit a VersorRigid3D transform from shared landmark pairs and report registration errors."""
     assert len(inter) >= 2, f"To few points: {inter}"
     # find shared points
     move_l = []

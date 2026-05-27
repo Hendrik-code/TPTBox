@@ -52,6 +52,13 @@ pytest-mock = "^3.6.0"
 exceptiongroup = { version = "^1.2", python = "<3.11" }
 tomli = {version = "*", python = "<3.11" }
 
+[tool.poetry.group.docs.dependencies]
+mkdocs = ">=1.6"
+mkdocs-material = ">=9.5"
+mkdocstrings = {extras = ["python"], version = ">=0.25"}
+mkdocs-gen-files = ">=0.5"
+mkdocs-literate-nav = ">=0.6"
+
 [build-system]
 requires = ["poetry-core>=1.0.0", "poetry-dynamic-versioning>=1.0.0,<2.0.0"]
 build-backend = "poetry_dynamic_versioning.backend"
@@ -124,9 +131,9 @@ select = [
     "TD005",
     "FIX003",
     "FIX004",
-    #"ERA", For clean up
-    #"D", Dockstring For clean up
-    #"ANN", Annoation For clean up
+    #"ERA",
+    "D",
+    "ANN201",
     "PD",
     "PGH",
     "PL",
@@ -163,16 +170,27 @@ ignore = [
     "UP038",
     "N999",
     "E741",
-    "SIM118",  # dictionay keys
+    "SIM118",  # dictionary keys
     "N802",    # function name lowercase
     "F811",
     "N803",
     "N806",
-    "FURB171", 
+    "FURB171",
     "PLW0108",
-    "B905", # strict= in zip
-    "UP007", # Union and "|" python 3.9
+    "B905",    # strict= in zip
+    "UP007",   # Union and "|" python 3.9
     "PLC0415", # import-outside-top-level
+    # Docstring rules relaxed for internal / magic / dunder members
+    "D100",    # missing docstring in public module
+    "D104",    # missing docstring in public package
+    "D105",    # missing docstring in magic method
+    "D107",    # missing docstring in __init__ (covered by class docstring)
+    # Argument descriptions in existing docstrings — addressed progressively
+    "D417",
+    # Return-type annotation not required for private helpers
+    "ANN202",
+    # En-dashes (–) in docstrings are legitimate range notation (e.g. "C1–C7")
+    "RUF002",
     ]
 
 # Allow fix for all enabled rules (when `--fix`) is provided.
@@ -184,6 +202,14 @@ extend-safe-fixes = ["RUF015", "C419", "C408", "B006"]
 
 # Allow unused variables when underscore-prefixed.
 dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+# Test files: don't require docstrings on test functions / helper utilities
+"unit_tests/**" = ["D101", "D102", "D103", "D205", "D415", "ANN201"]
+"TPTBox/tests/**" = ["D101", "D102", "D103", "D205", "D415", "ANN201"]
 
 [tool.ruff.lint.mccabe]
 # Flag errors (`C901`) whenever the complexity level exceeds 5.
