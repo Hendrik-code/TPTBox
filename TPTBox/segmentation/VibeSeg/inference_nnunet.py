@@ -87,9 +87,9 @@ def run_inference_on_file(
     ddevice: Literal["cpu", "cuda", "mps"] = "cuda",
     model_path=None,
     step_size: float = 0.5,
-    memory_base: int = 5000,  # Base memory in MB, default is 5GB
-    memory_factor: int = 160,  # prod(shape)*memory_factor / 1000, 160 ~> 30 GB
-    memory_max: int = 160000,  # in MB, default is 160GB
+    memory_base: float | None = None,  # Base memory in MB, default is 5GB
+    memory_factor: float | None = None,  # prod(shape)*memory_factor / 1000, 160 ~> 30 GB
+    memory_max: int = 990000,  # in MB, default is 990GB (so it is most likely ignored and replaced by Max Memory of the GPU)
     wait_till_gpu_percent_is_free: float = 0.1,
     verbose: bool = True,
     auto_download: bool = False,
@@ -196,6 +196,11 @@ def run_inference_on_file(
                 ds_info["resolution_range"] = ds_info2["resolution_range"]
             if "labels" in ds_info2:
                 ds_info["labels_mapping"] = ds_info2["labels"]
+
+    if memory_base is None:
+        memory_base = float(ds_info.get("memory_base", 5000))
+    if memory_factor is None:
+        memory_factor = float(ds_info.get("memory_factor", 160))
 
     nnunet = load_inf_model(
         nnunet_path,
