@@ -29,9 +29,9 @@ def load_inf_model(
     use_gaussian: bool = True,
     verbose: bool = False,
     gpu: int | None = None,
-    memory_base: int = 5000,
-    memory_factor: int = 160,
-    memory_max: int = 160000,
+    memory_base: float = 5000,
+    memory_factor: float = 160,
+    memory_max: float = 160000,
     wait_till_gpu_percent_is_free: float = 0.3,
     fail_on_missing_memory=False,
 ) -> nnUNetPredictor:
