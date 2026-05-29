@@ -2,13 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import nibabel as nib
 import numpy as np
-import SimpleITK as sitk  # noqa: N813
 import torch
 
 from TPTBox import NII, Log_Type, No_Logger
-from TPTBox.core import sitk_utils
 
 from .predictor import nnUNetPredictor
 
@@ -32,10 +29,11 @@ def load_inf_model(
     use_gaussian: bool = True,
     verbose: bool = False,
     gpu: int | None = None,
-    memory_base: int = 5000,
-    memory_factor: int = 160,
-    memory_max: int = 160000,
+    memory_base: float = 5000,
+    memory_factor: float = 160,
+    memory_max: float = 160000,
     wait_till_gpu_percent_is_free: float = 0.3,
+    fail_on_missing_memory=False,
 ) -> nnUNetPredictor:
     """Load and initialise an nnU-Net model predictor from a trained model folder.
 
@@ -103,6 +101,7 @@ def load_inf_model(
         memory_factor=memory_factor,
         memory_max=memory_max,
         wait_till_gpu_percent_is_free=wait_till_gpu_percent_is_free,
+        fail_on_missing_memory=fail_on_missing_memory,
     )
     check_name = "checkpoint_final.pth"  # if not allow_non_final else "checkpoint_best.pth"
     try:

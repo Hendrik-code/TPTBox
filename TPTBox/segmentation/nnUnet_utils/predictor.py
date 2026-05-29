@@ -83,9 +83,10 @@ class nnUNetPredictor:
         verbose: bool = False,
         verbose_preprocessing: bool = False,
         allow_tqdm: bool = True,
-        memory_base=5000,  # Base memory in MB, default is 5GB
-        memory_factor=160,  # prod(shape)*memory_factor / 1000, 160 ~> 30 GB
-        memory_max: int = 160000,  # in MB, default is 160GB
+        memory_base: float = 5000,  # Base memory in MB, default is 5GB
+        memory_factor: float = 160,  # prod(shape)*memory_factor / 1000, 160 ~> 30 GB
+        memory_max: float = 160000,  # in MB, default is 160GB
+        fail_on_missing_memory=False,
         wait_till_gpu_percent_is_free=0.3,
     ):
         self.verbose = verbose
@@ -108,12 +109,14 @@ class nnUNetPredictor:
         self.use_mirroring = use_mirroring
         if device.type == "cuda":
             device = torch.device(type="cuda", index=cuda_id)  # set the desired GPU with CUDA_VISIBLE_DEVICES!
-        self.do_not_use_half_precision = device.type in ["cpu", "mps"]  # float16 not supported by cpu
+        # float16 not supported by cpu
+        self.do_not_use_half_precision = device.type in ["cpu", "mps"]
         if device.type != "cuda" and perform_everything_on_gpu:
             print("perform_everything_on_gpu=True is only supported for cuda devices! Setting this to False")
             perform_everything_on_gpu = False
         self.device = device
         self.perform_everything_on_gpu = perform_everything_on_gpu
+        self.fail_on_missing_memory = fail_on_missing_memory
         self.memory_base = memory_base
         self.memory_factor = memory_factor
         self.memory_max = memory_max
@@ -152,7 +155,11 @@ class nnUNetPredictor:
             ## LOAD NNUNET 1 models
             from nnunet.training.model_restore import restore_model
 
-            pkl_file1 = join(model_training_output_dir, f"fold_{use_folds[0]}", "model_final_checkpoint.model.pkl")  # type: ignore
+            pkl_file1 = join(
+                model_training_output_dir,
+                f"fold_{use_folds[0]}",
+                "model_final_checkpoint.model.pkl",
+            )  # type: ignore
             trainer = restore_model(pkl_file1, fp16=True)
             trainer.output_folder = model_training_output_dir
             trainer.output_folder_base = model_training_output_dir
@@ -300,7 +307,10 @@ class nnUNetPredictor:
         # print(type(self.loaded_networks[0]))
 
     def predict_single_npy_array(
-        self, input_image: np.ndarray, image_properties: dict, save_or_return_probabilities: bool = False
+        self,
+        input_image: np.ndarray,
+        image_properties: dict,
+        save_or_return_probabilities: bool = False,
     ) -> np.ndarray:
         """Run full inference on a single numpy image array.
 
@@ -337,7 +347,10 @@ class nnUNetPredictor:
         if self.verbose:
             print("predicting")
         predicted_logits = self.predict_logits_from_preprocessed_data(dct["data"])  # type: ignore
-        print("convert_predicted_logits_to_segmentation_with_correct_shape", predicted_logits.shape)
+        print(
+            "convert_predicted_logits_to_segmentation_with_correct_shape",
+            predicted_logits.shape,
+        )
         import time
 
         t = time.time()
@@ -416,7 +429,7 @@ class nnUNetPredictor:
                 prediction = None
                 self.perform_everything_on_gpu = False
                 empty_cache(self.device)
-                if attempts == 0:
+                if attempts == 0 or self.fail_on_missing_memory:
                     raise
 
                 return self.predict_logits_from_preprocessed_data(data, attempts=attempts - 1)
@@ -603,12 +616,12 @@ class nnUNetPredictor:
                     time.sleep(1)
 
             def check_mem(shape):
-                memory = get_gpu_memory_MB(device)
+                memory = get_gpu_memory_MB(device) * 0.80
                 max_memory = self.memory_max
                 min_memory = self.memory_base
                 factor = self.memory_factor
                 # print(shape, "usage", np.prod(shape) / 1000000 * factor, max(min(memory, max_memory), min_memory))
-                return (np.prod(shape) / 1000000 * factor) + min_memory // 2 < max(min(memory, max_memory), min_memory)
+                return (np.prod(shape) / 1000000 * factor) + min_memory < max(min(memory, max_memory), min_memory)
 
             with tqdm(total=len(slicers), disable=not self.allow_tqdm) as pbar:
                 if not check_mem(shape) or "nnUNetPlans_2d" not in self.configuration_manager.configuration.get("data_identifier", "3D"):
