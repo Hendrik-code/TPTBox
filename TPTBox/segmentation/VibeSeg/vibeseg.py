@@ -84,6 +84,10 @@ VibeSeg_map = {
     72: "bone_other",
 }
 
+defaults = {
+    100: {"memory_base": 5500, "memory_factor": 25},
+}
+
 
 def run_vibeseg(
     i: Image_Reference,
@@ -113,6 +117,10 @@ def run_vibeseg(
     Returns:
         Segmentation ``NII`` saved at *out_seg*.
     """
+    if dataset_id in defaults:
+        for k, v in defaults[dataset_id].items():
+            if k not in args:
+                args[k] = v
     return run_inference_on_file(
         dataset_id,
         [to_nii(i)] if not isinstance(i, (list, tuple)) else [to_nii(j) for j in i],
