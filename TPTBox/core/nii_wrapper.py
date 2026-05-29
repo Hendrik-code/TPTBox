@@ -2505,7 +2505,7 @@ class NII(NII_Math):
         try:
             verts, faces, normals, values = marching_cubes(seg_arr, gradient_direction="ascent", step_size=1)
         except RuntimeError as e:
-            raise RuntimeError(str(e),f"{label=}, {self.unique()}, {out_path=}") from None
+            raise IndexError(str(e),f"{label=}, {self.unique()}, {out_path=}") from None
         # Remove padding offset (since we padded by 1 voxel)
         verts -= 1
         # Apply bounding box offset (still voxel space)
