@@ -210,6 +210,8 @@ convention = "google"
 # Test files: don't require docstrings on test functions / helper utilities
 "unit_tests/**" = ["D101", "D102", "D103", "D205", "D415", "ANN201"]
 "TPTBox/tests/**" = ["D101", "D102", "D103", "D205", "D415", "ANN201"]
+# Dev tooling (standalone scripts): same relaxed docstring rules, not an importable package
+"benchmarks/**" = ["D101", "D102", "D103", "D205", "D415", "ANN201", "INP001"]
 
 [tool.ruff.lint.mccabe]
 # Flag errors (`C901`) whenever the complexity level exceeds 5.
