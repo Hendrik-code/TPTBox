@@ -37,6 +37,7 @@ def load_inf_model(
     memory_factor: int = 160,
     memory_max: int = 160000,
     wait_till_gpu_percent_is_free: float = 0.3,
+    tile_batch_size: int = 1,
 ) -> nnUNetPredictor:
     """Load and initialise an nnU-Net model predictor from a trained model folder.
 
@@ -69,6 +70,9 @@ def load_inf_model(
         memory_max: Maximum GPU memory cap in MB (default 160 000 MB = 160 GB).
         wait_till_gpu_percent_is_free: Fraction of GPU memory that must be free
             before inference is started.
+        tile_batch_size: Number of sliding-window tiles per network forward pass.
+            ``1`` reproduces the original per-tile path; larger values batch
+            tiles to improve GPU utilisation at higher peak memory.
 
     Returns:
         Initialised ``nnUNetPredictor`` ready for inference.
@@ -119,6 +123,7 @@ def load_inf_model(
         memory_factor=memory_factor,
         memory_max=memory_max,
         wait_till_gpu_percent_is_free=wait_till_gpu_percent_is_free,
+        tile_batch_size=tile_batch_size,
     )
     check_name = "checkpoint_final.pth"  # if not allow_non_final else "checkpoint_best.pth"
     try:
