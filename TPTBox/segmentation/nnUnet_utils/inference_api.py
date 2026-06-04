@@ -31,6 +31,7 @@ def load_inf_model(
     inference_augmentation: bool = False,
     use_gaussian: bool = True,
     verbose: bool = False,
+    fast_perf: bool = True,
     gpu: int | None = None,
     memory_base: int = 5000,
     memory_factor: int = 160,
@@ -55,6 +56,11 @@ def load_inf_model(
         inference_augmentation: If True, enable test-time mirroring augmentation.
         use_gaussian: If True, apply Gaussian weighting in the sliding window.
         verbose: If True, print progress information during model initialisation.
+        fast_perf: If True (and running on CUDA), enable cuDNN autotuning and TF32
+            matmul/conv. Every sliding-window tile has the same ``patch_size``
+            shape, so cuDNN can pick the fastest convolution algorithms once and
+            reuse them. TF32 speeds up fp32 ops on Ampere+ GPUs with negligible
+            accuracy impact. These are global ``torch.backends`` flags.
         gpu: GPU device index forwarded to the predictor.  ``None`` defaults to 0.
         memory_base: Base GPU memory reservation in MB (default 5 000 MB = 5 GB).
         memory_factor: Per-voxel memory scaling factor.  The formula is
@@ -84,6 +90,16 @@ def load_inf_model(
                 _interop = True
         except Exception as e:
             print(e)
+        if fast_perf:
+            # All sliding-window tiles share the same (patch_size) shape, so cuDNN can
+            # autotune the fastest conv algorithms once and reuse them across tiles/images.
+            # TF32 accelerates fp32 matmul/conv on Ampere+ with negligible accuracy impact.
+            try:
+                torch.backends.cudnn.benchmark = True
+                torch.backends.cuda.matmul.allow_tf32 = True
+                torch.backends.cudnn.allow_tf32 = True
+            except Exception as e:
+                print(e)
         device = torch.device("cuda")
     else:
         device = torch.device("mps")
