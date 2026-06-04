@@ -281,23 +281,31 @@ class nnUNetPredictor:
             print("compiling network")
             self.network = torch.compile(self.network)  # type: ignore
 
-        self.loaded_networks = []
-        if cache_state_dicts:
-            for params in self.list_of_parameters:
-                if not isinstance(self.network, OptimizedModule):
-                    self.network.load_state_dict(params)  # type: ignore
-                else:
-                    self.network._orig_mod.load_state_dict(params)
-                if self.device.type == "cuda" and not torch.cuda.is_available():
-                    Print_Logger().on_warning(
-                        "No CUDA device. If you have a CUDA-able GPU (Nvidia), reinstall pytorch with cuda or for non-cuda devices use ddevice=cpu or ddevice=mps"
-                    )
-                if self.device.type == "mps" and not (hasattr(torch.backends, "mps") and torch.backends.mps.is_available()):
-                    Print_Logger().on_warning("No MPS device found. Use ddevice=cpu or ddevice=mps")
-                self.network.to(self.device)
-                self.network.eval()  # type: ignore
-                self.loaded_networks.append(self.network)
-        # print(type(self.loaded_networks[0]))
+        # Warn early if the requested device is unavailable (runs once, independent of folds).
+        if self.device.type == "cuda" and not torch.cuda.is_available():
+            Print_Logger().on_warning(
+                "No CUDA device. If you have a CUDA-able GPU (Nvidia), reinstall pytorch with cuda or for non-cuda devices use ddevice=cpu or ddevice=mps"
+            )
+        if self.device.type == "mps" and not (hasattr(torch.backends, "mps") and torch.backends.mps.is_available()):
+            Print_Logger().on_warning("No MPS device found. Use ddevice=cpu or ddevice=mps")
+
+        # loaded_networks holds one ready-to-run network per fold (or None to load weights
+        # lazily per fold). We only cache the single-fold case: previously this loop appended
+        # the SAME self.network object once per fold, so every entry ended up holding the LAST
+        # fold's weights. That silently collapsed an N-fold ensemble to a single fold while
+        # still paying Nx the compute. For >1 fold we keep loaded_networks=None and let
+        # predict_logits_from_preprocessed_data swap weights per fold via load_state_dict (a
+        # true ensemble that needs only one network's worth of GPU memory).
+        self.loaded_networks = None
+        if cache_state_dicts and len(self.list_of_parameters) == 1:
+            params = self.list_of_parameters[0]
+            if not isinstance(self.network, OptimizedModule):
+                self.network.load_state_dict(params)  # type: ignore
+            else:
+                self.network._orig_mod.load_state_dict(params)
+            self.network.to(self.device)
+            self.network.eval()  # type: ignore
+            self.loaded_networks = [self.network]
 
     def predict_single_npy_array(
         self, input_image: np.ndarray, image_properties: dict, save_or_return_probabilities: bool = False
