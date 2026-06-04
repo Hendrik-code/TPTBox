@@ -554,7 +554,6 @@ class nnUNetPredictor:
         network = network.to(self.device)  # type: ignore
         assert self.configuration_manager is not None
         assert self.label_manager is not None
-        empty_cache(self.device)
 
         # Autocast is a little bitch.
         # If the device_type is 'cpu' then it's slow as heck on some CPUs (no auto bfloat16 support detection)
@@ -648,7 +647,9 @@ class nnUNetPredictor:
                 predicted_logits /= n_predictions
                 del n_predictions
                 predicted_logits = predicted_logits.cpu()
-                empty_cache(self.device)
+                # NOTE: do not empty_cache() here. This runs once per fold; releasing the
+                # allocator pool now just forces the next fold to re-cudaMalloc. The pool is
+                # cleared once per image in predict_logits_from_preprocessed_data instead.
                 return predicted_logits[(slice(None), *slicer_revert_padding[1:])]
 
     def _run_prediction_splits(
