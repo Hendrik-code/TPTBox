@@ -70,6 +70,10 @@ class nnUNetPredictor:
         memory_max: Clamp on maximum GPU memory (MB) to assume available.
         wait_till_gpu_percent_is_free: Fraction of GPU memory that must be free
             before inference starts. Waits up to 40 minutes.
+        tile_batch_size: Number of sliding-window tiles to run per network
+            forward pass. ``1`` (default) reproduces the original per-tile loop
+            exactly; larger values batch tiles together to improve GPU
+            utilisation at the cost of higher peak memory.
     """
 
     def __init__(
@@ -87,6 +91,7 @@ class nnUNetPredictor:
         memory_factor=160,  # prod(shape)*memory_factor / 1000, 160 ~> 30 GB
         memory_max: int = 160000,  # in MB, default is 160GB
         wait_till_gpu_percent_is_free=0.3,
+        tile_batch_size: int = 1,
     ):
         self.verbose = verbose
         self.verbose_preprocessing = verbose_preprocessing
@@ -118,6 +123,10 @@ class nnUNetPredictor:
         self.memory_factor = memory_factor
         self.memory_max = memory_max
         self.wait_till_gpu_percent_is_free = wait_till_gpu_percent_is_free
+        # Number of sliding-window tiles to push through the network in one forward pass. All tiles
+        # share the same patch_size, so they batch densely. 1 reproduces the original per-tile path
+        # exactly; larger values raise GPU utilisation (and peak memory) for small patches.
+        self.tile_batch_size = tile_batch_size
 
     def initialize_from_trained_model_folder(
         self,
@@ -758,22 +767,28 @@ class nnUNetPredictor:
         return predicted_logits, n_predictions, gaussian, results_device
 
     def _run_sub(self, data: torch.Tensor, network, results_device, slicers, pbar: tqdm, addendum: str = ""):
-        """Iterate over slicers, run inference per tile, and accumulate results."""
+        """Iterate over slicers, run inference per tile (optionally batched), and accumulate results."""
         try:
             data = data.to(self.device)  # type: ignore
             predicted_logits, n_predictions, gaussian, results_device = self._allocate(data, results_device, pbar)
             pbar.desc = f"running prediction {addendum}"
             prediction = None
             work_on = None
-            for sl in slicers:
-                pbar.update(1)
-                work_on = data[sl][None]
+            batch_size = max(1, self.tile_batch_size)
+            for batch_start in range(0, len(slicers), batch_size):
+                batch_slicers = slicers[batch_start : batch_start + batch_size]
+                # batch_size == 1 keeps the original view (no copy); larger batches stack tiles into a
+                # dense (B, C, *patch) tensor (valid because all tiles share the same patch_size).
+                work_on = data[batch_slicers[0]][None] if batch_size == 1 else torch.stack([data[sl] for sl in batch_slicers], dim=0)
                 work_on = work_on.to(self.device, non_blocking=False)
-                prediction = self._internal_maybe_mirror_and_predict(work_on, network=network)[0].to(results_device)
-                if prediction.shape[0] != predicted_logits.shape[0]:
-                    prediction.squeeze_(0)
-                predicted_logits[sl] += prediction * gaussian if self.use_gaussian else prediction
-                n_predictions[sl[1:]] += gaussian if self.use_gaussian else 1
+                prediction = self._internal_maybe_mirror_and_predict(work_on, network=network).to(results_device)
+                for b, sl in enumerate(batch_slicers):
+                    pbar.update(1)
+                    pred = prediction[b]
+                    if pred.shape[0] != predicted_logits.shape[0]:
+                        pred = pred.squeeze(0)
+                    predicted_logits[sl] += pred * gaussian if self.use_gaussian else pred
+                    n_predictions[sl[1:]] += gaussian if self.use_gaussian else 1
             return predicted_logits, n_predictions  # noqa: TRY300
         except RuntimeError:
             del predicted_logits

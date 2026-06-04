@@ -97,6 +97,7 @@ def run_inference_on_file(
     memory_factor: int = 160,  # prod(shape)*memory_factor / 1000, 160 ~> 30 GB
     memory_max: int = 160000,  # in MB, default is 160GB
     wait_till_gpu_percent_is_free: float = 0.1,
+    tile_batch_size: int = 1,
     verbose: bool = True,
     auto_download: bool = False,
     cache_model: bool = False,
@@ -142,6 +143,10 @@ def run_inference_on_file(
         memory_max: Hard cap on assumed GPU memory in MB.
         wait_till_gpu_percent_is_free: Minimum free GPU fraction to require
             before starting inference.
+        tile_batch_size: Number of sliding-window tiles to run per network
+            forward pass. ``1`` (default) keeps the original per-tile behaviour;
+            larger values batch tiles to better saturate the GPU at the cost of
+            higher peak memory.
         verbose: Print progress information.
         cache_model: If ``True``, keep the loaded predictor in a process-wide
             cache and reuse it on subsequent calls with identical model and
@@ -223,6 +228,7 @@ def run_inference_on_file(
         memory_factor,
         memory_max,
         wait_till_gpu_percent_is_free,
+        tile_batch_size,
     )
     nnunet = _model_cache.get(cache_key) if cache_model else None
     if nnunet is None:
@@ -237,6 +243,7 @@ def run_inference_on_file(
             memory_factor=memory_factor,
             memory_max=memory_max,
             wait_till_gpu_percent_is_free=wait_till_gpu_percent_is_free,
+            tile_batch_size=tile_batch_size,
         )
         if cache_model:
             _model_cache[cache_key] = nnunet
