@@ -382,7 +382,7 @@ class nnUNetPredictor:
         # things a lot faster for some datasets.
         original_perform_everything_on_gpu = self.perform_everything_on_gpu
         assert self.list_of_parameters is not None
-        with torch.no_grad():
+        with torch.inference_mode():
             prediction = None
             try:
                 for idx, params in enumerate(self.list_of_parameters):
@@ -563,7 +563,7 @@ class nnUNetPredictor:
         # is set. Why. (this is why we don't make use of enabled=False)
         # So autocast will only be active if we have a cuda device.
         with (
-            torch.no_grad(),
+            torch.inference_mode(),
             torch.autocast(self.device.type, enabled=True) if self.device.type == "cuda" else dummy_context(),
         ):
             assert len(input_image.shape) == 4, "input_image must be a 4D np.ndarray or torch.Tensor (c, x, y, z)"
