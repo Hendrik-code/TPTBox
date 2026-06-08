@@ -6,7 +6,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 from acvl_utils.cropping_and_padding.bounding_boxes import bounding_box_to_slice
-from batchgenerators.utilities.file_and_folder_operations import isfile, load_json, save_pickle
+from batchgenerators.utilities.file_and_folder_operations import load_json, save_pickle
 from nnunetv2.utilities.label_handling.label_handling import LabelManager
 
 from TPTBox.segmentation.nnUnet_utils.plans_handler import ConfigurationManager, PlansManager

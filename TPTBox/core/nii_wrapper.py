@@ -1180,33 +1180,36 @@ class NII(NII_Math):
             if mapping.assert_affine(self,raise_error=False,origin_tolerance=0.000001,error_tolerance=0.000001,shape_tolerance=0):
                 log.print(f"resample_from_to skipped; already in space: {self}",verbose=verbose)
                 return self if inplace else self.copy()
-
             m1 = mapping if mapping.orientation == self.orientation else mapping.make_empty_POI().reorient(self.orientation)
             if m1.assert_affine(self,raise_error=False,origin_tolerance=0.00001,error_tolerance=0.00001,shape_tolerance=0):
                 log.print(f"resample_from_to only need reorientation; {self.orientation}",verbose=verbose)
                 ret = self.reorient(mapping.orientation,inplace=inplace)
                 ret.affine = mapping.affine #remove floating point error
                 return ret
-            if self.orientation == mapping.orientation and np.allclose(self.zoom , mapping.zoom, atol=1e-6):
-                shift = (np.array(self.origin) - np.array(m1.origin)) / np.array(m1.zoom)
-                if np.allclose(shift, np.round(shift), atol=1e-6):
-                    s = self.reorient(mapping.orientation,inplace=inplace)  # noqa: PLW0642
-                    shift = (np.array(self.origin) - np.array(mapping.origin)) / np.array(mapping.zoom)
-                    shift = np.round(shift).astype(int)
-                    dst_shape = np.array(mapping.shape)
-                    src_shape = np.array(s.shape)
-                    # padding before = how much dst starts before src
-                    pad_before = shift
-                    # padding after = remaining dst size after src
-                    pad_after = dst_shape-shift-src_shape
-                    pad = tuple((int(b), int(a)) for b, a in zip(pad_before, pad_after))
-                    ret = s.apply_pad(pad, mode=mode,inplace=inplace,verbose=verbose)
+            if np.allclose(self.zoom, m1.zoom, atol=1e-6):
+                s = self.reorient(mapping.orientation, inplace=inplace)
+                # Compute voxel offset directly from the affines after both
+                # images are in the same orientation. This is robust to axis
+                # permutations and flips.
+                voxel_offset = np.linalg.inv(mapping.affine) @ s.affine @ np.array([0, 0, 0, 1])
+                shift = np.round(voxel_offset[:3]).astype(int)
 
+                dst_shape = np.array(mapping.shape)
+                src_shape = np.array(s.shape)
+                # padding before = how much dst starts before src
+                pad_before = shift
+                # padding after = remaining dst size after src
+                pad_after = dst_shape - shift - src_shape
+                pad = tuple((int(b), int(a)) for b, a in zip(pad_before, pad_after))
+                try:
+                    ret = s.apply_pad(pad,mode=mode,inplace=inplace,verbose=verbose)
                     valid = ret.assert_affine(mapping,raise_error=False,origin_tolerance=0.0001,error_tolerance=0.0001,shape_tolerance=0)
                     if valid:
                         log.print(f"resample_from_to only needs padding/cropping {pad}",verbose=verbose)
-                        ret.affine = mapping.affine #remove floating point error
+                        ret.affine = mapping.affine  # remove floating point error
                         return ret
+                except ValueError as e:
+                    log.warning("Padding failed.",e,verbose=verbose)
 
 
         assert mapping is not None
