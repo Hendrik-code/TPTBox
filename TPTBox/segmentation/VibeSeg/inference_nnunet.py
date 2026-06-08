@@ -16,6 +16,12 @@ logger = Print_Logger()
 out_base = Path(__file__).parent.parent / "nnUNet/"
 _model_path_ = out_base / "nnUNet_results"
 
+# Opt-in cache of loaded predictors (enable via cache_model=True). Keyed by model identity plus
+# the device/runtime settings that affect the loaded predictor, so repeated inference (e.g. a loop
+# over many files with the same model) reuses the in-memory model instead of reloading weights from
+# disk and re-uploading them to the GPU on every call.
+_model_cache: dict = {}
+
 
 def get_ds_info(idx: int, _model_path: str | Path | None = None, exit_one_fail: bool = True, logger=logger) -> dict:
     """Load and return the ``dataset.json`` for the model with the given dataset index.
@@ -91,8 +97,10 @@ def run_inference_on_file(
     memory_factor: float | None = None,  # prod(shape)*memory_factor / 1000, 160 ~> 30 GB
     memory_max: int = 990000,  # in MB, default is 990GB (so it is most likely ignored and replaced by Max Memory of the GPU)
     wait_till_gpu_percent_is_free: float = 0.1,
+    tile_batch_size: int = 1,
     verbose: bool = True,
     auto_download: bool = False,
+    cache_model: bool = False,
     _key_ResEnc: str = "__nnUNet*ResEnc",
     fail_on_missing_memory=False,
     logger=logger,
@@ -136,7 +144,18 @@ def run_inference_on_file(
         memory_max: Hard cap on assumed GPU memory in MB.
         wait_till_gpu_percent_is_free: Minimum free GPU fraction to require
             before starting inference.
+        tile_batch_size: Number of sliding-window tiles to run per network
+            forward pass. ``1`` (default) keeps the original per-tile behaviour;
+            larger values batch tiles to better saturate the GPU at the cost of
+            higher peak memory.
         verbose: Print progress information.
+        cache_model: If ``True``, keep the loaded predictor in a process-wide
+            cache and reuse it on subsequent calls with identical model and
+            device/runtime settings. Avoids reloading weights from disk and
+            re-uploading them to the GPU when segmenting many files in a loop, at
+            the cost of holding the model in GPU memory between calls. The GPU
+            cache is also left warm (no ``empty_cache``) so the allocator can
+            reuse buffers across images.
 
     Returns:
         A tuple ``(seg_nii, softmax_logits)`` where ``seg_nii`` is the
@@ -202,21 +221,39 @@ def run_inference_on_file(
     if memory_factor is None:
         memory_factor = float(ds_info.get("memory_factor", 160))
 
-    nnunet = load_inf_model(
-        nnunet_path,
-        allow_non_final=True,
-        use_folds=tuple(folds) if len(folds) != 5 else None,
-        gpu=gpu,
-        ddevice=ddevice,
-        step_size=step_size,
-        memory_base=memory_base,
-        memory_factor=memory_factor,
-        memory_max=memory_max,
-        wait_till_gpu_percent_is_free=wait_till_gpu_percent_is_free,
-        fail_on_missing_memory=fail_on_missing_memory,
+    use_folds_arg = tuple(folds) if len(folds) != 5 else None
+    # Include every setting that changes the loaded predictor so a cache hit is always equivalent
+    # to a fresh load; differing settings simply miss the cache and reload.
+    cache_key = (
+        str(nnunet_path),
+        use_folds_arg,
+        ddevice,
+        gpu,
+        step_size,
+        memory_base,
+        memory_factor,
+        memory_max,
+        wait_till_gpu_percent_is_free,
+        tile_batch_size,
     )
-
-    #    _unets[idx] = nnunet
+    nnunet = _model_cache.get(cache_key) if cache_model else None
+    if nnunet is None:
+        nnunet = load_inf_model(
+            nnunet_path,
+            allow_non_final=True,
+            use_folds=use_folds_arg,
+            gpu=gpu,
+            ddevice=ddevice,
+            step_size=step_size,
+            memory_base=memory_base,
+            memory_factor=memory_factor,
+            memory_max=memory_max,
+            wait_till_gpu_percent_is_free=wait_till_gpu_percent_is_free,
+            tile_batch_size=tile_batch_size,
+            fail_on_missing_memory=fail_on_missing_memory,
+        )
+        if cache_model:
+            _model_cache[cache_key] = nnunet
     if "orientation" in ds_info:
         orientation = ds_info["orientation"]
 
@@ -322,9 +359,11 @@ def run_inference_on_file(
         seg_nii.map_labels_(mapping)
     if out_file is not None and (not Path(out_file).exists() or override):
         seg_nii.set_dtype("smallest_uint").save(out_file)
-    del nnunet
-
-    torch.cuda.empty_cache()
+    if not cache_model:
+        # When caching we keep the predictor alive (it stays referenced by _model_cache, so del
+        # would not free it anyway) and leave the CUDA cache warm so the next image reuses buffers.
+        del nnunet
+        torch.cuda.empty_cache()
     return seg_nii, softmax_logits
 
 

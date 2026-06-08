@@ -70,6 +70,10 @@ class nnUNetPredictor:
         memory_max: Clamp on maximum GPU memory (MB) to assume available.
         wait_till_gpu_percent_is_free: Fraction of GPU memory that must be free
             before inference starts. Waits up to 40 minutes.
+        tile_batch_size: Number of sliding-window tiles to run per network
+            forward pass. ``1`` (default) reproduces the original per-tile loop
+            exactly; larger values batch tiles together to improve GPU
+            utilisation at the cost of higher peak memory.
     """
 
     def __init__(
@@ -88,6 +92,7 @@ class nnUNetPredictor:
         memory_max: float = 160000,  # in MB, default is 160GB
         fail_on_missing_memory=False,
         wait_till_gpu_percent_is_free=0.3,
+        tile_batch_size: int = 1,
     ):
         self.verbose = verbose
         self.verbose_preprocessing = verbose_preprocessing
@@ -121,6 +126,10 @@ class nnUNetPredictor:
         self.memory_factor = memory_factor
         self.memory_max = memory_max
         self.wait_till_gpu_percent_is_free = wait_till_gpu_percent_is_free
+        # Number of sliding-window tiles to push through the network in one forward pass. All tiles
+        # share the same patch_size, so they batch densely. 1 reproduces the original per-tile path
+        # exactly; larger values raise GPU utilisation (and peak memory) for small patches.
+        self.tile_batch_size = tile_batch_size
 
     def initialize_from_trained_model_folder(
         self,
@@ -288,23 +297,31 @@ class nnUNetPredictor:
             print("compiling network")
             self.network = torch.compile(self.network)  # type: ignore
 
-        self.loaded_networks = []
-        if cache_state_dicts:
-            for params in self.list_of_parameters:
-                if not isinstance(self.network, OptimizedModule):
-                    self.network.load_state_dict(params)  # type: ignore
-                else:
-                    self.network._orig_mod.load_state_dict(params)
-                if self.device.type == "cuda" and not torch.cuda.is_available():
-                    Print_Logger().on_warning(
-                        "No CUDA device. If you have a CUDA-able GPU (Nvidia), reinstall pytorch with cuda or for non-cuda devices use ddevice=cpu or ddevice=mps"
-                    )
-                if self.device.type == "mps" and not (hasattr(torch.backends, "mps") and torch.backends.mps.is_available()):
-                    Print_Logger().on_warning("No MPS device found. Use ddevice=cpu or ddevice=mps")
-                self.network.to(self.device)
-                self.network.eval()  # type: ignore
-                self.loaded_networks.append(self.network)
-        # print(type(self.loaded_networks[0]))
+        # Warn early if the requested device is unavailable (runs once, independent of folds).
+        if self.device.type == "cuda" and not torch.cuda.is_available():
+            Print_Logger().on_warning(
+                "No CUDA device. If you have a CUDA-able GPU (Nvidia), reinstall pytorch with cuda or for non-cuda devices use ddevice=cpu or ddevice=mps"
+            )
+        if self.device.type == "mps" and not (hasattr(torch.backends, "mps") and torch.backends.mps.is_available()):
+            Print_Logger().on_warning("No MPS device found. Use ddevice=cpu or ddevice=mps")
+
+        # loaded_networks holds one ready-to-run network per fold (or None to load weights
+        # lazily per fold). We only cache the single-fold case: previously this loop appended
+        # the SAME self.network object once per fold, so every entry ended up holding the LAST
+        # fold's weights. That silently collapsed an N-fold ensemble to a single fold while
+        # still paying Nx the compute. For >1 fold we keep loaded_networks=None and let
+        # predict_logits_from_preprocessed_data swap weights per fold via load_state_dict (a
+        # true ensemble that needs only one network's worth of GPU memory).
+        self.loaded_networks = None
+        if cache_state_dicts and len(self.list_of_parameters) == 1:
+            params = self.list_of_parameters[0]
+            if not isinstance(self.network, OptimizedModule):
+                self.network.load_state_dict(params)  # type: ignore
+            else:
+                self.network._orig_mod.load_state_dict(params)
+            self.network.to(self.device)
+            self.network.eval()  # type: ignore
+            self.loaded_networks = [self.network]
 
     def predict_single_npy_array(
         self,
@@ -395,7 +412,7 @@ class nnUNetPredictor:
         # things a lot faster for some datasets.
         original_perform_everything_on_gpu = self.perform_everything_on_gpu
         assert self.list_of_parameters is not None
-        with torch.no_grad():
+        with torch.inference_mode():
             prediction = None
             try:
                 for idx, params in enumerate(self.list_of_parameters):
@@ -567,7 +584,6 @@ class nnUNetPredictor:
         network = network.to(self.device)  # type: ignore
         assert self.configuration_manager is not None
         assert self.label_manager is not None
-        empty_cache(self.device)
 
         # Autocast is a little bitch.
         # If the device_type is 'cpu' then it's slow as heck on some CPUs (no auto bfloat16 support detection)
@@ -576,7 +592,7 @@ class nnUNetPredictor:
         # is set. Why. (this is why we don't make use of enabled=False)
         # So autocast will only be active if we have a cuda device.
         with (
-            torch.no_grad(),
+            torch.inference_mode(),
             torch.autocast(self.device.type, enabled=True) if self.device.type == "cuda" else dummy_context(),
         ):
             assert len(input_image.shape) == 4, "input_image must be a 4D np.ndarray or torch.Tensor (c, x, y, z)"
@@ -661,7 +677,9 @@ class nnUNetPredictor:
                 predicted_logits /= n_predictions
                 del n_predictions
                 predicted_logits = predicted_logits.cpu()
-                empty_cache(self.device)
+                # NOTE: do not empty_cache() here. This runs once per fold; releasing the
+                # allocator pool now just forces the next fold to re-cudaMalloc. The pool is
+                # cleared once per image in predict_logits_from_preprocessed_data instead.
                 return predicted_logits[(slice(None), *slicer_revert_padding[1:])]
 
     def _run_prediction_splits(
@@ -762,22 +780,28 @@ class nnUNetPredictor:
         return predicted_logits, n_predictions, gaussian, results_device
 
     def _run_sub(self, data: torch.Tensor, network, results_device, slicers, pbar: tqdm, addendum: str = ""):
-        """Iterate over slicers, run inference per tile, and accumulate results."""
+        """Iterate over slicers, run inference per tile (optionally batched), and accumulate results."""
         try:
             data = data.to(self.device)  # type: ignore
             predicted_logits, n_predictions, gaussian, results_device = self._allocate(data, results_device, pbar)
             pbar.desc = f"running prediction {addendum}"
             prediction = None
             work_on = None
-            for sl in slicers:
-                pbar.update(1)
-                work_on = data[sl][None]
+            batch_size = max(1, self.tile_batch_size)
+            for batch_start in range(0, len(slicers), batch_size):
+                batch_slicers = slicers[batch_start : batch_start + batch_size]
+                # batch_size == 1 keeps the original view (no copy); larger batches stack tiles into a
+                # dense (B, C, *patch) tensor (valid because all tiles share the same patch_size).
+                work_on = data[batch_slicers[0]][None] if batch_size == 1 else torch.stack([data[sl] for sl in batch_slicers], dim=0)
                 work_on = work_on.to(self.device, non_blocking=False)
-                prediction = self._internal_maybe_mirror_and_predict(work_on, network=network)[0].to(results_device)
-                if prediction.shape[0] != predicted_logits.shape[0]:
-                    prediction.squeeze_(0)
-                predicted_logits[sl] += prediction * gaussian if self.use_gaussian else prediction
-                n_predictions[sl[1:]] += gaussian if self.use_gaussian else 1
+                prediction = self._internal_maybe_mirror_and_predict(work_on, network=network).to(results_device)
+                for b, sl in enumerate(batch_slicers):
+                    pbar.update(1)
+                    pred = prediction[b]
+                    if pred.shape[0] != predicted_logits.shape[0]:
+                        pred = pred.squeeze(0)
+                    predicted_logits[sl] += pred * gaussian if self.use_gaussian else pred
+                    n_predictions[sl[1:]] += gaussian if self.use_gaussian else 1
             return predicted_logits, n_predictions  # noqa: TRY300
         except RuntimeError:
             del predicted_logits

@@ -28,12 +28,14 @@ def load_inf_model(
     inference_augmentation: bool = False,
     use_gaussian: bool = True,
     verbose: bool = False,
+    fast_perf: bool = True,
     gpu: int | None = None,
     memory_base: float = 5000,
     memory_factor: float = 160,
     memory_max: float = 160000,
     wait_till_gpu_percent_is_free: float = 0.3,
     fail_on_missing_memory=False,
+    tile_batch_size: int = 1,
 ) -> nnUNetPredictor:
     """Load and initialise an nnU-Net model predictor from a trained model folder.
 
@@ -53,6 +55,11 @@ def load_inf_model(
         inference_augmentation: If True, enable test-time mirroring augmentation.
         use_gaussian: If True, apply Gaussian weighting in the sliding window.
         verbose: If True, print progress information during model initialisation.
+        fast_perf: If True (and running on CUDA), enable cuDNN autotuning and TF32
+            matmul/conv. Every sliding-window tile has the same ``patch_size``
+            shape, so cuDNN can pick the fastest convolution algorithms once and
+            reuse them. TF32 speeds up fp32 ops on Ampere+ GPUs with negligible
+            accuracy impact. These are global ``torch.backends`` flags.
         gpu: GPU device index forwarded to the predictor.  ``None`` defaults to 0.
         memory_base: Base GPU memory reservation in MB (default 5 000 MB = 5 GB).
         memory_factor: Per-voxel memory scaling factor.  The formula is
@@ -61,6 +68,9 @@ def load_inf_model(
         memory_max: Maximum GPU memory cap in MB (default 160 000 MB = 160 GB).
         wait_till_gpu_percent_is_free: Fraction of GPU memory that must be free
             before inference is started.
+        tile_batch_size: Number of sliding-window tiles per network forward pass.
+            ``1`` reproduces the original per-tile path; larger values batch
+            tiles to improve GPU utilisation at higher peak memory.
 
     Returns:
         Initialised ``nnUNetPredictor`` ready for inference.
@@ -82,6 +92,16 @@ def load_inf_model(
                 _interop = True
         except Exception as e:
             print(e)
+        if fast_perf:
+            # All sliding-window tiles share the same (patch_size) shape, so cuDNN can
+            # autotune the fastest conv algorithms once and reuse them across tiles/images.
+            # TF32 accelerates fp32 matmul/conv on Ampere+ with negligible accuracy impact.
+            try:
+                torch.backends.cudnn.benchmark = True
+                torch.backends.cuda.matmul.allow_tf32 = True
+                torch.backends.cudnn.allow_tf32 = True
+            except Exception as e:
+                print(e)
         device = torch.device("cuda")
     else:
         device = torch.device("mps")
@@ -102,6 +122,7 @@ def load_inf_model(
         memory_max=memory_max,
         wait_till_gpu_percent_is_free=wait_till_gpu_percent_is_free,
         fail_on_missing_memory=fail_on_missing_memory,
+        tile_batch_size=tile_batch_size,
     )
     check_name = "checkpoint_final.pth"  # if not allow_non_final else "checkpoint_best.pth"
     try:

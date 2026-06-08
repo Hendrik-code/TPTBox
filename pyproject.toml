@@ -210,10 +210,18 @@ convention = "google"
 # Test files: don't require docstrings on test functions / helper utilities
 "unit_tests/**" = ["D101", "D102", "D103", "D205", "D415", "ANN201"]
 "TPTBox/tests/**" = ["D101", "D102", "D103", "D205", "D415", "ANN201"]
+# Dev tooling (standalone scripts): same relaxed docstring rules, not an importable package
+"benchmarks/**" = ["D101", "D102", "D103", "D205", "D415", "ANN201", "INP001"]
 
 [tool.ruff.lint.mccabe]
 # Flag errors (`C901`) whenever the complexity level exceeds 5.
 max-complexity = 20
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::FutureWarning",
+]
 
 [tool.coverage.report]
 exclude_lines = [
@@ -221,7 +229,9 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "def __repr__",
     "except",
-    "warnings.warn",
+    "import warnings",
+    "warnings\\.warn",
+    "warnings\\.filter",
     "print\\(f?\"\\[!\\].*",
     "def __str__(self):",
     "def __hash__(self) -> int:",
