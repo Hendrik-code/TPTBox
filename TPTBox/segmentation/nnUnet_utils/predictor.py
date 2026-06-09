@@ -781,6 +781,7 @@ class nnUNetPredictor:
 
     def _run_sub(self, data: torch.Tensor, network, results_device, slicers, pbar: tqdm, addendum: str = ""):
         """Iterate over slicers, run inference per tile (optionally batched), and accumulate results."""
+        slicers = list(slicers)
         try:
             data = data.to(self.device)  # type: ignore
             predicted_logits, n_predictions, gaussian, results_device = self._allocate(data, results_device, pbar)
