@@ -523,8 +523,7 @@ def np_dilate_msk(
     out = arrc
     for _ in range(n_pixel):
         for i in labels:
-            data = out.copy()
-            data[i != data] = 0
+            data = out == i  # boolean mask; _binary_dilation casts to bool anyway, so this is exact and avoids a full copy
             if use_crop:
                 lcrop = np_bbox_binary(data, px_dist=2 + n_pixel, raise_error=False)
                 data = data[lcrop]
