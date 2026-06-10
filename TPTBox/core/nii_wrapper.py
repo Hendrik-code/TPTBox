@@ -1180,33 +1180,36 @@ class NII(NII_Math):
             if mapping.assert_affine(self,raise_error=False,origin_tolerance=0.000001,error_tolerance=0.000001,shape_tolerance=0):
                 log.print(f"resample_from_to skipped; already in space: {self}",verbose=verbose)
                 return self if inplace else self.copy()
-
             m1 = mapping if mapping.orientation == self.orientation else mapping.make_empty_POI().reorient(self.orientation)
             if m1.assert_affine(self,raise_error=False,origin_tolerance=0.00001,error_tolerance=0.00001,shape_tolerance=0):
                 log.print(f"resample_from_to only need reorientation; {self.orientation}",verbose=verbose)
                 ret = self.reorient(mapping.orientation,inplace=inplace)
                 ret.affine = mapping.affine #remove floating point error
                 return ret
-            if self.orientation == mapping.orientation and np.allclose(self.zoom , mapping.zoom, atol=1e-6):
-                shift = (np.array(self.origin) - np.array(m1.origin)) / np.array(m1.zoom)
-                if np.allclose(shift, np.round(shift), atol=1e-6):
-                    s = self.reorient(mapping.orientation,inplace=inplace)  # noqa: PLW0642
-                    shift = (np.array(self.origin) - np.array(mapping.origin)) / np.array(mapping.zoom)
-                    shift = np.round(shift).astype(int)
-                    dst_shape = np.array(mapping.shape)
-                    src_shape = np.array(s.shape)
-                    # padding before = how much dst starts before src
-                    pad_before = shift
-                    # padding after = remaining dst size after src
-                    pad_after = dst_shape-shift-src_shape
-                    pad = tuple((int(b), int(a)) for b, a in zip(pad_before, pad_after))
-                    ret = s.apply_pad(pad, mode=mode,inplace=inplace,verbose=verbose)
+            if np.allclose(self.zoom, m1.zoom, atol=1e-6):
+                s = self.reorient(mapping.orientation, inplace=inplace)
+                # Compute voxel offset directly from the affines after both
+                # images are in the same orientation. This is robust to axis
+                # permutations and flips.
+                voxel_offset = np.linalg.inv(mapping.affine) @ s.affine @ np.array([0, 0, 0, 1])
+                shift = np.round(voxel_offset[:3]).astype(int)
 
+                dst_shape = np.array(mapping.shape)
+                src_shape = np.array(s.shape)
+                # padding before = how much dst starts before src
+                pad_before = shift
+                # padding after = remaining dst size after src
+                pad_after = dst_shape - shift - src_shape
+                pad = tuple((int(b), int(a)) for b, a in zip(pad_before, pad_after))
+                try:
+                    ret = s.apply_pad(pad,mode=mode,inplace=inplace,verbose=verbose)
                     valid = ret.assert_affine(mapping,raise_error=False,origin_tolerance=0.0001,error_tolerance=0.0001,shape_tolerance=0)
                     if valid:
                         log.print(f"resample_from_to only needs padding/cropping {pad}",verbose=verbose)
-                        ret.affine = mapping.affine #remove floating point error
+                        ret.affine = mapping.affine  # remove floating point error
                         return ret
+                except ValueError as e:
+                    log.warning("Padding failed.",e,verbose=verbose)
 
 
         assert mapping is not None
@@ -2505,7 +2508,7 @@ class NII(NII_Math):
         try:
             verts, faces, normals, values = marching_cubes(seg_arr, gradient_direction="ascent", step_size=1)
         except RuntimeError as e:
-            raise RuntimeError(str(e),f"{label=}, {self.unique()}, {out_path=}") from None
+            raise IndexError(str(e),f"{label=}, {self.unique()}, {out_path=}") from None
         # Remove padding offset (since we padded by 1 voxel)
         verts -= 1
         # Apply bounding box offset (still voxel space)
@@ -2696,6 +2699,20 @@ class NII(NII_Math):
         if keep_label:
             seg_arr = seg_arr * self.get_seg_array()
         return self.set_array(seg_arr,inplace=inplace)
+    def ravel(self,order:Literal["K", "A", "C", "F"] | None="C")->np.ndarray:
+        """Return a contiguous flattened array.
+
+        A 1-D array, containing the elements of the input, is returned. A copy is made only if needed.
+
+        As of NumPy 1.10, the returned array will have the same type as the input array. (for example, a masked array will be returned for a masked array input)
+
+        Args:
+            order (Literal[&quot;K&quot;, &quot;A&quot;, &quot;C&quot;, &quot;F&quot;] | None, optional): The elements of a are read using this index order. ‘C’ means to index the elements in row-major, C-style order, with the last axis index changing fastest, back to the first axis index changing slowest. ‘F’ means to index the elements in column-major, Fortran-style order, with the first index changing fastest, and the last index changing slowest. Note that the ‘C’ and ‘F’ options take no account of the memory layout of the underlying array, and only refer to the order of axis indexing. ‘A’ means to read the elements in Fortran-like index order if a is Fortran contiguous in memory, C-like order otherwise. ‘K’ means to read the elements in the order they occur in memory, except for reversing the data when strides are negative. By default, ‘C’ index order is used. Defaults to "C".
+
+        Returns:
+            np.ndarray
+        """
+        return self.get_array().ravel(order=order)
     def extract_label_(self, label: int | Enum | Sequence[int] | Sequence[Enum], keep_label=False) -> Self:
         """In-place variant of `extract_label`."""
         return self.extract_label(label,keep_label,inplace=True)

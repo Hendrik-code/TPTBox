@@ -54,6 +54,7 @@ class Template_Registration:
         poi_target_cms: POI | None = None,
         max_history=100,
         change_after_point_reg=lambda x, y, z, w: (x, y, z, w),
+        tether_distance=1,
         **args,
     ):
         """Initialize a multi-stage registration pipeline from an atlas to a target image.
@@ -90,7 +91,7 @@ class Template_Registration:
                 "be": ("BSplineBending", {"stride": 1}),
                 "seg": "MSE",
                 "Dice": "Dice",
-                "Tether": Tether_Seg(delta=5),
+                "Tether": Tether_Seg(delta=tether_distance),
             }
 
         assert target_seg.seg, target_seg.seg
@@ -187,7 +188,7 @@ class Template_Registration:
                     poi_cms = poi_cms.resample_from_to(atlas_seg_)
 
                 self.reg_point = Point_Registration(poi_target, poi_cms, verbose=False)
-                atlas_reg = self.reg_point.transform_nii(atlas_seg_)
+                atlas_reg = self.reg_point.transform_nii(atlas_seg_, c_val=0)
 
                 if not atlas_reg.is_segmentation_in_border():
                     print("point registration ok")
@@ -204,7 +205,7 @@ class Template_Registration:
                 target_img = target_img.apply_pad(resize_param) if target_img is not None else None
 
         self.reg_point = Point_Registration(poi_target.resample_from_to(target_seg), poi_cms.resample_from_to(atlas_seg))
-        atlas_reg = self.reg_point.transform_nii(atlas_seg)
+        atlas_reg = self.reg_point.transform_nii(atlas_seg, c_val=0)
         atlas_img_reg = self.reg_point.transform_nii(atlas_img) if atlas_img is not None else None
 
         if crop:

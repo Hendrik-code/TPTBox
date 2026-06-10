@@ -160,7 +160,7 @@ def np_count_nonzero(arr: np.ndarray) -> int:
     return np.count_nonzero(arr)
 
 
-def np_unique(arr: np.ndarray) -> list[int]:
+def old_np_unique(arr: np.ndarray) -> list[int]:
     """Returns each existing label in the array (including zero!).
 
     Uses cc3d statistics for unsigned-integer arrays for speed, and falls back
@@ -181,7 +181,50 @@ def np_unique(arr: np.ndarray) -> list[int]:
     return list(np.unique(arr))
 
 
+def np_unique(arr: np.ndarray) -> list[int]:
+    """Returns each existing label in the array (including zero!).
+
+    Uses cc3d statistics for unsigned-integer arrays for speed, and falls back
+    to ``numpy.unique`` for other dtypes.
+
+    Args:
+        arr (np.ndarray): Input label array.
+
+    Returns:
+        list[int]: Sorted list of every distinct label value present in ``arr``,
+            including 0 (background).
+    """
+    if np.issubdtype(arr.dtype, np.unsignedinteger):
+        # bincount is O(max_val) but ~5-10x faster than np.unique for dense label arrays
+        max_val = int(arr.max())
+        if max_val < 2**20:  # ~1M labels threshold — bincount stays fast
+            counts = np.bincount(arr.ravel())
+            return list(np.where(counts > 0)[0])
+        # For sparse label spaces fall back to np.unique
+    return old_np_unique(arr)
+
+
 def np_unique_withoutzero(arr: UINTARRAY) -> list[int]:
+    """Returns each existing non-zero label in the array (excluding background zero).
+
+    Args:
+        arr (UINTARRAY): Input unsigned-integer label array.
+
+    Returns:
+        list[int]: Sorted list of every distinct label value present in ``arr``,
+            excluding 0 (background).
+    """
+    if np.issubdtype(arr.dtype, np.unsignedinteger):
+        max_val = int(arr.max())
+        if max_val == 0:
+            return []
+        if max_val < 2**20:
+            counts = np.bincount(arr.ravel())
+            return list(np.where(counts[1:] > 0)[0] + 1)
+    return [i for i in np.unique(arr) if i != 0]
+
+
+def old_np_unique_withoutzero(arr: UINTARRAY) -> list[int]:
     """Returns each existing non-zero label in the array (excluding background zero).
 
     Args:

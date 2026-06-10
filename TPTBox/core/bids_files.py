@@ -486,7 +486,7 @@ class BIDS_Global_info:
             return s
         return self.subjects.items()  # type: ignore
 
-    def iter_subjects(self, sort: bool = False) -> list[tuple[str, Subject_Container]]:
+    def iter_subjects(self, sort: bool = False, shuffle: bool = False) -> list[tuple[str, Subject_Container]]:
         """Iterate over all subjects (alias for :meth:`enumerate_subjects` without shuffle).
 
         Args:
@@ -498,6 +498,10 @@ class BIDS_Global_info:
         """
         if sort:
             return sorted(self.subjects.items())
+        if shuffle:
+            s = list(self.subjects.items())
+            random.shuffle(s)
+            return s
         return self.subjects.items()  # type: ignore
 
     def __len__(self):
