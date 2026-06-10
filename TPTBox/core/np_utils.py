@@ -255,8 +255,8 @@ def np_center_of_mass(arr: UINTARRAY) -> dict[int, COORDINATE]:
     """
     stats = cc3dstatistics(arr, use_crop=False)
     # Does not use the other calls for speed reasons
-    unique = [idx for idx, i in enumerate(stats["voxel_counts"]) if i > 0 and idx != 0]
-    return {idx: v for idx, v in enumerate(stats["centroids"]) if idx in unique}
+    vc = stats["voxel_counts"]
+    return {idx: v for idx, v in enumerate(stats["centroids"]) if idx != 0 and vc[idx] > 0}
 
 
 def np_bounding_boxes(arr: UINTARRAY) -> dict[int, tuple[slice, slice, slice]]:
@@ -272,8 +272,8 @@ def np_bounding_boxes(arr: UINTARRAY) -> dict[int, tuple[slice, slice, slice]]:
     """
     stats = cc3dstatistics(arr)
     # Does not use the other calls for speed reasons
-    unique = [idx for idx, i in enumerate(stats["voxel_counts"]) if i > 0 and idx != 0]
-    return {idx: v for idx, v in enumerate(stats["bounding_boxes"]) if idx in unique}
+    vc = stats["voxel_counts"]
+    return {idx: v for idx, v in enumerate(stats["bounding_boxes"]) if idx != 0 and vc[idx] > 0}
 
 
 def np_contacts(arr: UINTARRAY, connectivity: int) -> dict[tuple[int, int], int]:
