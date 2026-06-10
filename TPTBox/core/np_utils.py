@@ -125,10 +125,12 @@ def np_volume(arr: UINTARRAY, include_zero: bool = False) -> dict[int, int]:
     Returns:
         dict[int, int]: Mapping from label value to number of voxels with that label.
     """
+    # np.bincount wins decisively when there are many labels (e.g. connected-component maps);
+    # cc3d statistics is faster for the few-label case typical of anatomical segmentations.
+    counts = np.bincount(arr.ravel()) if int(arr.max()) > 256 else cc3dstatistics(arr, use_crop=not include_zero)["voxel_counts"]
     if include_zero:
-        return {idx: i for idx, i in dict(enumerate(cc3dstatistics(arr, use_crop=False)["voxel_counts"])).items() if i > 0}
-    else:
-        return {idx: i for idx, i in dict(enumerate(cc3dstatistics(arr)["voxel_counts"])).items() if i > 0 and idx != 0}
+        return {idx: i for idx, i in enumerate(counts) if i > 0}
+    return {idx: i for idx, i in enumerate(counts) if i > 0 and idx != 0}
 
 
 def np_is_empty(arr: UINTARRAY | INTARRAY) -> bool:
