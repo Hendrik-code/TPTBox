@@ -8,8 +8,144 @@ import torch
 from acvl_utils.cropping_and_padding.bounding_boxes import bounding_box_to_slice
 from batchgenerators.utilities.file_and_folder_operations import load_json, save_pickle
 from nnunetv2.utilities.label_handling.label_handling import LabelManager
+from tqdm import tqdm
 
 from TPTBox.segmentation.nnUnet_utils.plans_handler import ConfigurationManager, PlansManager
+
+SAFETY_FACTOR = 0.5  # only use 50% of VRAM
+
+
+def _argmax_with_gpu_fallback(predicted_logits: torch.Tensor | np.ndarray, device: torch.device, chunk_size: int = 64) -> np.ndarray:
+    """Computes argmax(0).
+
+    Tiered argmax:
+      1. Full array on GPU
+      2. Chunked on GPU (if full array doesn't fit)
+      3. Chunked on CPU (if even a single chunk doesn't fit)
+    """
+    from TPTBox.segmentation.nnUnet_utils.predictor import empty_cache
+
+    empty_cache(device)
+
+    def _get_free_vram(device: torch.device) -> int:
+        try:
+            """Returns free VRAM in bytes."""
+            free, _ = torch.cuda.mem_get_info(device)
+            return int(free * SAFETY_FACTOR)
+        except Exception:
+            return 0
+
+    def _array_bytes(shape: tuple, dtype: torch.dtype = torch.float16) -> int:
+        n_elements = 1
+        for s in shape:
+            n_elements *= s
+        return n_elements * torch.finfo(dtype).bits // 8
+
+    def _to_cpu_tensor(arr: torch.Tensor | np.ndarray) -> torch.Tensor:
+        if isinstance(arr, np.ndarray):
+            return torch.from_numpy(arr)
+        return arr.cpu()
+
+    def _chunked_argmax_gpu(t: torch.Tensor, device: torch.device) -> np.ndarray:
+        X = t.shape[1]
+        out = np.empty(t.shape[1:], dtype=np.int16)
+        for x in tqdm(range(0, X, chunk_size), "argmax gpu"):
+            chunk = t[:, x : x + chunk_size].to(device)
+            out[x : x + chunk_size] = torch.argmax(chunk, dim=0).cpu().numpy()
+        del chunk
+        empty_cache(device)
+        return out
+
+    def _chunked_argmax_cpu(t: torch.Tensor | np.ndarray) -> np.ndarray:
+        arr = t.numpy() if isinstance(t, torch.Tensor) else t
+        if not arr.flags["C_CONTIGUOUS"]:
+            arr = np.ascontiguousarray(arr)
+        X = arr.shape[1]
+        out = np.empty(arr.shape[1:], dtype=np.int16)
+        for x in tqdm(range(0, X, chunk_size), "argmax cpu"):
+            out[x : x + chunk_size] = arr[:, x : x + chunk_size].argmax(0)
+        return out
+
+    t = _to_cpu_tensor(predicted_logits)
+
+    if device is None or not torch.cuda.is_available():
+        return _chunked_argmax_cpu(t)
+
+    full_bytes = _array_bytes(t.shape)
+    free_vram = _get_free_vram(device)
+
+    print(f"[argmax] array: {full_bytes / 1e6:.1f} MB, VRAM: {free_vram / 1e6:.1f} MB")
+
+    # Tier 1: full GPU
+    if full_bytes <= free_vram or device.type == "mps":
+        try:
+            return torch.argmax(t.to(device), dim=0).cpu().numpy().astype(np.int16)
+        except torch.cuda.OutOfMemoryError:
+            print("[argmax] full GPU OOM despite estimate, trying chunked GPU")
+            empty_cache(device)
+        except Exception as e:
+            print(e)
+            empty_cache(device)
+
+    for i in range(10):
+        chunk_shape = (t.shape[0], min(max(int(chunk_size / 2**i), 1), t.shape[1]), *t.shape[2:])
+        chunk_bytes = _array_bytes(chunk_shape)
+        if chunk_bytes <= free_vram:
+            chunk_size = max(int(chunk_size / 2**i), 1)
+            break
+    print(f"[argmax] array chunk: {chunk_bytes / 1e6:.1f} MB, VRAM: {free_vram / 1e6:.1f} MB, {chunk_size=}")
+
+    # Tier 2: chunked GPU
+    if chunk_bytes <= free_vram:
+        print("[argmax] using chunked GPU")
+        try:
+            return _chunked_argmax_gpu(t, device)
+        except torch.cuda.OutOfMemoryError:
+            print("[argmax] chunked GPU OOM despite estimate, falling back to CPU")
+            empty_cache(device)
+    else:
+        print("[argmax] chunk too large for VRAM, falling back to CPU")
+
+    # Tier 3: chunked CPU
+    return _chunked_argmax_cpu(t)
+
+
+@torch.inference_mode()
+def convert_probabilities_to_segmentation(self, predicted_probabilities: np.ndarray | torch.Tensor, device, chunk_size=64) -> np.ndarray:
+    """Assumes that inference_nonlinearity was already applied!
+
+    predicted_probabilities has to have shape (c, x, y(, z)) where c is the number of classes/regions
+    """
+    if not isinstance(predicted_probabilities, (np.ndarray, torch.Tensor)):
+        raise RuntimeError(f"Unexpected input type. Expected np.ndarray or torch.Tensor, got {type(predicted_probabilities)}")  # noqa: TRY004
+
+    if self.has_regions:
+        assert self.regions_class_order is not None, "if region-based training is requested then you need to define regions_class_order!"
+        # check correct number of outputs
+    assert predicted_probabilities.shape[0] == self.num_segmentation_heads, (
+        f"unexpected number of channels in predicted_probabilities. Expected {self.num_segmentation_heads}, "
+        f"got {predicted_probabilities.shape[0]}. Remember that predicted_probabilities should have shape "
+        f"(c, x, y(, z))."
+    )
+    if self.has_regions:
+        if isinstance(predicted_probabilities, np.ndarray):
+            segmentation = np.zeros(predicted_probabilities.shape[1:], dtype=np.uint16)
+        else:
+            # no uint16 in torch
+            segmentation = torch.zeros(
+                predicted_probabilities.shape[1:],
+                dtype=torch.int16,
+                device=predicted_probabilities.device,
+            )
+        for i, c in enumerate(self.regions_class_order):
+            segmentation[predicted_probabilities[i] > 0.5] = c
+        if isinstance(segmentation, torch.Tensor):
+            segmentation = segmentation.cpu().numpy()
+    else:
+        # Issensee is no longer right when saying "numpy is faster than torch" newer torch versions no longer have this issue, on GPU we even get a 20x improvment. :facepalm:
+        segmentation = _argmax_with_gpu_fallback(predicted_probabilities, device, chunk_size=chunk_size)
+
+    return segmentation
 
 
 def convert_predicted_logits_to_segmentation_with_correct_shape(
@@ -20,6 +156,7 @@ def convert_predicted_logits_to_segmentation_with_correct_shape(
     properties_dict: dict,
     return_probabilities: bool = False,
     num_threads_torch: int = 8,
+    device=None,
 ) -> np.ndarray:
     """Revert all preprocessing steps and return a segmentation in the original image space.
 
@@ -62,19 +199,12 @@ def convert_predicted_logits_to_segmentation_with_correct_shape(
     predicted_logits = configuration_manager.resampling_fn_probabilities(
         predicted_logits, properties_dict["shape_after_cropping_and_before_resampling"], current_spacing, properties_dict["spacing"]
     )
-    # return value of resampling_fn_probabilities can be ndarray or Tensor but that doesnt matter because
-    # apply_inference_nonlin will covnert to torch
-    # And this is stupid because convert_probabilities_to_segmentation transforms it back to a numpy...
     if label_manager.has_regions or return_probabilities:
         # Softmax does not change when we use argmax in the next step
         predicted_logits = label_manager.apply_inference_nonlin(predicted_logits)
-    # segmentation may be torch.Tensor but we continue with numpy
-    if isinstance(predicted_logits, torch.Tensor):
-        predicted_logits = predicted_logits.cpu().numpy()
-
-    segmentation: np.ndarray = label_manager.convert_probabilities_to_segmentation(np.ascontiguousarray(predicted_logits))  # type: ignore
+    # segmentation: np.ndarray = label_manager.convert_probabilities_to_segmentation(predicted_logits)  # type: ignore
+    segmentation: np.ndarray = convert_probabilities_to_segmentation(label_manager, predicted_logits, device)
     segmentation = segmentation.astype(np.uint8 if len(label_manager.foreground_labels) < 255 else np.uint16)
-    # if not return_probabilities:
     del predicted_logits
     # put segmentation in bbox (revert cropping)
     segmentation_reverted_cropping = np.zeros(
