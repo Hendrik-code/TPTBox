@@ -2093,10 +2093,11 @@ class NII(NII_Math):
         flip = self.orientation[axis_] != axis  # Check orientation for flipping
         # Get the array data
         np_array = self.get_array()
-        np_array_cond = self.extract_label(idx).get_seg_array()
+        # both masks come directly from np_array via np_isin (avoids two extract_label round-trips)
+        np_array_cond = np_isin(np_array, idx)
 
         # Find the lowest point (smallest index) along the axis where `not_above` exists
-        threshold = np.where(self.extract_label(not_beyond).get_seg_array() == 1)
+        threshold = np.where(np_isin(np_array, not_beyond))
         if len(threshold[axis_]) == 0:
             return self if inplace else self.copy()
         flip_up = flip
@@ -2116,7 +2117,7 @@ class NII(NII_Math):
         mask = np.broadcast_to(mask, self.shape)
 
         # Replace values of `idx` with `fill` in the masked region
-        np_array = np.where((np_array_cond == 1) & mask, fill, np_array)
+        np_array = np.where(np_array_cond & mask, fill, np_array)
 
         # Update the NIfTI object with the modified array
         return self.set_array(np_array, inplace=inplace)
