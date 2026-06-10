@@ -378,6 +378,7 @@ class nnUNetPredictor:
             self.label_manager,
             dct["data_properites"],
             return_probabilities=save_or_return_probabilities,
+            device=self.device,
         )
         print("convert_predicted_logits_to_segmentation_with_correct_shape; Took", time.time() - t, " seconds")
 
@@ -671,15 +672,13 @@ class nnUNetPredictor:
                                 break
 
                         splits[j] += 1
+
                 predicted_logits, n_predictions = self._run_sub(data, network, device, slicers, pbar)
                 pbar.desc = "finish"
                 pbar.update(0)
                 predicted_logits /= n_predictions
                 del n_predictions
                 predicted_logits = predicted_logits.cpu()
-                # NOTE: do not empty_cache() here. This runs once per fold; releasing the
-                # allocator pool now just forces the next fold to re-cudaMalloc. The pool is
-                # cleared once per image in predict_logits_from_preprocessed_data instead.
                 return predicted_logits[(slice(None), *slicer_revert_padding[1:])]
 
     def _run_prediction_splits(
@@ -731,7 +730,7 @@ class nnUNetPredictor:
 
         predicted_logits /= n_predictions
         del n_predictions
-        empty_cache(self.device)
+        # empty_cache(self.device)
         return predicted_logits
 
     def _allocate(self, data: torch.Tensor, results_device, pbar: tqdm, gauss: bool = True):
