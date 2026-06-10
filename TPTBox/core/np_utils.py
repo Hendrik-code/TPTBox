@@ -705,9 +705,16 @@ def np_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 
     assert len(px_dist) == n, f"dimension mismatch, got img shape {shp} and px_dist {px_dist}"
 
     bbox: list[float] = []
-    for ax in itertools.combinations(reversed(range(n)), n - 1):
-        nonzero = np.any(a=img, axis=ax)
-        bbox.extend(np.where(nonzero)[0][[0, -1]])  # type: ignore
+    if n == 3:
+        # 2 full passes instead of 3: two axis extents come from a shared 2D projection (cheap),
+        # only the third axis needs a second full reduction.
+        p = np.any(img, axis=2)
+        for nonzero in (np.any(p, axis=1), np.any(p, axis=0), np.any(img, axis=(0, 1))):
+            bbox.extend(np.where(nonzero)[0][[0, -1]])  # type: ignore
+    else:
+        for ax in itertools.combinations(reversed(range(n)), n - 1):
+            nonzero = np.any(a=img, axis=ax)
+            bbox.extend(np.where(nonzero)[0][[0, -1]])  # type: ignore
     out: tuple[slice, ...] = tuple(
         slice(
             max(bbox[i] - px_dist[i // 2], 0),
