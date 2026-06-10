@@ -2723,15 +2723,17 @@ class NII(NII_Math):
     def remove_labels(self,label:int|Enum|Sequence[int]|Sequence[Enum], inplace=False, verbose:logging=True, removed_to_label=0) -> Self:
         """If this NII is a segmentation you can single out one label."""
         assert label != 0, 'Zero label does not make sens.  This is the background'
-        seg_arr = self.get_seg_array()
         if not isinstance(label,Sequence):
             label = [label] # type: ignore
+        flat: list[int] = []
         for l in label:
             if isinstance(l, list):
-                for g in l:
-                    seg_arr[seg_arr == g] = removed_to_label
+                flat.extend(g.value if isinstance(g, Enum) else g for g in l)
             else:
-                seg_arr[seg_arr == l] = removed_to_label
+                flat.append(l.value if isinstance(l, Enum) else l)
+        # one np_map_labels gather is constant-time in the number of labels (a per-label
+        # `seg_arr == l` loop costs one full pass per label).
+        seg_arr = np_map_labels(self.get_seg_array(), dict.fromkeys(flat, removed_to_label))
         return self.set_array(seg_arr,inplace=inplace, verbose=verbose)
     def remove_labels_(self, label: int | Enum | Sequence[int] | Sequence[Enum], removed_to_label=0, verbose: logging = True) -> Self:
         """In-place variant of `remove_labels`."""
