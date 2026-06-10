@@ -260,6 +260,19 @@ class POI(Abstract_POI, Has_Grid):
         # return tuple(a.tolist())
         return tuple(round(float(v), ROUNDING_LVL) for v in a)
 
+    def local_to_global_arr(self, coords: np.ndarray, itk_coords=False) -> np.ndarray:
+        """Vectorized :meth:`local_to_global` for an ``(N, 3)`` array of coordinates.
+
+        Equivalent to applying ``local_to_global`` to each row but in a single batched
+        affine matmul (much faster for many points).
+        """
+        assert self.zoom is not None and self.rotation is not None and self.origin is not None
+        a = (np.asarray(coords, dtype=float) * np.asarray(self.zoom)) @ np.asarray(self.rotation).T + np.asarray(self.origin)
+        if itk_coords:
+            a[:, 0] *= -1
+            a[:, 1] *= -1
+        return np.round(a, ROUNDING_LVL)
+
     def global_to_local(self, x: COORDINATE) -> COORDINATE:
         """Converts global coordinates to local coordinates using zoom, rotation, and origin.
 
