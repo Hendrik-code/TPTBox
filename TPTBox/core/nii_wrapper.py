@@ -43,6 +43,7 @@ from TPTBox.core.np_utils import (
     np_filter_connected_components,
     np_get_connected_components_center_of_mass,
     np_is_empty,
+    np_isin,
     np_map_labels,
     np_map_labels_based_on_majority_label_mask_overlap,
     np_point_coordinates,
@@ -2685,9 +2686,8 @@ class NII(NII_Math):
         seg_arr = self.get_seg_array()
 
         if isinstance(label, Sequence):
-            label_int:list[int] = [idx.value if isinstance(idx,Enum) else idx for idx in label]
-            assert 0 not in label_int, 'Zero label does not make sense. This is the background'
-            seg_arr = np_extract_label(seg_arr, label_int, to_label=1, inplace=True)
+            labels:int|list[int] = [idx.value if isinstance(idx,Enum) else idx for idx in label]
+            assert 0 not in labels, 'Zero label does not make sense. This is the background'
         else:
             if isinstance(label,Enum):
                 label = label.value
@@ -2695,9 +2695,13 @@ class NII(NII_Math):
                 label = int(label)
 
             assert label != 0, 'Zero label does not make sense. This is the background'
-            seg_arr = np_extract_label(seg_arr, label, to_label=1, inplace=True)
+            labels = label
         if keep_label:
-            seg_arr = seg_arr * self.get_seg_array()
+            # keep the original label values where in `labels`, zero everywhere else.
+            # single get_seg_array() copy + one np_isin mask (faster than extract + a second copy/multiply)
+            seg_arr[~np_isin(seg_arr, labels)] = 0
+        else:
+            seg_arr = np_extract_label(seg_arr, labels, to_label=1, inplace=True)
         return self.set_array(seg_arr,inplace=inplace)
     def ravel(self,order:Literal["K", "A", "C", "F"] | None="C")->np.ndarray:
         """Return a contiguous flattened array.
