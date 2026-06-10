@@ -39,6 +39,14 @@ except ModuleNotFoundError:
     has_torch = False
 
 
+try:
+    import ants
+
+    has_ants = True
+except ModuleNotFoundError:
+    has_ants = False
+
+
 class Test_test_samples(unittest.TestCase):
     # def test_load_ct(self):
     #    ct_nii, subreg_nii, vert_nii, label = get_test_ct()
@@ -60,7 +68,7 @@ class Test_test_samples(unittest.TestCase):
         assert "out_spine" in out
         assert "out_vert" in out
 
-    @unittest.skipIf(not has_spineps, "requires spineps to be installed")
+    @unittest.skipIf(not has_spineps or not has_ants, "requires spineps to be installed")
     def test_spineps(self):
         tests_path = get_tests_dir()
         if (tests_path / "derivative").exists():
