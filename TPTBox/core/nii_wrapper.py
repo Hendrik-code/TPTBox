@@ -2254,7 +2254,8 @@ class NII(NII_Math):
             If inplace is True, returns the current NIfTI image object with mapped labels. Otherwise, returns a new NIfTI image object with mapped labels.
         """
         data_orig = self.get_seg_array()
-        labels_before = [v for v in np_unique(data_orig) if v > 0]
+        # the before/after np_unique scans are only used for the verbose log line; skip them otherwise
+        labels_before = [v for v in np_unique(data_orig) if v > 0] if verbose else None
         # enforce keys to be str to support both str and int
         label_map_ = {
             (v_name2idx[k] if k in v_name2idx else int(k)): (
@@ -2264,15 +2265,16 @@ class NII(NII_Math):
         }
         log.print("label_map_ =", label_map_, verbose=verbose)
         data = np_map_labels(data_orig, label_map_)
-        labels_after = [v for v in np_unique(data) if v > 0]
-        log.print(
-                "N =",
-                len(label_map_),
-                "labels reassigned, before labels: ",
-                labels_before,
-                " after: ",
-                labels_after,verbose=verbose
-            )
+        if verbose:
+            labels_after = [v for v in np_unique(data) if v > 0]
+            log.print(
+                    "N =",
+                    len(label_map_),
+                    "labels reassigned, before labels: ",
+                    labels_before,
+                    " after: ",
+                    labels_after,verbose=verbose
+                )
         nii = data.astype(np.uint16), self.affine, self.header
         if inplace:
             self.nii = nii
