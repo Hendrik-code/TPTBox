@@ -39,6 +39,7 @@ def make_snapshot3D(
     verbose: bool = True,
     crop: bool = True,
     png_magnify: int = 1,
+    opacity: dict[int, float] | None = None,
 ) -> Image.Image:
     """Generate a 3D surface-rendered snapshot from a segmentation image.
 
@@ -62,10 +63,13 @@ def make_snapshot3D(
         verbose: If True, logs the output path after saving.
         crop: If True, crops the image to its bounding box before rendering.
         png_magnify: Window pixel density multiplier for the fury renderer.
+        opacity: mapping idx to opacity (1 means full, 0 invisible)
 
     Returns:
         The rendered snapshot as a PIL Image object.
     """
+    if opacity is None:
+        opacity = {}
     is_tmp = output_path is None
     t = None
     if output_path is None:
@@ -102,14 +106,7 @@ def make_snapshot3D(
         show_m.initialize()
         for i, ids in enumerate(ids_list):
             x = width * i
-            _plot_sub_seg(
-                scene,
-                nii.extract_label(ids, keep_label=True),
-                x,
-                0,
-                smoothing,
-                view[i % len(view)],
-            )
+            _plot_sub_seg(scene, nii.extract_label(ids, keep_label=True), x, 0, smoothing, view[i % len(view)], opacity=opacity)
         scene.projection(proj_type="parallel")
         scene.reset_camera_tight(margin_factor=1.02)
         window.record(
@@ -141,6 +138,7 @@ def make_snapshot3D_parallel(
     scale_factor: int = 1,
     override: bool = True,
     crop: bool = True,
+    opacity: dict[int, float] | None = None,
 ) -> None:
     """Run :func:`make_snapshot3D` in parallel across multiple images.
 
@@ -176,6 +174,7 @@ def make_snapshot3D_parallel(
                     "png_magnify": png_magnify,
                     "crop": crop,
                     "scale_factor": scale_factor,
+                    "opacity": opacity,
                 },
             )
             ress.append(res)
@@ -188,8 +187,12 @@ def make_snapshot3D_parallel(
 make_sub_snapshot_parallel = make_snapshot3D_parallel
 
 
-def _plot_sub_seg(scene: window.Scene, nii: NII, x: int, y: int, smoothing: int, orientation: VIEW) -> None:
+def _plot_sub_seg(
+    scene: window.Scene, nii: NII, x: int, y: int, smoothing: int, orientation: VIEW, opacity: dict[int, float] | None = None
+) -> None:
     """Render all labels from a segmentation NII into the fury scene at the given viewport offset."""
+    if opacity is None:
+        opacity = {}
     if orientation == "A":
         #               [  axis1(w)   ]  [  axis2(h)   ]  [  view in ]
         affine = np.array([[0, 0, 1, 0], [0, 1, 0, 0], [1, 0, 0, 0], [0, 0, 0, 1]])
@@ -210,6 +213,9 @@ def _plot_sub_seg(scene: window.Scene, nii: NII, x: int, y: int, smoothing: int,
     else:
         raise NotImplementedError()
     for idx in nii.unique():
+        o = opacity.get(idx, 1)
+        if o == 0:
+            continue
         color = get_color_by_label(idx)
         cont_actor = _plot_mask(
             nii.extract_label(idx),
@@ -218,7 +224,7 @@ def _plot_sub_seg(scene: window.Scene, nii: NII, x: int, y: int, smoothing: int,
             y,
             smoothing=smoothing,
             color=color,
-            opacity=1,
+            opacity=o,
         )
         scene.add(cont_actor)
 
@@ -388,7 +394,7 @@ def _contour_from_roi_smooth(
 
     skin_actor = vtk.vtkActor()
     skin_actor.SetMapper(skin_mapper)
-    skin_actor.GetProperty().SetOpacity(opacity)
+    skin_actor.GetProperty().SetOpacity(opacity) if opacity != 1 else None
     skin_actor.GetProperty().SetColor(color[0], color[1], color[2])
 
     return skin_actor
