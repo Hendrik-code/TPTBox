@@ -95,7 +95,7 @@ def _convert(obj):
     raise TypeError(type(obj))
 
 
-def _save_json(filepath:str|Path|bids_files.BIDS_FILE,data,indent=4,convert=_convert):
+def _save_json(data,filepath:str|Path|bids_files.BIDS_FILE,indent=4,convert=_convert):
     
     if isinstance(filepath,bids_files.BIDS_FILE):
         if "json" in filepath.file:
@@ -157,7 +157,7 @@ def save_json(filepath:str|Path|bids_files.BIDS_FILE,data,indent=4,convert=_conv
             Propagates any error raised during serialization or file writing,
             after attempting automatic recovery of the original file.
     """
-    return secure_save(_save_json,file_types=[".json"])(filepath,data,indent=indent,convert=convert)
+    return secure_save(_save_json,file_types=["json"])(data,filepath,indent=indent,convert=convert)
 
     
 

@@ -13,18 +13,24 @@ from math import ceil, floor
 import numpy as np
 import torch
 from acvl_utils.cropping_and_padding.padding import pad_nd_image
-from batchgenerators.utilities.file_and_folder_operations import join, load_json
-from nnunetv2.utilities.label_handling.label_handling import determine_num_input_channels
+from batchgenerators.utilities.file_and_folder_operations import (join,
+                                                                  load_json)
+from nnunetv2.utilities.label_handling.label_handling import \
+    determine_num_input_channels
 from torch._dynamo import OptimizedModule
 from tqdm import tqdm
 
 from TPTBox import Print_Logger
 from TPTBox.core.compat import zip_strict
-from TPTBox.segmentation.nnUnet_utils.data_iterators import PreprocessAdapterFromNpy
-from TPTBox.segmentation.nnUnet_utils.export_prediction import convert_predicted_logits_to_segmentation_with_correct_shape
-from TPTBox.segmentation.nnUnet_utils.get_network_from_plans import get_network_from_plans
+from TPTBox.segmentation.nnUnet_utils.data_iterators import \
+    PreprocessAdapterFromNpy
+from TPTBox.segmentation.nnUnet_utils.export_prediction import \
+    convert_predicted_logits_to_segmentation_with_correct_shape
+from TPTBox.segmentation.nnUnet_utils.get_network_from_plans import \
+    get_network_from_plans
 from TPTBox.segmentation.nnUnet_utils.plans_handler import PlansManager
-from TPTBox.segmentation.nnUnet_utils.sliding_window_prediction import compute_gaussian, compute_steps_for_sliding_window
+from TPTBox.segmentation.nnUnet_utils.sliding_window_prediction import (
+    compute_gaussian, compute_steps_for_sliding_window)
 
 
 def get_gpu_memory_MB(device) -> float:
@@ -426,7 +432,7 @@ class nnUNetPredictor:
                     else:
                         self.network._orig_mod.load_state_dict(params)
                     # print(type(self.network))
-                    new_prediction = self.predict_sliding_window_return_logits(data, network=network).to("cpu")
+                    new_prediction = self.predict_sliding_window_return_logits(data, network=network,idx=idx).to("cpu")
                     if prediction is None:
                         prediction = new_prediction
                     else:
@@ -467,9 +473,9 @@ class nnUNetPredictor:
                             self.network._orig_mod.load_state_dict(params)
 
                         if prediction is None:
-                            prediction = self.predict_sliding_window_return_logits(data, network=network).to("cpu")  # type: ignore
+                            prediction = self.predict_sliding_window_return_logits(data, network=network,idx=99).to("cpu")  # type: ignore
                         else:
-                            new_prediction = self.predict_sliding_window_return_logits(data, network=network).to("cpu")  # type: ignore
+                            new_prediction = self.predict_sliding_window_return_logits(data, network=network,idx=99).to("cpu")  # type: ignore
                             prediction += new_prediction
 
                     if len(self.list_of_parameters) > 1:
@@ -565,7 +571,7 @@ class nnUNetPredictor:
             prediction /= num_predictons
         return prediction
 
-    def predict_sliding_window_return_logits(self, input_image: torch.Tensor, network=None) -> np.ndarray | torch.Tensor:
+    def predict_sliding_window_return_logits(self, input_image: torch.Tensor, network=None,idx=0) -> np.ndarray | torch.Tensor:
         """Tile the input image and aggregate per-tile logits into a full-volume prediction.
 
         Args:
@@ -616,7 +622,7 @@ class nnUNetPredictor:
 
             # print("pixel", np.prod(shape) / 1000000)
             # print("memory", get_gpu_memory_MB(device), device)
-            if get_gpu_util(device) > 1 - self.wait_till_gpu_percent_is_free:
+            if get_gpu_util(device) > 1 - self.wait_till_gpu_percent_is_free and idx == 0:
                 t = tqdm(range(2400))  # Wait 40 minutes
                 for i in t:
                     util = get_gpu_util(device)
