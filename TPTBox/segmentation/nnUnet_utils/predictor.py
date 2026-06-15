@@ -18,8 +18,6 @@ from batchgenerators.utilities.file_and_folder_operations import (join,
 from nnunetv2.utilities.label_handling.label_handling import \
     determine_num_input_channels
 from torch._dynamo import OptimizedModule
-from tqdm import tqdm
-
 from TPTBox import Print_Logger
 from TPTBox.core.compat import zip_strict
 from TPTBox.segmentation.nnUnet_utils.data_iterators import \
@@ -31,6 +29,7 @@ from TPTBox.segmentation.nnUnet_utils.get_network_from_plans import \
 from TPTBox.segmentation.nnUnet_utils.plans_handler import PlansManager
 from TPTBox.segmentation.nnUnet_utils.sliding_window_prediction import (
     compute_gaussian, compute_steps_for_sliding_window)
+from tqdm import tqdm
 
 
 def get_gpu_memory_MB(device) -> float:
@@ -810,11 +809,14 @@ class nnUNetPredictor:
                     n_predictions[sl[1:]] += gaussian if self.use_gaussian else 1
             return predicted_logits, n_predictions  # noqa: TRY300
         except RuntimeError:
-            del predicted_logits
-            del n_predictions
-            del gaussian
-            del work_on
-            del prediction
+            try:
+                del predicted_logits
+                del n_predictions
+                del gaussian
+                del work_on
+                del prediction
+            except RuntimeError:
+                pass
             empty_cache(self.device)
             empty_cache(results_device)
             self.memory_base += 1000
