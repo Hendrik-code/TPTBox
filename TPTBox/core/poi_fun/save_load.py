@@ -10,26 +10,15 @@ from typing_extensions import TYPE_CHECKING, TypeGuard  # noqa: UP035
 
 # from TPTBox import POI, POI_Global
 from TPTBox.core import bids_files
+from TPTBox.core.internal.nii_help import save_json
 from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.poi_fun.poi_abstract import POI_Descriptor
-from TPTBox.core.vert_constants import (
-    AX_CODES,
-    COORDINATE,
-    LABEL_MAX,
-    ROTATION,
-    ZOOMS,
-    Abstract_lvl,
-    Any,
-    Location,
-    Vertebra_Instance,
-    _register_lvl,
-    conversion_poi,
-    conversion_poi2text,
-    log,
-    logging,
-    v_idx2name,
-    v_name2idx,
-)
+from TPTBox.core.vert_constants import (AX_CODES, COORDINATE, LABEL_MAX,
+                                        ROTATION, ZOOMS, Abstract_lvl, Any,
+                                        Location, Vertebra_Instance,
+                                        _register_lvl, conversion_poi,
+                                        conversion_poi2text, log, logging,
+                                        v_idx2name, v_name2idx)
 from TPTBox.logger import Log_Type
 
 if TYPE_CHECKING:
@@ -123,21 +112,9 @@ def save_poi(
         return
     json_object, print_add = _poi_to_dict_list(poi, additional_info, save_hint, resample_reference, verbose)
 
-    # Problem with python 3 and int64 serialization.
-    def convert(o):
-        if isinstance(o, np.integer):
-            return int(o)
-        if isinstance(o, np.floating):
-            return float(o)
-        if isinstance(o, np.ndarray):
-            return o.tolist()
-        if isinstance(o, Path):
-            return str(o.absolute())
-        raise TypeError(type(o))
-
+    
     try:
-        with open(out_path, "w") as f:
-            json.dump(json_object, f, default=convert, indent=4)
+        save_json(out_path,json_object,indent=4)
     except TypeError:
         Path(out_path).unlink(missing_ok=True)
         raise
@@ -831,7 +808,8 @@ def _load_landmark_txt(path: Path) -> list:
 
 
 if __name__ == "__main__":
-    from TPTBox import NII, POI, Location, POI_Global, Vertebra_Instance, calc_poi_from_subreg_vert, to_nii
+    from TPTBox import (NII, POI, Location, POI_Global, Vertebra_Instance,
+                        calc_poi_from_subreg_vert, to_nii)
 
     # nii = "/DATA/NAS/datasets_processed/CT_spine/dataset-myelom/rawdata/CTFU01051/ses-20130430/sub-CTFU01051_ses-20130430_sequ-2_ct.nii.gz"
     # fam = "/DATA/NAS/datasets_processed/CT_spine/dataset-myelom/"
