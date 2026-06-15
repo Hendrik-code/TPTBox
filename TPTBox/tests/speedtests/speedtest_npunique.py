@@ -18,13 +18,14 @@ if __name__ == "__main__":
         np_unique,
         np_unique_withoutzero,
         np_volume,
+        old_np_unique,
     )
     from TPTBox.tests.speedtests.speedtest import speed_test
     from TPTBox.tests.test_utils import get_nii
 
     def get_nii_array():
         num_points = random.randint(1, 30)
-        nii, points, orientation, sizes = get_nii(x=(140, 140, 150), num_point=num_points)
+        nii, points, orientation, sizes = get_nii(x=(400, 400, 400), num_point=num_points)
         # nii.map_labels_({1: -1}, verbose=False)
         arr = nii.get_seg_array().astype(np.uint8)
         # arr[arr == 1] = -1
@@ -34,7 +35,7 @@ if __name__ == "__main__":
     speed_test(
         repeats=50,
         get_input_func=get_nii_array,
-        functions=[np_unique, np.unique, np_is_empty, np.max],
+        functions=[np_unique, old_np_unique, np.unique, np_is_empty, np.max],
         assert_equal_function=lambda x, y: True,  # np.all([x[i] == y[i] for i in range(len(x))]),  # noqa: ARG005
         # np.all([x[i] == y[i] for i in range(len(x))])
     )
