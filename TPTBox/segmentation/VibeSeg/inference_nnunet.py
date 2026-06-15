@@ -173,11 +173,14 @@ def run_inference_on_file(
         model_path = _model_path_
     if out_file is not None and Path(out_file).exists() and not override:
         return out_file, None
-
-    from TPTBox.segmentation.nnUnet_utils.inference_api import (
-        load_inf_model,
-        run_inference,
-    )
+    
+    if min(input_nii[0].shape) <= 1:
+        shape = input_nii[0].shape
+        logger.on_fail(f"{shape=} has only {min(shape)} slice in a dimension.")    
+        return None,None
+    
+    from TPTBox.segmentation.nnUnet_utils.inference_api import (load_inf_model,
+                                                                run_inference)
 
     if isinstance(idx, int):
         if auto_download:
@@ -259,7 +262,7 @@ def run_inference_on_file(
 
     zoom = None
     og_nii = input_nii[0].copy()
-
+    
     try:
         zoom = ds_info.get("spacing")
         if idx not in [527] and zoom is not None:
@@ -291,6 +294,7 @@ def run_inference_on_file(
         "\n",
         nnunet_path,
     )
+    
     if orientation is not None:
         logger.print("orientation", orientation, f"from {input_nii[0].orientation}") if verbose else None
         input_nii = [i.reorient(orientation) for i in input_nii]
@@ -300,6 +304,7 @@ def run_inference_on_file(
         input_nii = [i.rescale_(zoom, mode=mode, verbose=True) for i in input_nii]
         logger.print(input_nii)
     logger.print("squash to float16") if verbose else None
+    
     input_nii = [squash_so_it_fits_in_float16(i) for i in input_nii]
 
     if crop:
