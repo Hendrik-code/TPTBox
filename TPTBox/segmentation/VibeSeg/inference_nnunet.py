@@ -309,7 +309,7 @@ def run_inference_on_file(
         p = (padd, padd)
         input_nii = [i.apply_pad([p, p, p], mode="reflect") for i in input_nii]
 
-    seg_nii, uncertainty_nii, softmax_logits = run_inference(input_nii, nnunet, logits=logits)
+    seg_nii, _, softmax_logits = run_inference(input_nii, nnunet, logits=logits)
     if padd != 0:
         seg_nii = seg_nii[padd:-padd, padd:-padd, padd:-padd]
 
