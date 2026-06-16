@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from math import ceil
 from pathlib import Path
 
 import numpy as np
@@ -161,7 +162,7 @@ def _split_ranges(length: int, n_chunks: int, overlap: int):
 def _run_inference_patches(input_nii:list[NII],nnunet,_cpu_chunks,logger=logger):
     """split image into k _cpu_chunks along the largest dimension.
         Should only be used if there is not enough RAM on the system."""
-    logger.on_debug("Run: _run_inference_patches, so limit RAM usage")
+    logger.on_debug("Run: _run_inference_patches, You should only run this if you have limit RAM.")
     from TPTBox.segmentation.nnUnet_utils.predictor import empty_cache
     empty_cache(nnunet.device)
     shape = input_nii[0].shape
