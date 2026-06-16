@@ -3,12 +3,12 @@ from __future__ import annotations
 import json
 import sys
 from collections.abc import Sequence
+from math import ceil
 from pathlib import Path
 from typing import Literal
 
 import numpy as np
 import torch
-
 from TPTBox import NII, Image_Reference, Log_Type, Print_Logger, to_nii
 from TPTBox.segmentation.VibeSeg.auto_download import download_weights
 
@@ -74,6 +74,50 @@ def squash_so_it_fits_in_float16(x: NII) -> NII:
         x /= m / 1000  # new max will be 1000
     return x
 
+def _split_ranges(length: int, n_chunks: int, overlap: int):
+    step = length // n_chunks
+    ranges = []
+    for i in range(n_chunks):
+        start = i * step
+        end = length if i == n_chunks - 1 else (i + 1) * step
+        read_start = max(0, start - overlap)
+        read_end = min(length, end + overlap)
+        crop_start = start - read_start
+        crop_end = crop_start + (end - start)
+        ranges.append((read_start,read_end,crop_start,crop_end))
+    return ranges
+
+def _run_inference_patches(input_nii:list[NII],nnunet,_cpu_chunks):
+    """split image into k _cpu_chunks along the largest dimension.
+        Should only be used if there is not enough RAM on the system."""
+    from TPTBox.segmentation.nnUnet_utils.inference_api import run_inference
+    shape = input_nii[0].shape
+    split_axis = int(np.argmax(shape))
+    
+    if _cpu_chunks is None:
+        _cpu_chunks =shape[split_axis] // 250     
+    patch_size = nnunet.configuration_manager.patch_size
+    print(f"{nnunet.tile_step_size=}")
+    overlap = ceil(patch_size[split_axis] * (1 - nnunet.tile_step_size))
+    print(f"{overlap=}")
+    ranges = _split_ranges(shape[split_axis],_cpu_chunks,overlap,)
+    print(f"{ranges=}")
+    seg_chunks = []
+    for read_start, read_end, crop_start, crop_end in ranges:
+        chunk_inputs = []
+        for nii in input_nii:
+            sl = [slice(None)] * 3
+            sl[split_axis] = slice(read_start, read_end)
+            chunk_inputs.append(nii[tuple(sl)])
+        seg_chunk, _, _ = run_inference(chunk_inputs,nnunet,logits=False,)
+        sl = [slice(None)] * 3
+        sl[split_axis] = slice(crop_start, crop_end)
+        seg_chunk = seg_chunk[tuple(sl)]
+        seg_chunks.append(seg_chunk)
+    seg_arr = np.concatenate([s.get_array() for s in seg_chunks],axis=split_axis)
+    seg_nii = input_nii[0].copy()
+    seg_nii.seg = True
+    return seg_nii.set_array_(seg_arr).set_dtype("smallest_uint")
 
 def run_inference_on_file(
     idx: int | Path,
@@ -84,7 +128,7 @@ def run_inference_on_file(
     gpu=None,
     keep_size: bool = False,
     fill_holes: bool = False,
-    logits: bool = False,
+    logits: bool = False, # deprecated
     mapping=None,
     crop: bool = False,
     max_folds=None,
@@ -103,6 +147,7 @@ def run_inference_on_file(
     cache_model: bool = False,
     _key_ResEnc: str = "__nnUNet*ResEnc",
     fail_on_missing_memory=False,
+    _cpu_chunks:int|None=None,
     logger=logger,
 ) -> tuple[Image_Reference, np.ndarray | None]:
     """Load a VibeSeg model and run inference on the supplied NIfTI images.
@@ -122,7 +167,8 @@ def run_inference_on_file(
             original image size.
         fill_holes: If ``True``, fill holes in the segmentation mask after
             inference.
-        logits: If ``True``, also return the raw softmax logits array.
+        logits: Deprecated; Was commented out for less GPU waste.
+            If ``True``, also return the raw softmax logits array. 
         mapping: Optional label remapping dict applied to the segmentation after
             inference.
         crop: If ``True``, crop the input to its foreground bounding box before
@@ -145,9 +191,12 @@ def run_inference_on_file(
         wait_till_gpu_percent_is_free: Minimum free GPU fraction to require
             before starting inference.
         tile_batch_size: Number of sliding-window tiles to run per network
-            forward pass. ``1`` (default) keeps the original per-tile behaviour;
+            forward pass. ``1`` (default) keeps the original per-tile behavior;
             larger values batch tiles to better saturate the GPU at the cost of
             higher peak memory.
+        _cpu_chunks: Split the prediction in k chunks along the largest axis. 
+            This setting should only be used if there in not enough (CPU) RAM. 
+            For GPU memory use the "memory_*" keys;
         verbose: Print progress information.
         cache_model: If ``True``, keep the loaded predictor in a process-wide
             cache and reuse it on subsequent calls with identical model and
@@ -313,8 +362,17 @@ def run_inference_on_file(
     if padd != 0:
         p = (padd, padd)
         input_nii = [i.apply_pad([p, p, p], mode="reflect") for i in input_nii]
-
-    seg_nii, uncertainty_nii, softmax_logits = run_inference(input_nii, nnunet, logits=logits)
+    if _cpu_chunks is None or _cpu_chunks <=1:
+        try:
+            seg_nii, _, softmax_logits = run_inference(input_nii, nnunet, logits=logits)
+        except MemoryError as e:
+            logger.print_error()
+            seg_nii  = _run_inference_patches(input_nii,nnunet,None)
+            softmax_logits = None    
+    else:
+        seg_nii  = _run_inference_patches(input_nii,nnunet,_cpu_chunks)
+        softmax_logits = None
+        
     if padd != 0:
         seg_nii = seg_nii[padd:-padd, padd:-padd, padd:-padd]
 
