@@ -3,13 +3,13 @@ from __future__ import annotations
 import json
 import random
 from pathlib import Path
-
 ###### GLOBAL POI #####
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, Union
 
 import numpy as np
 from typing_extensions import NotRequired
 
+from TPTBox.core.internal.nii_help import save_json
 from TPTBox.logger.log_file import log
 from TPTBox.mesh3D.mesh_colors import RGB_Color, get_color_by_label
 
@@ -545,8 +545,5 @@ def _save_mrk(
         "@schema": "https://raw.githubusercontent.com/slicer/slicer/master/Modules/Loadable/Markups/Resources/Schema/markups-schema-v1.0.3.json#",
         "markups": markups,
     }
-    # print(markups[-1].get("display"))
-    filepath.unlink(missing_ok=True)
-    with open(filepath, "w") as f:
-        json.dump(mrk_data, f, indent=2)
+    save_json(filepath,mrk_data,indent=2)
     log.on_save(f"Saved .mrk.json to {filepath}")

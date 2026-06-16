@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -7,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 import nibabel as nib
 import nibabel.orientations as nio
 import numpy as np
+from scipy.spatial import ConvexHull
 from scipy.spatial.transform import Rotation
 from typing_extensions import Self
 
@@ -14,20 +16,9 @@ from TPTBox.core.np_utils import np_count_nonzero
 from TPTBox.core.vert_constants import COORDINATE
 from TPTBox.logger import Log_Type
 
-from .vert_constants import (
-    AFFINE,
-    AX_CODES,
-    DIRECTIONS,
-    ORIGIN,
-    ROTATION,
-    ROUNDING_LVL,
-    SHAPE,
-    ZOOMS,
-    _plane_dict,
-    _same_direction,
-    log,
-    logging,
-)
+from .vert_constants import (AFFINE, AX_CODES, DIRECTIONS, ORIGIN, ROTATION,
+                             ROUNDING_LVL, SHAPE, ZOOMS, _plane_dict,
+                             _same_direction, log, logging)
 
 if TYPE_CHECKING:
     from TPTBox import NII, POI
@@ -382,7 +373,10 @@ class Has_Grid(Grid_Proxy):
         else:
             plane = "iso"
         return plane
-
+    def voxel_volume(self) -> float:
+        """Returns the volume of a single voxel in mm³ (product of all zoom values)."""
+        product = math.prod(self.spacing)
+        return product
     def get_axis(self, direction: DIRECTIONS = "S") -> int:
         """Return the axis index corresponding to the given anatomical direction.
 
@@ -482,7 +476,7 @@ class Has_Grid(Grid_Proxy):
         a = self.rotation.T @ (np.array(x) - self.origin) / np.array(self.zoom)
         return tuple(round(float(v), 7) for v in a)
 
-    def local_to_global(self, x: COORDINATE) -> tuple:
+    def local_to_global(self, x: COORDINATE|np.ndarray) -> tuple:
         """Convert voxel (local) coordinates to world (RAS/LPS) coordinates.
 
         Applies the forward affine transform: rotation times
@@ -587,6 +581,176 @@ class Has_Grid(Grid_Proxy):
             int: Number of dimensions (typically 3 for 3-D medical images).
         """
         return len(self.shape)
+    
+    def get_corners(self):
+        """
+        Compute the 8 corner points of the grid's oriented bounding box (OBB)
+        in world coordinates.
+
+        The box is defined by:
+            - shape_int: voxel dimensions (nx, ny, nz)
+            - zoom: physical spacing per axis (mm/voxel)
+            - rotation: 3×3 matrix whose columns define the local axes
+            - local_to_global: transforms local coordinates to world space
+
+        The box is centered at the grid center in local space and then mapped
+        into world space using the grid's rotation and translation.
+
+        Returns:
+            np.ndarray of shape (8, 3):
+                Corner points ordered in a consistent binary pattern:
+                (-u/±v/±w combinations).
+        """
+        s = np.array(self.shape_int, dtype=float)
+        zoom = np.array(self.zoom, dtype=float)
+
+        ctr = np.array(self.local_to_global((s - 1) * 0.5))
+        R = self.rotation
+
+        u = R[:,0] * 0.5 * s[0] * zoom[0]
+        v = R[:,1] * 0.5 * s[1] * zoom[1]
+        w = R[:,2] * 0.5 * s[2] * zoom[2]
+
+        return np.array([ctr-u-v-w,ctr-u-v+w,ctr-u+v-w,ctr-u+v+w,ctr+u-v-w,ctr+u-v+w,ctr+u+v-w,ctr+u+v+w])
+    def get_obb_quads(self: Has_Grid) -> list[np.ndarray]:
+        """
+        Return the 6 faces of the grid's oriented bounding box (OBB) as quadrilateral patches.
+
+        Each face is represented as a (4, 3) array of world-space vertices.
+        Vertex ordering follows the right-hand rule so that outward-facing
+        normals are consistent for all faces.
+
+        The OBB is constructed from:
+            - center position in world space
+            - half-extent vectors along rotated axes:
+                u, v, w = (R[:,i] * half_size_i)
+
+        Returns:
+            list[np.ndarray]:
+                A list of 6 quads corresponding to:
+                    +Z, -Z, +X, -X, +Y, -Y faces (in this order).
+        """
+        if len(self.zoom) < 3:
+            raise NotImplementedError("only implemented for 3D images.")
+        s = np.array(self.shape_int, dtype=float)
+        zoom = np.array(self.zoom, dtype=float)
+        ctr = np.array(self.local_to_global((s - 1) * 0.5))
+        R = self.rotation           # columns are local x/y/z axes
+        u = R[:, 0] * 0.5 * s[0] * zoom[0]
+        v = R[:, 1] * 0.5 * s[1] * zoom[1]
+        w = R[:, 2] * 0.5 * s[2] * zoom[2]
+        return [
+            np.array([ctr+u+v+w, ctr+u-v+w, ctr-u-v+w, ctr-u+v+w]),  # +Z face
+            np.array([ctr+u+v-w, ctr-u+v-w, ctr-u-v-w, ctr+u-v-w]),  # -Z face
+            np.array([ctr+u+v+w, ctr+u+v-w, ctr+u-v-w, ctr+u-v+w]),  # +X face
+            np.array([ctr-u+v+w, ctr-u-v+w, ctr-u-v-w, ctr-u+v-w]),  # -X face
+            np.array([ctr+u+v+w, ctr-u+v+w, ctr-u+v-w, ctr+u+v-w]),  # +Y face
+            np.array([ctr+u-v+w, ctr+u-v-w, ctr-u-v-w, ctr-u-v+w]),  # -Y face
+            ]
+    def get_intersecting_volume(self, b: Has_Grid) -> float:
+        """
+        Approximate the geometric intersection volume of two oriented bounding boxes (OBBs).
+
+        This method computes the intersection by:
+            1. Collecting candidate points:
+            - Corners of A inside B
+            - Corners of B inside A
+            - Edge/plane intersection points between both OBBs
+            2. Deduplicating points in world space
+            3. Constructing a 3D convex hull over these points
+            4. Returning the hull volume as the intersection volume
+
+        Important notes:
+            - This is NOT an exact polytope clipping implementation.
+            - The result is an approximation that is exact only when the
+            intersection is fully convex and all boundary points are captured
+            (which is typically but not strictly guaranteed).
+            - The method assumes the intersection of two OBBs is convex
+            (which it is), but numerical robustness depends on point sampling.
+            - Degenerate or near-tangent configurations may return 0.0 due to
+            insufficient hull points.
+
+        Computational complexity is constant with respect to image resolution
+        (depends only on 8 corners and 12 edges per box).
+
+        Args:
+            b (Has_Grid): Another grid with position, orientation, and spacing.
+
+        Returns:
+            float:
+                Estimated intersection volume in mm³. Returns 0.0 if no valid
+                convex hull can be constructed.
+        """
+        
+
+        def _half_spaces(grid: Has_Grid):
+            """Yield (point_on_plane, inward_unit_normal) for each of the 6 OBB faces."""
+            s = np.array(grid.shape_int, dtype=float)
+            zoom = np.array(grid.zoom, dtype=float)
+            ctr = np.array(grid.local_to_global((s - 1) * 0.5))
+            R = grid.rotation
+            half = 0.5 * s * zoom
+
+            for i in range(3):
+                axis = R[:, i]
+                for sign in (+1.0, -1.0):
+                    yield ctr + sign * half[i] * axis, -sign * axis
+
+        def _obb_edges(grid: Has_Grid):
+            c = grid.get_corners()
+            edge_ids = [(0, 1), (0, 2), (0, 4),(1, 3), (1, 5),(2, 3), (2, 6),(3, 7),(4, 5), (4, 6),(5, 7),(6, 7),]
+            return [(c[i], c[j]) for i, j in edge_ids]
+
+        def _point_inside_box(p: np.ndarray, box: Has_Grid, eps=1e-8) -> bool:
+            for pt, n in _half_spaces(box):
+                if np.dot(p - pt, n) < -eps:
+                    return False
+            return True
+        def _segment_plane_intersection(p0: np.ndarray,p1: np.ndarray,plane_pt: np.ndarray,plane_n: np.ndarray,eps=1e-10):
+            u = p1 - p0
+            denom = np.dot(u, plane_n)
+            if abs(denom) < eps:
+                return None
+            t = np.dot(plane_pt - p0, plane_n) / denom
+            if t < -eps or t > 1 + eps:
+                return None
+            return p0 + t * u
+        points = []
+
+        # corners of A inside B
+        for p in self.get_corners():
+            if _point_inside_box(p, b):
+                points.append(p)
+        # corners of B inside A
+        for p in b.get_corners():
+            if _point_inside_box(p, self):
+                points.append(p)
+        # edges of A against planes of B
+        for e0, e1 in _obb_edges(self):
+            for plane_pt, plane_n in _half_spaces(b):
+                p = _segment_plane_intersection(e0,e1,plane_pt,plane_n,)
+                if p is None:
+                    continue
+                if _point_inside_box(p, self) and _point_inside_box(p, b):
+                    points.append(p)
+        # edges of B against planes of A
+        for e0, e1 in _obb_edges(b):
+            for plane_pt, plane_n in _half_spaces(self):
+                p = _segment_plane_intersection(e0,e1,plane_pt,plane_n,)
+                if p is None:
+                    continue
+                if _point_inside_box(p, self) and _point_inside_box(p, b):
+                    points.append(p)
+        if len(points) == 0:
+            return 0.0
+        pts = np.unique(np.round(np.asarray(points), 8),axis=0,)
+        if len(pts) < 4:
+            return 0.0
+        try:
+            hull = ConvexHull(pts)
+            return float(hull.volume)
+        except Exception:
+            return 0.0
 
 
 @dataclass
