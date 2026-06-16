@@ -201,7 +201,7 @@ def np_unique(arr: np.ndarray) -> list[int]:
             counts = np.bincount(arr.ravel())
             return np.where(counts > 0)[0].tolist()
         # For sparse label spaces fall back to np.unique
-    return (np.unique(arr)).tolist()
+    return old_np_unique(arr)
 
 
 def np_unique_withoutzero(arr: UINTARRAY) -> list[int]:

@@ -24,49 +24,20 @@ from TPTBox.core.internal.nii_help import _resample_from_to, secure_save
 from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.nii_wrapper_math import NII_Math
 from TPTBox.core.np_utils import (
-    _pad_to_parameters,
-    np_bbox_binary,
-    np_calc_boundary_mask,
-    np_calc_convex_hull,
-    np_calc_overlapping_labels,
-    np_center_of_mass,
-    np_compute_surface,
-    np_connected_components,
-    np_connected_components_per_label,
-    np_dilate_msk,
-    np_dilate_msk_euclid,
-    np_erode_msk,
-    np_erode_msk_euclid,
-    np_extract_label,
-    np_fill_holes,
-    np_fill_holes_global_with_majority_voting,
-    np_filter_connected_components,
-    np_get_connected_components_center_of_mass,
-    np_is_empty,
-    np_map_labels,
-    np_map_labels_based_on_majority_label_mask_overlap,
-    np_point_coordinates,
-    np_smooth_gaussian_labelwise,
-    np_translate_arr,
-    np_unique,
-    np_unique_withoutzero,
-    np_volume,
-)
-from TPTBox.core.vert_constants import (
-    AFFINE,
-    AX_CODES,
-    COORDINATE,
-    DIRECTIONS,
-    LABEL_MAP,
-    LABEL_REFERENCE,
-    MODES,
-    SHAPE,
-    ZOOMS,
-    _same_direction,
-    log,
-    logging,
-    v_name2idx,
-)
+    _pad_to_parameters, np_bbox_binary, np_calc_boundary_mask,
+    np_calc_convex_hull, np_calc_overlapping_labels, np_center_of_mass,
+    np_compute_surface, np_connected_components,
+    np_connected_components_per_label, np_dilate_msk, np_dilate_msk_euclid,
+    np_erode_msk, np_erode_msk_euclid, np_extract_label, np_fill_holes,
+    np_fill_holes_global_with_majority_voting, np_filter_connected_components,
+    np_get_connected_components_center_of_mass, np_is_empty, np_map_labels,
+    np_map_labels_based_on_majority_label_mask_overlap, np_point_coordinates,
+    np_smooth_gaussian_labelwise, np_translate_arr, np_unique,
+    np_unique_withoutzero, np_volume)
+from TPTBox.core.vert_constants import (AFFINE, AX_CODES, COORDINATE,
+                                        DIRECTIONS, LABEL_MAP, LABEL_REFERENCE,
+                                        MODES, SHAPE, ZOOMS, _same_direction,
+                                        log, logging, v_name2idx)
 from TPTBox.logger.log_file import Log_Type
 
 if TYPE_CHECKING:
@@ -2637,7 +2608,7 @@ class NII(NII_Math):
             return True
         return min_v < x2[2] < max_v
 
-    def get_intersecting_volume(self, b: Self) -> float:
+    def get_intersecting_volume_slow(self, b: Self) -> float:
         """Returns the number of voxels in ``self``'s grid that overlap with image ``b``.
 
         ``b`` is binarised (all non-zero → 1) and resampled into ``self``'s voxel
@@ -2764,10 +2735,7 @@ class NII(NII_Math):
         out = np_unique_withoutzero(arr)
         log.print(out,verbose=verbose)
         return out
-    def voxel_volume(self) -> float:
-        """Returns the volume of a single voxel in mm³ (product of all zoom values)."""
-        product = math.prod(self.spacing)
-        return product
+    
 
     def volumes(self, include_zero: bool = False, in_mm3=False,sort=False) -> dict[int, float]|dict[int, int]:
         """Returns a dict stating how many pixels are present for each label."""
