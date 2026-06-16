@@ -9,6 +9,7 @@ from typing import Literal
 
 import numpy as np
 import torch
+
 from TPTBox import NII, Image_Reference, Log_Type, Print_Logger, to_nii
 from TPTBox.segmentation.VibeSeg.auto_download import download_weights
 
@@ -74,50 +75,6 @@ def squash_so_it_fits_in_float16(x: NII) -> NII:
         x /= m / 1000  # new max will be 1000
     return x
 
-def _split_ranges(length: int, n_chunks: int, overlap: int):
-    step = length // n_chunks
-    ranges = []
-    for i in range(n_chunks):
-        start = i * step
-        end = length if i == n_chunks - 1 else (i + 1) * step
-        read_start = max(0, start - overlap)
-        read_end = min(length, end + overlap)
-        crop_start = start - read_start
-        crop_end = crop_start + (end - start)
-        ranges.append((read_start,read_end,crop_start,crop_end))
-    return ranges
-
-def _run_inference_patches(input_nii:list[NII],nnunet,_cpu_chunks):
-    """split image into k _cpu_chunks along the largest dimension.
-        Should only be used if there is not enough RAM on the system."""
-    from TPTBox.segmentation.nnUnet_utils.inference_api import run_inference
-    shape = input_nii[0].shape
-    split_axis = int(np.argmax(shape))
-    
-    if _cpu_chunks is None:
-        _cpu_chunks =shape[split_axis] // 250     
-    patch_size = nnunet.configuration_manager.patch_size
-    print(f"{nnunet.tile_step_size=}")
-    overlap = ceil(patch_size[split_axis] * (1 - nnunet.tile_step_size))
-    print(f"{overlap=}")
-    ranges = _split_ranges(shape[split_axis],_cpu_chunks,overlap,)
-    print(f"{ranges=}")
-    seg_chunks = []
-    for read_start, read_end, crop_start, crop_end in ranges:
-        chunk_inputs = []
-        for nii in input_nii:
-            sl = [slice(None)] * 3
-            sl[split_axis] = slice(read_start, read_end)
-            chunk_inputs.append(nii[tuple(sl)])
-        seg_chunk, _, _ = run_inference(chunk_inputs,nnunet,logits=False,)
-        sl = [slice(None)] * 3
-        sl[split_axis] = slice(crop_start, crop_end)
-        seg_chunk = seg_chunk[tuple(sl)]
-        seg_chunks.append(seg_chunk)
-    seg_arr = np.concatenate([s.get_array() for s in seg_chunks],axis=split_axis)
-    seg_nii = input_nii[0].copy()
-    seg_nii.seg = True
-    return seg_nii.set_array_(seg_arr).set_dtype("smallest_uint")
 
 def run_inference_on_file(
     idx: int | Path,
@@ -228,8 +185,8 @@ def run_inference_on_file(
         logger.on_fail(f"{shape=} has only {min(shape)} slice in a dimension.")    
         return None,None
     
-    from TPTBox.segmentation.nnUnet_utils.inference_api import (load_inf_model,
-                                                                run_inference)
+    from TPTBox.segmentation.nnUnet_utils.inference_api import (
+        _run_inference_patches, load_inf_model, run_inference)
 
     if isinstance(idx, int):
         if auto_download:
@@ -303,6 +260,7 @@ def run_inference_on_file(
             wait_till_gpu_percent_is_free=wait_till_gpu_percent_is_free,
             tile_batch_size=tile_batch_size,
             fail_on_missing_memory=fail_on_missing_memory,
+            logger=logger
         )
         if cache_model:
             _model_cache[cache_key] = nnunet
@@ -364,13 +322,13 @@ def run_inference_on_file(
         input_nii = [i.apply_pad([p, p, p], mode="reflect") for i in input_nii]
     if _cpu_chunks is None or _cpu_chunks <=1:
         try:
-            seg_nii, _, softmax_logits = run_inference(input_nii, nnunet, logits=logits)
+            seg_nii, _, softmax_logits = run_inference(input_nii, nnunet, logits=logits,logger=logger)
         except MemoryError as e:
             logger.print_error()
-            seg_nii  = _run_inference_patches(input_nii,nnunet,None)
+            seg_nii  = _run_inference_patches(input_nii,nnunet,None,logger=logger)
             softmax_logits = None    
     else:
-        seg_nii  = _run_inference_patches(input_nii,nnunet,_cpu_chunks)
+        seg_nii  = _run_inference_patches(input_nii,nnunet,_cpu_chunks,logger=logger)
         softmax_logits = None
         
     if padd != 0:

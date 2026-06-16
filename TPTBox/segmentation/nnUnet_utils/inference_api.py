@@ -5,11 +5,11 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from TPTBox import NII, Log_Type, No_Logger
+from TPTBox import NII, Log_Type, Print_Logger
 
 from .predictor import nnUNetPredictor
 
-logger = No_Logger()
+logger = Print_Logger()
 logger.prefix = "API"
 
 _interop = False
@@ -36,6 +36,7 @@ def load_inf_model(
     wait_till_gpu_percent_is_free: float = 0.3,
     fail_on_missing_memory=False,
     tile_batch_size: int = 1,
+    logger=logger
 ) -> nnUNetPredictor:
     """Load and initialise an nnU-Net model predictor from a trained model folder.
 
@@ -144,11 +145,58 @@ def load_inf_model(
     return predictor
 
 
+def _split_ranges(length: int, n_chunks: int, overlap: int):
+    step = length // n_chunks
+    ranges = []
+    for i in range(n_chunks):
+        start = i * step
+        end = length if i == n_chunks - 1 else (i + 1) * step
+        read_start = max(0, start - overlap)
+        read_end = min(length, end + overlap)
+        crop_start = start - read_start
+        crop_end = crop_start + (end - start)
+        ranges.append((read_start,read_end,crop_start,crop_end))
+    return ranges
+
+def _run_inference_patches(input_nii:list[NII],nnunet,_cpu_chunks,logger=logger):
+    """split image into k _cpu_chunks along the largest dimension.
+        Should only be used if there is not enough RAM on the system."""
+    logger.on_debug("Run: _run_inference_patches, so limit RAM usage")
+    from TPTBox.segmentation.nnUnet_utils.predictor import empty_cache
+    empty_cache(nnunet.device)
+    shape = input_nii[0].shape
+    split_axis = int(np.argmax(shape))
+    
+    if _cpu_chunks is None:
+        _cpu_chunks =shape[split_axis] // 250     
+    patch_size = nnunet.configuration_manager.patch_size
+    overlap = ceil(patch_size[split_axis] * (1 - nnunet.tile_step_size))
+    logger.print(f"{overlap=}")
+    ranges = _split_ranges(shape[split_axis],_cpu_chunks,overlap,)
+    logger.print(f"{ranges=}")
+    seg_chunks = []
+    for read_start, read_end, crop_start, crop_end in ranges:
+        chunk_inputs = []
+        for nii in input_nii:
+            sl = [slice(None)] * 3
+            sl[split_axis] = slice(read_start, read_end)
+            chunk_inputs.append(nii[tuple(sl)])
+        seg_chunk, _, _ = run_inference(chunk_inputs,nnunet,logits=False,logger=logger)
+        sl = [slice(None)] * 3
+        sl[split_axis] = slice(crop_start, crop_end)
+        seg_chunk = seg_chunk[tuple(sl)]
+        seg_chunks.append(seg_chunk)
+    seg_arr = np.concatenate([s.get_array() for s in seg_chunks],axis=split_axis)
+    seg_nii = input_nii[0].copy()
+    seg_nii.seg = True
+    return seg_nii.set_array_(seg_arr).set_dtype("smallest_uint")
+
 def run_inference(
     input_nii: str | NII | list[NII],
     predictor: nnUNetPredictor,
     reorient_PIR: bool = False,  # noqa: N803
     logits: bool = False,
+    logger=logger,
     verbose: bool = False,  # noqa: ARG001
 ) -> tuple[NII, NII | None, np.ndarray | None]:
     """Run nnU-Net inference on a single image or list of images (multi-channel).
@@ -193,10 +241,10 @@ def run_inference(
     try:
         img = np.vstack(img_arrs)
     except Exception:
-        print("could not stack images; shapes=", [a.shape for a in img_arrs])
+        logger.on_fail("could not stack images; shapes=", [a.shape for a in img_arrs])
         raise
     props = {"spacing": i.zoom[::-1]}  # PIR
-    out = predictor.predict_single_npy_array(img, props, save_or_return_probabilities=False)
+    out = predictor.predict_single_npy_array(img, props, save_or_return_probabilities=False,logger=logger)
     segmentation: np.ndarray = out  # type: ignore
     softmax_logits = None
     segmentation = np.transpose(segmentation, axes=segmentation.ndim - 1 - np.arange(segmentation.ndim))
