@@ -641,7 +641,7 @@ class POI(Abstract_POI, Has_Grid):
             self, out_path, make_parents, additional_info, verbose=verbose, save_hint=save_hint, resample_reference=resample_reference
         )
 
-    def make_point_cloud_nii(self, affine=None, s=8, sphere=False) -> tuple[NII, NII]:
+    def make_point_cloud_nii(self, affine=None, s=8, sphere=True) -> tuple[NII, NII]:
         """Create point cloud NIfTI images from the POI coordinates.
 
         This method generates two NIfTI images, one for the regions and another for the subregions,
@@ -690,7 +690,9 @@ class POI(Abstract_POI, Has_Grid):
 
             for region, subregion, (x, y, z) in self.items():
                 x, y, z = round(x), round(y), round(z)  # noqa: PLW2901
-
+                if not (0 <= x < self.shape[0] and 0 <= y < self.shape[1] and 0 <= z < self.shape[2]):
+                    print(f"Skipping POI outside image: {region}, {subregion},{(x, y, z)} shape={self.shape}")
+                    continue
                 # image bounds
                 x0 = max(x - rx, 0)
                 x1 = min(x + rx + 1, self.shape[0])
@@ -712,11 +714,18 @@ class POI(Abstract_POI, Has_Grid):
                 kz1 = kz0 + (z1 - z0)
 
                 local_mask = sphere_mask[kx0:kx1, ky0:ky1, kz0:kz1]
-
+                if region == 0:
+                    region = 1
+                if subregion == 0:
+                    subregion = 1
                 arr[x0:x1, y0:y1, z0:z1][local_mask] = region
                 arr2[x0:x1, y0:y1, z0:z1][local_mask] = subregion
         else:
             for region, subregion, (x, y, z) in self.items():
+                if region == 0:
+                    region = 1
+                if subregion == 0:
+                    subregion = 1
                 arr[
                     max((floor(x - s1 / self.zoom[0])) + 1, 0) : min((ceil(x + s2 / self.zoom[0] + 1)), self.shape[0]),
                     max((floor(y - s1 / self.zoom[1])) + 1, 0) : min((ceil(y + s2 / self.zoom[1] + 1)), self.shape[1]),
