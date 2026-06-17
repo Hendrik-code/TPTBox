@@ -11,6 +11,7 @@ import numpy as np
 import vtk
 from fury import window
 from PIL import Image
+from tqdm import tqdm
 from vtk.util import numpy_support  # type: ignore
 from xvfbwrapper import Xvfb
 
@@ -36,6 +37,7 @@ def make_snapshot3D(
     resolution: float | None = None,
     width_factor: float = 1.0,
     scale_factor: int = 1,
+    debug:bool = False,
     verbose: bool = True,
     crop: bool = True,
     png_magnify: int = 1,
@@ -105,8 +107,10 @@ def make_snapshot3D(
         show_m = window.ShowManager(scene=scene, size=window_size, reset_camera=False, png_magnify=png_magnify)
         show_m.initialize()
         for i, ids in enumerate(ids_list):
+            if debug:
+                logger.on_debug(f"{i+1:02}/{len(ids_list):02} - Snapshot frames")
             x = width * i
-            _plot_sub_seg(scene, nii.extract_label(ids, keep_label=True), x, 0, smoothing, view[i % len(view)], opacity=opacity)
+            _plot_sub_seg(scene, nii.extract_label(ids, keep_label=True), x, 0, smoothing, view[i % len(view)], opacity=opacity,debug=debug)
         scene.projection(proj_type="parallel")
         scene.reset_camera_tight(margin_factor=1.02)
         window.record(
@@ -139,6 +143,7 @@ def make_snapshot3D_parallel(
     override: bool = True,
     crop: bool = True,
     opacity: dict[int, float] | None = None,
+    debug=False,
 ) -> None:
     """Run :func:`make_snapshot3D` in parallel across multiple images.
 
@@ -175,6 +180,7 @@ def make_snapshot3D_parallel(
                     "crop": crop,
                     "scale_factor": scale_factor,
                     "opacity": opacity,
+                    "debug":debug
                 },
             )
             ress.append(res)
@@ -188,7 +194,7 @@ make_sub_snapshot_parallel = make_snapshot3D_parallel
 
 
 def _plot_sub_seg(
-    scene: window.Scene, nii: NII, x: int, y: int, smoothing: int, orientation: VIEW, opacity: dict[int, float] | None = None
+    scene: window.Scene, nii: NII, x: int, y: int, smoothing: int, orientation: VIEW, opacity: dict[int, float] | None = None,debug=False
 ) -> None:
     """Render all labels from a segmentation NII into the fury scene at the given viewport offset."""
     if opacity is None:
@@ -212,7 +218,9 @@ def _plot_sub_seg(
         affine = np.array([[0, 0, 1, 0], [1, 0, 0, 0], [0, -1, 0, 0], [0, 0, 0, 1]])
     else:
         raise NotImplementedError()
-    for idx in nii.unique():
+    u = nii.unique() 
+    idxs = u if not debug else tqdm(u)
+    for idx in idxs:
         o = opacity.get(idx, 1)
         if o == 0:
             continue
