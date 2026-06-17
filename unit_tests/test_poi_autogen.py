@@ -713,7 +713,8 @@ class TestPOI(unittest.TestCase):
         assert poi.info == {"key": "value"}
         assert np.array_equal(poi.rotation, np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]]))
         assert poi.origin == (10, 10, 10)
-        
+
+
 class Test_Has_Grid_IntersectingVolume(unittest.TestCase):
     """Tests for Has_Grid.get_intersecting_volume using OBB/SAT/Sutherland-Hodgman.
 
@@ -809,7 +810,8 @@ class Test_Has_Grid_IntersectingVolume(unittest.TestCase):
 
     def test_non_unit_zoom_partial_overlap(self):
         """Non-unit zoom: 2 mm voxels, offset 4 mm (2 voxels) on x.
-        Overlap = (10*2 - 4) * 10*2 * 10*2 = 16 * 20 * 20 = 6400 mm³."""
+        Overlap = (10*2 - 4) * 10*2 * 10*2 = 16 * 20 * 20 = 6400 mm³.
+        """
         a = self._make_grid((10, 10, 10), zoom=(2.0, 2.0, 2.0), origin=(0.0, 0.0, 0.0))
         b = self._make_grid((10, 10, 10), zoom=(2.0, 2.0, 2.0), origin=(4.0, 0.0, 0.0))
         self.assertAlmostEqual(a.get_intersecting_volume(b), 16.0 * 20.0 * 20.0, places=2)
@@ -828,7 +830,7 @@ class Test_Has_Grid_IntersectingVolume(unittest.TestCase):
     def test_symmetry_axis_aligned(self):
         a = self._make_grid((10, 10, 10), origin=(0.0, 0.0, 0.0))
         b = self._make_grid((10, 10, 10), origin=(3.0, 4.0, 5.0))
-        #print(a.get_intersecting_volume(b),b.get_intersecting_volume(a),a.get_intersecting_volume(b)-b.get_intersecting_volume(a))
+        # print(a.get_intersecting_volume(b),b.get_intersecting_volume(a),a.get_intersecting_volume(b)-b.get_intersecting_volume(a))
         self.assertAlmostEqual(
             a.get_intersecting_volume(b),
             b.get_intersecting_volume(a),
@@ -851,22 +853,26 @@ class Test_Has_Grid_IntersectingVolume(unittest.TestCase):
     def test_90_degree_rotation_z_self_overlap(self):
         """A box rotated 90° around z intersected with itself → own volume."""
         angle = np.pi / 2
-        R = np.array([
-            [np.cos(angle), -np.sin(angle), 0.0],
-            [np.sin(angle),  np.cos(angle), 0.0],
-            [0.0,            0.0,           1.0],
-        ])
+        R = np.array(
+            [
+                [np.cos(angle), -np.sin(angle), 0.0],
+                [np.sin(angle), np.cos(angle), 0.0],
+                [0.0, 0.0, 1.0],
+            ]
+        )
         nii = self._make_grid((6, 6, 6), zoom=(1.0, 1.0, 1.0), origin=(0.0, 0.0, 0.0), rotation=R)
         self.assertAlmostEqual(nii.get_intersecting_volume(nii), 216.0, places=2)
 
     def test_45_degree_rotation_z_vs_axis_aligned_symmetry(self):
         """Rotated box vs axis-aligned: result must be symmetric."""
         angle = np.pi / 4
-        R = np.array([
-            [np.cos(angle), -np.sin(angle), 0.0],
-            [np.sin(angle),  np.cos(angle), 0.0],
-            [0.0,            0.0,           1.0],
-        ])
+        R = np.array(
+            [
+                [np.cos(angle), -np.sin(angle), 0.0],
+                [np.sin(angle), np.cos(angle), 0.0],
+                [0.0, 0.0, 1.0],
+            ]
+        )
         a = self._make_grid((10, 10, 10), zoom=(1.0, 1.0, 1.0), origin=(0.0, 0.0, 0.0))
         b = self._make_grid((10, 10, 10), zoom=(1.0, 1.0, 1.0), origin=(0.0, 0.0, 0.0), rotation=R)
         self.assertAlmostEqual(
@@ -883,11 +889,13 @@ class Test_Has_Grid_IntersectingVolume(unittest.TestCase):
         intersection must equal the small box's own volume = 64 mm³.
         """
         angle = np.pi / 4
-        R = np.array([
-            [np.cos(angle), -np.sin(angle), 0.0],
-            [np.sin(angle),  np.cos(angle), 0.0],
-            [0.0,            0.0,           1.0],
-        ])
+        R = np.array(
+            [
+                [np.cos(angle), -np.sin(angle), 0.0],
+                [np.sin(angle), np.cos(angle), 0.0],
+                [0.0, 0.0, 1.0],
+            ]
+        )
         large = self._make_grid((20, 20, 20), origin=(0.0, 0.0, 0.0))
         small = self._make_grid((4, 4, 4), zoom=(1.0, 1.0, 1.0), origin=(8.0, 8.0, 8.0), rotation=R)
         self.assertAlmostEqual(large.get_intersecting_volume(small), 64.0, places=2)
@@ -895,11 +903,13 @@ class Test_Has_Grid_IntersectingVolume(unittest.TestCase):
     def test_rotated_no_overlap(self):
         """Two rotated boxes placed far apart must give zero."""
         angle = np.pi / 3
-        R = np.array([
-            [np.cos(angle), -np.sin(angle), 0.0],
-            [np.sin(angle),  np.cos(angle), 0.0],
-            [0.0,            0.0,           1.0],
-        ])
+        R = np.array(
+            [
+                [np.cos(angle), -np.sin(angle), 0.0],
+                [np.sin(angle), np.cos(angle), 0.0],
+                [0.0, 0.0, 1.0],
+            ]
+        )
         a = self._make_grid((5, 5, 5), zoom=(1.0, 1.0, 1.0), origin=(0.0, 0.0, 0.0), rotation=R)
         b = self._make_grid((5, 5, 5), zoom=(1.0, 1.0, 1.0), origin=(50.0, 50.0, 50.0), rotation=R)
         self.assertAlmostEqual(a.get_intersecting_volume(b), 0.0, places=6)
@@ -926,8 +936,8 @@ class Test_Has_Grid_IntersectingVolume(unittest.TestCase):
         for _ in range(20):
             shape_a = tuple(rng.integers(3, 12, size=3).tolist())
             shape_b = tuple(rng.integers(3, 12, size=3).tolist())
-            zoom_a  = tuple(rng.uniform(0.5, 2.0, size=3).tolist())
-            zoom_b  = tuple(rng.uniform(0.5, 2.0, size=3).tolist())
+            zoom_a = tuple(rng.uniform(0.5, 2.0, size=3).tolist())
+            zoom_b = tuple(rng.uniform(0.5, 2.0, size=3).tolist())
             origin_a = tuple(rng.uniform(-5, 5, size=3).tolist())
             origin_b = tuple(rng.uniform(-5, 5, size=3).tolist())
             a = self._make_grid(shape_a, zoom=zoom_a, origin=origin_a)
@@ -947,8 +957,8 @@ class Test_Has_Grid_IntersectingVolume(unittest.TestCase):
         for _ in range(20):
             shape_a = tuple(rng.integers(4, 14, size=3).tolist())
             shape_b = tuple(rng.integers(4, 14, size=3).tolist())
-            zoom_a  = tuple(rng.uniform(0.5, 2.5, size=3).tolist())
-            zoom_b  = tuple(rng.uniform(0.5, 2.5, size=3).tolist())
+            zoom_a = tuple(rng.uniform(0.5, 2.5, size=3).tolist())
+            zoom_b = tuple(rng.uniform(0.5, 2.5, size=3).tolist())
             origin_a = tuple(rng.uniform(-8, 8, size=3).tolist())
             origin_b = tuple(rng.uniform(-8, 8, size=3).tolist())
             a = self._make_grid(shape_a, zoom=zoom_a, origin=origin_a)

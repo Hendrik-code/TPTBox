@@ -13,24 +13,20 @@ from math import ceil, floor
 import numpy as np
 import torch
 from acvl_utils.cropping_and_padding.padding import pad_nd_image
-from batchgenerators.utilities.file_and_folder_operations import (join,
-                                                                  load_json)
-from nnunetv2.utilities.label_handling.label_handling import \
-    determine_num_input_channels
+from batchgenerators.utilities.file_and_folder_operations import join, load_json
+from nnunetv2.utilities.label_handling.label_handling import determine_num_input_channels
 from torch._dynamo import OptimizedModule
 from tqdm import tqdm
 
 from TPTBox import Print_Logger
 from TPTBox.core.compat import zip_strict
-from TPTBox.segmentation.nnUnet_utils.data_iterators import \
-    PreprocessAdapterFromNpy
-from TPTBox.segmentation.nnUnet_utils.export_prediction import \
-    convert_predicted_logits_to_segmentation_with_correct_shape
-from TPTBox.segmentation.nnUnet_utils.get_network_from_plans import \
-    get_network_from_plans
+from TPTBox.segmentation.nnUnet_utils.data_iterators import PreprocessAdapterFromNpy
+from TPTBox.segmentation.nnUnet_utils.export_prediction import convert_predicted_logits_to_segmentation_with_correct_shape
+from TPTBox.segmentation.nnUnet_utils.get_network_from_plans import get_network_from_plans
 from TPTBox.segmentation.nnUnet_utils.plans_handler import PlansManager
-from TPTBox.segmentation.nnUnet_utils.sliding_window_prediction import (
-    compute_gaussian, compute_steps_for_sliding_window)
+from TPTBox.segmentation.nnUnet_utils.sliding_window_prediction import compute_gaussian, compute_steps_for_sliding_window
+
+logger = Print_Logger()
 
 
 def get_gpu_memory_MB(device) -> float:
@@ -143,6 +139,7 @@ class nnUNetPredictor:
         use_folds: tuple[int | str, ...] | None,
         checkpoint_name: str = "checkpoint_final.pth",
         cache_state_dicts: bool = True,
+        logger=logger,
     ) -> None:
         """Load model weights and plans from a trained nnU-Net output directory.
 
@@ -305,11 +302,11 @@ class nnUNetPredictor:
 
         # Warn early if the requested device is unavailable (runs once, independent of folds).
         if self.device.type == "cuda" and not torch.cuda.is_available():
-            Print_Logger().on_warning(
+            logger.on_warning(
                 "No CUDA device. If you have a CUDA-able GPU (Nvidia), reinstall pytorch with cuda or for non-cuda devices use ddevice=cpu or ddevice=mps"
             )
         if self.device.type == "mps" and not (hasattr(torch.backends, "mps") and torch.backends.mps.is_available()):
-            Print_Logger().on_warning("No MPS device found. Use ddevice=cpu or ddevice=mps")
+            logger.on_warning("No MPS device found. Use ddevice=cpu or ddevice=mps")
 
         # loaded_networks holds one ready-to-run network per fold (or None to load weights
         # lazily per fold). We only cache the single-fold case: previously this loop appended
@@ -330,11 +327,7 @@ class nnUNetPredictor:
             self.loaded_networks = [self.network]
 
     def predict_single_npy_array(
-        self,
-        input_image: np.ndarray,
-        image_properties: dict,
-        save_or_return_probabilities: bool = False,
-        logger=Print_Logger()
+        self, input_image: np.ndarray, image_properties: dict, save_or_return_probabilities: bool = False, logger=logger
     ) -> np.ndarray:
         """Run full inference on a single numpy image array.
 
@@ -370,7 +363,7 @@ class nnUNetPredictor:
 
         if self.verbose:
             logger.on_log("predicting")
-        predicted_logits = self.predict_logits_from_preprocessed_data(dct["data"],logger=logger)  # type: ignore
+        predicted_logits = self.predict_logits_from_preprocessed_data(dct["data"], logger=logger)  # type: ignore
         logger.on_log(
             "convert_predicted_logits_to_segmentation_with_correct_shape",
             predicted_logits.shape,
@@ -386,13 +379,13 @@ class nnUNetPredictor:
             dct["data_properites"],
             return_probabilities=save_or_return_probabilities,
             device=self.device,
-            logger=logger
+            logger=logger,
         )
         print("convert_predicted_logits_to_segmentation_with_correct_shape; Took", time.time() - t, " seconds")
 
         return ret
 
-    def predict_logits_from_preprocessed_data(self, data: torch.Tensor, attempts: int = 10,logger=Print_Logger()) -> torch.Tensor:
+    def predict_logits_from_preprocessed_data(self, data: torch.Tensor, attempts: int = 10, logger=logger) -> torch.Tensor:
         """Run sliding-window inference on already-preprocessed data and average across folds.
 
         If running the cascade, the previous-stage segmentation must already be
@@ -434,7 +427,7 @@ class nnUNetPredictor:
                     else:
                         self.network._orig_mod.load_state_dict(params)
                     # print(type(self.network))
-                    new_prediction = self.predict_sliding_window_return_logits(data, network=network,idx=idx,logger=logger).to("cpu")
+                    new_prediction = self.predict_sliding_window_return_logits(data, network=network, idx=idx, logger=logger).to("cpu")
                     if prediction is None:
                         prediction = new_prediction
                     else:
@@ -447,12 +440,12 @@ class nnUNetPredictor:
 
             except RuntimeError as e:
                 logger.on_fail(e)
-                logger.on_debug("GPU attempts remaining: ",attempts)
+                logger.on_debug("GPU attempts remaining: ", attempts)
                 empty_cache(self.device)
                 if attempts == 0 or self.fail_on_missing_memory:
                     logger.on_fail(
-                    "Prediction with perform_everything_on_gpu=True failed due to insufficient GPU memory. "
-                    "Falling back to perform_everything_on_gpu=False. Not a big deal, just slower..."
+                        "Prediction with perform_everything_on_gpu=True failed due to insufficient GPU memory. "
+                        "Falling back to perform_everything_on_gpu=False. Not a big deal, just slower..."
                     )
                     logger.on_fail("Error:")
                     logger.print_error()
@@ -460,7 +453,7 @@ class nnUNetPredictor:
                     self.perform_everything_on_gpu = False
                     raise
 
-                return self.predict_logits_from_preprocessed_data(data, attempts=attempts - 1,logger=logger)
+                return self.predict_logits_from_preprocessed_data(data, attempts=attempts - 1, logger=logger)
 
             # CPU version
             if prediction is None:
@@ -477,9 +470,11 @@ class nnUNetPredictor:
                             self.network._orig_mod.load_state_dict(params)
 
                         if prediction is None:
-                            prediction = self.predict_sliding_window_return_logits(data, network=network,idx=99,logger=logger).to("cpu")  # type: ignore
+                            prediction = self.predict_sliding_window_return_logits(data, network=network, idx=99, logger=logger).to("cpu")  # type: ignore
                         else:
-                            new_prediction = self.predict_sliding_window_return_logits(data, network=network,idx=99,logger=logger).to("cpu")  # type: ignore
+                            new_prediction = self.predict_sliding_window_return_logits(data, network=network, idx=99, logger=logger).to(
+                                "cpu"
+                            )  # type: ignore
                             prediction += new_prediction
 
                     if len(self.list_of_parameters) > 1:
@@ -493,7 +488,7 @@ class nnUNetPredictor:
                         raise
                     logger.on_bold("Sleep for a minute and try again")
                     time.sleep(60)
-                    return self.predict_logits_from_preprocessed_data(data, attempts=attempts - 1,logger=logger)
+                    return self.predict_logits_from_preprocessed_data(data, attempts=attempts - 1, logger=logger)
             del data
             logger.on_log("Prediction done, transferring to CPU if needed")  # if self.verbose else None
             prediction = prediction.to("cpu")  # type: ignore
@@ -575,7 +570,9 @@ class nnUNetPredictor:
             prediction /= num_predictons
         return prediction
 
-    def predict_sliding_window_return_logits(self, input_image: torch.Tensor, network=None,idx=0,logger=Print_Logger()) -> np.ndarray | torch.Tensor:
+    def predict_sliding_window_return_logits(
+        self, input_image: torch.Tensor, network=None, idx=0, logger=logger
+    ) -> np.ndarray | torch.Tensor:
         """Tile the input image and aggregate per-tile logits into a full-volume prediction.
 
         Args:
@@ -612,10 +609,7 @@ class nnUNetPredictor:
             if self.verbose:
                 logger.print("step_size:", self.tile_step_size)
             if self.verbose:
-                logger.print(
-                    "mirror_axes:",
-                    self.allowed_mirroring_axes if self.use_mirroring else None
-                )
+                logger.print("mirror_axes:", self.allowed_mirroring_axes if self.use_mirroring else None)
             patch_size = self.configuration_manager.patch_size
             device = self.device
             # if input_image is smaller than tile_size we need to pad it to tile_size.
@@ -683,7 +677,7 @@ class nnUNetPredictor:
 
                         splits[j] += 1
 
-                predicted_logits, n_predictions = self._run_sub(data, network, device, slicers, pbar,logger=logger)
+                predicted_logits, n_predictions = self._run_sub(data, network, device, slicers, pbar, logger=logger)
                 pbar.desc = "finish"
                 pbar.update(0)
                 predicted_logits /= n_predictions
@@ -743,7 +737,7 @@ class nnUNetPredictor:
         # empty_cache(self.device)
         return predicted_logits
 
-    def _allocate(self, data: torch.Tensor, results_device, pbar: tqdm, gauss: bool = True,logger=Print_Logger()):
+    def _allocate(self, data: torch.Tensor, results_device, pbar: tqdm, gauss: bool = True, logger=logger):
         """Pre-allocate output logit and count tensors; falls back to CPU on OOM."""
         pbar.desc = "preallocating arrays"
         pbar.update(0)
@@ -787,17 +781,17 @@ class nnUNetPredictor:
                     )
             except RuntimeError as e:
                 empty_cache(self.device)
-                raise MemoryError("Could not allocate RAM.",str(e))
+                raise MemoryError("Could not allocate RAM.", str(e)) from None
         # finally:
         #    empty_cache(self.device)
         return predicted_logits, n_predictions, gaussian, results_device
 
-    def _run_sub(self, data: torch.Tensor, network, results_device, slicers, pbar: tqdm, addendum: str = "",logger=Print_Logger()):
+    def _run_sub(self, data: torch.Tensor, network, results_device, slicers, pbar: tqdm, addendum: str = "", logger=logger):
         """Iterate over slicers, run inference per tile (optionally batched), and accumulate results."""
         slicers = list(slicers)
         try:
             data = data.to(self.device)  # type: ignore
-            predicted_logits, n_predictions, gaussian, results_device = self._allocate(data, results_device, pbar,logger=logger)
+            predicted_logits, n_predictions, gaussian, results_device = self._allocate(data, results_device, pbar, logger=logger)
             pbar.desc = f"running prediction {addendum}"
             prediction = None
             work_on = None

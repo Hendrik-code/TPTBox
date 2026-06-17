@@ -310,13 +310,12 @@ def save_json(json_ob: dict, file: str | Path, check_exist: bool = False, overri
         FileExistsError: When *check_exist* is ``True`` and the existing file
             contains different content.
     """
-
     if check_exist and test_name_conflict(json_ob, file):
         raise FileExistsError(file)
     if Path(file).exists() and not override:
         return True
     Print_Logger().on_save("save json with grid info", file)
-    secure_save_json(file,json_ob,indent=4)
+    secure_save_json(file, json_ob, indent=4)
     return False
 
 
