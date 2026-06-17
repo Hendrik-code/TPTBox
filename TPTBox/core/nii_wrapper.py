@@ -2507,7 +2507,7 @@ class NII(NII_Math):
                 elif number_path:
                     out_path.with_name(f"{out_path.stem}_{label}.stl")
                 log.on_save(f"Saving STL to {out_path}")
-                out_path.parent.mkdir(exist_ok=True)
+                out_path.parent.mkdir(exist_ok=True,parents=True)
                 cube.save(str(out_path))
 
         if include_normals:
