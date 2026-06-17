@@ -199,7 +199,7 @@ def np_unique(arr: np.ndarray) -> list[int]:
         max_val = int(arr.max())
         if max_val < 2**20:  # ~1M labels threshold — bincount stays fast
             counts = np.bincount(arr.ravel())
-            return list(np.where(counts > 0)[0])
+            return np.where(counts > 0)[0].tolist()
         # For sparse label spaces fall back to np.unique
     return old_np_unique(arr)
 
