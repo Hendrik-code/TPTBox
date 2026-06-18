@@ -669,9 +669,6 @@ class POI(Abstract_POI, Has_Grid):
             affine = self.affine
         arr = np.zeros(self.shape_int)
         arr2 = np.zeros(self.shape_int)
-        s1 = max(s // 2, 1)
-        s2 = max(s - s1, 1)
-        from math import ceil, floor
 
         if sphere:
             zoom = np.asarray(self.zoom)
@@ -726,15 +723,22 @@ class POI(Abstract_POI, Has_Grid):
                     region = 1  # noqa: PLW2901
                 if subregion == 0:
                     subregion = 1  # noqa: PLW2901
+                if not (0 <= x < self.shape[0] and 0 <= y < self.shape[1] and 0 <= z < self.shape[2]):
+                    print(f"Skipping POI outside image: {region}, {subregion}, {(x, y, z)} shape={self.shape}")
+                    continue
+                rx = int(np.ceil((s / 2) / self.zoom[0]))
+                ry = int(np.ceil((s / 2) / self.zoom[1]))
+                rz = int(np.ceil((s / 2) / self.zoom[2]))
                 arr[
-                    max((floor(x - s1 / self.zoom[0])) + 1, 0) : min((ceil(x + s2 / self.zoom[0] + 1)), self.shape[0]),
-                    max((floor(y - s1 / self.zoom[1])) + 1, 0) : min((ceil(y + s2 / self.zoom[1] + 1)), self.shape[1]),
-                    max((floor(z - s1 / self.zoom[2])) + 1, 0) : min((ceil(z + s2 / self.zoom[2] + 1)), self.shape[2]),
+                    int(max(x - rx, 0)) : int(min(x + rx + 1, self.shape[0])),
+                    int(max(y - ry, 0)) : int(min(y + ry + 1, self.shape[1])),
+                    int(max(z - rz, 0)) : int(min(z + rz + 1, self.shape[2])),
                 ] = region
+
                 arr2[
-                    max((floor(x - s1 / self.zoom[0])) + 1, 0) : min((ceil(x + s2 / self.zoom[0] + 1)), self.shape[0]),
-                    max((floor(y - s1 / self.zoom[1])) + 1, 0) : min((ceil(y + s2 / self.zoom[1] + 1)), self.shape[1]),
-                    max((floor(z - s1 / self.zoom[2])) + 1, 0) : min((ceil(z + s2 / self.zoom[2] + 1)), self.shape[2]),
+                    int(max(x - rx, 0)) : int(min(x + rx + 1, self.shape[0])),
+                    int(max(y - ry, 0)) : int(min(y + ry + 1, self.shape[1])),
+                    int(max(z - rz, 0)) : int(min(z + rz + 1, self.shape[2])),
                 ] = subregion
         nii = nib.Nifti1Image(arr, affine=affine)
         nii2 = nib.Nifti1Image(arr2, affine=affine)
