@@ -474,7 +474,7 @@ class Has_Grid(Grid_Proxy):
             arr = np.zeros(self.shape_int)
         return self.make_empty_nii(_arr=arr, seg=seg)
 
-    def global_to_local(self, x: COORDINATE) -> tuple:
+    def global_to_local(self, x: COORDINATE, itk=False) -> tuple:
         """Convert world (RAS/LPS) coordinates to voxel (local) coordinates.
 
         Applies the inverse affine transform: rotation-transpose times
@@ -486,10 +486,14 @@ class Has_Grid(Grid_Proxy):
         Returns:
             tuple: Voxel-space coordinate rounded to 7 decimal places.
         """
-        a = self.rotation.T @ (np.array(x) - self.origin) / np.array(self.zoom)
+        x_ = np.array(x)
+        if itk:
+            x_[0] *= -1
+            x_[1] *= -1
+        a = self.rotation.T @ (x_ - self.origin) / np.array(self.zoom)
         return tuple(round(float(v), 7) for v in a)
 
-    def local_to_global(self, x: COORDINATE | np.ndarray) -> tuple:
+    def local_to_global(self, x: COORDINATE | np.ndarray, itk=False) -> tuple:
         """Convert voxel (local) coordinates to world (RAS/LPS) coordinates.
 
         Applies the forward affine transform: rotation times
@@ -501,8 +505,10 @@ class Has_Grid(Grid_Proxy):
         Returns:
             tuple: World-space coordinate rounded to 7 decimal places.
         """
-        # TODO ITK version
         a = self.rotation @ (np.array(x) * np.array(self.zoom)) + self.origin
+        if itk:
+            a[0] *= -1
+            a[1] *= -1
         return tuple(round(float(v), 7) for v in a)
 
     def to_deepali_grid(self, align_corners: bool = True) -> Any:
