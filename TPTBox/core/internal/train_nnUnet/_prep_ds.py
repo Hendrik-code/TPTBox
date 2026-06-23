@@ -242,7 +242,13 @@ def _add_file_async(
 
 
 def _get_file_name(
-    root, img: Path | list[Path] | str | list[str], split: int, defrom: bool, defrom_count, mirror, degeneration_count
+    root,
+    img: Path | list[Path] | str | list[str],
+    split: int,
+    defrom: bool,
+    defrom_count,
+    mirror,
+    degeneration_count,
 ) -> Path:
     if not isinstance(img, (Path, str)):
         img = Path(img[0])
@@ -394,58 +400,3 @@ def random_transform(img: NII, prob=0.35):
     tens = transforms3D.ColorJitter3D_(prob=prob * 2)(tens)
     arr = (tens["img"] * max_v + min_v).numpy().astype(img.dtype)
     return img.set_array_(arr)
-
-
-def extract_image(
-    input_path: Path,
-    seg_path: Path,
-    offset,
-    deform,
-    degen,
-    orientation=("L", "P", "S"),
-    spacing=(1.40625, 1.40625, 3),
-    half_w=99999999,
-    crop_top=0,
-    deform_factor=1,
-    resample_to_seg=False,
-):
-    if isinstance(seg_path, BIDS_FILE):
-        seg_path = seg_path.get_nii_file()
-    print(input_path)
-    if resample_to_seg:
-        nii_img = to_nii(input_path, False).resample_from_to(seg_path).reorient(orientation).rescale(spacing)
-    else:
-        nii_img = to_nii(input_path).reorient(orientation).rescale(spacing)
-    axis = nii_img.get_axis("S")
-    offset = max(min(offset, nii_img.shape[axis] - 2 * half_w), 0)
-    max_offset = min(
-        offset + 2 * half_w,
-        nii_img.shape[axis] - crop_top,
-    )
-    if offset >= 0:
-        crop = [
-            slice(0, nii_img.shape[0]),
-            slice(0, nii_img.shape[1]),
-            slice(0, nii_img.shape[1]),
-        ]
-        crop[axis] = slice(offset, max_offset)
-        print(crop, nii_img.shape)
-        nii_img.apply_crop_(tuple(crop))
-        # nii_img.save(buffer_path / subj_p.name / (name + str(e) + ".nii.gz"))
-    if ".nii" not in seg_path.name:
-        seg_path = next(Path(seg_path).glob("sub-*_sequ-stitched_acq-ax_seg-all-combinded_msk.nii.gz"))
-    nii_seg = to_nii(seg_path, True)
-    try:
-        nii_seg.max()
-    except Exception:
-        seg_path.unlink()
-        sys.exit()
-    nii_seg = nii_seg.resample_from_to(nii_img)
-    if degen:
-        nii_img = random_transform(nii_img)
-    niis: dict[str, NII] = {}
-    niis["any"] = nii_img
-    niis["seg"] = nii_seg
-    if deform:
-        niis = deformed_nii(niis, deform_factor=deform_factor, normalize=True)
-    return niis

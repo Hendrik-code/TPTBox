@@ -355,8 +355,8 @@ class POI_Descriptor(AbstractSet, MutableMapping):
         return False
 
     def __len__(self) -> int:
-        if self._len is None:
-            self._len = len(list(self.items()))
+        # if self._len is None:
+        self._len = len(list(self.items()))
         return self._len
 
     def __iter__(self):
