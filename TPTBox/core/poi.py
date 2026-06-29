@@ -123,13 +123,16 @@ class POI(Abstract_POI, Has_Grid):
     _vert_orientation_pir = {}  # Elusive; will not be saved; will not be copied. For Buffering results  # noqa: RUF012
 
     def _set_inplace(self, poi: Self) -> Self:
-        """Copy all grid/affine attributes and centroids from ``poi`` into ``self``."""
+        """Copy all grid/affine attributes, centroids, and naming metadata from ``poi`` into ``self``."""
         self.orientation = poi.orientation
         self.centroids = poi.centroids
         self.zoom = poi.zoom
         self.shape = poi.shape
         self.origin = poi.origin
         self.rotation = poi.rotation
+        self.info = poi.info
+        self.level_one_info = poi.level_one_info
+        self.level_two_info = poi.level_two_info
         return self
 
     @property
@@ -224,6 +227,8 @@ class POI(Abstract_POI, Has_Grid):
             origin=origin if not isinstance(origin, Sentinel) else self.origin,
             info=deepcopy(self.info),
             format=self.format,
+            level_one_info=self.level_one_info,
+            level_two_info=self.level_two_info,
         )
 
     def local_to_global(self, x: COORDINATE, itk_coords=False) -> COORDINATE:
@@ -1330,7 +1335,18 @@ def calc_poi_average(pois: list[POI], keep_points_not_present_in_all_pois: bool 
 
     # Sort the new ctd by keys
     ctd = dict(sorted(ctd.items()))
-    return POI(centroids=ctd, orientation=pois[0].orientation, zoom=pois[0].zoom, shape=pois[0].shape, rotation=pois[0].rotation)
+    return POI(
+        centroids=ctd,
+        orientation=pois[0].orientation,
+        zoom=pois[0].zoom,
+        shape=pois[0].shape,
+        rotation=pois[0].rotation,
+        origin=pois[0].origin,
+        info=deepcopy(pois[0].info),
+        format=pois[0].format,
+        level_one_info=pois[0].level_one_info,
+        level_two_info=pois[0].level_two_info,
+    )
 
 
 def _load_from_POI_spine_r(data: dict) -> POI:

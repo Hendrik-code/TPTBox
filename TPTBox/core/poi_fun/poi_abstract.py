@@ -169,10 +169,10 @@ class POI_Descriptor(AbstractSet, MutableMapping):
         setattr(obj, self._name, int(value))
 
     def copy(self) -> POI_Descriptor:
-        """Return a deep copy of this descriptor."""
+        """Return a deep copy of this descriptor (keeping its name<->id ``definition``)."""
         from copy import deepcopy
 
-        return POI_Descriptor(default=deepcopy(self.pois))
+        return POI_Descriptor(default=deepcopy(self.pois), definition=self.definition)
 
     def _sort(self: Self, inplace=True, order_dict: dict | None = None):
         """Sort vertebra dictionary by sorting_list."""
