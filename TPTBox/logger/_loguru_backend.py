@@ -159,11 +159,37 @@ def add_file_sink(filepath, key, *, rotation=None, retention=None, enqueue: bool
     )
 
 
-def emit_file(text: str, key, ltype: Log_Type = Log_Type.TEXT) -> None:
+def add_file_stream_sink(stream, key, *, enqueue: bool = False) -> int:
+    """Register a Loguru function sink writing ANSI-free lines to ``stream`` (a file handle).
+
+    Unlike :func:`add_file_sink` (Loguru owns the file) this keeps the caller's handle, so
+    ``flush()`` works and the call's ``end`` is honored. No rotation/retention.
+    """
+    if not _configured:
+        configure()
+
+    def _sink(message, _s=stream) -> None:
+        end = message.record["extra"].get("tptbox_end", "\n")
+        text = str(message)
+        text = text.removesuffix("\n")
+        _s.write(text + end)
+
+    return logger.add(
+        _sink,
+        format=_FILE_FORMAT,
+        colorize=False,
+        level=0,
+        filter=lambda r, _k=key: r["extra"].get("tptbox_file_id") == _k,
+        enqueue=enqueue,
+        catch=False,
+    )
+
+
+def emit_file(text: str, key, ltype: Log_Type = Log_Type.TEXT, end: str = "\n") -> None:
     """Emit one ANSI-free line to the file sink identified by ``key``."""
     if not _configured:
         configure()
-    logger.bind(tptbox_channel="file", tptbox_file_id=key).log(level_name(ltype), text)
+    logger.bind(tptbox_channel="file", tptbox_file_id=key, tptbox_end=end).log(level_name(ltype), text)
 
 
 def remove_sink(sink_id: int) -> None:
