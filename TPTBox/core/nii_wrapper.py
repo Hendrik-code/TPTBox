@@ -2036,27 +2036,35 @@ class NII(NII_Math):
         assert self.seg and mask_other.seg
         return np_calc_overlapping_labels(self.get_seg_array(), mask_other.get_seg_array())
 
-    def is_segmentation_in_border(self,minimum=0, voxel_tolerance: int = 2,use_mm=False) -> bool:
-        """Checks if the segmentation is touching the border of the image volume.
+    def is_segmentation_in_border(self,minimum=0,voxel_tolerance: int = 2,use_mm: bool = False) -> bool:
+        """Checks if the segmentation touches the border of the image volume.
 
         Parameters:
-        - minimum (int, optional): Minimum intensity threshold for segmentation. Defaults to 0.
-        - voxel_tolerance (int, optional): Number of voxels allowed as tolerance from the border. Defaults to 2.
-        - use_mm (bool, optional): Whether to use millimeter units instead of voxels. Defaults to False.
+        - minimum (int, optional): Minimum intensity threshold for segmentation.
+        Defaults to 0.
+        - voxel_tolerance (int, optional): Number of voxels allowed as tolerance
+        from the border. Defaults to 2.
+        - use_mm (bool, optional): Whether to use millimeter units instead of
+        voxels. Defaults to False.
 
         Returns:
-        - bool: True if the segmentation is within the defined voxel tolerance of the border, False otherwise.
+        - bool: True if the segmentation is within the defined tolerance of the
+        border, False otherwise.
         """
         slices = self.compute_crop(minimum,dist=0,use_mm=use_mm,raise_error=False)
         if slices is None:
             return False
-        shp = self.shape
-        seg_at_border = False
-        for d in range(3):
-            if slices[d].start <= voxel_tolerance or slices[d].stop - 1 >= shp[d] - voxel_tolerance:
-                seg_at_border = True
-                break
-        return seg_at_border
+        for dim, s in enumerate(slices):
+            shape_dim = self.shape[dim]
+            # Interpret open-ended slices as full image bounds
+            start = 0 if s.start is None else s.start
+            stop = shape_dim if s.stop is None else s.stop
+            # stop is exclusive, so the last occupied voxel is stop - 1
+            if start <= voxel_tolerance:
+                return True
+            if stop - 1 >= shape_dim - voxel_tolerance:
+                return True
+        return False
 
     def truncate_labels_beyond_reference_(
         self, idx: int | list[int] = 1, not_beyond: int | list[int] = 1, fill: int = 0,  axis: DIRECTIONS = "S", inclusion: bool = False, inplace: bool = True
