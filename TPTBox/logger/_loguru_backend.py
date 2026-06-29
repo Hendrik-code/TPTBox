@@ -26,9 +26,12 @@ from TPTBox.logger.log_constants import Log_Type
 
 __all__ = [
     "add_file_sink",
+    "add_file_stream_sink",
     "configure",
+    "emit_exception",
     "emit_file",
     "emit_terminal",
+    "install_excepthook",
     "level_name",
     "logger",
     "remove_sink",
@@ -198,3 +201,37 @@ def remove_sink(sink_id: int) -> None:
         logger.remove(sink_id)
     except (ValueError, KeyError):
         pass
+
+
+def emit_exception(message: str, ltype: Log_Type = Log_Type.FAIL) -> None:
+    """Emit a structured record carrying the *active* exception, for user sinks.
+
+    The human-readable traceback text is still emitted separately by the facade
+    (``print_error``). This extra record is bound to the ``"exception"`` channel so the
+    default terminal/file sinks ignore it (no double traceback there); a user sink added
+    with ``serialize=True`` (or any permissive filter) receives the structured exception.
+    """
+    if not _configured:
+        configure()
+    logger.opt(exception=True).bind(tptbox_channel="exception").log(level_name(ltype), message)
+
+
+def install_excepthook() -> None:
+    """Route uncaught exceptions through Loguru (opt-in; replaces ``sys.excepthook``)."""
+
+    def _hook(exc_type, exc_value, exc_tb):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_tb)
+            return
+        logger.opt(exception=(exc_type, exc_value, exc_tb)).bind(tptbox_channel="exception").log(
+            level_name(Log_Type.FAIL), "Uncaught exception"
+        )
+
+    sys.excepthook = _hook
+
+
+# Configure eagerly at import: this runs before any user code can add Loguru sinks, so the
+# take-over `logger.remove()` only drops Loguru's own default handler (nothing user-owned yet).
+# Sinks a caller adds afterwards survive. Set TPTBOX_LOGGER_TAKEOVER=0 before importing TPTBox
+# to opt out of the take-over.
+configure()
