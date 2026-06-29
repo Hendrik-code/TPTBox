@@ -25,6 +25,7 @@ joblib = "*"
 scikit-learn = "*"
 pynrrd = "*"
 requests = "*"
+loguru = "^0.7.2"
 
 # --- OLD STACK (Python < 3.11)
 numpy = [
