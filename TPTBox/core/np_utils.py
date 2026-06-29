@@ -462,10 +462,11 @@ def np_dilate_msk_euclid(arr: np.ndarray, n_pixel: int = 3, use_crop=True, label
 
     Assigns each newly covered voxel to the nearest existing label.
     """
+    arr_bin = arr.copy()
+    if labels is not None:
+        arr_bin[np_isin(arr_bin, labels, invert=True)] = 0
+
     if use_crop:
-        arr_bin = arr.copy()
-        if labels is not None:
-            arr_bin[np_isin(arr_bin, labels, invert=True)] = 0
         crop = np_bbox_binary(arr_bin, px_dist=1 + n_pixel, raise_error=False)
         arrc = arr[crop]
     else:

@@ -1304,9 +1304,9 @@ def calc_centroids(
         coords = tqdm(coords)
     for i, out_coord in coords:
         if second_stage == -1:
-            ctd_list[first_stage, i] = out_coord
+            ctd_list[first_stage, int(i)] = out_coord
         else:
-            ctd_list[i, second_stage] = out_coord
+            ctd_list[int(i), second_stage] = out_coord
     return POI(ctd_list, **msk_nii._extract_affine(), **args)
 
 
