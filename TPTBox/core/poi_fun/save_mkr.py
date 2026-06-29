@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Literal, TypedDict, Union
 import numpy as np
 from typing_extensions import NotRequired
 
+from TPTBox.core.poi_fun.poi_abstract import _GROUP_NAME_KEY, label_name_dict
 from TPTBox.logger.log_file import log
 from TPTBox.mesh3D.mesh_colors import RGB_Color, get_color_by_label
 
@@ -404,7 +405,8 @@ def get_desc(self: POI_Global, region: int, subregion: int) -> tuple[str, str, s
         Tuple ``(name, name2, label)`` where ``name`` and ``name2`` are the
         group/region name and ``label`` is the subregion label string.
     """
-    label = self.info.get("label_name", {}).get(str((region, subregion)))
+    _ln = label_name_dict(self.info)
+    label = _ln.get(region, {}).get(subregion)
     if label is None:
         label = str(subregion)
         try:
@@ -412,7 +414,9 @@ def get_desc(self: POI_Global, region: int, subregion: int) -> tuple[str, str, s
         except Exception:
             label = str(subregion)
     try:
-        if region in self.info.get("label_group_name", {}):
+        if _ln.get(region, {}).get(_GROUP_NAME_KEY) is not None:
+            name2 = _ln[region][_GROUP_NAME_KEY]
+        elif region in self.info.get("label_group_name", {}):
             name2 = self.info["label_group_name"][region]
         else:
             name2 = self.level_one_info(region).name
