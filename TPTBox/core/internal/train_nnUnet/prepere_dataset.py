@@ -283,12 +283,12 @@ def build_dataset(cfg: DatasetConfig) -> None:
     logger.on_text("Next step:")
     logger.on_text("Single Folds")
     logger.on_text(
-        f"run {Path(__file__).parent}/train.py  -id {cfg.dataset_id} --gpu 0 -e 300 -el 1000 --num-folds 0 --start-fold 0 -b {cfg.nnunet_base.absolute()}"  # noqa: G004
+        f"python {Path(__file__).parent}/train.py  -id {cfg.dataset_id} --gpu 0 -e 300 -el 1000 --num-folds 0 --start-fold 0 -b {cfg.nnunet_base.absolute()}"  # noqa: G004
     )  # noqa: G004
 
     logger.on_text("k-Folds")
     logger.on_text(
-        f"run {Path(__file__).parent}/train.py  -id {cfg.dataset_id} --gpu 0 -e 300 -el 1000 --num-folds 3 --start-fold 0 -b {cfg.nnunet_base.absolute()}"  # noqa: G004
+        f"python {Path(__file__).parent}/train.py  -id {cfg.dataset_id} --gpu 0 -e 300 -el 1000 --num-folds 3 --start-fold 0 -b {cfg.nnunet_base.absolute()}"  # noqa: G004
     )
     # logger.on_text(
     #    f"  conda run --live-stream --name py3.12 python "
