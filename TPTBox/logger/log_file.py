@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
 
+from TPTBox.logger import _loguru_backend as _backend
 from TPTBox.logger.log_constants import (
     Log_Type,
     _clean_all_color_from_text,
@@ -561,7 +562,9 @@ def print_to_terminal(text: str, end: str, ltype: Log_Type = Log_Type.TEXT) -> N
     if ltype == Log_Type.WARNING_THROW:
         warnings.warn(color_log_text(ltype=ltype, text=text), Warning, stacklevel=3)
     else:
-        print(color_log_text(ltype=ltype, text=text), end=end)
+        # Route through Loguru (native level-driven coloring). The facade already built the
+        # exact prefixed text; the backend applies the matching color and honors `end`.
+        _backend.emit_terminal(text, ltype, end)
 
 
 def sub_log_call_func(name: str, logger: Logger, function, default_verbose: bool | None = None, **kwargs) -> object:
