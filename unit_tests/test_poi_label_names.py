@@ -107,5 +107,41 @@ class TestMetadataTransfer(unittest.TestCase):
             self._check(q)
 
 
+class TestNameIndexing(unittest.TestCase):
+    def test_index_by_level_names(self):
+        p = _poi()
+        self.assertEqual(p[1, "Vertebra_Corpus"], (1.0, 2.0, 3.0))  # [idx, "level2name"]
+        self.assertEqual(p["C1", "Vertebra_Corpus"], (1.0, 2.0, 3.0))  # ["level1name", "level2name"]
+        self.assertEqual(p["C2", "Vertebra_Corpus"], (4.0, 5.0, 6.0))
+        self.assertIn(("C2", "Vertebra_Corpus"), p)
+        p["C1", "Vertebra_Disc"] = (7.0, 8.0, 9.0)
+        self.assertEqual(p[1, 100], (7.0, 8.0, 9.0))  # Vertebra_Disc == 100
+
+    def test_enum_with_level_set_no_warning(self):
+        import warnings
+
+        p = _poi()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            self.assertEqual(p[Vertebra_Instance.C1, Location.Vertebra_Corpus], (1.0, 2.0, 3.0))
+
+    def test_enum_without_level_warns(self):
+        import warnings
+
+        from TPTBox.core.vert_constants import Any
+
+        q = POI(
+            centroids={1: {50: (1.0, 2.0, 3.0)}},
+            orientation=("R", "A", "S"),
+            zoom=(1.0, 1.0, 1.0),
+            shape=(10.0, 10.0, 10.0),
+        )
+        self.assertIs(q.level_one_info, Any)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            _ = q[Vertebra_Instance.C1, Location.Vertebra_Corpus]
+        self.assertTrue(any("not set" in str(x.message) for x in w))
+
+
 if __name__ == "__main__":
     unittest.main()
