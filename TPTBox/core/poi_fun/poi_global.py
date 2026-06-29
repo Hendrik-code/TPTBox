@@ -205,7 +205,14 @@ class POI_Global(Abstract_POI):
                     log.print(v, "-->", v_out)
                 out[k1, k2] = tuple(v_out)
 
-        return poi.POI(centroids=out, **msk._extract_affine(), info=self.info, format=self.format)
+        return poi.POI(
+            centroids=out,
+            **msk._extract_affine(),
+            info=self.info,
+            format=self.format,
+            level_one_info=self.level_one_info,
+            level_two_info=self.level_two_info,
+        )
 
     def copy(self, centroids: POI_Descriptor | None = None) -> Self:
         """Return a deep copy of this ``POI_Global``.

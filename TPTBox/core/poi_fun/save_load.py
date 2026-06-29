@@ -11,7 +11,7 @@ from typing_extensions import TYPE_CHECKING, TypeGuard  # noqa: UP035
 # from TPTBox import POI, POI_Global
 from TPTBox.core import bids_files
 from TPTBox.core.nii_poi_abstract import Has_Grid
-from TPTBox.core.poi_fun.poi_abstract import POI_Descriptor
+from TPTBox.core.poi_fun.poi_abstract import _GROUP_NAME_KEY, LABEL_NAME, POI_Descriptor, label_name_dict, normalize_label_name
 from TPTBox.core.vert_constants import (
     AX_CODES,
     COORDINATE,
@@ -207,7 +207,8 @@ def _poi_to_dict_list(  # noqa: C901
 
     for k, v in ctd.info.items():
         if k not in ori:
-            ori[k] = v
+            # always persist label_name in the new nested format {region:{sub:name,"name":group}}
+            ori[k] = normalize_label_name(v) if k == LABEL_NAME else v
 
     dict_list: list[_Orientation | (_Point3D | dict)] = [ori]
 
@@ -353,6 +354,9 @@ def load_poi(ctd_path: POI_Reference, verbose=True) -> POI | POI_Global:  # noqa
     level_one_info = _register_lvl[dict_list[0].get("level_one_info", Vertebra_Instance.__name__)]
     level_two_info = _register_lvl[dict_list[0].get("level_two_info", Location.__name__)]
     info = {k: v for k, v in dict_list[0].items() if k not in ctd_info_blacklist}
+    if LABEL_NAME in info:
+        # migrate old flat {"(1, 2)": "C2"} / JSON string keys -> nested {1: {2: "C2", "name": ...}}
+        info[LABEL_NAME] = normalize_label_name(info[LABEL_NAME])
     if format_ in (FORMAT_GLOBAL, FORMAT_PLST):
         from TPTBox import POI_Global
 
@@ -649,8 +653,9 @@ def _load_mkr_POI(dict_mkr: dict) -> POI_Global:
                 description = control_points.get("description", region)
                 associatedNodeID = control_points.get("associatedNodeID", description)
                 label_group_name[region] = associatedNodeID
+                label_name.setdefault(region, {})[_GROUP_NAME_KEY] = associatedNodeID
 
-            label_name[str((region, subregion))] = label
+            label_name.setdefault(region, {})[subregion] = label
     assert itk_coords is not None, "itk_coords not set"
     from TPTBox import POI_Global
 
@@ -821,7 +826,7 @@ def _load_landmark_txt(path: Path) -> list:
             id_ = label_group_name[current_group]
             new_id = len(points[id_]) + 1
             points[id_][new_id] = coords
-            label_name[str((id_, new_id))] = key
+            label_name.setdefault(id_, {})[new_id] = key
     if len(label_name) != 0:
         header["label_name"] = label_name
     if len(label_group_name) != 0:
