@@ -10,7 +10,7 @@ if __name__ == "__main__":
     # build N real BIDS_FILE candidates once (touches a tempdir; not part of the timed comparison)
     tmp = Path(tempfile.mkdtemp())
     formats = ["T1w", "T2w", "ct", "msk", "dixon"]
-    N = 2000
+    N = 100
     CANDIDATES = []
     for i in range(N):
         fmt = formats[i % len(formats)]
@@ -37,7 +37,7 @@ if __name__ == "__main__":
 
     print(f"\n=== Searchquery.filter flatten mode ({N} candidates, keep {keep}) ===")
     speed_test(
-        repeats=12,
+        repeats=25,
         get_input_func=get_input,
         functions=[old_filter, new_filter],
         assert_equal_function=lambda x, y: [f.BIDS_key for f in x] == [f.BIDS_key for f in y],
