@@ -35,6 +35,7 @@ from TPTBox.core.vert_constants import (
     Location,
     Sentinel,
     Vertebra_Instance,
+    _same_direction,
     log,
     logging,
     v_name2idx,
@@ -743,6 +744,36 @@ class POI(Abstract_POI, Has_Grid):
         nii = nib.Nifti1Image(arr, affine=affine)
         nii2 = nib.Nifti1Image(arr2, affine=affine)
         return NII(nii, seg=True), NII(nii2, seg=True)
+
+    def flip(self, axis: int | str, keep_global_coords: bool = True, inplace: bool = False) -> Self:
+        """Flip the POIs along a spatial axis.
+
+        Args:
+            axis: Axis to flip, either as an integer or anatomical direction
+                string (e.g. ``"S"``, ``"R"``).
+            keep_global_coords: If True, perform the flip by changing the
+                orientation, preserving world-space coordinates. If False,
+                mirror the voxel coordinates without changing the affine.
+            inplace: Whether to modify this POI in place.
+
+        Returns:
+            The flipped POI.
+        """
+        axis = self.get_axis(axis) if not isinstance(axis, int) else axis
+
+        if keep_global_coords:
+            orient = list(self.orientation)
+            orient[axis] = _same_direction[orient[axis]]
+            return self.reorient(tuple(orient), inplace=inplace)
+
+        assert self.shape is not None, "Cannot flip voxel coordinates without shape information."
+
+        def _flip(x: float, y: float, z: float):
+            p = [x, y, z]
+            p[axis] = self.shape[axis] - 1 - p[axis]
+            return tuple(p)
+
+        return self.apply_all(_flip, inplace=inplace)
 
     def filter_points_inside_shape(self, inplace=False) -> Self:
         """Filter out POI points that are outside the defined shape.

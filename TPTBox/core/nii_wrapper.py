@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 import traceback
 import warnings
 import zlib

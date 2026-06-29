@@ -23,7 +23,7 @@ def get_outpaths_spineps(
         "out_unc",
         "out_logits",
         "out_snap",
-        "out_ctD",
+        "out_ctd",
         "out_snap2",
         "out_debug",
         "out_raw",
@@ -74,7 +74,22 @@ def run_spineps(
     ignore_compatibility_issues: bool = False,
     use_cpu: bool = False,
     **args,
-) -> dict:
+) -> dict[
+    Literal[
+        "out_spine",
+        "out_spine_raw",
+        "out_vert",
+        "out_vert_raw",
+        "out_unc",
+        "out_logits",
+        "out_snap",
+        "out_ctd",
+        "out_snap2",
+        "out_debug",
+        "out_raw",
+    ],
+    Path,
+]:
     """Run the SPINEPS spine segmentation pipeline on a single image.
 
     Handles model loading, BIDS path resolution, and delegates to SPINEPS'
