@@ -161,8 +161,14 @@ class Logger_Interface(Protocol):
             return self  # type: ignore
 
     def print_error(self, **args) -> None:
-        """Log the current exception traceback with ``Log_Type.FAIL`` severity."""
+        """Log the current exception traceback with ``Log_Type.FAIL`` severity.
+
+        Also emits a structured Loguru record carrying the active exception so user sinks
+        (e.g. ``logger.add(..., serialize=True)``) can capture it; the human-readable
+        traceback text below is unchanged.
+        """
         self.print(traceback.format_exc(), ltype=Log_Type.FAIL, **args)
+        _backend.emit_exception("Logged exception")
 
     logging_state = None
 
