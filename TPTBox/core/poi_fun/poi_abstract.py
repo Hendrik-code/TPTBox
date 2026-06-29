@@ -79,16 +79,51 @@ class _Abstract_POI_Definition:
         self.subregion_name2idx = {value: key for key, value in subregion.items()}
 
 
-def unpack_poi_id(key: POI_ID, definition: _Abstract_POI_Definition) -> tuple[int, int]:
+def _resolve_poi_part(part, name2idx: dict, level_info=None) -> int:
+    """Resolve one half of a POI key (region or subregion) to its integer id.
+
+    Order: Enum -> ``.value``; numeric string -> int; other string -> ``level_info`` enum
+    name (when ``level_info`` is a concrete enum), then ``name2idx``. When ``level_info`` is
+    the ``Any`` wildcard and an Enum is used, a warning is emitted (the level info is not set).
+    """
+    if isinstance(part, Enum):
+        if level_info is Any:
+            import warnings
+
+            warnings.warn(
+                f"Indexing a POI with the enum {part!r} but the matching level_one_info/level_two_info is not set "
+                f"(it is 'Any'); the integer value {part.value} is used.",
+                stacklevel=4,
+            )
+        return part.value
+    if isinstance(part, str):
+        try:
+            return int(part)
+        except ValueError:
+            pass
+        if level_info is not None and level_info is not Any:
+            try:
+                return level_info._get_id(part, no_raise=False)
+            except Exception:
+                pass
+        return name2idx[part]
+    return part
+
+
+def unpack_poi_id(key: POI_ID, definition: _Abstract_POI_Definition, level_one_info=None, level_two_info=None) -> tuple[int, int]:
     """Convert any supported POI key type to a ``(region, subregion)`` integer pair.
 
     Accepted key forms: plain integer (packed label), ``slice(region, subregion)``,
     2-tuple of ints, 2-tuple of ``Abstract_lvl`` / ``Enum`` members, or mixed tuples.
-    String values are resolved via ``definition``'s name-to-index mappings.
+    String values resolve via ``level_one_info``/``level_two_info`` enum names (when given)
+    and otherwise via ``definition``'s name-to-index mappings, so ``poi[idx, "level2name"]``
+    and ``poi["level1name", "level2name"]`` work in addition to ids and Enums.
 
     Args:
         key: POI identifier in any of the supported formats.
         definition: Name-to-integer mapping used to resolve string labels.
+        level_one_info: Optional region-level enum class for name/enum resolution + warnings.
+        level_two_info: Optional subregion-level enum class for name/enum resolution + warnings.
 
     Returns:
         ``(region, subregion)`` tuple of plain Python integers.
@@ -101,20 +136,8 @@ def unpack_poi_id(key: POI_ID, definition: _Abstract_POI_Definition) -> tuple[in
         subregion = key.stop
     else:
         region, subregion = key
-    if isinstance(region, str):
-        try:
-            region = int(region)
-        except ValueError:
-            region = definition.region_name2idx[region]
-    if isinstance(region, Enum):
-        region = region.value
-    if isinstance(subregion, str):
-        try:
-            subregion = int(subregion)
-        except ValueError:
-            subregion = definition.subregion_name2idx[subregion]
-    if isinstance(subregion, Enum):
-        subregion = subregion.value
+    region = _resolve_poi_part(region, definition.region_name2idx, level_one_info)
+    subregion = _resolve_poi_part(subregion, definition.subregion_name2idx, level_two_info)
     return region, subregion
 
 
@@ -731,17 +754,20 @@ class Abstract_POI:
         """Iterate over all ``(region, subregion)`` key pairs."""
         return iter(self.centroids.keys())
 
+    def _resolve_key(self, key: POI_ID) -> tuple[int, int]:
+        """Resolve any key (ids, Enums, or ``level_one_info``/``level_two_info`` names) to ``(region, subregion)`` ints."""
+        return unpack_poi_id(key, self.centroids.definition, self.level_one_info, self.level_two_info)
+
     def __contains__(self, key: POI_ID) -> bool:
-        key = unpack_poi_id(key, self.centroids.definition)
-        return key in self.centroids
+        return self._resolve_key(key) in self.centroids
 
     def __getitem__(self, key: POI_ID) -> COORDINATE:
-        return tuple(self.centroids[key])
+        return tuple(self.centroids[self._resolve_key(key)])
 
     def __setitem__(self, key: POI_ID, value: tuple[float, float, float] | Sequence[float] | np.ndarray) -> None:
         if len(value) != DIMENSIONS:
             raise ValueError(value)
-        self.centroids[key] = tuple(value)
+        self.centroids[self._resolve_key(key)] = tuple(value)
 
     def __len__(self) -> int:
         return self.centroids.__len__()
