@@ -278,6 +278,9 @@ class Logger(Logger_Interface):
         default_verbose: bool = False,
         log_arguments=None,
         prefix: str | None = None,
+        rotation=None,
+        retention=None,
+        enqueue: bool = False,
     ):
         """Initialise a file-backed logger, creating the log directory and file automatically.
 
@@ -287,6 +290,10 @@ class Logger(Logger_Interface):
             default_verbose: Default verbose behavior when not specified in calls.
             log_arguments: If set, will print the contents in a "run with arguments" section.
             prefix: If set, will use this string as prefix instead of the automatically chosen one.
+            rotation: Optional Loguru rotation policy (e.g. ``"10 MB"``, ``"00:00"``). When set
+                (or ``retention``), Loguru owns the file and rotates it.
+            retention: Optional Loguru retention policy (e.g. ``"10 days"``, ``5``).
+            enqueue: If True, file writes go through a background thread (thread/process-safe).
         """
         path = Path(path)  # ensure pathlib object
         # Get Start time
@@ -308,10 +315,20 @@ class Logger(Logger_Interface):
         log_path = Path(path).joinpath("logs")
         if not Path.exists(log_path):
             Path.mkdir(log_path)
-        # Open log file
-        self.f = open(log_path.joinpath(log_filename_full), "w")  # noqa: SIM115
-        # calls close() if program terminates
-        self._finalizer = weakref.finalize(self.f, self.close)
+        # Open log file -> route writes through a Loguru sink.
+        self._filepath = log_path.joinpath(log_filename_full)
+        self._file_key = id(self)
+        self._closed = False
+        if rotation is None and retention is None:
+            # Default: own the handle (flush() works, `end` honored, atexit-safe duration line).
+            self.f = open(self._filepath, "w")  # noqa: SIM115
+            self._sink_id = _backend.add_file_stream_sink(self.f, self._file_key, enqueue=enqueue)
+        else:
+            # Loguru owns the file -> rotation/retention available (lines are \n-terminated).
+            self.f = None
+            self._sink_id = _backend.add_file_sink(self._filepath, self._file_key, rotation=rotation, retention=retention, enqueue=enqueue)
+        # calls close() at interpreter exit (matches the previous atexit cleanup)
+        self._finalizer = weakref.finalize(self, self.close)
         self.default_verbose = default_verbose
         # Log file always start with their name and start log time
         self.print(log_filename_processed[:-1], verbose=False, ltype=Log_Type.LOG)
@@ -349,14 +366,14 @@ class Logger(Logger_Interface):
         path = bids_file.dataset
         return Logger(path, log_filename, default_verbose=default_verbose, prefix=override_prefix)
 
-    def _log(self, text: str, end: str = "\n", ltype=Log_Type.TEXT) -> None:  # noqa: ARG002
-        """Write a plain-text line to the log file."""
-        self.f.write(str(text))
-        self.f.write(end)
+    def _log(self, text: str, end: str = "\n", ltype=Log_Type.TEXT) -> None:
+        """Write a plain-text line to the log file (via the Loguru file sink)."""
+        _backend.emit_file(str(text), self._file_key, ltype, end)
 
     def flush(self) -> None:
-        """Flush the underlying file buffer to disk."""
-        self.f.flush()
+        """Flush the underlying file buffer to disk (Loguru file sinks flush per write)."""
+        if self.f is not None:
+            self.f.flush()
 
     def flush_sub_logger(self, sublogger: String_Logger, closed: bool = False) -> None:
         """Append a sub-logger's accumulated content into this log file.
@@ -378,7 +395,8 @@ class Logger(Logger_Interface):
 
     def close(self) -> None:
         """Flush all sub-loggers, write timing information, and close the log file."""
-        if not self.f.closed:
+        if not self._closed:
+            self._closed = True
             self.sub_loggers = [s for s in self.sub_loggers if s.log_content != ""]
             if len(self.sub_loggers) > 0:
                 self.print(ignore_prefix=True)
@@ -399,8 +417,11 @@ class Logger(Logger_Interface):
                 verbose=False,
                 ltype=Log_Type.LOG,
             )
-            self.f.flush()
-            self.f.close()
+            # remove the sink AFTER the closing lines were emitted, then release our handle
+            _backend.remove_sink(self._sink_id)
+            if self.f is not None:
+                self.f.flush()
+                self.f.close()
 
     @property
     def removed(self) -> bool:
