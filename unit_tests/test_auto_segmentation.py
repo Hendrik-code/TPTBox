@@ -4,6 +4,7 @@
 # coverage html
 from __future__ import annotations
 
+import os
 import random
 import shutil
 import sys
@@ -47,6 +48,18 @@ except ModuleNotFoundError:
     has_ants = False
 
 
+# The spineps / VibeSeg tests below run the REAL model pipelines: they download
+# network weights and run full nnU-Net / spineps inference. With no GPU they
+# saturate every CPU core for many minutes per dataset, so they are OFF by
+# default even when spineps is installed (the bare ``skipIf(not has_spineps)``
+# guard wrongly assumes spineps is absent on dev machines). Opt in explicitly,
+# e.g. on a GPU box with the models present:
+#     TPTBOX_RUN_SLOW_SEG_TESTS=1 pytest unit_tests/test_auto_segmentation.py
+# Mocked, fast equivalents of these wrappers live in test_segmentation_mock.py.
+RUN_SLOW_SEG_TESTS = os.environ.get("TPTBOX_RUN_SLOW_SEG_TESTS", "0") == "1"
+_SLOW_SEG_REASON = "slow real-model segmentation test; set TPTBOX_RUN_SLOW_SEG_TESTS=1 to run"
+
+
 class Test_test_samples(unittest.TestCase):
     # def test_load_ct(self):
     #    ct_nii, subreg_nii, vert_nii, label = get_test_ct()
@@ -68,6 +81,7 @@ class Test_test_samples(unittest.TestCase):
         assert "out_spine" in out
         assert "out_vert" in out
 
+    @unittest.skipUnless(RUN_SLOW_SEG_TESTS, _SLOW_SEG_REASON)
     @unittest.skipIf(not has_spineps or not has_ants, "requires spineps to be installed")
     def test_spineps(self):
         tests_path = get_tests_dir()
@@ -91,6 +105,7 @@ class Test_test_samples(unittest.TestCase):
         assert label in vert_nii.unique(), (label, vert_nii.unique())
         shutil.rmtree(tests_path / "derivative")
 
+    @unittest.skipUnless(RUN_SLOW_SEG_TESTS, _SLOW_SEG_REASON)
     @unittest.skipIf(not has_spineps, "requires spineps to be installed")
     def test_VIBESeg(self):
         tests_path = get_tests_dir()
@@ -105,6 +120,7 @@ class Test_test_samples(unittest.TestCase):
             assert seg_out_path.exists()
             seg_out_path.unlink(missing_ok=True)
 
+    @unittest.skipUnless(RUN_SLOW_SEG_TESTS, _SLOW_SEG_REASON)
     @unittest.skipIf(not has_spineps, "requires spineps to be installed")
     def test_VIBESeg_ct(self):
         tests_path = get_tests_dir()
