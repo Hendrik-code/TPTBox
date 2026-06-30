@@ -240,7 +240,37 @@ exclude_lines = [
     "raise "
 ]
 omit = [
-    "TPTBox/test/speedtest/*",
+    "TPTBox/tests/speedtests/*",
+    # --- Vendored nnU-Net internals: mocked around in unit tests, never executed ---
+    "TPTBox/segmentation/nnUnet_utils/predictor.py",
+    "TPTBox/segmentation/nnUnet_utils/plans_handler.py",
+    "TPTBox/segmentation/nnUnet_utils/export_prediction.py",
+    "TPTBox/segmentation/nnUnet_utils/default_preprocessor.py",
+    "TPTBox/segmentation/nnUnet_utils/data_iterators.py",
+    "TPTBox/segmentation/nnUnet_utils/get_network_from_plans.py",
+    "TPTBox/segmentation/nnUnet_utils/sliding_window_prediction.py",
+    # --- Vendored deepali optimization internals ---
+    "TPTBox/registration/_deformable/_deepali/deform_reg_pair.py",
+    "TPTBox/registration/_deformable/_deepali/registration_losses.py",
+    "TPTBox/registration/_deformable/_deepali/engine.py",
+    "TPTBox/registration/_deformable/_deepali/metrics.py",
+    "TPTBox/registration/_deformable/_deepali/hooks.py",
+    "TPTBox/registration/_deformable/_deepali/optim.py",
+    "TPTBox/registration/ridged_intensity/affine_deepali.py",
+    "TPTBox/registration/_ridged_intensity/affine_deepali.py",
+    "TPTBox/registration/_deepali/spine_rigid_elements_reg.py",
+    # --- 3D rendering: requires vedo (not a core dependency) ---
+    "TPTBox/mesh3D/snapshot3D.py",
+    "TPTBox/mesh3D/mesh.py",
+    "TPTBox/mesh3D/html_preview.py",
+    # --- Import-broken / missing optional dep (nipy) / stale scripts ---
+    "TPTBox/registration/_deformable/grid_search.py",
+    "TPTBox/registration/_deformable/_grid_search_vert.py",
+    "TPTBox/registration/script_ax2sag.py",
+    "TPTBox/registration/_ridged_intensity/register.py",
+    # --- Dead / unused ---
+    "TPTBox/registration/_deformable/deformable_reg_old.py",
+    "TPTBox/core/internal/elastic_deform.py",
 ]
 [tool.ruff.format]
 # Like Black, use double quotes for strings.
