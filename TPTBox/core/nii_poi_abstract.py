@@ -493,6 +493,18 @@ class Has_Grid(Grid_Proxy):
         a = self.rotation.T @ (x_ - self.origin) / np.array(self.zoom)
         return tuple(round(float(v), 7) for v in a)
 
+    def global_to_local_arr(self, coords: np.ndarray, itk=False) -> np.ndarray:
+        """Vectorized :meth:`global_to_local` for an ``(N, 3)`` array of world coordinates.
+
+        Equivalent to applying ``global_to_local`` to each row but in a single batched
+        inverse-affine matmul.
+        """
+        a = (np.asarray(coords, dtype=float) - np.asarray(self.origin)) @ np.asarray(self.rotation) / np.asarray(self.zoom)
+        if itk:
+            a[:, 0] *= -1
+            a[:, 1] *= -1
+        return np.round(a, 7)
+
     def local_to_global(self, x: COORDINATE | np.ndarray, itk=False) -> tuple:
         """Convert voxel (local) coordinates to world (RAS/LPS) coordinates.
 
