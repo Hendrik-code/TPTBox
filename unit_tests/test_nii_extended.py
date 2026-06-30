@@ -2,12 +2,35 @@
 
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 
 import numpy as np
 
 from TPTBox import NII
-from TPTBox.tests.test_utils import get_nii, get_random_ax_code, repeats
+from TPTBox.tests.test_utils import get_nii, get_random_ax_code, get_test_ct, get_test_mri, repeats
+
+try:
+    import ants  # noqa: F401
+
+    has_ants = True
+except Exception:
+    has_ants = False
+
+try:
+    import deepali  # noqa: F401
+
+    has_deepali = True
+except Exception:
+    has_deepali = False
+
+try:
+    from stl import mesh  # noqa: F401
+
+    has_stl = True
+except Exception:
+    has_stl = False
 
 
 def _make_nii(arr: np.ndarray, seg: bool = True, zoom=(1.0, 1.0, 1.0)) -> NII:
@@ -463,6 +486,267 @@ class Test_NII_GetSegArray(unittest.TestCase):
         nii = _make_nii(arr, seg=False)
         result = nii.get_seg_array()
         self.assertEqual(result.shape, arr.shape)
+
+
+class Test_NII_DtypeSmallest(unittest.TestCase):
+    """set_dtype with the 'smallest_uint'/'smallest_int' selectors and astype(subok=False)."""
+
+    def test_smallest_uint_small_values(self):
+        arr = np.zeros((4, 4, 4), np.uint16)
+        arr[0, 0, 0] = 5
+        nii = _make_nii(arr).set_dtype("smallest_uint")
+        self.assertEqual(nii.get_array().dtype, np.uint8)
+
+    def test_smallest_uint_large_values(self):
+        arr = np.zeros((4, 4, 4), np.int32)
+        arr[0, 0, 0] = 5000
+        nii = _make_nii(arr, seg=False).set_dtype("smallest_uint")
+        self.assertEqual(nii.get_array().dtype, np.uint16)
+
+    def test_smallest_int(self):
+        arr = np.zeros((4, 4, 4), np.int32)
+        arr[0, 0, 0] = 100
+        nii = _make_nii(arr, seg=False).set_dtype("smallest_int")
+        self.assertEqual(nii.get_array().dtype, np.int8)
+
+    def test_astype_subok_false_returns_ndarray(self):
+        arr = np.ones((3, 3, 3), np.uint8)
+        out = _make_nii(arr, seg=False).astype(np.float64, subok=False)
+        self.assertIsInstance(out, np.ndarray)
+        self.assertEqual(out.dtype, np.float64)
+
+
+class Test_NII_CenterCropPad(unittest.TestCase):
+    """apply_center_crop (crop + pad branches) and apply_pad (int / None / per-side None)."""
+
+    def test_center_crop_smaller(self):
+        arr = np.zeros((20, 20, 20), np.uint8)
+        arr[5:15, 5:15, 5:15] = 1
+        out = _make_nii(arr).apply_center_crop((10, 10, 10))
+        self.assertEqual(out.shape, (10, 10, 10))
+
+    def test_center_crop_larger_pads(self):
+        arr = np.zeros((5, 5, 5), np.uint8)
+        arr[2, 2, 2] = 1
+        out = _make_nii(arr).apply_center_crop((9, 9, 9))
+        self.assertEqual(out.shape, (9, 9, 9))
+        self.assertIn(1, out.unique())
+
+    def test_apply_pad_int(self):
+        arr = np.zeros((5, 5, 5), np.uint8)
+        arr[2, 2, 2] = 1
+        out = _make_nii(arr).apply_pad(2, verbose=False)
+        self.assertEqual(out.shape, (9, 9, 9))
+
+    def test_apply_pad_none_is_noop(self):
+        arr = np.zeros((5, 5, 5), np.uint8)
+        out = _make_nii(arr).apply_pad(None)
+        self.assertEqual(out.shape, (5, 5, 5))
+
+    def test_apply_pad_with_none_sides(self):
+        arr = np.zeros((5, 5, 5), np.uint8)
+        out = _make_nii(arr).apply_pad([(2, None), (None, 3), (1, 1)], verbose=False)
+        self.assertEqual(out.shape, (7, 8, 7))
+
+
+class Test_NII_ReorientSameAs(unittest.TestCase):
+    def test_reorient_same_as(self):
+        msk = get_nii()[0]
+        target = msk.reorient(("P", "I", "R"))
+        out = msk.reorient_same_as(target)
+        self.assertEqual(out.orientation, target.orientation)
+
+    def test_reorient_same_as_inplace(self):
+        msk = get_nii()[0]
+        target = msk.reorient(("P", "I", "R"))
+        msk.reorient_same_as_(target)
+        self.assertEqual(msk.orientation, target.orientation)
+
+
+class Test_NII_MatchHistograms(unittest.TestCase):
+    def test_match_histograms_shape(self):
+        mri = get_test_mri()[0]
+        out = mri.match_histograms(get_test_mri()[0])
+        self.assertEqual(out.shape, mri.shape)
+        self.assertFalse(out.seg)
+
+    def test_match_histograms_inplace(self):
+        mri = get_test_mri()[0]
+        ref = get_test_mri()[0]
+        mri.match_histograms_(ref)
+        self.assertEqual(mri.shape, ref.shape)
+
+
+class Test_NII_SmoothLabelwise(unittest.TestCase):
+    def test_smooth_labelwise_preserves_labels(self):
+        nii = _make_two_label_seg()
+        out = nii.smooth_gaussian_labelwise(label_to_smooth=1, sigma=1.0)
+        self.assertTrue(out.seg)
+        self.assertEqual(sorted(out.unique()), [1, 2])
+
+    def test_smooth_labelwise_inplace(self):
+        nii = _make_two_label_seg()
+        nii.smooth_gaussian_labelwise(label_to_smooth=[1, 2], sigma=1.0, inplace=True)
+        self.assertEqual(sorted(nii.unique()), [1, 2])
+
+
+class Test_NII_ConvexHull(unittest.TestCase):
+    @staticmethod
+    def _l_shape():
+        arr = np.zeros((20, 20, 20), np.uint8)
+        arr[5:15, 5, 5:15] = 1
+        arr[5, 5:15, 5:15] = 1
+        return _make_nii(arr)
+
+    def test_convex_hull_does_not_shrink(self):
+        nii = self._l_shape()
+        hull = nii.calc_convex_hull(axis="S")
+        self.assertGreaterEqual(int((hull.get_array() > 0).sum()), int((nii.get_array() > 0).sum()))
+        self.assertEqual(hull.unique(), [1])
+
+    def test_convex_hull_inplace(self):
+        nii = self._l_shape()
+        nii.calc_convex_hull_(axis="S")
+        self.assertIn(1, nii.unique())
+
+
+class Test_NII_SurfacePoints(unittest.TestCase):
+    def test_surface_points_list(self):
+        arr = np.zeros((15, 15, 15), np.uint8)
+        arr[3:12, 3:12, 3:12] = 1
+        pts = _make_nii(arr).compute_surface_points()
+        self.assertIsInstance(pts, list)
+        self.assertGreater(len(pts), 0)
+        # surface voxel count is strictly less than the solid volume
+        self.assertLess(len(pts), int((arr > 0).sum()))
+
+
+class Test_NII_FillHolesGlobal(unittest.TestCase):
+    @staticmethod
+    def _hollow():
+        arr = np.zeros((15, 15, 15), np.uint8)
+        arr[2:13, 2:13, 2:13] = 1
+        arr[6:9, 6:9, 6:9] = 0
+        return arr
+
+    def test_fill_holes_global(self):
+        out = _make_nii(self._hollow()).fill_holes_global_with_majority_voting()
+        self.assertEqual(out.get_array()[7, 7, 7], 1)
+
+    def test_fill_holes_global_inplace(self):
+        nii = _make_nii(self._hollow())
+        nii.fill_holes_global_with_majority_voting(inplace=True)
+        self.assertEqual(nii.get_array()[7, 7, 7], 1)
+
+
+class Test_NII_SegDifference(unittest.TestCase):
+    def test_diff_codes(self):
+        arr = np.zeros((10, 10, 10), np.uint8)
+        gt = np.zeros((10, 10, 10), np.uint8)
+        arr[1:4, 1:4, 1:4] = 1
+        gt[1:4, 1:4, 1:4] = 1  # TP
+        gt[6:8, 6:8, 6:8] = 1  # FN (missed by prediction)
+        arr[8:9, 8:9, 8:9] = 2  # FP (extra in prediction)
+        arr[4:5, 4:5, 4:5] = 1
+        gt[4:5, 4:5, 4:5] = 2  # wrong label
+        diff = _make_nii(arr).get_segmentation_difference_to(_make_nii(gt))
+        self.assertEqual(sorted(diff.unique()), [1, 2, 3, 4])
+
+    def test_overlapping_labels(self):
+        a = np.zeros((10, 10, 10), np.uint8)
+        a[1:5, 1:5, 1:5] = 1
+        b = np.zeros((10, 10, 10), np.uint8)
+        b[1:5, 1:5, 1:5] = 7
+        pairs = _make_nii(a).get_overlapping_labels_to(_make_nii(b))
+        self.assertIn((1, 7), pairs)
+
+
+class Test_NII_Border(unittest.TestCase):
+    def test_in_border_true(self):
+        arr = np.zeros((20, 20, 20), np.uint8)
+        arr[0:3, 0:3, 0:3] = 1
+        self.assertTrue(_make_nii(arr).is_segmentation_in_border())
+
+    def test_in_border_false(self):
+        arr = np.zeros((20, 20, 20), np.uint8)
+        arr[8:12, 8:12, 8:12] = 1
+        self.assertFalse(_make_nii(arr).is_segmentation_in_border())
+
+
+class Test_NII_ExtractBackground(unittest.TestCase):
+    def test_extract_background(self):
+        arr = np.zeros((10, 10, 10), np.uint8)
+        arr[2:8, 2:8, 2:8] = 1
+        bg = _make_nii(arr).extract_background()
+        self.assertEqual(int(bg.get_array().sum()), int((arr == 0).sum()))
+        self.assertEqual(bg.get_array()[0, 0, 0], 1)
+        self.assertEqual(bg.get_array()[4, 4, 4], 0)
+
+
+class Test_NII_Translate(unittest.TestCase):
+    def test_translate_tuple(self):
+        arr = np.zeros((12, 12, 12), np.uint8)
+        arr[5, 5, 5] = 1
+        out = _make_nii(arr).translate_arr((2, 0, 0), verbose=False)
+        self.assertEqual(out.shape, (12, 12, 12))
+        self.assertEqual(out.get_array()[7, 5, 5], 1)
+
+    def test_translate_dict(self):
+        arr = np.zeros((12, 12, 12), np.uint8)
+        arr[5, 5, 5] = 1
+        # identity affine -> orientation ("R", "A", "S"); "S" is axis 2
+        out = _make_nii(arr).translate_arr({"S": 2}, verbose=False)
+        self.assertEqual(out.get_array()[5, 5, 7], 1)
+
+
+@unittest.skipIf(not has_stl, "requires numpy-stl")
+class Test_NII_STL(unittest.TestCase):
+    @staticmethod
+    def _blob():
+        arr = np.zeros((20, 20, 20), np.uint8)
+        arr[5:15, 5:15, 5:15] = 1
+        return _make_nii(arr)
+
+    def test_to_stl_returns_mesh(self):
+        m = self._blob().to_stl(label=1)
+        self.assertEqual(m.vectors.shape[1:], (3, 3))
+        self.assertGreater(m.vectors.shape[0], 0)
+
+    def test_to_stl_saves_file(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "out.stl"
+            self._blob().to_stl(label=1, out_path=p)
+            self.assertTrue(p.exists())
+            self.assertGreater(p.stat().st_size, 0)
+
+    def test_to_stls_dict(self):
+        with tempfile.TemporaryDirectory() as td:
+            meshes = self._blob().to_stls(out_path=Path(td))
+            self.assertIn(1, meshes)
+
+
+@unittest.skipIf(not has_ants, "requires antspyx")
+class Test_NII_Ants(unittest.TestCase):
+    def test_to_ants_preserves_shape(self):
+        ct = get_test_ct()[0]
+        a = ct.to_ants()
+        self.assertEqual(tuple(a.shape), ct.shape)
+
+    def test_n4_bias_field_correction(self):
+        mri = get_test_mri()[0]
+        small = mri.apply_crop(mri.compute_crop()).rescale((4.0, 4.0, 4.0))
+        out = small.n4_bias_field_correction()
+        self.assertEqual(out.shape, small.shape)
+        self.assertFalse(out.seg)
+
+
+@unittest.skipIf(not has_deepali, "requires deepali")
+class Test_NII_Deepali(unittest.TestCase):
+    def test_to_from_deepali_roundtrip(self):
+        mri = get_test_mri()[0]
+        back = NII.from_deepali(mri.to_deepali())
+        self.assertEqual(back.shape, mri.shape)
+        np.testing.assert_allclose(back.get_array(), mri.get_array(), rtol=1e-4, atol=1e-3)
 
 
 if __name__ == "__main__":
