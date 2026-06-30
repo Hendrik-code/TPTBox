@@ -308,7 +308,9 @@ class Logger(Logger_Interface):
         if not Path.exists(log_path):
             Path.mkdir(log_path)
         # Open log file
-        self.f = open(log_path.joinpath(log_filename_full), "w")  # noqa: SIM115
+        # encoding="utf-8" so non-ASCII log content (e.g. the "±" from
+        # print_statistic) cannot raise UnicodeEncodeError under a C/ASCII locale.
+        self.f = open(log_path.joinpath(log_filename_full), "w", encoding="utf-8")  # noqa: SIM115
         # calls close() if program terminates
         self._finalizer = weakref.finalize(self.f, self.close)
         self.default_verbose = default_verbose
