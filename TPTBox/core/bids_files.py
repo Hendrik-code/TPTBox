@@ -1750,15 +1750,15 @@ class Searchquery:
         """
         if self._flatten:
             assert isinstance(self.candidates, list)
-            for bids_file in self.candidates.copy():
-                if not bids_file.do_filter(key, filter_fun, required=required):
-                    self.candidates.remove(bids_file)
+            # list comprehension is O(n); the old copy()+list.remove() loop was O(n^2)
+            self.candidates = [f for f in self.candidates if f.do_filter(key, filter_fun, required=required)]
         else:
             assert isinstance(self.candidates, dict)
-            for sequences, bids_files in self.candidates.copy().items():
-                # print(sequences, list(bids_file.do_filter(key, filter_fun, required=required) for bids_file in bids_files))
-                if not any(bids_file.do_filter(key, filter_fun, required=required) for bids_file in bids_files):
-                    self.candidates.pop(sequences)
+            self.candidates = {
+                seq: bids_files
+                for seq, bids_files in self.candidates.items()
+                if any(f.do_filter(key, filter_fun, required=required) for f in bids_files)
+            }
 
     def filter_format(self, filter_fun: list[str] | str | typing.Callable[[str | object], bool]) -> None:
         """Keep only files whose format label satisfies *filter_fun*.
@@ -1807,15 +1807,15 @@ class Searchquery:
         """
         if self._flatten:
             assert isinstance(self.candidates, list)
-            for bids_file in self.candidates.copy():
-                if bids_file.do_filter(key, filter_fun, required=required):
-                    self.candidates.remove(bids_file)
+            # list comprehension is O(n); the old copy()+list.remove() loop was O(n^2)
+            self.candidates = [f for f in self.candidates if not f.do_filter(key, filter_fun, required=required)]
         else:
             assert isinstance(self.candidates, dict)
-            for sequences, bids_files in self.candidates.copy().items():
-                # print(sequences, list(bids_file.do_filter(key, filter_fun, required=required) for bids_file in bids_files))
-                if any(bids_file.do_filter(key, filter_fun, required=required) for bids_file in bids_files):
-                    self.candidates.pop(sequences)
+            self.candidates = {
+                seq: bids_files
+                for seq, bids_files in self.candidates.items()
+                if not any(f.do_filter(key, filter_fun, required=required) for f in bids_files)
+            }
 
     def filter_dixon_only_inphase(self) -> None:
         """Remove Dixon files that are fat, water, out-of-phase, or difference images.
