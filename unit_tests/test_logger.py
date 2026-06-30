@@ -308,7 +308,7 @@ def _read_logfile(logger: Logger) -> str:
     if not logger.f.closed:
         logger.flush()
     log_files = list(Path(logger.f.name).parent.glob("*.log"))
-    return "\n".join(p.read_text() for p in log_files)
+    return "\n".join(p.read_text(encoding="utf-8") for p in log_files)
 
 
 class Test_Logger(unittest.TestCase):
