@@ -42,6 +42,7 @@ from TPTBox.core.np_utils import (
     np_filter_connected_components,
     np_get_connected_components_center_of_mass,
     np_is_empty,
+    np_isin,
     np_map_labels,
     np_map_labels_based_on_majority_label_mask_overlap,
     np_point_coordinates,
@@ -2099,10 +2100,11 @@ class NII(NII_Math):
         flip = self.orientation[axis_] != axis  # Check orientation for flipping
         # Get the array data
         np_array = self.get_array()
-        np_array_cond = self.extract_label(idx).get_seg_array()
+        # both masks come directly from np_array via np_isin (avoids two extract_label round-trips)
+        np_array_cond = np_isin(np_array, idx)
 
         # Find the lowest point (smallest index) along the axis where `not_above` exists
-        threshold = np.where(self.extract_label(not_beyond).get_seg_array() == 1)
+        threshold = np.where(np_isin(np_array, not_beyond))
         if len(threshold[axis_]) == 0:
             return self if inplace else self.copy()
         flip_up = flip
@@ -2122,7 +2124,7 @@ class NII(NII_Math):
         mask = np.broadcast_to(mask, self.shape)
 
         # Replace values of `idx` with `fill` in the masked region
-        np_array = np.where((np_array_cond == 1) & mask, fill, np_array)
+        np_array = np.where(np_array_cond & mask, fill, np_array)
 
         # Update the NIfTI object with the modified array
         return self.set_array(np_array, inplace=inplace)
@@ -2260,7 +2262,8 @@ class NII(NII_Math):
             If inplace is True, returns the current NIfTI image object with mapped labels. Otherwise, returns a new NIfTI image object with mapped labels.
         """
         data_orig = self.get_seg_array()
-        labels_before = [v for v in np_unique(data_orig) if v > 0]
+        # the before/after np_unique scans are only used for the verbose log line; skip them otherwise
+        labels_before = [v for v in np_unique(data_orig) if v > 0] if verbose else None
         # enforce keys to be str to support both str and int
         label_map_ = {
             (v_name2idx[k] if k in v_name2idx else int(k)): (
@@ -2270,15 +2273,16 @@ class NII(NII_Math):
         }
         log.print("label_map_ =", label_map_, verbose=verbose)
         data = np_map_labels(data_orig, label_map_)
-        labels_after = [v for v in np_unique(data) if v > 0]
-        log.print(
-                "N =",
-                len(label_map_),
-                "labels reassigned, before labels: ",
-                labels_before,
-                " after: ",
-                labels_after,verbose=verbose
-            )
+        if verbose:
+            labels_after = [v for v in np_unique(data) if v > 0]
+            log.print(
+                    "N =",
+                    len(label_map_),
+                    "labels reassigned, before labels: ",
+                    labels_before,
+                    " after: ",
+                    labels_after,verbose=verbose
+                )
         nii = data.astype(np.uint16), self.affine, self.header
         if inplace:
             self.nii = nii
@@ -2692,9 +2696,8 @@ class NII(NII_Math):
         seg_arr = self.get_seg_array()
 
         if isinstance(label, Sequence):
-            label_int:list[int] = [idx.value if isinstance(idx,Enum) else idx for idx in label]
-            assert 0 not in label_int, 'Zero label does not make sense. This is the background'
-            seg_arr = np_extract_label(seg_arr, label_int, to_label=1, inplace=True)
+            labels:int|list[int] = [idx.value if isinstance(idx,Enum) else idx for idx in label]
+            assert 0 not in labels, 'Zero label does not make sense. This is the background'
         else:
             if isinstance(label,Enum):
                 label = label.value
@@ -2702,9 +2705,13 @@ class NII(NII_Math):
                 label = int(label)
 
             assert label != 0, 'Zero label does not make sense. This is the background'
-            seg_arr = np_extract_label(seg_arr, label, to_label=1, inplace=True)
+            labels = label
         if keep_label:
-            seg_arr = seg_arr * self.get_seg_array()
+            # keep the original label values where in `labels`, zero everywhere else.
+            # single get_seg_array() copy + one np_isin mask (faster than extract + a second copy/multiply)
+            seg_arr[~np_isin(seg_arr, labels)] = 0
+        else:
+            seg_arr = np_extract_label(seg_arr, labels, to_label=1, inplace=True)
         return self.set_array(seg_arr,inplace=inplace)
     def ravel(self,order:Literal["K", "A", "C", "F"] | None="C")->np.ndarray:
         """Return a contiguous flattened array.
@@ -2726,15 +2733,17 @@ class NII(NII_Math):
     def remove_labels(self,label:int|Enum|Sequence[int]|Sequence[Enum], inplace=False, verbose:logging=True, removed_to_label=0) -> Self:
         """If this NII is a segmentation you can single out one label."""
         assert label != 0, 'Zero label does not make sens.  This is the background'
-        seg_arr = self.get_seg_array()
         if not isinstance(label,Sequence):
             label = [label] # type: ignore
+        flat: list[int] = []
         for l in label:
             if isinstance(l, list):
-                for g in l:
-                    seg_arr[seg_arr == g] = removed_to_label
+                flat.extend(g.value if isinstance(g, Enum) else g for g in l)
             else:
-                seg_arr[seg_arr == l] = removed_to_label
+                flat.append(l.value if isinstance(l, Enum) else l)
+        # one np_map_labels gather is constant-time in the number of labels (a per-label
+        # `seg_arr == l` loop costs one full pass per label).
+        seg_arr = np_map_labels(self.get_seg_array(), dict.fromkeys(flat, removed_to_label))
         return self.set_array(seg_arr,inplace=inplace, verbose=verbose)
     def remove_labels_(self, label: int | Enum | Sequence[int] | Sequence[Enum], removed_to_label=0, verbose: logging = True) -> Self:
         """In-place variant of `remove_labels`."""
