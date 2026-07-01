@@ -20,7 +20,7 @@ except Exception:
 
 class TestAnts(unittest.TestCase):
     @unittest.skipIf(not has_ants, "requires ants to be installed")
-    def test_segmentation_CT(self):
+    def test_ants_segmentation_CT(self):
         """Test round-trip for Segmentation.seg.nrrd."""
         ct, subreg, vert = get_nii_paths_ct()
         from TPTBox import NII, to_nii
@@ -32,6 +32,25 @@ class TestAnts(unittest.TestCase):
         assert nii.orientation == nii2.orientation
         assert np.isclose(nii.affine, nii2.affine).all()
         assert np.isclose(nii.get_array(), nii.get_array()).all()
+
+        nii = to_nii(ct)
+        nii2 = ants_to_nifti(nii.to_ants(), nii.header)
+        nii2 = NII(nii2)
+        assert nii.orientation == nii2.orientation
+        assert np.isclose(nii.affine, nii2.affine).all()
+        assert np.isclose(nii.get_array(), nii.get_array()).all()
+
+    @unittest.skipIf(not has_ants, "requires ants to be installed")
+    def test_n4_bias_field_correction(self):
+        """Test round-trip for Segmentation.seg.nrrd."""
+        ct, subreg, vert = get_nii_paths_ct()
+        from TPTBox import NII, to_nii
+        from TPTBox.core.internal import ants_to_nifti, nifti_to_ants
+
+        nii = to_nii(ct)
+        nii2 = nii.n4_bias_field_correction()
+
+        assert nii2.shape == nii.shape
 
     # @unittest.skipIf(not has_ants, "requires spineps to be installed")
     # def test_raf_ants():
