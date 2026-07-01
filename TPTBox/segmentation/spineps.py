@@ -14,6 +14,7 @@ def get_outpaths_spineps(
     dataset: str | Path | None = None,
     derivative_name: str = "derivative",
     ignore_bids_filter: bool = True,
+    _dataset_id_ct_crop=100,
 ) -> dict[
     Literal[
         "out_spine",
@@ -23,10 +24,11 @@ def get_outpaths_spineps(
         "out_unc",
         "out_logits",
         "out_snap",
-        "out_ctD",
+        "out_ctd",
         "out_snap2",
         "out_debug",
         "out_raw",
+        "out_vibeseg",
     ],
     Path,
 ]:
@@ -54,6 +56,7 @@ def get_outpaths_spineps(
         None,
         input_format=file_path.format,
         non_strict_mode=ignore_bids_filter,
+        _dataset_id_ct_crop=_dataset_id_ct_crop,
     )
     return output_paths
 
@@ -74,7 +77,23 @@ def run_spineps(
     ignore_compatibility_issues: bool = False,
     use_cpu: bool = False,
     **args,
-) -> dict:
+) -> dict[
+    Literal[
+        "out_spine",
+        "out_spine_raw",
+        "out_vert",
+        "out_vert_raw",
+        "out_unc",
+        "out_logits",
+        "out_snap",
+        "out_ctd",
+        "out_snap2",
+        "out_debug",
+        "out_raw",
+        "out_vibeseg",
+    ],
+    Path,
+]:
     """Run the SPINEPS spine segmentation pipeline on a single image.
 
     Handles model loading, BIDS path resolution, and delegates to SPINEPS'
@@ -105,8 +124,13 @@ def run_spineps(
     Returns:
         The output paths dictionary returned by SPINEPS' ``process_img_nii``.
     """
-    from spineps import get_instance_model, get_semantic_model, process_img_nii
+    from spineps import get_instance_model, get_semantic_model
     from spineps.get_models import get_actual_model
+
+    try:
+        from spineps import process_img_nii as segment_image
+    except Exception:
+        from spineps import segment_image
 
     label = {}
     try:
@@ -130,7 +154,7 @@ def run_spineps(
         model_instance = get_actual_model(model_instance, use_cpu=use_cpu)
     else:
         model_instance = get_instance_model(model_instance, use_cpu=use_cpu)
-    output_paths, errcode = process_img_nii(
+    output_paths, errcode = segment_image(
         img_ref=file_path,
         derivative_name=derivative_name,
         model_semantic=model_semantic,

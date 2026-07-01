@@ -1,6 +1,7 @@
 import time
 
-import elasticdeform
+# pip install elasticdeform
+import elasticdeform  # See https://github.com/gvtulder/elasticdeform/issues/24 to install this for >2.x
 import numpy as np
 from numpy.typing import NDArray
 
@@ -49,19 +50,23 @@ def deformed_nii(
         deformed_data = deformed_NII(arr_dic, sigma=sigma, points=points)
     """
     if sigma is None or points is None:
+        np.random.seed(None)
         sigma, points = get_random_deform_parameter(deform_factor=deform_factor)
-
     print("deformation parameter sigma = ", round(sigma, 4), "; n_points = ", points)
     t = time.time()
-    values = list(nii_dic.values())
+
     # Deform
+    max_v = None
     if joint_normalize:
         max_v = max([img.max() for img in nii_dic.values() if not img.seg])
         nii_dic = {k: img if img.seg else img.set_dtype(np.float32) / max_v for k, img in nii_dic.items()}
     elif normalize:
-        nii_dic = {k: img if img.seg else img.set_dtype(np.float32).normalize() for k, img in nii_dic.items()}
+        max_v = {k: None if img.seg else (float(max(img.max() - img.min(), 1)), float(img.min())) for k, img in nii_dic.items()}
+        nii_dic = {k: img if img.seg else (img.set_dtype(np.float32) - max_v[k][1]) / max_v[k][0] for k, img in nii_dic.items()}
     else:
         nii_dic = {k: img if img.seg else img.set_dtype(np.float32) for k, img in nii_dic.items()}
+
+    values = list(nii_dic.values())
     assert sigma is not None
     p = deform_padding
     out: list[NDArray] = elasticdeform.deform_random_grid(
@@ -74,6 +79,10 @@ def deformed_nii(
     for (k, nii), arr in zip(nii_dic.items(), out, strict=True):
         out2[k] = nii.set_array(arr[p:-p, p:-p, p:-p])
     print("Deformation took", round(time.time() - t, 1), "Seconds")
+    if joint_normalize:
+        out2 = {k: img if img.seg else img.set_dtype(np.float32) * max_v for k, img in out2.items()}
+    elif normalize:
+        out2 = {k: img if img.seg else ((img.set_dtype(np.float32) * max_v[k][0]) + max_v[k][1]) for k, img in out2.items()}
     return out2
 
 

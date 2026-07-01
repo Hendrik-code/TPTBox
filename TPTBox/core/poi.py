@@ -36,6 +36,7 @@ from TPTBox.core.vert_constants import (
     Location,
     Sentinel,
     Vertebra_Instance,
+    _same_direction,
     log,
     logging,
     v_name2idx,
@@ -655,7 +656,7 @@ class POI(Abstract_POI, Has_Grid):
             self, out_path, make_parents, additional_info, verbose=verbose, save_hint=save_hint, resample_reference=resample_reference
         )
 
-    def make_point_cloud_nii(self, affine=None, s=8, sphere=False) -> tuple[NII, NII]:
+    def make_point_cloud_nii(self, affine=None, s=8, sphere=True) -> tuple[NII, NII]:
         """Create point cloud NIfTI images from the POI coordinates.
 
         This method generates two NIfTI images, one for the regions and another for the subregions,
@@ -683,9 +684,6 @@ class POI(Abstract_POI, Has_Grid):
             affine = self.affine
         arr = np.zeros(self.shape_int)
         arr2 = np.zeros(self.shape_int)
-        s1 = max(s // 2, 1)
-        s2 = max(s - s1, 1)
-        from math import ceil, floor
 
         if sphere:
             zoom = np.asarray(self.zoom)
@@ -704,7 +702,9 @@ class POI(Abstract_POI, Has_Grid):
 
             for region, subregion, (x, y, z) in self.items():
                 x, y, z = round(x), round(y), round(z)  # noqa: PLW2901
-
+                if not (0 <= x < self.shape[0] and 0 <= y < self.shape[1] and 0 <= z < self.shape[2]):
+                    print(f"Skipping POI outside image: {region}, {subregion},{(x, y, z)} shape={self.shape}")
+                    continue
                 # image bounds
                 x0 = max(x - rx, 0)
                 x1 = min(x + rx + 1, self.shape[0])
@@ -726,24 +726,68 @@ class POI(Abstract_POI, Has_Grid):
                 kz1 = kz0 + (z1 - z0)
 
                 local_mask = sphere_mask[kx0:kx1, ky0:ky1, kz0:kz1]
-
+                if region == 0:
+                    region = 1  # noqa: PLW2901
+                if subregion == 0:
+                    subregion = 1  # noqa: PLW2901
                 arr[x0:x1, y0:y1, z0:z1][local_mask] = region
                 arr2[x0:x1, y0:y1, z0:z1][local_mask] = subregion
         else:
             for region, subregion, (x, y, z) in self.items():
+                if region == 0:
+                    region = 1  # noqa: PLW2901
+                if subregion == 0:
+                    subregion = 1  # noqa: PLW2901
+                if not (0 <= x < self.shape[0] and 0 <= y < self.shape[1] and 0 <= z < self.shape[2]):
+                    print(f"Skipping POI outside image: {region}, {subregion}, {(x, y, z)} shape={self.shape}")
+                    continue
+                rx = int(np.ceil((s / 2) / self.zoom[0]))
+                ry = int(np.ceil((s / 2) / self.zoom[1]))
+                rz = int(np.ceil((s / 2) / self.zoom[2]))
                 arr[
-                    max((floor(x - s1 / self.zoom[0])) + 1, 0) : min((ceil(x + s2 / self.zoom[0] + 1)), self.shape[0]),
-                    max((floor(y - s1 / self.zoom[1])) + 1, 0) : min((ceil(y + s2 / self.zoom[1] + 1)), self.shape[1]),
-                    max((floor(z - s1 / self.zoom[2])) + 1, 0) : min((ceil(z + s2 / self.zoom[2] + 1)), self.shape[2]),
+                    int(max(x - rx, 0)) : int(min(x + rx + 1, self.shape[0])),
+                    int(max(y - ry, 0)) : int(min(y + ry + 1, self.shape[1])),
+                    int(max(z - rz, 0)) : int(min(z + rz + 1, self.shape[2])),
                 ] = region
+
                 arr2[
-                    max((floor(x - s1 / self.zoom[0])) + 1, 0) : min((ceil(x + s2 / self.zoom[0] + 1)), self.shape[0]),
-                    max((floor(y - s1 / self.zoom[1])) + 1, 0) : min((ceil(y + s2 / self.zoom[1] + 1)), self.shape[1]),
-                    max((floor(z - s1 / self.zoom[2])) + 1, 0) : min((ceil(z + s2 / self.zoom[2] + 1)), self.shape[2]),
+                    int(max(x - rx, 0)) : int(min(x + rx + 1, self.shape[0])),
+                    int(max(y - ry, 0)) : int(min(y + ry + 1, self.shape[1])),
+                    int(max(z - rz, 0)) : int(min(z + rz + 1, self.shape[2])),
                 ] = subregion
         nii = nib.Nifti1Image(arr, affine=affine)
         nii2 = nib.Nifti1Image(arr2, affine=affine)
         return NII(nii, seg=True), NII(nii2, seg=True)
+
+    def flip(self, axis: int | str, keep_global_coords: bool = True, inplace: bool = False) -> Self:
+        """Flip the POIs along a spatial axis.
+
+        Args:
+            axis: Axis to flip, either as an integer or anatomical direction
+                string (e.g. ``"S"``, ``"R"``).
+            keep_global_coords: If True, perform the flip by changing the
+                orientation, preserving world-space coordinates. If False,
+                mirror the voxel coordinates without changing the affine.
+            inplace: Whether to modify this POI in place.
+
+        Returns:
+            The flipped POI.
+        """
+        axis = self.get_axis(axis) if not isinstance(axis, int) else axis
+
+        if keep_global_coords:
+            orient = list(self.orientation)
+            orient[axis] = _same_direction[orient[axis]]
+            return self.reorient(tuple(orient), inplace=inplace)
+
+        assert self.shape is not None, "Cannot flip voxel coordinates without shape information."
+
+        def _flip(x: float, y: float, z: float):
+            p = [x, y, z]
+            p[axis] = self.shape[axis] - 1 - p[axis]
+            return tuple(p)
+
+        return self.apply_all(_flip, inplace=inplace)
 
     def filter_points_inside_shape(self, inplace=False) -> Self:
         """Filter out POI points that are outside the defined shape.

@@ -821,6 +821,7 @@ class Lower_Body(Abstract_lvl):
     LATERAL_CONDYLE_DISTAL = 16
     MEDIAL_CONDYLE_DISTAL = 17
     NOTCH_POINT = 18
+    TGPP = 99
     # Femur, Tibia
     ANATOMICAL_AXIS_PROXIMAL = 19
     ANATOMICAL_AXIS_DISTAL = 20
@@ -837,7 +838,6 @@ class Lower_Body(Abstract_lvl):
     LATERAL_CONDYLE_LATERAL = 29
     ANKLE_CENTER = 30
     MEDIAL_MALLEOLUS = 31
-    TGPP = 99
     TTP = 98
     # Fibula
     LATERAL_MALLEOLUS = 32
@@ -893,7 +893,7 @@ _ABBREVIATION_TO_ENUM = {
     "TMM": (Full_Body_Instance.tibia_right, Lower_Body.MEDIAL_MALLEOLUS),
     "TAAP": (Full_Body_Instance.tibia_right, Lower_Body.ANATOMICAL_AXIS_PROXIMAL),
     "TADP": (Full_Body_Instance.tibia_right, Lower_Body.ANATOMICAL_AXIS_DISTAL),
-    "TGPP": (Full_Body_Instance.tibia_right, Lower_Body.TGPP),
+    "TGPP": (Full_Body_Instance.femur_right, Lower_Body.TGPP),
     "TTP": (Full_Body_Instance.tibia_right, Lower_Body.TTP),
     # Fibula
     "FLM": (Full_Body_Instance.fibula_right, Lower_Body.LATERAL_MALLEOLUS),

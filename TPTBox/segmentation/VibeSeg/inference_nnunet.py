@@ -84,7 +84,7 @@ def run_inference_on_file(
     gpu=None,
     keep_size: bool = False,
     fill_holes: bool = False,
-    logits: bool = False,
+    logits: bool = False,  # deprecated
     mapping=None,
     crop: bool = False,
     max_folds=None,
@@ -103,6 +103,7 @@ def run_inference_on_file(
     cache_model: bool = False,
     _key_ResEnc: str = "__nnUNet*ResEnc",
     fail_on_missing_memory=False,
+    _cpu_chunks: int | None = None,
     logger=logger,
 ) -> tuple[Image_Reference, np.ndarray | None]:
     """Load a VibeSeg model and run inference on the supplied NIfTI images.
@@ -122,7 +123,8 @@ def run_inference_on_file(
             original image size.
         fill_holes: If ``True``, fill holes in the segmentation mask after
             inference.
-        logits: If ``True``, also return the raw softmax logits array.
+        logits: Deprecated; Was commented out for less GPU waste.
+            If ``True``, also return the raw softmax logits array.
         mapping: Optional label remapping dict applied to the segmentation after
             inference.
         crop: If ``True``, crop the input to its foreground bounding box before
@@ -145,9 +147,12 @@ def run_inference_on_file(
         wait_till_gpu_percent_is_free: Minimum free GPU fraction to require
             before starting inference.
         tile_batch_size: Number of sliding-window tiles to run per network
-            forward pass. ``1`` (default) keeps the original per-tile behaviour;
+            forward pass. ``1`` (default) keeps the original per-tile behavior;
             larger values batch tiles to better saturate the GPU at the cost of
             higher peak memory.
+        _cpu_chunks: Split the prediction in k chunks along the largest axis.
+            This setting should only be used if there in not enough (CPU) RAM.
+            For GPU memory use the "memory_*" keys;
         verbose: Print progress information.
         cache_model: If ``True``, keep the loaded predictor in a process-wide
             cache and reuse it on subsequent calls with identical model and
@@ -174,10 +179,12 @@ def run_inference_on_file(
     if out_file is not None and Path(out_file).exists() and not override:
         return out_file, None
 
-    from TPTBox.segmentation.nnUnet_utils.inference_api import (
-        load_inf_model,
-        run_inference,
-    )
+    if min(input_nii[0].shape) <= 1:
+        shape = input_nii[0].shape
+        logger.on_fail(f"{shape=} has only {min(shape)} slice in a dimension.")
+        return None, None
+
+    from TPTBox.segmentation.nnUnet_utils.inference_api import _run_inference_patches, load_inf_model, run_inference
 
     if isinstance(idx, int):
         if auto_download:
@@ -251,6 +258,7 @@ def run_inference_on_file(
             wait_till_gpu_percent_is_free=wait_till_gpu_percent_is_free,
             tile_batch_size=tile_batch_size,
             fail_on_missing_memory=fail_on_missing_memory,
+            logger=logger,
         )
         if cache_model:
             _model_cache[cache_key] = nnunet
@@ -291,6 +299,7 @@ def run_inference_on_file(
         "\n",
         nnunet_path,
     )
+
     if orientation is not None:
         logger.print("orientation", orientation, f"from {input_nii[0].orientation}") if verbose else None
         input_nii = [i.reorient(orientation) for i in input_nii]
@@ -300,6 +309,7 @@ def run_inference_on_file(
         input_nii = [i.rescale_(zoom, mode=mode, verbose=True) for i in input_nii]
         logger.print(input_nii)
     logger.print("squash to float16") if verbose else None
+
     input_nii = [squash_so_it_fits_in_float16(i) for i in input_nii]
 
     if crop:
@@ -308,8 +318,17 @@ def run_inference_on_file(
     if padd != 0:
         p = (padd, padd)
         input_nii = [i.apply_pad([p, p, p], mode="reflect") for i in input_nii]
+    if _cpu_chunks is None or _cpu_chunks <= 1:
+        try:
+            seg_nii, _, softmax_logits = run_inference(input_nii, nnunet, logits=logits, logger=logger)
+        except MemoryError:
+            logger.print_error()
+            seg_nii = _run_inference_patches(input_nii, nnunet, None, logger=logger)
+            softmax_logits = None
+    else:
+        seg_nii = _run_inference_patches(input_nii, nnunet, _cpu_chunks, logger=logger)
+        softmax_logits = None
 
-    seg_nii, uncertainty_nii, softmax_logits = run_inference(input_nii, nnunet, logits=logits)
     if padd != 0:
         seg_nii = seg_nii[padd:-padd, padd:-padd, padd:-padd]
 
