@@ -1274,10 +1274,11 @@ class NII(NII_Math):
             import ants.ops.bias_correction as bc  # install antspyx not ants!
         except ModuleNotFoundError:
             import ants.utils.bias_correction as bc  # install antspyx not ants!
-        from ants.utils.convert_nibabel import from_nibabel
         from scipy.ndimage import binary_dilation, generate_binary_structure
+
+        from TPTBox.core.internal import ants_to_nifti, nifti_to_ants
         dtype = self.dtype
-        input_ants:ants.ANTsImage = from_nibabel(nib.nifti1.Nifti1Image(self.get_array(),self.affine))
+        input_ants:ants.ANTsImage = self.to_ants()
         if threshold != 0:
             mask_arr = self.get_array()
             mask_arr[mask_arr < threshold] = 0
@@ -1286,7 +1287,7 @@ class NII(NII_Math):
             struct = generate_binary_structure(3, 3)
             mask_arr = binary_dilation(mask_arr.copy(), structure=struct, iterations=3)
             mask_arr = mask_arr.astype(np.uint8)
-            mask:ants.ANTsImage = from_nibabel(nib.nifti1.Nifti1Image(mask_arr,self.affine))#self.set_array(mask,verbose=False).nii
+            mask:ants.ANTsImage = self.set_array(mask_arr,verbose=False).to_ants()
             mask = mask.set_spacing(input_ants.spacing) # type: ignore
         out = bc.n4_bias_field_correction(
             input_ants,
@@ -1299,11 +1300,10 @@ class NII(NII_Math):
 
         )
 
-
-        out_nib:Nifti1Image = out.to_nibabel()
+        out_nib:Nifti1Image = ants_to_nifti(out)
         if crop:
             # Crop to regions that had a normalization applied. Removes a lot of dead space
-            dif = NII((input_ants - out).to_nibabel())
+            dif = NII(ants_to_nifti(input_ants - out))
             dif_arr = dif.get_array()
             dif_arr[dif_arr != 0] = 1
             dif.set_array_(dif_arr,verbose=verbose)
@@ -1513,7 +1513,14 @@ class NII(NII_Math):
             log.print_error()
             log.on_fail("run 'pip install antspyx' to install hf-deepali")
             raise
-        return ants.from_nibabel(self.nii)
+        try:
+            from ants.utils.convert_nibabel import from_nibabel
+
+            return from_nibabel(self.nii)
+        except ModuleNotFoundError:
+            from ants.utils.nibabel_nifti_to_ants import from_nibabel_nifti
+
+            return from_nibabel_nifti(self.nii)
 
     def to_simpleITK(self) -> Any:
         """Converts this NII to a SimpleITK image.
