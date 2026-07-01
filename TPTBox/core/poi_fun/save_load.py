@@ -10,6 +10,7 @@ from typing_extensions import TYPE_CHECKING, TypeGuard  # noqa: UP035
 
 # from TPTBox import POI, POI_Global
 from TPTBox.core import bids_files
+from TPTBox.core.internal.nii_help import save_json
 from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.poi_fun.poi_abstract import POI_Descriptor
 from TPTBox.core.vert_constants import (
@@ -123,21 +124,8 @@ def save_poi(
         return
     json_object, print_add = _poi_to_dict_list(poi, additional_info, save_hint, resample_reference, verbose)
 
-    # Problem with python 3 and int64 serialization.
-    def convert(o):
-        if isinstance(o, np.integer):
-            return int(o)
-        if isinstance(o, np.floating):
-            return float(o)
-        if isinstance(o, np.ndarray):
-            return o.tolist()
-        if isinstance(o, Path):
-            return str(o.absolute())
-        raise TypeError(type(o))
-
     try:
-        with open(out_path, "w") as f:
-            json.dump(json_object, f, default=convert, indent=4)
+        save_json(out_path, json_object, indent=4)
     except TypeError:
         Path(out_path).unlink(missing_ok=True)
         raise

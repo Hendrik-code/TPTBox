@@ -355,8 +355,8 @@ class POI_Descriptor(AbstractSet, MutableMapping):
         return False
 
     def __len__(self) -> int:
-        if self._len is None:
-            self._len = len(list(self.items()))
+        # if self._len is None:
+        self._len = len(list(self.items()))
         return self._len
 
     def __iter__(self):
@@ -803,7 +803,7 @@ class Abstract_POI:
             obj.centroids.pop(loc, None)
         return obj
 
-    def extract_subregion(self, *location: Abstract_lvl | int, inplace: bool = False) -> Self:
+    def extract_subregion(self, *location: int | list[int] | Enum, inplace: bool = False) -> Self:
         """Return a POI containing only the specified subregion(s).
 
         Args:
@@ -829,16 +829,32 @@ class Abstract_POI:
         """In-place alias for :meth:`extract_subregion`."""
         return self.extract_subregion(*location, inplace=True)
 
-    def extract_vert(self, *vert_label: int, inplace: bool = False) -> Self:
-        """Deprecated — use :meth:`extract_region` instead."""
-        import warnings
+    def extract(
+        self,
+        *vert_label: tuple[int, int] | list[tuple[int, int]],
+        inplace: bool = False,
+    ) -> Self:
+        """Return a POI containing only the specified region(s) (vertebrae).
 
-        warnings.warn("extract_vert id deprecated use extract_region instead", stacklevel=5)  # TODO remove in version 2.0
-        return self.extract_region(*vert_label, inplace=inplace)
+        Args:
+            *vert_label: One or more region IDs, lists of IDs, or ``Enum``
+                members to retain.
+            inplace: Filter in place.  Defaults to ``False``.
 
-    def extract_vert_(self, *vert_label: int) -> Self:
-        """Deprecated in-place alias — use :meth:`extract_region_` instead."""
-        return self.extract_vert(*vert_label, inplace=True)
+        Returns:
+            Filtered POI.
+        """
+        # flatten list
+        vert_label = _flatten(vert_label)
+        vert_labels = tuple(vert_label)
+        extracted_centroids = POI_Descriptor()
+        for x1, x2, y in self.centroids.items():
+            if (x1, x2) in vert_labels:
+                extracted_centroids[x1, x2] = y
+        if inplace:
+            self.centroids = extracted_centroids
+            return self
+        return self.copy(centroids=extracted_centroids)
 
     def extract_region(self, *vert_label: int | list[int] | Enum, inplace: bool = False) -> Self:
         """Return a POI containing only the specified region(s) (vertebrae).

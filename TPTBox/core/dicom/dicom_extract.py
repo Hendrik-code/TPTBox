@@ -28,26 +28,51 @@ from TPTBox.core.nii_wrapper import NII
 
 sys.path.append(str(Path(__file__).parent))
 
+import string
+
 from TPTBox.core.dicom.dicom2nii_utils import get_json_from_dicom, load_json, save_json, test_name_conflict
 
 logger = Print_Logger()
 
 
-def _inc_key(keys: dict, inc: int = 1) -> None:
-    """Increment the sequence key inside *keys* by *inc*."""
-    k = "sequ"
+def _next_letter_suffix(s: str, inc: int = 1) -> str:
+    """Increment a letter suffix: a -> b, z -> aa, aa -> ab."""
+    alphabet = string.ascii_lowercase
+    # Convert to a number (base 26, 1-indexed)
+    n = 0
+    for c in s:
+        n = n * 26 + (ord(c) - ord("a") + 1)
+    n += inc
+    # Convert back to letters
+    result = []
+    while n > 0:
+        n -= 1
+        result.append(alphabet[n % 26])
+        n //= 26
+    return "".join(reversed(result))
+
+
+def _inc_key(keys: dict, inc: int = 1, k="sequ") -> None:
+    """Increment the sequence key inside *keys* by appending letter suffixes."""
     if k not in keys:
-        keys[k] = 0
+        keys[k] = "0"
+    value = str(keys[k])
     try:
-        v = int(keys[k])
-        keys[k] = str(v + int(inc))
-    except Exception:
-        try:
-            a, b = str(keys[k]).rsplit("-", maxsplit=2)
-        except Exception:
-            a = keys[k]
-            b = 0
-        keys[k] = a + "-" + str(int(b) + int(inc))
+        # Pure number: 100 -> 100-a
+        int(value)
+        keys[k] = f"{value}-a"
+        return  # noqa: TRY300
+    except ValueError:
+        pass
+
+    try:
+        base, suffix = value.rsplit("-", maxsplit=1)
+        if suffix.isalpha():
+            keys[k] = f"{base}-{_next_letter_suffix(suffix, inc)}"
+        else:
+            keys[k] = f"{base}-a"
+    except ValueError:
+        keys[k] = f"{value}-a"
 
 
 def _generate_bids_path(

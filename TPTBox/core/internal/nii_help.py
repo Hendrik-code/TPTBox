@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 from collections.abc import Callable
 from functools import wraps
@@ -14,10 +15,11 @@ from TPTBox.core import bids_files
 if TYPE_CHECKING:
     from TPTBox.core.nii_poi_abstract import Has_Grid
     from TPTBox.core.nii_wrapper import NII
+
 from TPTBox.core.vert_constants import AFFINE, MODES, SHAPE, ZOOMS, Sentinel, _supported_img_files
 
 
-def secure_save(func) -> Callable:
+def secure_save(func, *, file_types=tuple(_supported_img_files)) -> Callable:
     """Decorator that writes to a `.backup` file first and restores it if saving fails.
 
     Steps: (1) back up existing file, (2) call the wrapped save function, (3) delete backup on
@@ -48,7 +50,7 @@ def secure_save(func) -> Callable:
     @wraps(func)
     def wrapper(self, file: str | Path | bids_files.BIDS_FILE, *args, **kwargs):
         if isinstance(file, bids_files.BIDS_FILE):
-            for file_type in _supported_img_files:
+            for file_type in file_types:
                 if file_type in file.file:
                     file = file.file[file_type]
                     break
@@ -79,6 +81,84 @@ def secure_save(func) -> Callable:
             raise
 
     return wrapper
+
+
+def _convert(obj):
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, Path):
+        return str(obj.absolute())
+    raise TypeError(type(obj))
+
+
+def _save_json(data, filepath: str | Path | bids_files.BIDS_FILE, indent=4, convert=_convert):
+
+    if isinstance(filepath, bids_files.BIDS_FILE):
+        if "json" in filepath.file:
+            filepath = filepath.file["json"]
+        else:
+            nf = filepath.get_nii_file()
+            if nf is not None:
+                filepath = (nf.parent) / (nf.name.split(".")[0] + ".json")
+            else:
+                nf = next(iter(filepath.file.values()))
+                filepath = (nf.parent) / (nf.name.rsplit(".", maxsplit=1)[0] + ".json")
+    # print(markups[-1].get("display"))
+    with open(filepath, "w") as f:
+        json.dump(data, f, indent=indent, default=convert)
+
+
+def save_json(filepath: str | Path | bids_files.BIDS_FILE, data, indent=4, convert=_convert) -> None:
+    """Safely save a Python object as a JSON file with automatic backup protection.
+
+    This function writes JSON data to disk using a safe save mechanism:
+    if the target file already exists, it is first moved to a `.backup`
+    file. If writing succeeds, the backup is removed. If writing fails,
+    the original file is restored.
+
+    The function supports flexible input types for the target path:
+        - str or Path: written directly to disk
+        - bids_files.BIDS_FILE: resolved to an appropriate `.json` path
+
+    Non-JSON-serializable types are handled via a custom converter
+    that supports:
+        - numpy integers → int
+        - numpy floats → float
+        - numpy arrays → list
+        - pathlib.Path → absolute string path
+
+    Args:
+        filepath (str | Path | bids_files.BIDS_FILE):
+            Target file path or BIDS file container.
+        data (Any):
+            Python object to serialize into JSON.
+        indent (int, optional):
+            Pretty-print indentation level. Default is 4.
+        convert (callable, optional):
+            Custom serialization function for unsupported types.
+            Defaults to `_convert`.
+
+    Returns:
+        None
+
+    Notes:
+        - Uses `secure_save` to ensure atomic write semantics with backup/restore.
+        - If `filepath` is a `BIDS_FILE`, the `.json` path is inferred from:
+            1. explicit "json" entry in the file map
+            2. associated NIfTI file path
+            3. fallback to any available file in the container
+        - This function is intended for structured metadata and annotation storage.
+
+    Raises:
+        Exception:
+            Propagates any error raised during serialization or file writing,
+            after attempting automatic recovery of the original file.
+    """
+    return secure_save(_save_json, file_types=["json"])(data, filepath, indent=indent, convert=convert)
 
 
 def _resample_from_to(

@@ -167,7 +167,6 @@ ignore = [
     "PLR2004",
     "SIM105",
     "TRY003",
-    "UP038",
     "N999",
     "E741",
     "SIM118",  # dictionary keys
