@@ -131,6 +131,7 @@ class Test_extract_vertebra_bodies(unittest.TestCase):
 
 # --------------------------------------------------------------------------- inference_api
 @unittest.skipIf(not has_nnunet, "requires nnunetv2")
+@unittest.skipIf(not has_torch, "requires torch to import the segmentation module")
 class Test_inference_api_run_inference(unittest.TestCase):
     def test_marshalling_single(self):
         from TPTBox.segmentation.nnUnet_utils.inference_api import run_inference
@@ -201,6 +202,7 @@ class Test_inference_api_run_inference(unittest.TestCase):
 
 
 @unittest.skipIf(not has_nnunet, "requires nnunetv2")
+@unittest.skipIf(not has_torch, "requires torch")
 class Test_inference_api_load_model(unittest.TestCase):
     def _load(self, td, **kwargs):
         from TPTBox.segmentation.nnUnet_utils.inference_api import load_inf_model
@@ -293,6 +295,7 @@ class Test_inference_nnunet_helpers(unittest.TestCase):
 
 
 @unittest.skipIf(not has_nnunet, "requires nnunetv2")
+@unittest.skipIf(not has_torch, "requires torch")
 class Test_run_inference_on_file(unittest.TestCase):
     @staticmethod
     def _fake_run_inference(in_list, _predictor=None, **_):
@@ -511,6 +514,7 @@ class Test_vibeseg(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- auto_download
+@unittest.skipIf(not has_torch, "requires torch")
 class Test_auto_download(unittest.TestCase):
     def setUp(self):
         from TPTBox.segmentation.VibeSeg import auto_download as ad
@@ -617,6 +621,7 @@ class Test_auto_download(unittest.TestCase):
 
 # --------------------------------------------------------------------------- spineps
 @unittest.skipIf(not has_spineps, "requires spineps")
+@unittest.skipIf(not has_torch, "requires torch")
 class Test_spineps(unittest.TestCase):
     def test_get_outpaths_spineps(self):
         from TPTBox.segmentation.spineps import get_outpaths_spineps
