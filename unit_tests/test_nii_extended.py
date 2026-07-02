@@ -615,7 +615,8 @@ class Test_NII_ConvexHull(unittest.TestCase):
         # check that the resulting hull is actually convex
         points = np.argwhere(hull.get_array() > 0)
         hull_vertices = ConvexHull(points)
-        hull_verteices2 = ConvexHull(nii.get_array() > 0)
+        points2 = np.argwhere(nii.get_array() > 0)
+        hull_verteices2 = ConvexHull(points2)
         self.assertEqual(len(hull_vertices.vertices), len(hull_verteices2.vertices))
 
     def test_convex_hull_inplace(self):
