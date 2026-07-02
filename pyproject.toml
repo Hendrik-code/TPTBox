@@ -51,6 +51,7 @@ coverage = ">=7.0.1"
 pytest-mock = "^3.6.0"
 exceptiongroup = { version = "^1.2", python = "<3.11" }
 tomli = {version = "*", python = "<3.11" }
+dicom2nifti = "*"
 
 [tool.poetry.group.docs.dependencies]
 mkdocs = ">=1.6"
