@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 import numpy as np
+from scipy.spatial import ConvexHull
 
 from TPTBox import NII
 from TPTBox.tests.test_utils import get_nii, get_random_ax_code, get_test_ct, get_test_mri, repeats
@@ -611,10 +612,7 @@ class Test_NII_ConvexHull(unittest.TestCase):
         hull = nii.calc_convex_hull(axis="S")
         self.assertGreaterEqual(int((hull.get_array() > 0).sum()), int((nii.get_array() > 0).sum()))
         self.assertEqual(hull.unique(), [1])
-
         # check that the resulting hull is actually convex
-        from scipy.spatial import ConvexHull
-
         points = np.argwhere(hull.get_array() > 0)
         hull_vertices = ConvexHull(points)
         hull_verteices2 = ConvexHull(nii.get_array() > 0)
