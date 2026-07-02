@@ -569,12 +569,20 @@ class Test_NII_MatchHistograms(unittest.TestCase):
         out = mri.match_histograms(get_test_mri()[0])
         self.assertEqual(out.shape, mri.shape)
         self.assertFalse(out.seg)
+        # check that the histogram is actaulyl equal afterwards
+        mri_hist = np.histogram(mri.get_array().ravel(), bins=256, range=(0, 255))
+        out_hist = np.histogram(out.get_array().ravel(), bins=256, range=(0, 255))
+        self.assertTrue(np.allclose(mri_hist[0], out_hist[0], atol=1e-5))
 
     def test_match_histograms_inplace(self):
         mri = get_test_mri()[0]
         ref = get_test_mri()[0]
         mri.match_histograms_(ref)
         self.assertEqual(mri.shape, ref.shape)
+        # check that the histogram is actaulyl equal afterwards
+        mri_hist = np.histogram(mri.get_array().ravel(), bins=256, range=(0, 255))
+        out_hist = np.histogram(ref.get_array().ravel(), bins=256, range=(0, 255))
+        self.assertTrue(np.allclose(mri_hist[0], out_hist[0], atol=1e-5))
 
 
 class Test_NII_SmoothLabelwise(unittest.TestCase):
@@ -603,6 +611,14 @@ class Test_NII_ConvexHull(unittest.TestCase):
         hull = nii.calc_convex_hull(axis="S")
         self.assertGreaterEqual(int((hull.get_array() > 0).sum()), int((nii.get_array() > 0).sum()))
         self.assertEqual(hull.unique(), [1])
+
+        # check that the resulting hull is actually convex
+        from scipy.spatial import ConvexHull
+
+        points = np.argwhere(hull.get_array() > 0)
+        hull_vertices = ConvexHull(points)
+        hull_verteices2 = ConvexHull(nii.get_array() > 0)
+        self.assertEqual(len(hull_vertices.vertices), len(hull_verteices2.vertices))
 
     def test_convex_hull_inplace(self):
         nii = self._l_shape()
