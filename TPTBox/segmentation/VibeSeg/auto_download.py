@@ -24,6 +24,8 @@ from typing import Any
 
 from tqdm import tqdm
 
+from TPTBox.logger import logger
+
 logger = logging.getLogger(__name__)
 WEIGHTS_URL_ = "https://github.com/robert-graf/VibeSegmentator/releases/download/v1.0.0/"
 env_name = "VIBESEG_WEIGHTS_PATH"
@@ -96,9 +98,9 @@ def _download(weights_url: str, weights_dir: Path, text: str = "", is_zip: bool 
         with urllib.request.urlopen(str(weights_url)) as response:
             file_size = int(response.info().get("Content-Length", -1))
     except Exception:
-        print("Download attempt failed:", weights_url)
+        logger.on_fail("Download attempt failed:", weights_url)
         return
-    print(f"Downloading {text}...")
+    logger.on_neutral(f"Downloading {text}...")
 
     with tqdm(total=file_size, unit="B", unit_scale=True, unit_divisor=1024, desc=Path(weights_url).name) as pbar:
 
@@ -111,7 +113,7 @@ def _download(weights_url: str, weights_dir: Path, text: str = "", is_zip: bool 
         # Download the file
         urllib.request.urlretrieve(str(weights_url), zip_path, reporthook=update_progress)
     if is_zip:
-        print(f"Extracting {text}...")
+        logger.on_neutral(f"Extracting {text}...")
         with zipfile.ZipFile(zip_path, "r") as zip_ref:
             zip_ref.extractall(weights_dir)
         os.remove(zip_path)  # noqa: PTH107

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Literal
 
 from TPTBox import BIDS_FILE, NII, Print_Logger
+from TPTBox.logger import logger
 
 logger = Print_Logger()
 
@@ -169,9 +170,10 @@ def _run_spineps_all(nii_dataset: Path | str) -> None:
         try:
             # Execute the command and capture output
             result = subprocess.run(command, check=True, capture_output=True, text=True)
-            print(f"Model {model_semantic} processing complete:\n", result.stdout)
+            _logger = logger
+            _logger.on_ok(f"Model {model_semantic} processing complete:\n", result.stdout)
         except subprocess.CalledProcessError as e:
-            print(f"Error during processing {model_semantic}:\n", e.stderr)
+            logger.on_fail(f"Error during processing {model_semantic}:\n", e.stderr)
 
 
 def _run_spineps_internal(

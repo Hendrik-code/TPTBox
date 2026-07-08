@@ -29,8 +29,20 @@ from TPTBox.core.poi import calc_poi_from_two_segs as calc_poi_labeled_buffered
 from TPTBox.core.poi_fun.poi_global import POI_Global
 from TPTBox.core.vert_constants import ZOOMS, Location, Vertebra_Instance, v_idx2name, v_idx_order, v_name2idx
 
-# Logger
-from TPTBox.logger import Log_Type, Logger, Logger_Interface, Print_Logger, String_Logger
+# Logger — everything goes through `configure_logging()` and the `logger` proxy.
+from TPTBox.logger import (
+    Log_Type,
+    Logger,
+    Logger_Interface,
+    Print_Logger,
+    Reflection_Logger,
+    String_Logger,
+    configure_logging,
+    get_default_logger,
+    log,
+    logger,
+    loguru_logger,
+)
 from TPTBox.logger.log_file import No_Logger
 
 Centroids = POI
@@ -57,8 +69,13 @@ __all__ = [
     "calc_centroids",
     "calc_poi_from_subreg_vert",
     "calc_poi_from_two_segs",
+    "configure_logging",
     "core",
+    "get_default_logger",
     "load_poi",
+    "log",
+    "logger",
+    "loguru_logger",
     "np_utils",
     "to_nii",
     "v_idx2name",

@@ -73,6 +73,9 @@ class Logger_Interface(Protocol):
     def _preprocess_text(self, text: tuple[str, ...], ltype=Log_Type.TEXT, ignore_prefix: bool = False) -> str:
         """Processes given text parts, converting manually specified datatypes, and adds the prefix and ltype corresponding color.
 
+        Layout: ``[prefix] YYYY-MM-DD HH:MM:SS body`` — the ``[]`` prefix always comes
+        first, then the timestamp, then the message body. No level name is emitted.
+
         Args:
             text (tuple[str, ...]): _description_
             type (_type_, optional): _description_. Defaults to Log_Type.TEXT.
@@ -86,7 +89,7 @@ class Logger_Interface(Protocol):
 
         if "[" not in string[:3] and not ignore_prefix:
             prefix = self._get_logger_prefix(ltype)
-            string = prefix + " " + string
+            string = prefix + " " + _backend._timestamp() + " " + string
 
         return string
 
@@ -632,4 +635,174 @@ def _set_indent(indent_change: int | bool):
     return indentation_level
 
 
-log = No_Logger()
+_default_logger: Logger_Interface = No_Logger()
+
+
+def _set_default_logger(logger: Logger_Interface) -> None:
+    """Install a module-wide default logger. Prefer :func:`configure_logging`."""
+    global _default_logger  # noqa: PLW0603
+    _default_logger = logger
+
+
+def get_default_logger() -> Logger_Interface:
+    """Return the module-wide default logger."""
+    return _default_logger
+
+
+def _set_logger_silence() -> None:
+    """Silence every TPTBox printout.
+
+    default logger becomes a non-verbose ``No_Logger`` and the global terminal severity threshold is raised above every real level.
+    """
+    from TPTBox.logger import _loguru_backend as _backend_mod
+
+    _set_default_logger(No_Logger())
+    _default_logger.default_verbose = False  # type: ignore[attr-defined]
+    _backend_mod._set_verbosity_level(_backend_mod.SILENT_LEVEL)
+
+
+class _LoggerProxy:
+    """Attribute-forwarding proxy: every access resolves to the current default logger.
+
+    Import once at module top-level:
+
+        from TPTBox.logger import logger
+
+    Then use it exactly like a ``Logger``:
+
+        logger.on_ok("done")
+        logger.on_fail("bad")
+        logger.print("plain", ltype=Log_Type.LOG)
+
+    ``logger.<name>`` always looks up ``<name>`` on whatever :func:`get_default_logger`
+    currently returns — so :func:`configure_logging` reconfigures every callsite at
+    once, without library code having to be re-imported or refactored.
+    """
+
+    __slots__ = ()
+
+    def __getattr__(self, name: str):
+        return getattr(_default_logger, name)
+
+    def __repr__(self) -> str:
+        return f"<TPTBox logger → {_default_logger!r}>"
+
+
+logger = _LoggerProxy()
+# `log` is kept as a backwards-compatible alias for the older `log.print(...)` idiom.
+log = logger
+
+
+def _capture_exceptions(fn):
+    """Decorator: log any exception raised by ``fn`` through the default logger, then re-raise.
+
+    The uncaught exception is captured via :func:`Logger_Interface.print_error`, which
+    emits a colored traceback to the terminal AND a structured Loguru record so
+    user-added sinks receive the exception too.
+    """
+    import functools
+
+    @functools.wraps(fn)
+    def _wrapped(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except Exception:
+            get_default_logger().print_error()
+            raise
+
+    return _wrapped
+
+
+def configure_logging(
+    file=None,
+    filename=None,
+    level=None,
+    verbose=None,
+    silent: bool = False,
+    capture_warnings: bool | None = None,
+    capture_exceptions: bool | None = None,
+    loguru_sink=None,
+) -> dict:
+    """One-call TPTBox logging setup — the single entry point for configuring output.
+
+    Every argument is optional; unset args leave the corresponding aspect untouched.
+    Call with no arguments to inspect the current effective configuration.
+
+    Args:
+        file: Path to a log file, or a directory / dataset root (in which case a
+            timestamped ``<start>_<filename>_log.log`` is created inside a ``logs/``
+            subfolder). ``None`` leaves the current default logger in place.
+        filename: The log file's stem when ``file`` is a directory / dataset root.
+            Ignored when ``file`` is a full path or ``None``.
+        level: Global terminal severity threshold. Accepts an int (loguru severity),
+            a string (``"WARNING"``, ``"TPTBOX_OK"``, ``"INFO"``, ...), or a
+            :class:`Log_Type`.
+        verbose: Sets ``default_verbose`` on the default logger. When True, every
+            ``logger.print(..., verbose=None)`` call inside TPTBox reaches the terminal;
+            when False, only file sinks receive them. Independent of ``level``.
+        silent: Shortcut for ``verbose=False`` plus terminal threshold above every
+            real level. Nothing prints.
+        capture_warnings: If True, install a hook so ``warnings.warn(...)`` is routed
+            through the logger. If False, restore the previous behavior.
+        capture_exceptions: If True, replace ``sys.excepthook`` so uncaught exceptions
+            are routed through Loguru. If False, restore ``sys.__excepthook__``.
+        loguru_sink: Optional dict of kwargs forwarded to ``loguru_logger.add(...)`` —
+            e.g. ``{"sink": "run.jsonl", "serialize": True, "level": "TPTBOX_WARNING"}``.
+
+    Returns:
+        A dict with the resulting configuration: ``file``, ``level``, ``verbose``,
+        ``capture_warnings``, ``capture_exceptions``.
+    """
+    import sys
+
+    from TPTBox.logger import _loguru_backend as _backend_mod
+
+    if file is not None:
+        _set_default_logger(_build_logger(file, filename))
+
+    if silent:
+        _set_logger_silence()
+    else:
+        if level is not None:
+            _backend_mod._set_verbosity_level(level)
+        if verbose is not None:
+            _default_logger.default_verbose = verbose  # type: ignore[attr-defined]
+
+    if capture_warnings is True:
+        _backend_mod._install_warnings_hook()
+    elif capture_warnings is False:
+        _backend_mod._restore_warnings_hook()
+
+    if capture_exceptions is True:
+        _backend_mod._install_excepthook()
+    elif capture_exceptions is False:
+        sys.excepthook = sys.__excepthook__
+
+    if loguru_sink is not None:
+        from TPTBox.logger._loguru_backend import logger as _loguru
+
+        _loguru.add(**loguru_sink)
+
+    return {
+        "file": getattr(_default_logger, "_filepath", None),
+        "level": _backend_mod.current_level(),
+        "verbose": getattr(_default_logger, "default_verbose", None),
+        "capture_warnings": _backend_mod._original_showwarning is not None,
+        "capture_exceptions": sys.excepthook is not sys.__excepthook__,
+    }
+
+
+def _build_logger(file, filename) -> Logger:
+    """Instantiate a :class:`Logger` from ``file`` (path-or-directory) and ``filename``.
+
+    - ``file`` is a directory: use it as-is as the log dataset root, with ``filename`` as
+      the log stem (defaults to ``"run"``).
+    - ``file`` is a file path: use its parent as the root and its stem as the log stem
+      (``filename`` overrides the stem if provided).
+    """
+    from pathlib import Path
+
+    file = Path(file)
+    if file.exists() and file.is_dir():
+        return Logger(file, filename or "run")
+    return Logger(file.parent or Path("."), filename or file.stem or "run")

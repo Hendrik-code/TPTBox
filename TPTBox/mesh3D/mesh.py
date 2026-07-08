@@ -11,7 +11,7 @@ import numpy as np
 import pyvista as pv
 from skimage.measure import marching_cubes
 
-from TPTBox import NII, POI, Image_Reference, Log_Type, to_nii_seg
+from TPTBox import NII, POI, Image_Reference, Log_Type, logger, to_nii_seg
 from TPTBox.core import vert_constants as vc
 from TPTBox.core.np_utils import np_bbox_binary
 from TPTBox.core.poi import COORDINATE
@@ -122,7 +122,7 @@ class SegmentationMesh(Mesh3D):
 
         # Force dtype to uint
         if np.issubdtype(int_arr.dtype, np.floating):
-            print("input is of type float, converting to int")
+            logger.on_warning("input is of type float, converting to int")
             int_arr.astype(np.uint16)
         # calculate bounding box cutout
         bbox_crop = np_bbox_binary(int_arr, px_dist=2)

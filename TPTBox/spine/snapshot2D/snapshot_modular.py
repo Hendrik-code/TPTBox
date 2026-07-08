@@ -25,6 +25,7 @@ from TPTBox import (
     Location,
     POI_Reference,
     calc_centroids,
+    logger,
     to_nii,
     to_nii_optional,
     v_idx2name,
@@ -395,7 +396,7 @@ def curve_projected_mip(
         try:
             thicke = [int(i // y_zoom) + int(i % y_zoom > 0) for i in thick]
         except Exception:
-            print("thick infinity bug", y_zoom, thick_t, thick)
+            logger.on_fail("thick infinity bug", y_zoom, thick_t, thick)
             thicke = (*thick_t,)
         thick = thicke
         y_post_rel_to_border = y_ref + int(0.4 * (shp[1] - 1 - y_ref))  # one-third distance to border
@@ -493,7 +494,7 @@ def curve_projection_axial_fallback(
                 axis=0,
             )
         except Exception as e:
-            print(e)
+            logger.on_warning(e)
             axl_plane = np.zeros((1, 1))
         return axl_plane
 
@@ -689,7 +690,7 @@ def plot_sag_centroids(
                     zorder=2,
                 )
         except Exception as e:
-            print(e)
+            logger.on_warning(e)
     if "line_segments_sag" in ctd.info:
         for color, x, (c, d) in ctd.info["line_segments_sag"]:
             if len(x) == 2:
@@ -1050,7 +1051,7 @@ def to_cdt(ctd_bids: POI_Reference | None) -> POI | None:
     ctd = POI.load(ctd_bids, allow_global=True)
     if len(ctd) > 0:  # handle case if empty centroid file given
         return ctd
-    print("[!][snp] To few centroids", ctd)
+    logger.on_fail("[snp] To few centroids", ctd)
     return None
 
 
@@ -1169,7 +1170,7 @@ def create_snapshot(  # noqa: C901
             else:
                 ctd_tmp = ctd
         except Exception:
-            print("did not manage to calc ctd_tmp\n", frame)
+            logger.on_fail("did not manage to calc ctd_tmp\n", frame)
             raise
         if frame.curve_location is None:
             if frame.show_these_subreg_poi is not None:
@@ -1208,7 +1209,7 @@ def create_snapshot(  # noqa: C901
             else:
                 sag_seg, cor_seg, axl_seg = (None, None, None)
         except Exception:
-            print(frame)
+            logger.on_fail(frame)
             raise
         # Conversion to 2D image done, now normalization
         try:
@@ -1219,7 +1220,8 @@ def create_snapshot(  # noqa: C901
             max_cor = np.percentile(cor_img[cor_img != 0], 99)
         except Exception:
             max_cor = 1
-        print("max sag/cor", max_sag, max_cor) if verbose else None
+        if verbose:
+            logger.on_neutral("max sag/cor", max_sag, max_cor)
         ##MRT##
         if frame.mode == "MRI":
             max_intens = max(max_sag, max_cor)  # type: ignore
@@ -1368,7 +1370,8 @@ def create_snapshot(  # noqa: C901
         snp_path = [str(snp_path)]
     for path in snp_path:
         fig.savefig(str(path))
-        print("[*] Snapshot saved:", path) if verbose else None
+        if verbose:
+            logger.on_save("Snapshot saved:", path)
     plt.close()
     return snp_path
 

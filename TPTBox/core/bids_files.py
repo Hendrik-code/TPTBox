@@ -14,6 +14,7 @@ from warnings import warn
 import numpy as np
 
 import TPTBox
+from TPTBox.logger import logger
 
 if TYPE_CHECKING:
     from TPTBox.core.nii_poi_abstract import Grid
@@ -66,28 +67,29 @@ def validate_entities(key: str, value: str, name: str, verbose: bool) -> bool:
         return True
     try:
         key = key.lower()
+        log = logger
         if key not in entities_keys:
-            print(
-                f"[!] {key} is not in list of legal keys. This name '{name}' is invalid. Legal keys are: {list(entities_keys.keys())}. \nFor use see https://bids-specification.readthedocs.io/en/stable/99-appendices/09-entities.html"
+            log.on_fail(
+                f"{key} is not in list of legal keys. This name '{name}' is invalid. Legal keys are: {list(entities_keys.keys())}. \nFor use see https://bids-specification.readthedocs.io/en/stable/99-appendices/09-entities.html"
             )
             entities_keys[key] = key
             return False
         if key in entity_alphanumeric and not value.isalnum():
-            print(f"[!] value for {key} must be alphanumeric. This name '{name}' is invalid, with value {value}")
+            log.on_fail(f"value for {key} must be alphanumeric. This name '{name}' is invalid, with value {value}")
             return False
         if key in entity_decimal and not value.isdecimal():
-            print(f"[!] value for {key} must be decimal. This name '{name}' is invalid, with value {value}")
+            log.on_fail(f"value for {key} must be decimal. This name '{name}' is invalid, with value {value}")
             return False
         # if int(value) == 0:
-        #    print(f"[!] value for {key} must be not 0. This name '{name}' is invalid, with value {value}")
+        #    log.on_fail(f"value for {key} must be not 0. This name '{name}' is invalid, with value {value}")
         if key in entity_format and value not in formats_relaxed:
-            print(f"[!] value for {key} must be a format. This name '{name}' is invalid, with value {value}")
+            log.on_fail(f"value for {key} must be a format. This name '{name}' is invalid, with value {value}")
             return False
         if key in entity_on_off and value not in ["on", "off"]:
-            print(f"[!] value for {key} must be in {['on', 'off']}. This name '{name}' is invalid, with value {value}")
+            log.on_fail(f"value for {key} must be in {['on', 'off']}. This name '{name}' is invalid, with value {value}")
             return False
         if key in entity_left_right and value not in ["L", "R"]:
-            print(f"[!] value for {key} must be in {['L', 'R']}. This name '{name}' is invalid, with value {value}")
+            log.on_fail(f"value for {key} must be in {['L', 'R']}. This name '{name}' is invalid, with value {value}")
             return False
         # parts = [
         #    "mag",
@@ -117,7 +119,7 @@ def validate_entities(key: str, value: str, name: str, verbose: bool) -> bool:
         else:
             return True
     except Exception as e:
-        print(e)
+        logger.on_fail(e)
         return False
 
 
@@ -148,29 +150,30 @@ def get_values_from_name(path: Path | str, verbose: bool) -> tuple[str, dict[str
 
     keys = bids_key.split("_")
     bids_format = keys[-1]
+    log = logger
     if bids_format not in formats_relaxed and verbose:
-        print(f"[!] Unknown format {bids_format} in file {name}", formats)
+        log.on_fail(f"Unknown format {bids_format} in file {name}", formats)
         formats_relaxed.append(bids_format)
     if file_type not in file_types and verbose:
-        print(f"[!] Unknown file_type {file_type} in file {name}")
+        log.on_fail(f"Unknown file_type {file_type} in file {name}")
 
     dic = {}
     for idx, s in enumerate(keys[:-1]):
         try:
             key, value = s.split("-", maxsplit=1)
             if idx == 0 and key != "sub" and verbose:
-                print(f"[!] First key must be sub not {key}. This name '{name}' is invalid")
+                log.on_fail(f"First key must be sub not {key}. This name '{name}' is invalid")
             if idx != 1 and key == "ses" and verbose:
-                print(f"[!] Session must be second key. This name '{name}' is invalid")
+                log.on_fail(f"Session must be second key. This name '{name}' is invalid")
 
             if key in dic and verbose:
-                print(f"[!] {bids_key} contains copies of the same key twice. This name '{name}' is invalid")
+                log.on_fail(f"{bids_key} contains copies of the same key twice. This name '{name}' is invalid")
 
             validate_entities(key, value, name, verbose)
             dic[key] = value
         except Exception:
             if verbose:
-                print(f'[!] "{s}" is not a valid key/value pair. Expected "KEY-VALUE" in {name}')
+                log.on_fail(f'"{s}" is not a valid key/value pair. Expected "KEY-VALUE" in {name}')
     return bids_format, dic, bids_key, file_type
 
 
@@ -231,9 +234,10 @@ def Buffered_BIDS_Global_info(
         try:
             with open(str(f / buffer_name), "wb") as b:
                 pickle.dump(new_buffer, b)
-                print("\n[ ] Save Buffer:", f) if verbose else None
+                if verbose:
+                    logger.on_neutral("Save Buffer:", f)
         except OSError:
-            print("Saving not allowed")
+            logger.on_fail("Saving not allowed")
 
         _cont = 0
         return new_buffer
@@ -243,7 +247,8 @@ def Buffered_BIDS_Global_info(
             assert "/" not in parent, "only top parent folder allowed"
             folder = Path(dataset, parent)
             if not folder.exists():
-                print("[ ] Dose not exist:", (folder), f"{' ':20}") if verbose else None
+                if verbose:
+                    logger.on_neutral("Dose not exist:", (folder), f"{' ':20}")
                 continue
             if (folder / buffer_name).exists():
                 import datetime
@@ -253,40 +258,31 @@ def Buffered_BIDS_Global_info(
 
                 age = today - file_mod_time
                 if age.days >= int(max_age_days):
-                    (
-                        print(
-                            "[ ] Delete Buffer - to old:",
+                    if verbose:
+                        logger.on_neutral(
+                            "Delete Buffer - to old:",
                             (folder / buffer_name),
                             f"{' ':20}",
                         )
-                        if verbose
-                        else None
-                    )
                     (folder / buffer_name).unlink()
             if (folder / buffer_name).exists() and parent not in recompute_parents:
                 with open((folder / buffer_name), "rb") as b:
                     l = pickle.load(b)
-                    (
-                        print(
-                            f"[{len(l):8}] Read Buffer:",
+                    if verbose:
+                        logger.on_neutral(
+                            f"Read Buffer [{len(l):8}]:",
                             (folder / buffer_name),
                             f"{' ':20}",
                         )
-                        if verbose
-                        else None
-                    )
                     files[dataset] += l
             else:
-                (
-                    print(
-                        f"[{_cont:8}] Create new Buffer:",
+                if verbose:
+                    logger.on_neutral(
+                        f"Create new Buffer [{_cont:8}]:",
                         (folder / buffer_name),
                         f"{' ':20}",
                         end="\r",
                     )
-                    if verbose
-                    else None
-                )
                 files[dataset] += save_buffer((folder), buffer_name)
     if filter_file is not None:
         files: dict[Path | str, list[Path]] = {d: [g for g in f if filter_file(g)] for d, f in files.items()}
@@ -315,7 +311,7 @@ def _scan_tree(path, lvl=1, filter_folder=lambda _x, _y: True, verbose=False):
             yield from _scan_tree(entry.path, lvl=lvl + 1, verbose=verbose)
         elif entry.name[0] != ".":
             if verbose:
-                print(f"[{_cont:8}]", end="\r")
+                logger.on_neutral(f"[{_cont:8}]", end="\r", ignore_prefix=True)
                 _cont += 1
 
             yield entry
@@ -365,10 +361,10 @@ class BIDS_Global_info:
         for ds in datasets:
             ds_path = Path(ds) if isinstance(ds, str) else ds
             if not ds_path.name.startswith("dataset-"):
-                print(f"[!] Dataset {ds_path.name} does not start with 'dataset-'")
+                logger.on_fail(f"Dataset {ds_path.name} does not start with 'dataset-'")
         for ps in parents:
             if not any(ps.startswith(lp) for lp in parents):
-                print(f"[!] Parentfolder {ps} is not a legal name")
+                logger.on_fail(f"Parentfolder {ps} is not a legal name")
 
         self.datasets = datasets
         self.parents = parents
@@ -437,7 +433,7 @@ class BIDS_Global_info:
                 bids_key, file_type = str(bids).rsplit("/", maxsplit=1)[-1].split(".", maxsplit=1)
                 # print(bids_key)
             except Exception:
-                print("[!] skip file with out a type declaration:", bids.name)
+                logger.on_fail("skip file with out a type declaration:", bids.name)
                 # raise e
                 return
 
@@ -455,14 +451,12 @@ class BIDS_Global_info:
         if subject not in self.subjects:
             self.subjects[subject] = Subject_Container(subject, self.sequence_splitting_keys)
         self.count_file += 1
-        (
-            print(
+        if self.verbose:
+            logger.on_neutral(
                 f"Found: {subject}, total file keys {(self.count_file)},  total subjects = {len(self.subjects)}    ",
                 end="\r",
+                ignore_prefix=True,
             )
-            if self.verbose
-            else None
-        )
         self.subjects[subject].add(bids)
 
     def enumerate_subjects(self, sort: bool = False, shuffle: bool = False) -> list[tuple[str, Subject_Container]]:
@@ -1093,13 +1087,10 @@ class BIDS_FILE:
             for key, value in info.items():
                 # New Keys are getting checked!
                 if non_strict_mode:
-                    (
-                        print(
-                            f"[!] {key} is not in list of legal keys. This name '{key}' is invalid. Legal keys are: {list(entities_keys.keys())}. \nFor use see https://bids-specification.readthedocs.io/en/stable/99-appendices/09-entities.html"
+                    if key not in entities_keys:
+                        logger.on_fail(
+                            f"{key} is not in list of legal keys. This name '{key}' is invalid. Legal keys are: {list(entities_keys.keys())}. \nFor use see https://bids-specification.readthedocs.io/en/stable/99-appendices/09-entities.html"
                         )
-                        if key not in entities_keys
-                        else None
-                    )
                 else:
                     assert key in entities_keys, (
                         f"[!] {key} is not in list of legal keys. This name '{key}' is invalid. Legal keys are: {list(entities_keys.keys())}. \nFor use see https://bids-specification.readthedocs.io/en/stable/99-appendices/09-entities.html"
@@ -1601,7 +1592,7 @@ class BIDS_FILE:
             sequence_splitting_keys (list[str]): list of keys to use for splitting
         """
         if "sub" not in self.info:
-            print(f"family_id, no sub-key, got {self.info}")
+            logger.on_fail(f"family_id, no sub-key, got {self.info}")
             identifier = "sub-404"
         else:
             identifier = "sub-" + self.info["sub"]

@@ -9,6 +9,7 @@ from TPTBox import POI, Location, Logger_Interface, Print_Logger
 from TPTBox.core.compat import zip_strict
 from TPTBox.core.nii_wrapper import NII
 from TPTBox.core.vert_constants import Vertebra_Instance
+from TPTBox.logger import logger
 
 _log = Print_Logger()
 sacrum_w_o_arcus = (Vertebra_Instance.COCC.value, Vertebra_Instance.S6.value, Vertebra_Instance.S5.value, Vertebra_Instance.S4.value)
@@ -106,7 +107,7 @@ def paint_into_NII(
                 assert a is not None
                 direction = np.array(poi[idx, goal]) - np.array(poi[idx, start])
                 if abs(direction.sum().item()) < 0.000000000001:
-                    print("skip", idx, goal, "-", start)
+                    logger.on_debug("skip", idx, goal, "-", start)
                     continue
                 a = add_ray_to_img(poi[idx, start], direction, a, True, value=199, dilate=2)  # type: ignore
             except KeyError:

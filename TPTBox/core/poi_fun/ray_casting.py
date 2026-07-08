@@ -11,6 +11,7 @@ from TPTBox import NII, POI, Print_Logger, Vertebra_Instance
 from TPTBox.core.poi_fun._help import sacrum_w_o_arcus, to_local_np
 from TPTBox.core.poi_fun.pixel_based_point_finder import get_direction
 from TPTBox.core.vert_constants import COORDINATE, DIRECTIONS, Location
+from TPTBox.logger import logger
 from TPTBox.logger.log_file import Logger_Interface
 
 _log = Print_Logger()
@@ -102,7 +103,7 @@ def max_distance_ray_cast_convex_npfast(
         y = start_coord[1] + norm_vec[1] * mid
         z = start_coord[2] + norm_vec[2] * mid
         val = trilinear_interpolate(region_array, x, y, z)
-        print(f"Raycast check at distance {mid:.2f}: value={val:.4f}")
+        logger.on_debug(f"Raycast check at distance {mid:.2f}: value={val:.4f}")
         if val > 0.5:
             min_v = mid
         else:
@@ -585,9 +586,10 @@ def calculate_pca_normal_np(
     pca.fit(points)
     # First, second, and third principal components
     if verbose:
-        print(f"Main Axis (PC1): {pca.components_[0]}")
-        print(f"Secondary Axis (PC2): {pca.components_[1]}")
-        print(f"Third Axis (PC3): {pca.components_[2]}")
+        _log = logger
+        _log.on_neutral(f"Main Axis (PC1): {pca.components_[0]}")
+        _log.on_neutral(f"Secondary Axis (PC2): {pca.components_[1]}")
+        _log.on_neutral(f"Third Axis (PC3): {pca.components_[2]}")
     normal_vector = pca.components_[pca_component]
     if zoom is not None:
         normal_vector = normal_vector / np.array(zoom)

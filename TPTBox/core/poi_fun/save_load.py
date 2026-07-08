@@ -416,7 +416,7 @@ def _load_docker_centroids(dict_list: list, centroids: POI_Descriptor, format_: 
                     subreg_id = conversion_poi[subreg]
                     centroids[vert_id, subreg_id] = (d["X"], d["Y"], d["Z"])
                 except Exception:
-                    print(f"Label {d['label']} is not an integer and cannot be converted to an int")
+                    log.on_warning(f"Label {d['label']} is not an integer and cannot be converted to an int")
                     centroids[0, d["label"]] = (d["X"], d["Y"], d["Z"])
         else:
             raise ValueError(d)

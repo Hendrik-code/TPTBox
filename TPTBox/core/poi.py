@@ -962,7 +962,7 @@ def _buffer_it(func):
         len_pref = 0
         if buffer_file is not None and Path(buffer_file).exists():
             assert extend_to is None
-            print("load")
+            log.on_neutral("load")
             extend_to = POI.load(buffer_file)
             len_pref = len(extend_to)
         kwargs["extend_to"] = extend_to
@@ -1053,7 +1053,7 @@ def calc_poi_from_subreg_vert(
     # Step 1 get all required locations, crop vert/subreg
     # Step 2 calc centroids
 
-    print("step 2", subreg_id_int) if _print_phases else None
+    log.on_debug("step 2", subreg_id_int) if _print_phases else None
     if len(subreg_id_int_phase_1) != 0:
         arr = vert_msk.get_array()
         arr[arr >= 100] = 0
@@ -1072,7 +1072,7 @@ def calc_poi_from_subreg_vert(
         )
         [subreg_id_int.remove(i) for i in subreg_id_int_phase_1]
     # Step 3 Vertebra_Full
-    print("step 3", subreg_id_int) if _print_phases else None
+    log.on_debug("step 3", subreg_id_int) if _print_phases else None
     if Location.Vertebra_Full.value in subreg_id_int:
         log.print("Calc centroid from subregion id", "Vertebra_Full", verbose=verbose)
         full = Location.Vertebra_Full.value
@@ -1085,7 +1085,7 @@ def calc_poi_from_subreg_vert(
             extend_to = calc_centroids(vert_msk.set_array(arr), decimals=decimals, second_stage=full, extend_to=extend_to, inplace=True)
         subreg_id_int.remove(full)
     # Step 4 IVD / Endplates Superior / Endplate Inferior
-    print("step 4", subreg_id_int) if _print_phases else None
+    log.on_debug("step 4", subreg_id_int) if _print_phases else None
     mapping_vert = {
         Location.Vertebra_Disc.value: 100,
         Location.Vertebral_Body_Endplate_Superior.value: 200,
@@ -1112,7 +1112,7 @@ def calc_poi_from_subreg_vert(
             subreg_id_int.remove(loc)
     # Step 5 call non_centroid_pois
     # Prepare mask to binary mask
-    print("step 5", subreg_id_int) if _print_phases else None
+    log.on_debug("step 5", subreg_id_int) if _print_phases else None
     vert_arr = vert_msk.get_seg_array()
     subreg_arr = subreg_msk.get_seg_array()
     assert subreg_msk.shape == vert_arr.shape, "Shape miss-match" + str(subreg_msk.shape) + str(vert_arr.shape)

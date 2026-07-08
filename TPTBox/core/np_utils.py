@@ -29,6 +29,7 @@ from skimage.measure import label as _label
 
 from TPTBox.core.compat import zip_strict
 from TPTBox.core.vert_constants import COORDINATE, LABEL_MAP, LABEL_REFERENCE
+from TPTBox.logger import logger
 
 UINT = TypeVar("UINT", bound=np.unsignedinteger[Any])
 INT = TypeVar("INT", bound=np.signedinteger[Any])
@@ -110,7 +111,7 @@ def cc3dstatistics(arr: UINTARRAY, use_crop: bool = True) -> dict:
             arrc = arr[crop]
             return _cc3dstats(arrc)
     except ValueError as e:
-        print(e)
+        logger.on_warning(e)
     return _cc3dstats(arr)
 
 
@@ -1317,7 +1318,8 @@ def _convex_hull(
     """
     points = np.transpose(np.where(arr))
     if len(points) <= 3:
-        print("To few points") if verbose else None
+        if verbose:
+            logger.on_warning("To few points")
         return np.zeros_like(arr, dtype=arr.dtype)
     hull = scipy.spatial.ConvexHull(points)
     deln = scipy.spatial.Delaunay(points[hull.vertices])
@@ -1401,7 +1403,6 @@ def np_calc_boundary_mask(
         infect(*infect_list.pop())
     boundary[boundary == 0] = 2
     boundary -= 1
-    print(boundary.sum())
     return boundary
 
 
@@ -1449,7 +1450,7 @@ def np_betti_numbers(img: np.ndarray, verbose=False) -> tuple[int, int, int]:
     b2 -= 1
     b1 = b0 + b2 - euler_char_num  # Euler number = Betti:0 - Betti:1 + Betti:2
     if verbose:
-        print(f"Betti number: b0 = {b0}, b1 = {b1}, b2 = {b2}")
+        logger.on_neutral(f"Betti number: b0 = {b0}, b1 = {b1}, b2 = {b2}")
     return b0, b1, b2
 
 

@@ -12,6 +12,8 @@ from scipy.ndimage import binary_opening, distance_transform_edt
 from scipy.spatial import ConvexHull
 from skimage.exposure import match_histograms
 
+from TPTBox.logger import logger
+
 
 def get_rotation_and_spacing_from_affine(affine: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Decompose a NIfTI affine into its rotation matrix and voxel spacing.
@@ -190,11 +192,15 @@ def get_max_affine_and_shape(
         new_spacing = np.maximum(min_spacing, new_spacing)
 
     shape: np.ndarray = np.ceil(min_shape / new_spacing)
-    print("Choose the following spacing:", new_spacing) if verbose else None
-    print(f"Output shape is {shape}, which utilizes {min_possible_volume / min_volume * 100:.1f} % of all voxels.") if verbose else None
+    if verbose:
+        _log = logger
+        _log.on_neutral("Choose the following spacing:", new_spacing)
+        _log.on_neutral(f"Output shape is {shape}, which utilizes {min_possible_volume / min_volume * 100:.1f} % of all voxels.")
     affine = get_ras_affine(min_rotation, new_spacing, origen[0])
-    print("The new origin is ", np.round(affine[:3, 3], 2)) if verbose else None
-    print("The optimal rotation came from file number ", opt_id, " ", np.round(min_rotation.reshape(-1), 2)) if verbose else None
+    if verbose:
+        _log = logger
+        _log.on_neutral("The new origin is ", np.round(affine[:3, 3], 2))
+        _log.on_neutral("The optimal rotation came from file number ", opt_id, " ", np.round(min_rotation.reshape(-1), 2))
     return nib.Nifti1Image(np.zeros(shape.astype(int), dtype=dtype), affine)  # type: ignore
 
 
@@ -332,7 +338,7 @@ def n4_bias_field_correction(
             ndim = nib_image.ndim
 
             if ndim < 3:
-                print("Dimensionality is less than 3.")
+                logger.on_fail("Dimensionality is less than 3.")
                 return None
 
             q_form = nib_image.get_qform()
@@ -506,16 +512,19 @@ def main(  # noqa: C901
         min_value = 0
         match_histogram = False
         histogram = None
+    _log = logger
     if len(images) == 0 or len(images) == 1:
-        print("!!! Need at least two images (-i ...nii.gz ...nii.gz) to stitch!!!\n Got " + str(images))
+        _log.on_fail("Need at least two images (-i ...nii.gz ...nii.gz) to stitch! Got " + str(images))
         return None, None
     corners = []
     affines = []
     niis: list[nib.nifti1.Nifti1Image] = []
-    print("### loading ###") if verbose else None
+    if verbose:
+        _log.on_neutral("### loading ###")
     for f_name in images:
         if isinstance(f_name, (Path, str)):
-            print("Load ", f_name, Path(f_name)) if verbose else None
+            if verbose:
+                _log.on_neutral("Load ", f_name, Path(f_name))
             # Load Nii
             nii: nib.nifti1.Nifti1Image = nib.load(f_name)  # type: ignore
 
@@ -529,13 +538,16 @@ def main(  # noqa: C901
                 if len(niis) == 0:
                     reference = None
                 else:
-                    print("Histogram equalization with previous file") if verbose else None
+                    if verbose:
+                        _log.on_neutral("Histogram equalization with previous file")
                     reference = get_array(niis[-1])
             elif histogram.isdigit():
-                print("Histogram equalization", images[int(histogram)]) if verbose else None
+                if verbose:
+                    _log.on_neutral("Histogram equalization", images[int(histogram)])
                 reference = buffer_reference(images[int(histogram)], bias_field=bias_field, crop=crop_to_bias_field)  # type: ignore
             else:
-                print("Histogram equalization with file", histogram) if verbose else None
+                if verbose:
+                    _log.on_neutral("Histogram equalization with file", histogram)
                 reference = buffer_reference(histogram, bias_field=bias_field, crop=crop_to_bias_field)  # type: ignore
             if reference is not None:
                 image = get_array(nii)
@@ -555,7 +567,8 @@ def main(  # noqa: C901
     corners_current = np.concatenate(corners, axis=0)
 
     # compute output shape and affine
-    print("### compute output shape and affine ###") if verbose else None
+    if verbose:
+        _log.on_neutral("### compute output shape and affine ###")
     if is_segmentation:
         max_value = max([x.get_fdata().max() for x in niis])
         if max_value < 256:
@@ -573,9 +586,11 @@ def main(  # noqa: C901
     target_list = []
     occupancy_list = []
     # get resampled arrays and occupancy
-    print("### resample to new space ###") if verbose else None
+    if verbose:
+        _log.on_neutral("### resample to new space ###")
     for i, nii in enumerate(niis, 1):
-        print(f"{i:2}/{len(niis):2} resampled", end="\r") if verbose else None
+        if verbose:
+            _log.on_neutral(f"{i:2}/{len(niis):2} resampled", end="\r", ignore_prefix=True)
         nii_new = nip.resample_from_to(nii, nii_out, 0 if is_segmentation else 3, mode="constant", cval=min_value)
         arr_new = get_array(nii_new)
         target_list.append(arr_new)
@@ -588,11 +603,13 @@ def main(  # noqa: C901
         else:
             occupancy_list.append(get_array(b).astype(np.float32))
 
-    print("\n### ramp stitching ###") if verbose else None
+    if verbose:
+        _log.on_neutral("\n### ramp stitching ###")
     # ramp stitching
     combinations = list(itertools.combinations(range(len(target_list)), 2))
     for idx, item in enumerate(combinations, 1):
-        print(f"{idx:2}/{len(combinations):2} ramp stitching", end="\r") if verbose else None
+        if verbose:
+            _log.on_neutral(f"{idx:2}/{len(combinations):2} ramp stitching", end="\r", ignore_prefix=True)
         # TODO fix intersection with more than two occupancies
         arr_1_full = occupancy_list[item[0]]
         arr_2_full = occupancy_list[item[1]]
@@ -639,9 +656,8 @@ def main(  # noqa: C901
                 if kick_out_fully_integrated_images:
                     images.pop(item[1])
             if (arr_1_full.max() != 1 or arr_2_full.max() != 1) and kick_out_fully_integrated_images:
-                print("kick_out_fully_integrated_images")
-
-                print(images)
+                _log.on_warning("kick_out_fully_integrated_images")
+                _log.on_neutral(images)
                 return main(
                     images,
                     output,
@@ -672,7 +688,8 @@ def main(  # noqa: C901
         target_arr = target_arr.astype(dtype2)
     target_arr = target_arr.sum(0)
     target_arr[target_arr <= min_value] = min_value
-    print("\n### Save ###") if verbose else None
+    if verbose:
+        _log.on_neutral("\n### Save ###")
     if output is not None:
         output = str(output)
         if not output.endswith(".nii.gz"):
@@ -695,7 +712,8 @@ def main(  # noqa: C901
 
     if save:
         nib.save(nii_out, output)  # type: ignore
-        print("Saved ", output) if verbose else None
+        if verbose:
+            _log.on_save("Saved ", output)
 
     if store_ramp:
         occupancy_arr = np.stack(occupancy_list, -1)
@@ -707,9 +725,11 @@ def main(  # noqa: C901
         output = output.replace(".nii.gz", "_ramps.nii.gz").replace("_msk_", "_") if ramp_path is None else ramp_path
         if save:
             nib.save(nii_occ, output)  # type: ignore
-            print("Saved ", output) if verbose else None
+            if verbose:
+                _log.on_save("Saved ", output)
         return nii_out, nii_occ
-    print("\n### Finished ###") if verbose else None
+    if verbose:
+        _log.on_neutral("\n### Finished ###")
     return nii_out, None
 
 

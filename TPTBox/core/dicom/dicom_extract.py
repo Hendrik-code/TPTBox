@@ -201,7 +201,7 @@ def dicom_to_nifti_multiframe(ds: pydicom.FileDataset, nii_path: str | Path) -> 
         # }
         # ],
         # --- No geometry info (e.g. RGB screen captures or video frames) ---
-        print("⚠️ No spatial metadata found — assuming pixel size = 1mm and identity orientation.")
+        logger.on_warning("No spatial metadata found — assuming pixel size = 1mm and identity orientation.")
         affine = np.eye(4)
         affine[0, 0] = 1.0
         affine[1, 1] = 1.0
@@ -332,7 +332,7 @@ def _extract_nii_from_dicom(dicom_out_path, nii_path):
 
         return False
     except Exception:
-        print(nii_path)
+        logger.on_fail(nii_path)
 
     return True
 
@@ -525,7 +525,7 @@ def _add_grid_info_to_json(nii_path: Path | str, simp_json: Path | str, force_up
     json_dict = load_json(simp_json) if Path(simp_json).exists() else {}
     if "grid" in json_dict and not force_update:
         return json_dict
-    print("Read Grid info", Path(simp_json).exists(), "grid" in json_dict)
+    logger.on_neutral("Read Grid info", Path(simp_json).exists(), "grid" in json_dict)
     nii = NII.load(nii_path, False)
     gird = {
         "shape": nii.shape,

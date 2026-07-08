@@ -33,10 +33,10 @@ from typing import TYPE_CHECKING, Literal, NoReturn, Union
 import numpy as np
 
 from TPTBox.logger import log_file
+from TPTBox.logger.log_file import logger as log  # noqa: F401  # backwards-compat alias
 
 ROUNDING_LVL = 7
 #####################
-log = log_file.Reflection_Logger()
 logging = Union[bool, log_file.Logger_Interface]
 # R: Right, L: Left; S: Superior (up), I: Inferior (down); A: Anterior (front), P: Posterior (back)
 DIRECTIONS = Literal["R", "L", "S", "I", "A", "P"]

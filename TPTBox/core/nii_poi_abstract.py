@@ -12,7 +12,7 @@ from typing_extensions import Self
 
 from TPTBox.core.np_utils import np_count_nonzero
 from TPTBox.core.vert_constants import COORDINATE
-from TPTBox.logger import Log_Type
+from TPTBox.logger import Log_Type, logger
 
 from .vert_constants import (
     AFFINE,
@@ -95,7 +95,7 @@ class Has_Grid(Grid_Proxy):
         try:
             zoom = "(" + ",".join([f"{a:.2f}" for a in self.zoom]) + ")"
         except Exception as e:
-            print(e)
+            logger.on_warning(e)
             zoom = self.zoom
 
         return f"shape={self.shape_int},spacing={zoom}, origin={origin}, ori={self.orientation}"  # type: ignore

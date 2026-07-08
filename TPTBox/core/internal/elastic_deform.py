@@ -5,6 +5,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from TPTBox import NII
+from TPTBox.logger import logger
 
 
 def deformed_nii(
@@ -51,7 +52,7 @@ def deformed_nii(
     if sigma is None or points is None:
         sigma, points = get_random_deform_parameter(deform_factor=deform_factor)
 
-    print("deformation parameter sigma = ", round(sigma, 4), "; n_points = ", points)
+    logger.on_neutral("deformation parameter sigma = ", round(sigma, 4), "; n_points = ", points)
     t = time.time()
     values = list(nii_dic.values())
     # Deform
@@ -73,7 +74,7 @@ def deformed_nii(
     out2: dict[str, NII] = {}
     for (k, nii), arr in zip(nii_dic.items(), out, strict=True):
         out2[k] = nii.set_array(arr[p:-p, p:-p, p:-p])
-    print("Deformation took", round(time.time() - t, 1), "Seconds")
+    logger.on_neutral("Deformation took", round(time.time() - t, 1), "Seconds")
     return out2
 
 
