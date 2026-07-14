@@ -179,7 +179,6 @@ def Buffered_BIDS_Global_info(
     parents: Sequence[str] | str = ["rawdata", "derivatives"],
     additional_key: Sequence[str] = ["sequ", "seg", "ovl"],
     verbose: bool = True,
-    file_name_manipulation: typing.Callable[[str], str] | None = None,
     sequence_splitting_keys: list[str] | None = None,
     filter_file: typing.Callable[[Path], bool] | None = None,
     max_age_days: int = 30,
@@ -295,7 +294,6 @@ def Buffered_BIDS_Global_info(
         parents,
         additional_key,
         verbose=verbose,
-        file_name_manipulation=file_name_manipulation,
         sequence_splitting_keys=sequence_splitting_keys,
         filter_folder=lambda _x, _y: False,
         additional_file_list=files,
@@ -330,7 +328,6 @@ class BIDS_Global_info:
         parents: Sequence[str] | str = ["rawdata", "derivatives"],
         additional_key: Sequence[str] = ["sequ", "seg", "ovl"],
         verbose: bool = True,
-        file_name_manipulation: typing.Callable[[str], str] | None = None,
         sequence_splitting_keys: list[str] | None = None,
         filter_folder: typing.Callable[[Path, int], bool] | None = None,
         additional_file_list: dict[str | Path, list[Path]] | None = None,
@@ -360,7 +357,6 @@ class BIDS_Global_info:
         assert isinstance(parents, Sequence), "parents is not a list"
         self.__bids_list: dict = {}
 
-        self.file_name_manipulation = file_name_manipulation
         # Validate
         for ds in datasets:
             ds_path = Path(ds) if isinstance(ds, str) else ds
@@ -444,12 +440,7 @@ class BIDS_Global_info:
             if bids_key in self._global_bids_list:
                 self._global_bids_list[bids_key].add_file(bids)
                 return
-            bids = BIDS_FILE(
-                bids,
-                ds,
-                verbose=self.verbose,
-                file_name_manipulation=self.file_name_manipulation,
-            )
+            bids = BIDS_FILE(bids, ds, verbose=self.verbose)
 
         subject = bids.info.get("sub", "unsorted")
         if subject not in self.subjects:
@@ -641,14 +632,7 @@ class Subject_Container:
 class BIDS_FILE:
     """Representation of a single BIDS-compliant file with parsed entities and dataset context."""
 
-    def __init__(
-        self,
-        file: Path | str,
-        dataset: Path | str,
-        verbose=True,
-        bids_ds: BIDS_Global_info | None = None,
-        file_name_manipulation: typing.Callable[[str], str] | None = None,
-    ):
+    def __init__(self, file: Path | str, dataset: Path | str, verbose=True, bids_ds: BIDS_Global_info | None = None):
         """Multi-file BIDS record sharing the same identifier (all extensions of one file stem).
 
         Holds references to `.nii.gz`, `.json`, etc. simultaneously.
@@ -671,12 +655,7 @@ class BIDS_FILE:
         file = Path(file) if not isinstance(file, Path) else file
         self.dataset = Path(dataset) if not isinstance(dataset, Path) else dataset
         self.verbose = verbose
-        if file_name_manipulation is not None:
-            if "WS_" in str(file):
-                file.rename(file.parent / Path(file_name_manipulation(file.name)))
-            name = file_name_manipulation(file.name)
-        else:
-            name = file.name
+        name = file.name
         self.format, self.info, self.BIDS_key, file_type = get_values_from_name(name, verbose)
 
         if bids_ds is not None:
@@ -863,36 +842,47 @@ class BIDS_FILE:
             p = Path(path + "." + key)
             value.rename(p)
 
-    def symlink_files(self, path: Path | str, ending: str = ".nii.gz", exist_ok: bool = False) -> None:
-        """Create symbolic links for all associated files at a new base path.
+    def symlink_files(self, path: Path | str, ending: str = ".nii.gz", exist_ok: bool = False, hard_link: bool = False) -> None:
+        """Create symbolic or hard links for all associated files at a new base path.
 
-        Equivalent to :meth:`rename_files` but creates symlinks rather than
-        moving files.  Existing correct symlinks are silently skipped.
+        Equivalent to :meth:`rename_files` but creates links rather than moving
+        files. Existing correct symlinks/hard links are silently skipped.
 
         Args:
             path: Target path including the primary extension (e.g.
                 ``/out/sub-001_T1w.nii.gz``).
             ending: Extension used to compute the base stem; a leading dot is
                 added automatically if absent.
+            exist_ok: If ``True``, skip existing files.
+            hard_link: If ``True``, create hard links using :func:`os.link`
+                instead of symbolic links.
 
         Raises:
             AssertionError: If *path* does not end with *ending*, or if an
-                existing symlink at the target points elsewhere.
+                existing link at the target points elsewhere.
         """
-        ending = ending if ending[0] == "." else "." + ending
+        ending = ending if ending.startswith(".") else "." + ending
         path = str(path)
-        assert path.endswith(ending), f"set 'ending' to the part after the '.'\n {path} does not end with {ending}"
+        assert path.endswith(ending), f"set 'ending' to the part after the '.'\n{path} does not end with {ending}"
         path = path.replace(ending, "")
+
         for key, value in self.file.items():
             p = Path(path + "." + key)
 
-            if os.path.islink(p):
-                assert Path(os.readlink(p)) == value, f"{p} exists"
-                continue
-            if exist_ok and p.exists():
-                continue
-
-            os.symlink(value, p)
+            if hard_link:
+                if p.exists():
+                    if exist_ok:
+                        continue
+                    assert p.stat().st_ino == value.stat().st_ino and p.stat().st_dev == value.stat().st_dev, f"{p} exists"
+                    continue
+                os.link(value, p)
+            else:
+                if os.path.islink(p):
+                    assert Path(os.readlink(p)) == value, f"{p} exists"
+                    continue
+                if exist_ok and p.exists():
+                    continue
+                os.symlink(value, p)
 
     def get_path_decomposed(self, file_type: str | None = None) -> tuple[Path, str, str, str]:
         """Decompose the file path relative to the dataset root.
