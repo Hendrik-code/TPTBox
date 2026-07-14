@@ -7,6 +7,7 @@ import tempfile
 import zipfile
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 from pathlib import Path
 
 import dicom2nifti
@@ -547,10 +548,17 @@ def _add_grid_info_to_json(nii_path: Path | str, simp_json: Path | str, force_up
     Returns:
         The updated JSON dictionary including the ``"grid"`` key.
     """
-    json_dict = load_json(simp_json) if Path(simp_json).exists() else {}
+    nii_path = Path(nii_path)
+    simp_json = Path(simp_json)
+
+    json_dict = (
+        load_json(simp_json)
+        if simp_json.exists() and datetime.fromtimestamp(simp_json.stat().st_mtime) > datetime.fromtimestamp(nii_path.stat().st_mtime)
+        else {}
+    )
     if "grid" in json_dict and not force_update:
         return json_dict
-    print("Read Grid info", Path(simp_json).exists(), "grid" in json_dict)
+    print("Read Grid info")
     nii = NII.load(nii_path, False)
     gird = {
         "shape": nii.shape,
