@@ -34,6 +34,7 @@ class DatasetConfig:
 
     # ── Preprocessing / spacing ───────────────────────────────────────────────
     spacing: tuple[float, float, float] = (1, 1, 1)
+    orientation: tuple[str, str, str] = ("R", "A", "S")
     is_ct: bool = True
     num_input: int = 1
     axis: str = "S"
@@ -130,13 +131,11 @@ def _build_label_mapping(
     mapping_forward: dict[int, int] = {}
     labels_mapping_return: dict[str, str | int] = {}
 
-    for new_idx, (orig_idx, name) in enumerate(
-        sorted(dataset_mapping.items()),
-        start=1,
-    ):
+    for new_idx, (orig_idx, name) in enumerate(sorted(dataset_mapping.items()), start=1):
         labels_mapping[name] = new_idx
-        mapping_forward[orig_idx] = new_idx
-        labels_mapping_return[str(new_idx)] = enums.get(name, orig_idx)
+        if orig_idx != new_idx:
+            mapping_forward[orig_idx] = new_idx
+            labels_mapping_return[str(new_idx)] = enums.get(name, orig_idx)
 
     # ----------------------------------------------------------
     # remap mirror pairs
@@ -238,6 +237,7 @@ def build_dataset(cfg: DatasetConfig) -> None:
         num_input=cfg.num_input,
         is_ct=cfg.is_ct,
         base=cfg.nnunet_base,
+        orientation=cfg.orientation,
     )
     dataset_settings["labels_mapping"] = mapping_back
 

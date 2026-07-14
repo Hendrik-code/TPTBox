@@ -105,9 +105,10 @@ def _run_training_highjack(self: nnUNetTrainer) -> None:
 
         self.on_epoch_end()
         l = list(self.dataset_json["labels"].keys())
+        dice = self.logger.get_value("dice_per_class_or_region", step=-1)
         self.print_to_log_file(
             "Dice",
-            ", ".join([f"{l[e]}:{i:.3f}" for e, i in enumerate(self.logger.my_fantastic_logging["dice_per_class_or_region"][-1], 1)]),
+            ", ".join([f"{l[e]}:{i:.3f}" for e, i in enumerate(dice, 1)]),
         )
     self.on_train_end()
 
