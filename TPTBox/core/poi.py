@@ -1087,7 +1087,7 @@ def calc_poi_from_subreg_vert(
             level_two_info=Location,
         )
         if extend_to is None
-        else extend_to.apply_crop(crop, inplace=True)
+        else extend_to.resample_from_to_(vert_msk)
     )
 
     if _vert_ids is None:

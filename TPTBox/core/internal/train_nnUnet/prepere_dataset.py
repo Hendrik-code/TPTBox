@@ -178,7 +178,7 @@ def build_dataset(cfg: DatasetConfig) -> None:
     from _prep_ds import add_file, finalize_ds, run, set_up_dataset
 
     labels_mapping, mapping_forward, mapping_back, mirror = _build_label_mapping(cfg)
-    logger.on_text(f"Label count     : {len(mapping_forward)} classes")
+    logger.on_text(f"Label count     : {len(labels_mapping) - 1} classes")
     logger.on_text(f"Mirror pairs    : {len(mirror) if mirror else 0}")
     logger.on_text(f"Trainer         : {cfg.nn_trainer}")
     logger.on_text(f"Spacing         : {cfg.spacing}")
@@ -198,8 +198,8 @@ def build_dataset(cfg: DatasetConfig) -> None:
         labels_found = set(seg_nii.unique())
         labels_found.discard(0)  # ignore background
 
-        expected_labels = set(mapping_forward.keys())
-
+        expected_labels = set(labels_mapping.values())
+        expected_labels.remove(0)
         missing_mapping = labels_found - expected_labels
         unused_mapping = expected_labels - labels_found
 
@@ -210,7 +210,7 @@ def build_dataset(cfg: DatasetConfig) -> None:
             logger.on_fail(f"Labels present in segmentation but missing in mapping: {sorted(missing_mapping)}")
 
         if unused_mapping:
-            logger.on_warning(f"Labels defined in mapping but not found in sample: {sorted(unused_mapping)}")
+            logger.on_ok(f"Unmapped labels {sorted(unused_mapping)}")
 
         # Test remapping
         out = seg_nii.map_labels(mapping_forward)
@@ -218,8 +218,7 @@ def build_dataset(cfg: DatasetConfig) -> None:
 
         logger.on_text(f"Remapped labels    : {remapped_labels}")
 
-        expected_remapped = set(mapping_forward.values())
-        unexpected = set(remapped_labels) - expected_remapped - {0}
+        unexpected = set(remapped_labels) - expected_labels - {0}
 
         if unexpected:
             logger.on_fail(f"Unexpected labels after remapping: {sorted(unexpected)}")
