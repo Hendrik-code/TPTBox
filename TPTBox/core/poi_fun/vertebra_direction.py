@@ -24,7 +24,7 @@ def calc_orientation_of_vertebra_PIR(
     source_subreg_point_id=Location.Vertebra_Corpus,
     subreg_id=Location.Spinal_Canal,
     do_fill_back: bool = False,
-    spine_plot_path: None | str = None,
+    spine_plot_path: str | None = None,
     save_normals_in_info=False,
     _orientation_version=0,
 ) -> tuple[POI, NII | None]:
