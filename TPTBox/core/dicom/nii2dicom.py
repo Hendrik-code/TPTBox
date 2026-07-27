@@ -59,7 +59,7 @@ def nifti2dicom_1file(
     out_dir: str | Path,
     no_json_ok: bool = False,
     secondary: bool = False,
-    json_path: None | str | Path = None,
+    json_path: str | Path | None = None,
     out_name: str = "slice",
 ) -> None:
     r"""Convert a single NIfTI file to a DICOM series.

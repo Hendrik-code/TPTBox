@@ -191,6 +191,7 @@ ignore = [
     # En-dashes (–) in docstrings are legitimate range notation (e.g. "C1–C7")
     "RUF002",
     "PLR0917", # Too many positional arguments
+    "UP038", #  Use `X | Y` in `isinstance` call instead of `(X, Y)`
     ]
 
 # Allow fix for all enabled rules (when `--fix`) is provided.
