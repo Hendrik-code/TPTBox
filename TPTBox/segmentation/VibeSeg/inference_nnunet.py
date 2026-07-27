@@ -345,7 +345,7 @@ def run_inference_on_file(
         unknown_strings: dict[str, int] = {"max": seg_nii.max() + 1, "Intervertebral_Disc": 100}
         mapping = {}
 
-        def to_int(a: str, k: None | int = None):
+        def to_int(a: str, k: int | None = None):
             if a in unknown_strings:
                 return unknown_strings[a]
             try:

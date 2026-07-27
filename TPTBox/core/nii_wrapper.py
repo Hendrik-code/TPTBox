@@ -1157,7 +1157,7 @@ class NII(NII_Math):
         return self.rescale( voxel_spacing=voxel_spacing, c_val=c_val, verbose=verbose,mode=mode, inplace=True)
 
     def resample_from_to(self, to_vox_map:Image_Reference|Has_Grid|tuple[SHAPE,AFFINE,ZOOMS], mode:MODES='nearest', order: int |None=None, c_val=None, inplace = False,verbose:logging=True,align_corners:bool=False) -> Self:
-        r"""Self will be resampled in coordinate of given other image. Adheres to global space not to local pixel space.
+        """Self will be resampled in coordinate of given other image. Adheres to global space not to local pixel space.
 
         Args:
             to_vox_map (Image_Reference|Proxy): If object, has attributes shape giving input voxel shape, and affine giving mapping of input voxels to output space. If length 2 sequence, elements are (shape, affine) with same meaning as above. The affine is a (4, 4) array-like.\n
@@ -1802,7 +1802,7 @@ class NII(NII_Math):
             return self.set_array_(convex_hull_arr)
         return self.set_array(convex_hull_arr)
 
-    def calc_convex_hull_(self, axis: None | DIRECTIONS = "S", verbose: bool = False) -> Self:
+    def calc_convex_hull_(self, axis: DIRECTIONS | None = "S", verbose: bool = False) -> Self:
         """In-place variant of `calc_convex_hull`."""
         return self.calc_convex_hull(axis=axis, inplace=True, verbose=verbose)
 
