@@ -508,7 +508,7 @@ def np_dilate_msk(
     connectivity: int = 3,
     use_crop: bool = True,
     mask: np.ndarray | None = None,
-    ignore_axis: None | int = None,
+    ignore_axis: int | None = None,
 ) -> np.ndarray:
     """Dilates the given array by the specified number of voxels (not including the zero label).
 
@@ -586,7 +586,7 @@ def np_erode_msk(
     use_crop: bool = True,
     connectivity: int = 3,
     border_value=0,
-    ignore_axis: None | int = None,
+    ignore_axis: int | None = None,
 ) -> np.ndarray:
     """Erodes the given array by the specified number of voxels.
 
