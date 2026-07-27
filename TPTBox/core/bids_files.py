@@ -142,7 +142,7 @@ def get_values_from_name(path: Path | str, verbose: bool) -> tuple[str, dict[str
           (e.g. ``"sub-001_ses-01_T1w"``),
         * ``file_type`` is the extension (e.g. ``"nii.gz"``).
     """
-    name = Path(path).name
+    name = path.rpartition("/")[2] if isinstance(path, str) else path.name
 
     bids_key, file_type = name.split(".", maxsplit=1)
 
@@ -303,7 +303,7 @@ def Buffered_BIDS_Global_info(
 _cont = 0
 
 
-def _scan_tree(path, lvl=1, filter_folder=lambda _x, _y: True, verbose=False):
+def _scan_tree(path, lvl=1, filter_folder=None, verbose=False):
     """Recursively yield DirEntry objects for given directory."""
     global _cont  # noqa: PLW0603
     for entry in os.scandir(path):
@@ -343,6 +343,7 @@ class BIDS_Global_info:
                         filter_folder = lambda p, lvl: True if (lvl != 2 or p.name in ["sub-123","sub-456"]) else False
         """
         self.count_file = 0
+        self._p_counter = 0
         if sequence_splitting_keys is None:
             from TPTBox.core.bids_constants import sequence_splitting_keys
 
@@ -427,34 +428,28 @@ class BIDS_Global_info:
                 ds = bids.dataset
             else:
                 raise AssertionError("Dataset-path required")
-
         if isinstance(bids, (Path, str)):
-            try:
-                bids_key, file_type = str(bids).rsplit("/", maxsplit=1)[-1].split(".", maxsplit=1)
-                # print(bids_key)
-            except Exception:
+            name = bids.rpartition("/")[2] if isinstance(bids, str) else bids.name
+            bids_key, sep, file_type = name.partition(".")
+            if not sep:
                 print("[!] skip file with out a type declaration:", bids.name)
-                # raise e
                 return
 
             if bids_key in self._global_bids_list:
                 self._global_bids_list[bids_key].add_file(bids)
                 return
             bids = BIDS_FILE(bids, ds, verbose=self.verbose)
-
         subject = bids.info.get("sub", "unsorted")
         if subject not in self.subjects:
             self.subjects[subject] = Subject_Container(subject, self.sequence_splitting_keys)
         self.count_file += 1
-        (
-            print(
-                f"Found: {subject}, total file keys {(self.count_file)},  total subjects = {len(self.subjects)}    ",
-                end="\r",
-            )
-            if self.verbose
-            else None
-        )
+        self._p_counter -= 1
+        if self.verbose and self._p_counter < 0:
+            print(f"Found: {subject}, total file keys {(self.count_file)},  total subjects = {len(self.subjects)}", end="\r")
+            self._p_counter += random.randint(10, 250)
+
         self.subjects[subject].add(bids)
+        self._global_bids_list[bids.BIDS_key] = bids
 
     def enumerate_subjects(self, sort: bool = False, shuffle: bool = False) -> list[tuple[str, Subject_Container]]:
         """Return all subject identifiers together with their :class:`Subject_Container`.
@@ -660,14 +655,23 @@ class BIDS_FILE:
 
         if bids_ds is not None:
             bids_ds.add_file_2_subject(bids=self, ds=self.dataset)
-        self.file = {file_type: file}
-        bids_key, _ = file.name.split(".", maxsplit=1)
-        for file_type in ["nii.gz", "json", "png"]:
-            if file_type in self.file:
-                continue
-            if os.path.exists(os.path.join(file.parent, bids_key + "." + file_type)):
-                self.file[file_type] = Path(file.parent, bids_key + "." + file_type)
-        self.file = dict(sorted(self.file.items()))
+        self._file = {file_type: file}
+        self._checked = False
+
+    @property
+    def file(self) -> dict[str, Path]:
+        if not self._checked:
+            files = {p.parent for p in self._file.values()}
+            for f in files:
+                bids_key = self.BIDS_key
+                for file_type in ["nii.gz", "json", "png"]:
+                    if file_type in self._file:
+                        continue
+                    if os.path.exists(os.path.join(f, bids_key + "." + file_type)):
+                        self._file[file_type] = Path(f, bids_key + "." + file_type)
+            self._file = dict(sorted(self._file.items()))
+            self._checked = True
+        return self._file
 
     def get_file(self, ending: str = "json", default: Path | None = None) -> Path | None:
         """Return the path for a given file extension, or *default* if absent.
@@ -790,11 +794,7 @@ class BIDS_FILE:
         assert key != "sub", "not allowed to remove subject name"
         return self.info.pop(key)
 
-    def add_file(
-        self,
-        path: Path,
-        bids_ds: BIDS_Global_info | None = None,
-    ) -> None:
+    def add_file(self, path: Path, bids_ds: BIDS_Global_info | None = None) -> None:
         """Associate an additional file extension with this BIDS entry.
 
         Used to register companion files (e.g. a ``.json`` sidecar alongside
@@ -813,12 +813,16 @@ class BIDS_FILE:
         bids_key, file_type = Path(path).name.split(".", maxsplit=1)
 
         assert bids_key == self.BIDS_key, f"only aligned data aka same name different file type: {bids_key} != {self.BIDS_key}"
-        bids_dic_file = self.file
-        if file_type not in self.file:
+        bids_dic_file = self._file
+        if file_type not in bids_dic_file:
             bids_dic_file[file_type] = path
             if bids_ds is not None:
-                bids_ds._global_bids_list[bids_key].file = dict(sorted(bids_dic_file.items()))
-        self.file = dict(sorted(bids_dic_file.items()))
+                bids_ds._global_bids_list[bids_key]._file = dict(sorted(bids_dic_file.items()))
+                self._file = bids_ds._global_bids_list[bids_key]._file
+            else:
+                self._file = dict(sorted(bids_dic_file.items()))
+        elif bids_dic_file[file_type] != path:
+            print("BIDS_Key conflict!", path, "<-->", bids_dic_file)
 
     def rename_files(self, path: Path | str, ending: str = ".nii.gz") -> None:
         """Rename all associated files on disk to a new base path.
@@ -871,17 +875,20 @@ class BIDS_FILE:
 
             if hard_link:
                 if p.exists():
+                    same = p.stat().st_ino == value.stat().st_ino and p.stat().st_dev == value.stat().st_dev
                     if exist_ok:
+                        p.unlink(missing_ok=True)
+                    else:
+                        assert same, f"{p} exists"
                         continue
-                    assert p.stat().st_ino == value.stat().st_ino and p.stat().st_dev == value.stat().st_dev, f"{p} exists"
-                    continue
                 os.link(value, p)
             else:
                 if os.path.islink(p):
-                    assert Path(os.readlink(p)) == value, f"{p} exists"
-                    continue
-                if exist_ok and p.exists():
-                    continue
+                    if exist_ok and p.exists():
+                        p.unlink(missing_ok=True)
+                    else:
+                        assert Path(os.readlink(p)) == value, f"{p} exists"
+                        continue
                 os.symlink(value, p)
 
     def get_path_decomposed(self, file_type: str | None = None) -> tuple[Path, str, str, str]:
@@ -907,7 +914,6 @@ class BIDS_FILE:
         parent = folder_list[0]
         subpath = folder_list[1:-1]
         filename = folder_list[-1]
-        # print(parent, subpath, filename)
         return self.dataset, parent, str.join("/", subpath), filename
 
     @property
@@ -1980,7 +1986,7 @@ class Searchquery:
             for sequ, values in self.candidates.items()
         )
         if sort:
-            l = sorted(l)  # type: ignore
+            l = sorted(l, key=lambda x: x.family_id)  # type: ignore
         return l
 
 
