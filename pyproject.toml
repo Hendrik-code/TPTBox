@@ -25,6 +25,8 @@ joblib = "*"
 scikit-learn = "*"
 pynrrd = "*"
 requests = "*"
+trimesh = "*"
+numpy-stl = "*"
 
 # --- OLD STACK (Python < 3.11)
 numpy = [

@@ -15,6 +15,7 @@ from TPTBox.core.poi_fun.strategies import (
 from TPTBox.core.poi_fun.vertebra_direction import calc_center_spinal_cord, calc_orientation_of_vertebra_PIR
 from TPTBox.core.vert_constants import Location, vert_directions
 from TPTBox.spine.spinestats import calculate_IVD_POI
+from TPTBox.spine.spinestats.endplates import calc_endplate_points_
 
 _log = Print_Logger()
 all_poi_functions: dict[int, Strategy_Pattern] = {}
@@ -297,7 +298,9 @@ Strategy_Computed_Before(L.Spinal_Canal_ivd_lvl,L.Vertebra_Disc,L.Vertebra_Corpu
 Strategy_Computed_Before(L.Spinal_Cord,L.Vertebra_Disc,L.Vertebra_Corpus,L.Dens_axis)
 Strategy_Computed_Before(L.Spinal_Canal,L.Vertebra_Corpus)
 Strategy_Computed_Before(L.Vertebra_Disc_Inferior,L.Vertebra_Disc_Inferior)
-
+Strategy_Computed_Before(L.Vertebral_Body_Endplate_Superior,L.Vertebra_Corpus)
+Strategy_Computed_Before(L.Vertebral_Body_Endplate_Inferior,L.Vertebra_Corpus)
+Strategy_Computed_Before(L.Endplate,L.Vertebra_Corpus)
 
 # fmt: on
 def compute_non_centroid_pois(  # noqa: C901
@@ -342,14 +345,22 @@ def compute_non_centroid_pois(  # noqa: C901
         _vert_ids = vert.unique()
 
     locations = list(locations) if isinstance(locations, Sequence) else [locations]
+    ### Step 0 Endplates ###
+    endplate = [Location.Vertebral_Body_Endplate_Inferior, Location.Vertebral_Body_Endplate_Superior, Location.Endplate]
+    if any(i in locations for i in endplate):
+        [locations.remove(i) for i in endplate if i in locations]
+
+        log.on_text("Compute Vertebra Endplate DIRECTIONS", verbose=verbose)
+        sub_regions = poi.keys_subregion()
+        if any(a.value not in sub_regions for a in endplate):  # skip if all exists
+            poi, *_ = calc_endplate_points_(poi, vert, subreg, _vert_ids=_vert_ids, log=log)
     ### STEP 1 Vert Direction###
-    assert 52 not in poi.keys_region()
 
     if Location.Vertebra_Direction_Inferior in locations:
         log.on_text("Compute Vertebra DIRECTIONS", verbose=verbose)
         ### Calc vertebra direction; We always need them, so we just compute them. ###
         sub_regions = poi.keys_subregion()
-        if any(a.value not in sub_regions for a in vert_directions):
+        if any(a.value not in sub_regions for a in vert_directions):  # skip if all exists
             poi, _ = calc_orientation_of_vertebra_PIR(
                 poi, vert, subreg, do_fill_back=False, save_normals_in_info=False, _orientation_version=_orientation_version
             )
