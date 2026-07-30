@@ -254,7 +254,13 @@ def calc_endplate_points_(
     if Location.Endplate.value in sp_u:
         vert, spine = endplate_to_super_infer_endplate(vert, spine)
         sp_u = spine.unique()
-    if not any(a in sp_u for a in [Location.Vertebral_Body_Endplate_Superior.value, Location.Vertebral_Body_Endplate_Inferior.value]):
+    if not any(
+        a in sp_u
+        for a in [
+            Location.Vertebral_Body_Endplate_Superior.value,
+            Location.Vertebral_Body_Endplate_Inferior.value,
+        ]
+    ):
         log.print(f"[calc_endplate_points] No endplates, {sp_u}")
         return (poi, vert, spine)
     poi.info.setdefault("endplate_internal_angle", {})
@@ -269,18 +275,29 @@ def calc_endplate_points_(
     # Collect normals per vertebra so we can compute the inter-endplate
     # angle once both superior and inferior have been processed.
     normals_by_vert: dict[int, dict[Location, np.ndarray]] = {}
-    for endplate in (Location.Vertebral_Body_Endplate_Superior, Location.Vertebral_Body_Endplate_Inferior):
+    for endplate in (
+        Location.Vertebral_Body_Endplate_Superior,
+        Location.Vertebral_Body_Endplate_Inferior,
+    ):
         endplate_nii = vert * spine.extract_label(endplate) % 100
 
         for vert_id in vert_ids:
             if vert_id == 2 and Location.Vertebral_Body_Endplate_Superior == endplate:
                 continue
             nii = endplate_nii.extract_label(vert_id)
-            _endplate(poi, nii, endplate, vert_id, log, normals_by_vert, compute_curvature=compute_curvature)
+            _endplate(
+                poi,
+                nii,
+                endplate,
+                vert_id,
+                log,
+                normals_by_vert,
+                compute_curvature=compute_curvature,
+            )
 
     # Location.Sacrum_Endplate,
     endplate_nii = spine.extract_label(Location.Sacrum_Endplate)  # vert *
-    endplate_nii = endplate_nii.apply_crop(endplate_nii.compute_crop(0, 2))
+    endplate_nii = endplate_nii.apply_crop(endplate_nii.compute_crop(0, 2, raise_error=False))
     if endplate_nii.max() > 0:
         c = endplate_nii.dilate_msk(2).get_connected_components()
         if c.max() != 1:
@@ -362,7 +379,14 @@ def endplate_to_super_infer_endplate(vert: NII, spine: NII) -> tuple[NII, NII]:
     vert[spine.extract_label([Location.Vertebra_Corpus, Location.Vertebra_Corpus_border]) != 1] = 0
     vert %= 100
     v = vert.infect(
-        spine.extract_label([Location.Vertebra_Corpus, Location.Vertebra_Corpus_border, Location.Endplate, Location.Vertebra_Disc]),
+        spine.extract_label(
+            [
+                Location.Vertebra_Corpus,
+                Location.Vertebra_Corpus_border,
+                Location.Endplate,
+                Location.Vertebra_Disc,
+            ]
+        ),
         verbose=False,
     )
     endplate_nii = v * endplate_nii
@@ -375,7 +399,7 @@ def endplate_to_super_infer_endplate(vert: NII, spine: NII) -> tuple[NII, NII]:
 if __name__ == "__main__":
     from pathlib import Path
 
-    from TPTBox import calc_poi_from_subreg_vert, to_nii
+    from TPTBox import calc_poi_from_subreg_vert
 
     p = Path("/DATA/NAS/datasets_processed/CT_spine/dataset-myelom/derivatives-final/sub-CTFU00065/ses-00000")
     poi = calc_poi_from_subreg_vert(
