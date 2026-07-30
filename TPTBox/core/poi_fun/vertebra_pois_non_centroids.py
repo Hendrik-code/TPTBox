@@ -355,7 +355,6 @@ def compute_non_centroid_pois(  # noqa: C901
         if any(a.value not in sub_regions for a in endplate):  # skip if all exists
             poi, *_ = calc_endplate_points_(poi, vert, subreg, _vert_ids=_vert_ids, log=log)
     ### STEP 1 Vert Direction###
-
     if Location.Vertebra_Direction_Inferior in locations:
         log.on_text("Compute Vertebra DIRECTIONS", verbose=verbose)
         ### Calc vertebra direction; We always need them, so we just compute them. ###
@@ -410,6 +409,11 @@ def compute_non_centroid_pois(  # noqa: C901
             poi = calc_center_spinal_cord(
                 poi, subreg, source_subreg_point_id=Location.Vertebra_Disc, subreg_id=Location.Spinal_Canal_ivd_lvl, add_dense=True
             )
+    if any(i in locations for i in [Location.Articular_Process_Midpoint_Left, Location.Articular_Process_Midpoint_Right]):
+        from TPTBox.spine.spinestats.articularis_midpoint import calc_all_facet_joint_pois
+
+        p = calc_all_facet_joint_pois(vert, subreg)
+        poi.join_left_(p)
     # Step 3 Compute on individual Vertebras
     ivd_location = set()
 
@@ -417,7 +421,7 @@ def compute_non_centroid_pois(  # noqa: C901
         if vert_id >= 39:
             continue
         current_vert = vert.extract_label(vert_id)
-        bb = current_vert.compute_crop()
+        bb = current_vert.compute_crop(raise_error=False)
         current_vert.apply_crop_(bb)
         current_subreg = subreg.apply_crop(bb) * current_vert
         for location in locations:

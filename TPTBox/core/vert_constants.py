@@ -1248,6 +1248,9 @@ class Location(Abstract_lvl):
     Implant_Target_Left = 92
     Implant_Target_Right = 93
 
+    Articular_Process_Midpoint_Left = 94
+    Articular_Process_Midpoint_Right = 95
+
     # Muscle_Inserts_Rib_left = 90
     # Muscle_Inserts_Rib_right = 91
     # Ligament attachment points
