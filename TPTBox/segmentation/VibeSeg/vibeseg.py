@@ -98,6 +98,7 @@ def run_vibeseg(
     dataset_id: int = 100,
     padd: int = 5,
     keep_size: bool = False,
+    model_path=None,
     **args,
 ) -> NII:
     """Run the VibeSeg whole-body segmentation model on a single image.
@@ -130,6 +131,7 @@ def run_vibeseg(
         ddevice=ddevice,
         padd=padd,
         keep_size=keep_size,
+        model_path=model_path,
         **args,
     )[0]
 
@@ -245,7 +247,10 @@ def extract_vertebra_bodies_from_VibeSeg(
     centroids_unsorted_srp = centroids_unsorted.reorient(("S", "R", "P"))
     centroids_sorted = dict(
         sorted(
-            {i: centroids_unsorted_srp[i, 50][0] for i in centroids_unsorted_srp.keys_region()}.items(),
+            {
+                i: centroids_unsorted_srp[i, 50][0]
+                for i in centroids_unsorted_srp.keys_region()
+            }.items(),
             key=lambda x: x[1],
         )
     )
@@ -257,7 +262,9 @@ def extract_vertebra_bodies_from_VibeSeg(
             return 0  # Remove cervical vertebrae
         if index < num_lumbar_verts:
             return Vertebra_Instance.name2idx()[f"L{num_lumbar_verts - index}"]
-        return Vertebra_Instance.name2idx()[f"T{num_thoracic_verts - (index - num_lumbar_verts)}"]
+        return Vertebra_Instance.name2idx()[
+            f"T{num_thoracic_verts - (index - num_lumbar_verts)}"
+        ]
 
     label_mapping = {k: map_to_label(i) for i, k in enumerate(centroids_sorted)}
     vert_bodys.map_labels_(label_mapping, verbose=False)
