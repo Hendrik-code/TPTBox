@@ -15,7 +15,7 @@ from TPTBox.core.poi_fun.strategies import (
 from TPTBox.core.poi_fun.vertebra_direction import calc_center_spinal_cord, calc_orientation_of_vertebra_PIR
 from TPTBox.core.vert_constants import Location, vert_directions
 from TPTBox.spine.spinestats import calculate_IVD_POI
-from TPTBox.spine.spinestats.endplates import calc_endplate_points_
+from TPTBox.spine.spinestats.poi_fun.endplates import calc_endplate_points_
 
 _log = Print_Logger()
 all_poi_functions: dict[int, Strategy_Pattern] = {}
@@ -410,7 +410,7 @@ def compute_non_centroid_pois(  # noqa: C901
                 poi, subreg, source_subreg_point_id=Location.Vertebra_Disc, subreg_id=Location.Spinal_Canal_ivd_lvl, add_dense=True
             )
     if any(i in locations for i in [Location.Articular_Process_Midpoint_Left, Location.Articular_Process_Midpoint_Right]):
-        from TPTBox.spine.spinestats.articularis_midpoint import calc_all_facet_joint_pois
+        from TPTBox.spine.spinestats.poi_fun.articularis_midpoint import calc_all_facet_joint_pois
 
         p = calc_all_facet_joint_pois(vert, subreg)
         poi.join_left_(p)
