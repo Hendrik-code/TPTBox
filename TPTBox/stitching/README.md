@@ -56,18 +56,22 @@ pip install TPTBox
 ```
 
 ```python
-from TPTBox import NII
 from TPTBox.stitching import stitching
-out_nii,_ = stitching([NII.load("a.nii.gz",seg=False), NII.load("b.nii.gz",seg=False), NII.load("c.nii.gz",seg=False)], out="out.nii.gz")
 
-```
+list_of_files = ["File_A.nii.gz", "File_B.nii.gz", "File_C.nii.gz",]
 
-or
-
-
-```python
-from TPTBox.stitching import stitching_raw
-stitching_raw(["a.nii.gz", "b.nii.gz", "c.nii.gz"], "out.nii.gz", is_segmentation=False)
+# Call the stitching function
+# This will combine your images into a single NIfTI file
+stitching(
+    list_of_files,  # List of input files
+    out="out_path_stiched_image.nii.gz",  # Path to save stitched output
+    is_seg=False,  # Set True if these are segmentation masks
+    is_ct=False,  # True for CT, min_value will by -1024 instead of 0
+    kick_out_fully_integrated_images=True,
+    dtype=float,  # Data type of the output image
+    match_histogram=False,  # Match intensity histograms across images
+    store_ramp=False,  # Store blending ramp (optional)
+)
 ```
 
 

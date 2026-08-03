@@ -11,42 +11,28 @@
 [![Documentation](https://readthedocs.org/projects/tptbox/badge/?version=latest)](https://tptbox.readthedocs.io/en/latest/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="https://tptbox.readthedocs.io">Documentation</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a>
+</p>
+
 
 The Torso Processing ToolBox (TPTBox) is a multi-functional package to handle any sort of bids-conform dataset (CT, MRI, ...)
-It can find, filter, search any BIDS_Family and subjects, and has many functionalities, among them:
-- Easily loop over datasets, and the required files
-- Read, Write Niftys, centroid jsons, ...
-- Reorient, Resample, Shift Niftys, Centroids, labels
-- Modular 2D snapshot generation (different views, MIPs, ...)
-- 3D Mesh generation from segmentation and snapshots from them
-- Registration
-- Logging everything consistently
-- ...
 
-## Documentation
+## Features
 
-Full API reference and usage guides are available at **https://tptbox.readthedocs.io**.
+- **Dataset Handling**: Loop over datasets, search query, and find images and their corresponding derivatives
 
-The docs cover all sub-packages — `NII`, `POI`, `BIDS_FILE`, NumPy utilities,
-vertebra constants, spine analysis, registration, segmentation, mesh3D,
-stitching, and the logger — with hyperlinks back to the GitHub source.
 
-## Modules
+- **I/O Handling**: Read and Write nifti files and point coordinate files as JSONs
+- **Image Processing**: Reorient, Resample, Shift Niftys, Centroids, labels, compute connected components, and so much more
+- **Visualization**: Modular 2D snapshot generation (different views, maximum intensity projections, depth-color map)
+- **3D Mesh generation**: Use 3D segmentations to create 3D meshes and then take snapshots for visualization
+- **Registration**: Register two images to each other, using available data (image, segmentation, points)
+- **Stitching**: You have multiple MRI of the same person, split into different regions? Use our stitching algorithm to create one unified view.
+- **Logger**: Log every function in a file automatically, color important messages in the terminal for easy recognition.
 
-Each sub-package has its own README with API tables and examples:
-
-| Module | Description |
-|---|---|
-| [`core`](TPTBox/core/README.md) | `NII` (NIfTI I/O and transforms), `POI` (anatomical landmarks), BIDS dataset navigation, NumPy utilities, vertebra constants |
-| [`core/poi_fun`](TPTBox/core/poi_fun/README.md) | Internal POI computation strategies (surface points, corpus centers, disc points) |
-| [`spine`](TPTBox/spine/README.md) | Spine-specific tools: 2D snapshot generation and statistical measurements |
-| [`spine/snapshot2D`](TPTBox/spine/snapshot2D/README.md) | Modular 2D image generation — axial/sagittal/coronal slices, MIPs, segmentation overlays |
-| [`spine/spinestats`](TPTBox/spine/spinestats/README.md) | Clinical spine measurements: distances, angles, disc heights, IVD landmarks |
-| [`registration`](TPTBox/registration/README.md) | Rigid and deformable image registration via ANTs and DeepALI |
-| [`segmentation`](TPTBox/segmentation/README.md) | Integration with SPINEPS, VibeSeg/TotalVibeSeg, and nnU-Net pipelines |
-| [`mesh3D`](TPTBox/mesh3D/README.md) | 3D surface mesh generation and rendering from segmentation volumes |
-| [`stitching`](TPTBox/stitching/README.md) | Multi-station NIfTI stitching for whole-body or long-spine acquisitions |
-| [`logger`](TPTBox/logger/README.md) | Structured, consistent logging for medical image processing pipelines |
 
 ## Install the package
 ```bash
@@ -69,29 +55,8 @@ pip install poetry
 poetry install --with dev
 ```
 
-## Functionalities
 
-Each folder in this package represents a different functionality.
-
-The top-level-hierarchy incorporates the most important files, the BIDS_files.
-
-### BIDS_Files
-
-This file builds a data model out of the BIDS file names.
-It can load a dataset as a BIDS_Global_info file, from which search queries and loops over the dataset can be started.
-See ```tutorial_BIDS_files.ipynb``` for details.
-
-### bids_constants
-Defines constants for the BIDS nomenclature (sequence-splitting keys, naming conventions...)
-
-### vert_constants
-
-Contains definitions and sort order for our intern labels, for vertebrae, POI, ...
-
-### Rotation and Resampling
-
-Example rotate and resample.
-
+### Quick Use:
 ```python
 from TPTBox import NII
 
@@ -111,171 +76,107 @@ nii.orientation  # Orientation in 3-Letters
 nii.zoom # Scale of the three image axis
 nii.shape #shape
 ```
-### Stitching
-Python function and script for arbitrary image stitching. [See Details](TPTBox/stitching/)
-
-![Example of a stitching](TPTBox/stitching/stitching.jpg)
-### Spineps and Points of Interests (POI) integration
-
-![Example of two lumbar vertebrae. The left example is derived from 1 mm isotropic CT, the right from sagittal MRI with a resolution of 3.3 mm in the left–right direction. Top row: Subregion of the vertebra used for analysis. Middle row: Extreme points. Bottom row: Corpus edge and ligamentum flavum points.](TPTBox/images/poi_preview.png)
-For our Spine segmentation pipline follow the installation of [SPINEPS](https://github.com/Hendrik-code/spineps).
-Image Source: Rule-based Key-Point Extraction for MR-Guided Biomechanical Digital Twins of the Spine;
 
 
+## Documentation
 
-SPINEPS will produce two mask: instance and semantic labels. With these we can compute our POIs. There are either center of mass points or surface points with bioloical meaning. See [Validation of a Patient-Specific Musculoskeletal Model for Lumbar Load Estimation Generated by an Automated Pipeline From Whole Body CT](https://pubmed.ncbi.nlm.nih.gov/35898642/)
-```python
-from TPTBox import NII, POI, Location, POI_Global, calc_poi_from_subreg_vert
-from TPTBox.core.vert_constants import v_name2idx
-from TPTBox.segmentation.spineps import run_spineps_single
+Full API reference and usage guides are available at **https://tptbox.readthedocs.io**.
 
-# This requires that spineps is installed
-output_paths = run_spineps_single(
-    "file-path-of_T2w.nii.gz",
-    model_semantic="t2w",
-    ignore_compatibility_issues=True,
-)
-out_spine = output_paths["out_spine"]
-out_vert = output_paths["out_vert"]
-semantic_nii = NII.load(out_spine, seg=True)
-instance_nii = NII.load(out_vert, seg=True)
+The docs cover all sub-packages — `NII`, `POI`, `BIDS_FILE`, NumPy utilities,
+vertebra constants, spine analysis, registration, segmentation, mesh3D,
+stitching, and the logger — with hyperlinks back to the GitHub source.
 
-poi = calc_poi_from_subreg_vert(
-    instance_nii,
-    semantic_nii,
-    subreg_id=[
-        Location.Vertebra_Full,
-        Location.Arcus_Vertebrae,
-        Location.Spinosus_Process,
-        Location.Costal_Process_Left,
-        Location.Costal_Process_Right,
-        Location.Superior_Articular_Left,
-        Location.Superior_Articular_Right,
-        Location.Inferior_Articular_Left,
-        Location.Inferior_Articular_Right,
-        # Location.Vertebra_Corpus_border, CT only
-        Location.Vertebra_Corpus,
-        Location.Vertebra_Disc,
-        Location.Muscle_Inserts_Spinosus_Process,
-        Location.Muscle_Inserts_Transverse_Process_Left,
-        Location.Muscle_Inserts_Transverse_Process_Right,
-        Location.Muscle_Inserts_Vertebral_Body_Left,
-        Location.Muscle_Inserts_Vertebral_Body_Right,
-        Location.Muscle_Inserts_Articulate_Process_Inferior_Left,
-        Location.Muscle_Inserts_Articulate_Process_Inferior_Right,
-        Location.Muscle_Inserts_Articulate_Process_Superior_Left,
-        Location.Muscle_Inserts_Articulate_Process_Superior_Right,
-        Location.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Median,
-        Location.Ligament_Attachment_Point_Posterior_Longitudinal_Superior_Median,
-        Location.Ligament_Attachment_Point_Anterior_Longitudinal_Inferior_Median,
-        Location.Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Median,
-        Location.Additional_Vertebral_Body_Middle_Superior_Median,
-        Location.Additional_Vertebral_Body_Posterior_Central_Median,
-        Location.Additional_Vertebral_Body_Middle_Inferior_Median,
-        Location.Additional_Vertebral_Body_Anterior_Central_Median,
-        Location.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Left,
-        Location.Ligament_Attachment_Point_Posterior_Longitudinal_Superior_Left,
-        Location.Ligament_Attachment_Point_Anterior_Longitudinal_Inferior_Left,
-        Location.Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Left,
-        Location.Additional_Vertebral_Body_Middle_Superior_Left,
-        Location.Additional_Vertebral_Body_Posterior_Central_Left,
-        Location.Additional_Vertebral_Body_Middle_Inferior_Left,
-        Location.Additional_Vertebral_Body_Anterior_Central_Left,
-        Location.Ligament_Attachment_Point_Anterior_Longitudinal_Superior_Right,
-        Location.Ligament_Attachment_Point_Posterior_Longitudinal_Superior_Right,
-        Location.Ligament_Attachment_Point_Anterior_Longitudinal_Inferior_Right,
-        Location.Ligament_Attachment_Point_Posterior_Longitudinal_Inferior_Right,
-        Location.Additional_Vertebral_Body_Middle_Superior_Right,
-        Location.Additional_Vertebral_Body_Posterior_Central_Right,
-        Location.Additional_Vertebral_Body_Middle_Inferior_Right,
-        Location.Additional_Vertebral_Body_Anterior_Central_Right,
-        Location.Ligament_Attachment_Point_Flava_Superior_Median,
-        Location.Ligament_Attachment_Point_Flava_Inferior_Median,
-        Location.Vertebra_Direction_Posterior,
-        Location.Vertebra_Direction_Inferior,
-        Location.Vertebra_Direction_Right,
-    ],
-)
-poi = poi.round(2)
-print("Vertebra T4 Vertebra Corpus Center of mass:", poi[v_name2idx["T4"], Location.Vertebra_Corpus])
-print("The id number of T4 Vertebra_Corpus is ", v_name2idx["T4"], Location.Vertebra_Corpus.value)
+## The three pillars
 
-# rescale/reorante local poi like nii
-poi_new = poi.reorient(("P", "I", "R")).rescale((1, 1, 1))
-# Local and global POIs can be rescaled to a target spacing with:
-poi_new = poi.resample_from_to(other_nii_or_poi)
+### <a href=TPTBox/core/README_NII.md>NII: nii_wrapper.py -- NIfTI image wrapper </a>
+This is the core of image handling, this takes care of loading images and segmentations, and any data processing
 
-# local to global poi
-global_poi = poi.to_global(itk_coords=True)
-# You can save global pois in mrk.json format for import and editing in slicer.
-global_poi.save_mrk("FILE.mrk.json", glyphScale=3.0)
-# Import as a Markup in slicer; To make points editable you must click on the "lock" symbol under Markups - Control Points - Interaction
+### <a href=TPTBox/core/README_POI.md>POI: poi.py -- Points of Interests </a>
+This is the core of handling 2D/3D coordinates in any defined space. Center of mass locations can be computed in this format, and other landmarks. Similar to Niftis, this contains an affine matrix so it is aware of its global space relation, voxel spacing, ...
 
-# Save in our format:
-poi.save(poi_path)
-# Loading local/global Poi
-poi = POI.load(poi_path)
-poi = POI_Global.load(poi_path)
+### <a href=TPTBox/core/README_BIDS.md>BIDS: bids_file.py -- Dataset Handling </a>
+This is the core of handling datasets that are BIDS-compliant. Easily search through your datasets and find all images following your constraints, such as every CT that also has a specific segmentation available.
+
+## Modules
+
+Each sub-package has its own README with API tables and examples. Click on the name to get the corresponding README with quick examples and more explanations.
+
+
+| Module | Description |
+|---|---|
+| [`core`](TPTBox/core/README.md) | `NII` (NIfTI I/O and transforms), `POI` (anatomical landmarks), BIDS dataset navigation, NumPy utilities, vertebra constants |
+| [`core/poi_fun`](TPTBox/core/poi_fun/README.md) | Internal POI computation strategies (surface points, corpus centers, disc points) |
+| [`spine`](TPTBox/spine/README.md) | Spine-specific tools: 2D snapshot generation and statistical measurements |
+| [`spine/snapshot2D`](TPTBox/spine/snapshot2D/README.md) | Modular 2D image generation — axial/sagittal/coronal slices, MIPs, segmentation overlays |
+| [`spine/spinestats`](TPTBox/spine/spinestats/README.md) | Clinical spine measurements: distances, angles, disc heights, IVD landmarks |
+| [`registration`](TPTBox/registration/README.md) | Rigid and deformable image registration via ANTs and DeepALI |
+| [`segmentation`](TPTBox/segmentation/README.md) | Integration with SPINEPS, VibeSeg/TotalVibeSeg, and nnU-Net pipelines |
+| [`mesh3D`](TPTBox/mesh3D/README.md) | 3D surface mesh generation and rendering from segmentation volumes |
+| [`stitching`](TPTBox/stitching/README.md) | Multi-station NIfTI stitching for whole-body or long-spine acquisitions |
+| [`logger`](TPTBox/logger/README.md) | Structured, consistent logging for medical image processing pipelines |
 
 
 
-```
+# Publications
 
+An incomplete list of publications that actively used TPTBox:
 
-### Snapshot2D Spine
-![Snapshot2D Spine example](TPTBox/images/snp2D_example.png)
-The snapshot function automatically generates sag, cor, axial cuts in the center of a segmentation.
+1. **Denoising diffusion-based MRI to CT image translation enables automated spinal segmentation**; Graf, Robert;
+Schmitt, Joachim; Schlaeger, Sarah; Möller, Hendrik Kristian; Sideri-Lampretsa, Vasiliki; Sekuboyina, Anjany; Krieg, Sandro Manuel;
+Wiestler, Benedikt; Menze, Bjoern; Rueckert, Daniel; Kirschke, Jan; **European Radiology Experimental, 2023**
 
-```python
-from TPTBox.spine.snapshot2D import Snapshot_Frame, create_snapshot
+2. **Modeling the acquisition shift between axial and sagittal MRI for di usion super-resolution to enable axial spine segmentation**; Graf, Robert; Möller, Hendrik; McGinnis, Julian; Rühling, Sebastian; Weihrauch, Maren; Atad, Matan; Shit,
+Suprosanna; Menze, Bjoern; Mühlau, Mark; Paetzold, Johannes C.; Rueckert, Daniel; Kirschke, Jan S.; **Proceedings of Machine Learning Research, 2024**
 
-ct = Path("Path to CT")
-mri = Path("Path to MRI")
-vert = Path("Path to Vertebra segmentation")
-subreg = Path("Path to Vertebra subregions")
-poi_ct = Path("Path to Vertebra poi")
-poi_mr = Path("Path to Vertebra poi")
+3. **Detecting unforeseen data properties with diffusion autoencoder embeddings using spine MRI data**; Graf, Robert; Hunecke, Florian; Pohl, Soeren; Atad, Matan; Möller, Hendrik; Starck, Sophie; Kröncke, Thomas; Bette, Stefanie; Bamberg,
+Fabian; Pischon, Tobias; Niendorf, Thoralf; Schmidt, Carsten; Paetzold, Johannes C.; Rueckert, Daniel; Kirschke, Jan S.; **International Conference on Medical Image Computing and Computer-Assisted Intervention (MICCAI), 2024**
 
-ct_frame = Snapshot_Frame(image=ct, segmentation=vert, centroids=poi_ct, mode="CT", coronal=True, axial=True)
-mr_frame = Snapshot_Frame(image=mri, segmentation=vert, centroids=poi_mr, mode="MRI", coronal=True, axial=True)
-create_snapshot(snp_path="snapshot.jpg", frames=[ct_frame, mr_frame])
-```
+4. **SPINEPS—automatic whole spine segmentation of T2-weighted MR images using a two-phase approach to multi-class semantic and instance segmentation**; Möller, Hendrik; Graf, Robert; Schmitt, Joachim; Keinert-Weth, Benjamin;
+Schön, Hanna; Atad, Matan; Sekuboyina, Anjany; Streckenbach, Felix; Kofler, Florian;
+Kroencke, Thomas; Bette, Stefanie; Willich, Stefan N.; Keil, Thomas; Niendorf, Thoralf;
+Pischon, Tobias; Endemann, Beate; Menze, Bjoern; Rueckert, Daniel; Kirschke, Jan S.;
+**European Radiology, 2025**
 
+5. **VIBESegmentator: full body MRI segmentation for the NAKO and UK Biobank**;
+Graf, Robert; Platzek, Paul; Riedel, Evamaria Olga; Ramschütz, Constanze; Starck, Sophie; Möller, Hendrik K.; Atad, Matan; Völzke,
+Henry; Bülow, Robin; Schmidt, Carsten Oliver; Rüdebusch, Julia; Jung, Matthias; Reisert, Marco; Weiss, Jakob; Lö ler, Maximilian T.;
+Bamberg, Fabian; Wiestler, Benedikt; Paetzold, Johannes C.; Rueckert, Daniel; Kirschke, Jan S.; **European Radiology, 2025**
 
-### Snapshot3D
-![Snapshot3D example](TPTBox/images/snp3D_example.jpg)
-Requires additonal python packages: vtk fury xvfbwrapper
+6. **Generating synthetic high-resolution spinal STIR and T1w images from T2w FSE and low-resolution axial Dixon**; Graf, Robert; Platzek, Paul-Sören; Riedel, Evamaria Olga; Kim, Su Hwan; Lenhart, Nicolas; Ramschütz, Constanze; Paprottka,
+Karolin Johanna; Kertels, Olivia Ruriko; Möller, Hendrik Kristian; Atad, Matan; Bülow, Robin; Werner, Nicole; Völzke, Henry; Schmidt,
+Carsten Oliver; Wiestler, Benedikt; Paetzold, Johannes C.; Rueckert, Daniel; Kirschke, Jan S.; **European Radiology, 2025**
 
-```python
-from TPTBox.mesh3D.snapshot3D import make_snapshot3D, make_snapshot3D_parallel
+7. **MAGO-SP: detection and correction of water-fat swaps in magnitude-only VIBE MRI**;
+Graf, Robert; Möller, Hendrik; Starck, Sophie; Atad, Matan; Braun, Philipp; Stelter, Jonathan; Peters, Annette; Krist, Lilian; Willich,
+Stefan N.; Völzke, Henry; Bülow, Robin; Pischon, Tobias; Niendorf, Thoralf; Paetzold, Johannes C.; Karampinos, Dimitrios; Rueckert,
+Daniel; Kirschke, Jan S.; **International Conference on Medical Image Computing and Computer-Assisted Intervention (MICCAI), 2025**
 
-# all segmentation; view give the rotation of an image
-make_snapshot3D("sub-101000_msk.nii.gz", "snapshot3D.png", view=["A", "L", "P", "R"])
-# Select witch segmentation per panel are chosen.
-make_snapshot3D("sub-101000_msk.nii.gz", "snapshot3D_v2.png", view=["A"], ids_list=[[1, 2], [3]])
-# we proviede a implementation to process multiple images at the same time.
-make_snapshot3D_parallel(["a.nii.gz", "b.nii.gz"], ["snp_a.png", "snp_b.png"], view=["A"])
-```
+8. **Automated Thoracolumbar Stump Rib Detection and Analysis in a Large CT Cohort**;
+Möller, Hendrik; Dima, Alina; Keinert-Weth, Benjamin; Graf, Robert; Atad, Matan; Paetzold,
+Johannes; Jungmann, Friederike; Braren, Rickmer; Kofler, Florian; Menze, Bjoern; Rueckert,
+Daniel; Kirschke, Jan S.; Schön, Hanna; **MDPI AI, 2026**
 
-<!---
-### Logger
+9. **PARASIDE: An automatic paranasal sinus segmentation and structure analysis tool for magnetic resonance imaging**; Möller, Hendrik;
+Krautschick, Lukas; Graf, Robert; Atad, Matan; Busch, Chia-Jung; Beule, Achim Georg;
+Scharf, Christian; Kaderali, Lars; Menze, Bjoern; Rueckert, Daniel; Kirschke, Jan S.;
+Paperlein, Fabian; **Computers in Biology and Medicine, 2026**
 
-```python
-TBD
-```
+10. **One Sequence to Segment Them All: Efficient Data Augmentation for CT and MRI Cross-Domain 3D Spine Segmentation;** Molinier,
+Nathan*; Möller, Hendrik*; Dagonneau, Thomas; Curto-Vilalta, Anna; Graf, Robert; Atad,
+Matan; Rueckert, Daniel; Kirschke, Jan S.; Cohen-Adad, Julien; **International Conference on
+Medical Image Computing and Computer-Assisted Intervention (MICCAI) , 2026**
 
-### Point registration with POIs
-```python
-TBD
-```
+11. **VERIDAH: Solving Enumeration Anomaly Aware Vertebra
+Labeling across Imaging Sequences;** Möller, Hendrik; Schön, Hanna; Graf, Robert;
+Atad, Matan; Molinier, Nathan; Sekuboyina, Anjany; Budai, Bettina; Bamberg, Fabian;
+Ringhof, Steffen; Schlett, Christopher; Pischon, Tobias; Niendorf, Thoralf; Decker, Josua;
+Weber, Marc-André; Menze, Bjoern; Rueckert, Daniel; Kirschke, Jan S.; **European
+Radiology (under review), 2026**
 
+12. **Rule-based key-point extraction for MR-guided biomechanical digital twins of the spine**; Graf, Robert; Lerchl,
+Tanja; Nispel, Kati; Möller, Hendrik; Atad, Matan; McGinnis, Julian; Watrinet, Julius Maria; Paetzold, Johannes C.; Rueckert, Daniel;
+Kirschke, Jan S.; **International Workshop on Digital Twin for Healthcare (DT4H), 2025**
 
-> [!Note]
-> Notably, ...
-
-> [!TIP]
-> A Tip
-
-> [!IMPORTANT]
-> Importantly
--->
+13. **VERPEX: Anatomical Landmark Extraction on 3D Vertebrae exploiting Segmentation Masks**; Möller, Hendrik; Wang, Alissa Yuxuan; Graf, Robert;
+Nispel, Kati; Atad, Matan; Menze, Bjoern; Rueckert, Daniel; Kirschke, Jan S.; Lerchl, Tanja;
+**International Workshop on Digital Twin for Healthcare (DT4H), 2026**
