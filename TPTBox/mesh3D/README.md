@@ -44,6 +44,7 @@ More extensive:
 from TPTBox.core.vert_constants import Full_Body_Instance
 from TPTBox.mesh3D.snapshot3D import make_snapshot3D_parallel
 
+path = "/path/to/folder"
 seg = path / "seg-VIBESeg-11-lr_msk.nii.gz"
 out_path = path / "snp3D.jpg"
 out_path2 = path / "snp3D_2.jpg"

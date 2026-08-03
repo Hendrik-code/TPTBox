@@ -16,7 +16,7 @@ You can verify alignment by opening the images in ITKSnap with "open additional 
 
 
 ### Standalone
-This script can be run directly from the console. Copy 'stiching.py' and install the necessary package.
+This script can be run directly from the console. Copy 'stitching.py' and install the necessary package.
 
 ```
 stitching.py
@@ -64,7 +64,7 @@ list_of_files = ["File_A.nii.gz", "File_B.nii.gz", "File_C.nii.gz",]
 # This will combine your images into a single NIfTI file
 stitching(
     list_of_files,  # List of input files
-    out="out_path_stiched_image.nii.gz",  # Path to save stitched output
+    out="out_path_stitched_image.nii.gz",  # Path to save stitched output
     is_seg=False,  # Set True if these are segmentation masks
     is_ct=False,  # True for CT, min_value will by -1024 instead of 0
     kick_out_fully_integrated_images=True,
