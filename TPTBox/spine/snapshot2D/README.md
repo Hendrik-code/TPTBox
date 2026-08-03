@@ -3,7 +3,7 @@
 Modular 2D image generation for NIfTI data.  Supports axial/sagittal/coronal slices,
 maximum intensity projections (MIPs), and segmentation overlays.
 
-![Snapshot2D Spine example](TPTBox/images/snp2D_example.png)
+![Snapshot2D Spine example](../../images/snp2D_example.png)
 
 ## Key symbols
 
