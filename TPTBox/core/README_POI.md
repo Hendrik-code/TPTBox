@@ -1,6 +1,6 @@
 # TPTBox `poi.py` — Points of Interest
 
-![Example of two lumbar vertebrae. The left example is derived from 1 mm isotropic CT, the right from sagittal MRI with a resolution of 3.3 mm in the left–right direction. Top row: Subregion of the vertebra used for analysis. Middle row: Extreme points. Bottom row: Corpus edge and ligamentum flavum points.](TPTBox/images/poi_preview.png)
+![Example of two lumbar vertebrae. The left example is derived from 1 mm isotropic CT, the right from sagittal MRI with a resolution of 3.3 mm in the left–right direction. Top row: Subregion of the vertebra used for analysis. Middle row: Extreme points. Bottom row: Corpus edge and ligamentum flavum points.](../images/poi_preview.png)
 
 
 | Symbol | Description |
