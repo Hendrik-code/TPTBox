@@ -12,7 +12,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 <p align="center">
-  <a href="#quick-start">Quick start</a> ·
+  <a href="#quick-use">Quick use</a> ·
   <a href="https://tptbox.readthedocs.io">Documentation</a> ·
   <a href="CONTRIBUTING.md">Contributing</a>
 </p>
