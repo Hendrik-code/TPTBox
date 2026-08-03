@@ -94,7 +94,7 @@ This is the core of image handling, this takes care of loading images and segmen
 ### <a href=TPTBox/core/README_POI.md>POI: poi.py -- Points of Interests </a>
 This is the core of handling 2D/3D coordinates in any defined space. Center of mass locations can be computed in this format, and other landmarks. Similar to Niftis, this contains an affine matrix so it is aware of its global space relation, voxel spacing, ...
 
-### <a href=TPTBox/core/README_BIDS.md>BIDS: bids_file.py -- Dataset Handling </a>
+### <a href=TPTBox/core/README_BIDS.md>BIDS: bids_files.py -- Dataset Handling </a>
 This is the core of handling datasets that are BIDS-compliant. Easily search through your datasets and find all images following your constraints, such as every CT that also has a specific segmentation available.
 
 ## Modules

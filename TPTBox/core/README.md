@@ -6,13 +6,13 @@ The `core` subpackage is the foundation of TPTBox. It provides the three primary
 
 ## The three pillars -- NII, POI, BIDS
 
-### <a href=TPTBox/core/README_NII.md>NII: nii_wrapper.py -- NIfTI image wrapper </a>
+### <a href=README_NII.md>NII: nii_wrapper.py -- NIfTI image wrapper </a>
 This is the core of image handling, this takes care of loading images and segmentations, and any data processing
 
-### <a href=TPTBox/core/README_POI.md>POI: poi.py -- Points of Interests </a>
+### <a href=README_POI.md>POI: poi.py -- Points of Interests </a>
 This is the core of handling 2D/3D coordinates in any defined space. Center of mass locations can be computed in this format, and other landmarks. Similar to Niftis, this contains an affine matrix so it is aware of its global space relation, voxel spacing, ...
 
-### <a href=TPTBox/core/README_BIDS.md>BIDS: bids_file.py -- Dataset Handling </a>
+### <a href=README_BIDS.md>BIDS: bids_files.py -- Dataset Handling </a>
 This is the core of handling datasets that are BIDS-compliant. Easily search through your datasets and find all images following your constraints, such as every CT that also has a specific segmentation available.
 
 
@@ -20,7 +20,7 @@ This is the core of handling datasets that are BIDS-compliant. Easily search thr
 
 ### `np_utils.py` — NumPy utilities
 
-Numpy functionalities that a lot f NII functions above utilize under the hood. Most of them are optimized to run on uint numpy arrays.
+Numpy functionalities that a lot of NII functions above utilize under the hood. Most of them are optimized to run on uint numpy arrays.
 
 | Symbol | Description |
 |---|---|
