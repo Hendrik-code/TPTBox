@@ -1,5 +1,5 @@
 <h1 align="center">
-<img src="https://github.com/Hendrik-code/TPTBox/blob/main/TPTBox/images/logo.svg" width="300">
+<img src="TPTBox/images/TPTBox_overview.png" width="800">
 </h1><br>
 
 
@@ -104,16 +104,16 @@ Each sub-package has its own README with API tables and examples. Click on the n
 
 | Module | Description |
 |---|---|
-| [`core`](TPTBox/core/README.md) | `NII` (NIfTI I/O and transforms), `POI` (anatomical landmarks), BIDS dataset navigation, NumPy utilities, vertebra constants |
-| [`core/poi_fun`](TPTBox/core/poi_fun/README.md) | Internal POI computation strategies (surface points, corpus centers, disc points) |
-| [`spine`](TPTBox/spine/README.md) | Spine-specific tools: 2D snapshot generation and statistical measurements |
-| [`spine/snapshot2D`](TPTBox/spine/snapshot2D/README.md) | Modular 2D image generation — axial/sagittal/coronal slices, MIPs, segmentation overlays |
-| [`spine/spinestats`](TPTBox/spine/spinestats/README.md) | Clinical spine measurements: distances, angles, disc heights, IVD landmarks |
-| [`registration`](TPTBox/registration/README.md) | Rigid and deformable image registration via ANTs and DeepALI |
-| [`segmentation`](TPTBox/segmentation/README.md) | Integration with SPINEPS, VibeSeg/TotalVibeSeg, and nnU-Net pipelines |
-| [`mesh3D`](TPTBox/mesh3D/README.md) | 3D surface mesh generation and rendering from segmentation volumes |
-| [`stitching`](TPTBox/stitching/README.md) | Multi-station NIfTI stitching for whole-body or long-spine acquisitions |
-| [`logger`](TPTBox/logger/README.md) | Structured, consistent logging for medical image processing pipelines |
+| [`core`](https://tptbox.readthedocs.io/en/latest/modules/core/) | `NII` (NIfTI I/O and transforms), `POI` (anatomical landmarks), BIDS dataset navigation, NumPy utilities, vertebra constants |
+| [`core/poi_fun`](https://tptbox.readthedocs.io/en/latest/modules/poi_fun/) | Internal POI computation strategies (surface points, corpus centers, disc points) |
+| [`spine`](https://tptbox.readthedocs.io/en/latest/modules/spine/) | Spine-specific tools: 2D snapshot generation and statistical measurements |
+| [`spine/snapshot2D`](https://tptbox.readthedocs.io/en/latest/modules/snapshot2d/) | Modular 2D image generation — axial/sagittal/coronal slices, MIPs, segmentation overlays |
+| [`spine/spinestats`](https://tptbox.readthedocs.io/en/latest/modules/spinestats/) | Clinical spine measurements: distances, angles, disc heights, IVD landmarks |
+| [`registration`](https://tptbox.readthedocs.io/en/latest/modules/registration/) | Rigid and deformable image registration via ANTs and DeepALI |
+| [`segmentation`](https://tptbox.readthedocs.io/en/latest/modules/segmentation/) | Integration with SPINEPS, VibeSeg/TotalVibeSeg, and nnU-Net pipelines |
+| [`mesh3D`](https://tptbox.readthedocs.io/en/latest/modules/mesh3d/) | 3D surface mesh generation and rendering from segmentation volumes |
+| [`stitching`](https://tptbox.readthedocs.io/en/latest/modules/stitching/) | Multi-station NIfTI stitching for whole-body or long-spine acquisitions |
+| [`logger`](https://tptbox.readthedocs.io/en/latest/modules/logger/) | Structured, consistent logging for medical image processing pipelines |
 
 
 
