@@ -3,52 +3,24 @@
 The `core` subpackage is the foundation of TPTBox. It provides the three primary abstractions —
 `NII`, `POI`, and `BIDS_FILE` — along with helper utilities for array operations and anatomical constants.
 
-## Key Classes and Functions
 
-### `nii_wrapper.py` — NIfTI image wrapper
+## The three pillars -- NII, POI, BIDS
 
-| Symbol | Description |
-|---|---|
-| `NII` | Wraps `nibabel.Nifti1Image`; the central image type throughout TPTBox |
-| `NII.load(path, seg)` | Load a NIfTI file from disk (classmethod) |
-| `NII.from_numpy(arr, affine, seg)` | Construct from a numpy array and affine matrix |
-| `NII.reorient(axcodes_to)` | Reorient to a canonical axis code (e.g. `("R","A","S")`) |
-| `NII.rescale(voxel_spacing)` | Resample to new voxel spacing in mm |
-| `NII.resample_from_to(other)` | Resample to match the grid of another `NII` |
-| `NII.apply_mask(mask)` | Zero-out voxels outside a binary/label mask |
-| `NII.map_labels(label_map)` | Remap integer labels |
-| `NII.save(path)` | Save to disk as `.nii` or `.nii.gz` |
-| `NII.get_array()` | Return a copy of the underlying numpy array |
-| `NII.get_seg_array()` | Same as `get_array()` but asserts `seg=True` |
-| `Image_Reference` | Type alias: `BIDS_FILE | Nifti1Image | Path | str | NII` |
+### <a href=README_NII.md>NII: nii_wrapper.py -- NIfTI image wrapper </a>
+This is the core of image handling, this takes care of loading images and segmentations, and any data processing
 
-### `bids_files.py` — BIDS dataset navigation
+### <a href=README_POI.md>POI: poi.py -- Points of Interests </a>
+This is the core of handling 2D/3D coordinates in any defined space. Center of mass locations can be computed in this format, and other landmarks. Similar to Niftis, this contains an affine matrix so it is aware of its global space relation, voxel spacing, ...
 
-| Symbol | Description |
-|---|---|
-| `BIDS_Global_info` | Scans a dataset root and indexes all BIDS files |
-| `BIDS_Global_info.enumerate_subjects()` | Iterate over subjects as `(subject_id, Subject_Container)` |
-| `Subject_Container` | Per-subject file index; entry point for queries |
-| `Subject_Container.new_query()` | Returns a `Searchquery` for this subject |
-| `BIDS_FILE` | One file parsed into BIDS entities (sub, ses, format, …) |
-| `BIDS_FILE.open_nii()` | Load this file's NIfTI |
-| `BIDS_FILE.get_changed_path(...)` | Derive a new path with changed BIDS entities |
-| `Searchquery` | Fluent query builder: `.filter()`, `.loop_dict()`, `.first()` |
-| `BIDS_Family` | `dict[str, list[BIDS_FILE]]` grouping files by format |
+### <a href=README_BIDS.md>BIDS: bids_files.py -- Dataset Handling </a>
+This is the core of handling datasets that are BIDS-compliant. Easily search through your datasets and find all images following your constraints, such as every CT that also has a specific segmentation available.
 
-### `poi.py` — Points of Interest
 
-| Symbol | Description |
-|---|---|
-| `POI` | Maps `(vertebra_id, subregion_id) → (x, y, z)` |
-| `calc_centroids(seg_nii)` | Compute centroids for every label in a segmentation |
-| `calc_poi_from_subreg_vert(vert, subreg)` | Compute POIs from paired vertebra + subregion segmentations |
-| `POI.save(path)` | Serialise to JSON |
-| `POI.load(path)` | Deserialise from JSON |
-| `POI.to_global(ref)` | Convert from voxel to world (mm) coordinates |
-| `POI.to_local(ref)` | Convert from world to voxel coordinates |
+## Other Key Classes and Functions
 
 ### `np_utils.py` — NumPy utilities
+
+Numpy functionalities that a lot of NII functions above utilize under the hood. Most of them are optimized to run on uint numpy arrays.
 
 | Symbol | Description |
 |---|---|
@@ -63,6 +35,15 @@ The `core` subpackage is the foundation of TPTBox. It provides the three primary
 | `np_map_labels(arr, label_map)` | Remap label integers via a dict |
 | `np_unique(arr)` | Unique values (faster than `np.unique` for uint arrays) |
 
+```python
+from TPTBox.core.np_utils import np_unique, np_center_of_mass
+
+a = np.array([0,1,2,3], [4,5,6,7], dtype=np.uint8)
+
+label = np_unique(a)
+center_of_mass_of_label_four = np_center_of_mass(a)[4]
+```
+
 ### `vert_constants.py` — Anatomical constants
 
 | Symbol | Description |
@@ -76,22 +57,11 @@ The `core` subpackage is the foundation of TPTBox. It provides the three primary
 | `AX_CODES` | Type alias: `tuple[str, str, str]` |
 | `AFFINE` | Type alias: `np.ndarray` (4×4) |
 
-## Quick Example
-
 ```python
-from TPTBox import NII, BIDS_Global_info, calc_centroids
+from TPTBox import NII, Location
+# Segmentation
+seg = NII.load("path/to/seg.nii.gz", seg=True)
 
-# Load and resample a CT
-ct = NII.load("sub-001_ct.nii.gz", seg=False)
-ct_ras = ct.reorient(("R", "A", "S")).rescale((1.0, 1.0, 1.0))
-
-# Compute centroids from a segmentation
-seg = NII.load("sub-001_seg.nii.gz", seg=True)
-poi = calc_centroids(seg)
-print(poi)
-
-# Scan a BIDS dataset
-bids = BIDS_Global_info(["dataset/"], parents=["rawdata"])
-for subj, container in bids.enumerate_subjects():
-    t2 = container.new_query().filter("format", "T2w").first()
+# Get the segmentation of the Vertebra Corpus
+seg_corpus = seg.extract_label(Location.Vertebra_Corpus)
 ```
