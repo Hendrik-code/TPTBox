@@ -1147,10 +1147,9 @@ class BIDS_FILE:
                 return out_path
             if not out_path.exists():
                 return out_path
-            if "run" in info:
-                info["run"] += 1
-            else:
-                info["run"] = 2
+            # "run" is a decimal entity and must stay a string: validate_entities() calls
+            # .isdecimal() on it, which an int does not support.
+            info["run"] = str(int(info["run"]) + 1) if "run" in info else "2"
 
     def save_changed_path(
         self,

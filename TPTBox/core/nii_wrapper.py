@@ -2620,7 +2620,8 @@ class NII(NII_Math):
         elif isinstance(key,np.ndarray):
             return self.get_array()[key]
         elif isinstance(key,slice):
-            self.__getitem__((key,Ellipsis,Ellipsis))
+            # pad with full slices for the trailing dimensions; Ellipsis is rejected above
+            return self.__getitem__((key, *(slice(None) for _ in range(len(self.shape) - 1))))
         else:
             raise TypeError("Invalid argument type:", type(key))
     def __setitem__(self, key,value):
@@ -2721,14 +2722,14 @@ class NII(NII_Math):
                 return self.clamp(0,1,inplace=inplace)
         seg_arr = self.get_seg_array()
 
+        if isinstance(label,str):
+            label = int(label)  # a str is also a Sequence, so this must come first
         if isinstance(label, Sequence):
             labels:int|list[int] = [idx.value if isinstance(idx,Enum) else idx for idx in label]
             assert 0 not in labels, 'Zero label does not make sense. This is the background'
         else:
             if isinstance(label,Enum):
                 label = label.value
-            if isinstance(label,str):
-                label = int(label)
 
             assert label != 0, 'Zero label does not make sense. This is the background'
             labels = label
@@ -2759,6 +2760,8 @@ class NII(NII_Math):
     def remove_labels(self,label:int|Enum|Sequence[int]|Sequence[Enum], inplace=False, verbose:logging=True, removed_to_label=0) -> Self:
         """If this NII is a segmentation you can single out one label."""
         assert label != 0, 'Zero label does not make sens.  This is the background'
+        if isinstance(label,str):
+            label = int(label)  # a str is also a Sequence, so this must come first
         if not isinstance(label,Sequence):
             label = [label] # type: ignore
         flat: list[int] = []

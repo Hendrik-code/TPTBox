@@ -322,5 +322,81 @@ class Test_POI_PIR_Cache(unittest.TestCase):
         self.assertNotIn(99, poi.copy()._vert_orientation_pir)
 
 
+class Test_Public_API(unittest.TestCase):
+    """__all__ advertised load_poi, but nothing imported it, so `import *` raised."""
+
+    def test_load_poi_is_exported(self):
+        import TPTBox
+
+        self.assertTrue(callable(TPTBox.load_poi))
+
+    def test_everything_in_all_is_importable(self):
+        import TPTBox
+
+        missing = [name for name in TPTBox.__all__ if not hasattr(TPTBox, name)]
+        self.assertEqual(missing, [])
+
+
+class Test_Getitem_Slice(unittest.TestCase):
+    """nii[0:5] delegated to a key containing Ellipsis, which the same method rejects."""
+
+    def test_single_slice(self):
+        nii = _make_nii(_cube())
+        self.assertEqual(nii[0:5].shape, (5, 10, 10))
+
+    def test_full_slice_tuple_still_works(self):
+        nii = _make_nii(_cube())
+        self.assertEqual(nii[2:5, 2:5, 2:5].shape, (3, 3, 3))
+
+
+class Test_Label_As_String(unittest.TestCase):
+    """str is a Sequence, so the str branch was unreachable and '12' iterated as characters."""
+
+    @staticmethod
+    def _seg() -> NII:
+        arr = np.zeros((10, 10, 10), dtype=np.uint8)
+        arr[1, 1, 1] = 12
+        arr[2:5, 2:5, 2:5] = 3
+        return _make_nii(arr)
+
+    def test_extract_label_string_matches_int(self):
+        seg = self._seg()
+        self.assertEqual(int(seg.extract_label("12").sum()), int(seg.extract_label(12).sum()))
+
+    def test_remove_labels_string(self):
+        self.assertEqual(list(self._seg().remove_labels("12", verbose=False).unique()), [3])
+
+
+class Test_Metrics_On_Integer_Images(unittest.TestCase):
+    """ssim/psnr used in-place `/=`, which fails on integer arrays."""
+
+    @staticmethod
+    def _int_nii() -> NII:
+        arr = np.zeros((10, 10, 10), dtype=np.int16)
+        arr[2:5, 2:5, 2:5] = 300
+        return _make_nii(arr, seg=False)
+
+    def test_ssim_identical_is_one(self):
+        nii = self._int_nii()
+        self.assertAlmostEqual(float(nii.ssim(nii)), 1.0, places=5)
+
+    def test_psnr_runs_on_int16(self):
+        nii = self._int_nii()
+        self.assertTrue(np.isinf(nii.psnr(nii)))
+
+
+class Test_Calc_Centroids_Level_Info(unittest.TestCase):
+    """type() was taken after unwrapping the enum to .value, so it was always int."""
+
+    def test_level_two_info_records_the_enum_class(self):
+        from TPTBox import Location, calc_centroids
+
+        arr = np.zeros((10, 10, 10), dtype=np.uint8)
+        arr[2:5, 2:5, 2:5] = 1
+        arr[6:9, 6:9, 6:9] = 2
+        poi = calc_centroids(_make_nii(arr), second_stage=Location.Vertebra_Corpus)
+        self.assertIs(poi.level_two_info, Location)
+
+
 if __name__ == "__main__":
     unittest.main()

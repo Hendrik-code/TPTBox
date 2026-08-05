@@ -1317,12 +1317,14 @@ def calc_centroids(
         - NaN values in the binary mask are ignored.
     """
     args = {}
+    # Capture the enum class BEFORE unwrapping to .value, otherwise type() just reports int
+    # and the POI header records "int" instead of e.g. "Location".
     if isinstance(second_stage, Abstract_lvl):
-        second_stage = second_stage.value
         args["level_two_info"] = type(second_stage)
+        second_stage = second_stage.value
     if isinstance(first_stage, Abstract_lvl):
-        first_stage = first_stage.value
         args["level_one_info"] = type(first_stage)
+        first_stage = first_stage.value
     assert first_stage == -1 or second_stage == -1, "first or second dimension must be fixed."
     msk_nii = to_nii(msk, seg=True)
     msk_data = msk_nii.get_seg_array()

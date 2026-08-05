@@ -481,7 +481,6 @@ def run_VibeSeg(
     if (in_niis[0].affine == np.eye(4)).all():
         logger.on_warning(
             "Your affine matrix is the identity. Make sure that the spacing and orientation is correct. For NAKO VIBE it should be 1.40625 mm for R/L and A/P and 3 mm S/I. For UKBB R/L and A/P should be around 2.2 mm",
-            stacklevel=3,
         )
     return run_inference_on_file(
         dataset_id,

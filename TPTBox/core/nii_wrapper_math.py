@@ -456,7 +456,7 @@ class NII_Math(NII_Proxy, Has_Grid):
         """
         img_1 = nii.get_array() - min_v
         img_2 = self.get_array() - min_v
-        img_1/= img_1.max()
+        img_1 = img_1/ img_1.max()  # out-of-place: /= fails on integer arrays
         img_1[img_1<=0] = 0
         img_2= img_2/ img_2.max()
         img_2[img_2<=0] = 0
@@ -480,7 +480,7 @@ class NII_Math(NII_Proxy, Has_Grid):
         """
         img_1 = nii.get_array() - min_v
         img_2 = self.get_array() - min_v
-        img_1/= img_1.max()
+        img_1 = img_1/ img_1.max()  # out-of-place: /= fails on integer arrays
         img_1[img_1<=0] = 0
         img_2= img_2/img_2.max()
         img_2[img_2<=0] = 0

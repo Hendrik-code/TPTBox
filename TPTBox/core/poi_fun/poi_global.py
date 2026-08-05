@@ -37,7 +37,7 @@ class POI_Global(Abstract_POI):
         args = {}
         if level_one_info is not None:
             args["level_one_info"] = level_one_info
-        if level_one_info is not None:
+        if level_two_info is not None:
             args["level_two_info"] = level_two_info
         self.itk_coords = itk_coords
         _format = FORMAT_GLOBAL
@@ -124,8 +124,9 @@ class POI_Global(Abstract_POI):
         p = poi.POI.load(ref)
         if isinstance(ref, poi.POI):
             return self.to_other(p)
-        elif isinstance(ref, Self):
+        elif isinstance(ref, POI_Global):  # `Self` is a typing form; isinstance() against it raises
             return self.to_cord_system(ref.itk_coords)
+        return p
 
     def to_global(self, itk_coords: bool | None = None) -> Self:
         """Return this object unchanged (already in global coordinates)."""
