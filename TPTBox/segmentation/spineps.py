@@ -23,7 +23,7 @@ def get_outpaths_spineps(
         "out_unc",
         "out_logits",
         "out_snap",
-        "out_ctD",
+        "out_ctd",
         "out_snap2",
         "out_debug",
         "out_raw",
@@ -61,9 +61,9 @@ def get_outpaths_spineps(
 def run_spineps(
     file_path: str | Path | BIDS_FILE,
     dataset: str | Path | None = None,
-    model_semantic: str | Path = "t2w",
-    model_instance: str | Path = "instance",
-    model_labeling: str | None = "t2w_labeling",
+    model_semantic: str | Path = "t2w",  # t2w, vibe, ct
+    model_instance: str | Path = "instance",  # instance, ct_instance
+    model_labeling: str | None = "t2w_labeling",  # t2w_labeling, ct_labeling
     derivative_name: str = "derivative",
     override_semantic: bool = False,
     override_instance: bool = False,

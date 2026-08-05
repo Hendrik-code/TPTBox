@@ -98,6 +98,7 @@ def run_vibeseg(
     dataset_id: int = 100,
     padd: int = 5,
     keep_size: bool = False,
+    memory_max=9900000,  # in MB
     **args,
 ) -> NII:
     """Run the VibeSeg whole-body segmentation model on a single image.
@@ -112,6 +113,7 @@ def run_vibeseg(
         padd: Number of voxels to pad the image before inference.
         keep_size: If True, keep the model's native output resolution instead of
             resampling back to the input image space.
+        memory_max: MAX GPU memory in MB. Changes the super-batches are used. Might speed up inference. At least 8000
         **args: Additional keyword arguments forwarded to ``run_inference_on_file``.
 
     Returns:
@@ -130,6 +132,7 @@ def run_vibeseg(
         ddevice=ddevice,
         padd=padd,
         keep_size=keep_size,
+        memory_max=memory_max,
         **args,
     )[0]
 
