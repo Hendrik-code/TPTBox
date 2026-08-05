@@ -700,7 +700,7 @@ def plot_sag_centroids(
                     v[0] * zms[0],
                     c,
                     d,
-                    color=cmap(color - 1 % LABEL_MAX % cmap.N),
+                    color=cmap((color - 1) % LABEL_MAX % cmap.N),
                 )
             )
     if "text_sag" in ctd.info:
@@ -811,7 +811,7 @@ def plot_cor_centroids(
                     v[0] * zms[0],
                     c,
                     d,
-                    color=cmap(color - 1 % LABEL_MAX % cmap.N),
+                    color=cmap((color - 1) % LABEL_MAX % cmap.N),
                 )
             )
     if "text_cor" in ctd.info:

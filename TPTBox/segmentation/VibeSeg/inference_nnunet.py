@@ -370,8 +370,8 @@ def run_inference_on_file(
         for k, v in mapping_.items():
             key = to_int(k)
             value = to_int(v, key)
-            if k != value:
-                mapping[k] = value
+            if key != value:  # `k` is the raw string: map_labels_ needs the int key
+                mapping[key] = value
             unknown_strings[v] = value
         logger.print(f"{unknown_strings}")
         logger.print(f"{mapping=}")

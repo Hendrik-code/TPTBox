@@ -1014,7 +1014,9 @@ def np_filter_connected_components(
     largest_k_components = min(largest_k_components, len(label_volume_pairs))
     label_volume_pairs.sort(key=lambda x: x[1], reverse=True)
 
-    if len(labels) == 1 or label_volume_pairs == largest_k_components or largest_k_components_org is None or k_larges_global:
+    # `label_volume_pairs == largest_k_components` compared a list[tuple] to an int and was
+    # therefore always False, so this shortcut never fired when every component is kept.
+    if len(labels) == 1 or len(label_volume_pairs) == largest_k_components or largest_k_components_org is None or k_larges_global:
         preserve: list[int] = [x[0] for x in label_volume_pairs[:largest_k_components]]
     else:
         counter = dict.fromkeys(labels, 0)
@@ -1294,7 +1296,10 @@ def np_smooth_gaussian_labelwise(
     seg_arr_s = seg_arr_smoothed.copy()
 
     if background_threshold is not None:
-        seg_arr_smoothed[seg_arr_smoothed < background_threshold] = len(sem_labels_plus_background) - 1  # background label
+        # Threshold the winning *confidence*, not the argmax index: seg_arr_smoothed holds
+        # label indices, so comparing it to a probability threshold zeroed out whichever
+        # labels happened to sort below it.
+        seg_arr_smoothed[arr_stack.max(axis=0) < background_threshold] = len(sem_labels_plus_background) - 1  # background label
 
     for idx, l in enumerate(sem_labels_plus_background):
         seg_arr_s[seg_arr_smoothed == idx] = l

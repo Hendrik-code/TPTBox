@@ -276,8 +276,9 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         super().__init__(
             source=source.to_deepali(),
             target=fix.to_deepali(),
-            source_seg=to_nii(moving_seg, True).to_deepali() if fixed_seg is not None else None,
-            target_seg=to_nii(fixed_seg, True).to_deepali() if moving_seg is not None else None,
+            # each branch used to test the *other* variable
+            source_seg=to_nii(moving_seg, True).to_deepali() if moving_seg is not None else None,
+            target_seg=to_nii(fixed_seg, True).to_deepali() if fixed_seg is not None else None,
             source_pset=source_pset,
             target_pset=target_pset,
             source_landmarks=source_landmarks,

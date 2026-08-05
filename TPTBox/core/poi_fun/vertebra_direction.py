@@ -126,8 +126,9 @@ def calc_orientation_of_vertebra_PIR(
             cond = np.where(curr_slice != 0)
             x_slice[cond] = np.minimum(curr_slice[cond], x_slice[cond])
             fill_back[i] = x_slice
-        subreg_sar.set_array(fill_back).reorient(poi.orientation).rescale_(poi.zoom)
-        arr = subreg_sar.get_array()
+        # set_array/reorient are out-of-place: the chained result must be captured, otherwise
+        # `arr` is still in (S,A,R) at iso spacing. Mirrors calc_center_spinal_cord below.
+        arr = subreg_sar.set_array(fill_back).reorient(poi.orientation).rescale_(poi.zoom).get_array()
         fill_back_nii.set_array_(arr)
 
     ret = calc_centroids(subreg_iso.set_array(out), second_stage=subreg_id, extend_to=poi_iso.copy(), inplace=True)

@@ -732,7 +732,7 @@ def plot_compute_lordosis_and_kyphosis(
         vert = round((id1.value + id2.value) / 2)
         while (vert, 50) not in poi and vert != 0:
             vert -= 1
-        if (vert, 50) not in poi:
+        if (vert, 50) in poi:  # the body needs the key to be PRESENT; `not in` made it dead
             cord = poi[vert, 50]
             text_out.append((vert, (f"{str(name).split('_')[-1]}: {v:.1f}°", 15, cord[1])))
 

@@ -98,7 +98,10 @@ def make_quadrants(
         subreg_id=[
             Location.Vertebra_Corpus,
             Location.Vertebra_Direction_Inferior,
-            Location.Vertebra_Direction_Inferior,
+            # Vertebra_Direction_Right is read below; it used to be a second copy of
+            # Inferior, so the lookup always raised KeyError and every vertebra was
+            # skipped -> make_quadrants silently returned an all-zero image.
+            Location.Vertebra_Direction_Right,
         ],
         buffer_file=poi_buffer,
     )

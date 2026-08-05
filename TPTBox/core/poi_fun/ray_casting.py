@@ -669,5 +669,7 @@ def set_label_above_3_point_plane(
     plane_z = (-a * x - b * y - d) / c
 
     # Create the 3D array and set values above the plane to 0
-    array[np.logical_and(mask, z * invert > plane_z)] = value
+    # Negating z is not the same as flipping the inequality; scale both sides so that
+    # invert=-1 really selects the opposite half-space.
+    array[np.logical_and(mask, invert * z > invert * plane_z)] = value
     return array
