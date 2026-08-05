@@ -214,7 +214,9 @@ def old_np_unique(arr: np.ndarray) -> list[int]:
             return [idx for idx, i in enumerate(cc3dstatistics(arr)["voxel_counts"]) if i > 0]
         except Exception:
             pass
-    return list(np.unique(arr))
+    # .tolist() yields native Python scalars; list() would leak numpy scalars, which are
+    # not JSON-serializable and differ from the ints the cc3d/bincount paths return.
+    return np.unique(arr).tolist()
 
 
 def np_unique(arr: np.ndarray) -> list[int]:
@@ -256,8 +258,8 @@ def np_unique_withoutzero(arr: UINTARRAY) -> list[int]:
             return []
         if max_val < 2**20:
             counts = np.bincount(arr.ravel())
-            return list(np.where(counts[1:] > 0)[0] + 1)
-    return [i for i in np.unique(arr) if i != 0]
+            return (np.where(counts[1:] > 0)[0] + 1).tolist()
+    return [i for i in np.unique(arr).tolist() if i != 0]
 
 
 def old_np_unique_withoutzero(arr: UINTARRAY) -> list[int]:
@@ -737,7 +739,7 @@ def np_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 
     n = img.ndim
     shp = img.shape
     if isinstance(px_dist, int):
-        px_dist = np.ones(n, dtype=np.uint8) * px_dist
+        px_dist = np.ones(n, dtype=int) * px_dist  # uint8 overflows for px_dist > 255
     assert len(px_dist) == n, f"dimension mismatch, got img shape {shp} and px_dist {px_dist}"
 
     bbox: list[float] = []
@@ -754,7 +756,8 @@ def np_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 
     out: tuple[slice, ...] = tuple(
         slice(
             max(bbox[i] - px_dist[i // 2], 0),
-            min(bbox[i + 1] + px_dist[i // 2], shp[i // 2]) + 1,
+            # clamp AFTER the +1, otherwise a bbox touching the far border yields stop == shape + 1
+            min(bbox[i + 1] + px_dist[i // 2] + 1, shp[i // 2]),
         )
         for i in range(0, len(bbox), 2)
     )

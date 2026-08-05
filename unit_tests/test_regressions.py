@@ -211,5 +211,75 @@ class Test_Smallest_Int_Dtype(unittest.TestCase):
             _make_nii(arr, seg=False).set_dtype("smallest_uint")
 
 
+class Test_Bbox_Binary(unittest.TestCase):
+    """np_bbox_binary clamped before adding 1 and stored px_dist as uint8."""
+
+    @staticmethod
+    def _touching_border() -> np.ndarray:
+        arr = np.zeros((20, 20, 20), dtype=np.uint8)
+        arr[:, 5, 5] = 1
+        return arr
+
+    def test_stop_never_exceeds_shape(self):
+        from TPTBox.core.np_utils import np_bbox_binary
+
+        for sl, dim in zip(np_bbox_binary(self._touching_border(), px_dist=2), (20, 20, 20)):
+            self.assertLessEqual(sl.stop, dim)
+
+    def test_large_px_dist_does_not_overflow(self):
+        from TPTBox.core.np_utils import np_bbox_binary
+
+        self.assertEqual(np_bbox_binary(self._touching_border(), px_dist=300)[0], slice(0, 20))
+
+    def test_interior_bbox_is_unchanged(self):
+        from TPTBox.core.np_utils import np_bbox_binary
+
+        arr = np.zeros((20, 20, 20), dtype=np.uint8)
+        arr[5:8, 5:8, 5:8] = 1
+        self.assertEqual(np_bbox_binary(arr, px_dist=0)[0], slice(5, 8))
+
+
+class Test_Unique_Return_Types(unittest.TestCase):
+    """np_unique returned numpy scalars on the fallback paths, breaking json.dumps."""
+
+    def test_all_dtypes_return_native_scalars(self):
+        import json
+
+        from TPTBox.core.np_utils import np_unique, np_unique_withoutzero
+
+        for dtype in (np.uint8, np.int16, np.float32):
+            arr = np.zeros((8, 8, 8), dtype=dtype)
+            arr[0, 0, 0] = 3
+            for values in (np_unique(arr), np_unique_withoutzero(arr)):
+                json.dumps(values)  # would raise for numpy scalars
+                for value in values:
+                    self.assertIn(type(value), (int, float), f"{dtype} produced {type(value)}")
+
+    def test_values_are_correct(self):
+        from TPTBox.core.np_utils import np_unique, np_unique_withoutzero
+
+        arr = np.zeros((8, 8, 8), dtype=np.int16)
+        arr[0, 0, 0] = 3
+        self.assertEqual(np_unique(arr), [0, 3])
+        self.assertEqual(np_unique_withoutzero(arr), [3])
+
+
+class Test_Segmentation_In_Border(unittest.TestCase):
+    """An empty mask was reported as touching the border."""
+
+    def test_empty_is_not_in_border(self):
+        self.assertFalse(_make_nii(np.zeros((10, 10, 10), dtype=np.uint8)).is_segmentation_in_border())
+
+    def test_touching_border_is_detected(self):
+        arr = np.zeros((10, 10, 10), dtype=np.uint8)
+        arr[0, 5, 5] = 1
+        self.assertTrue(_make_nii(arr).is_segmentation_in_border())
+
+    def test_centred_is_not_in_border(self):
+        arr = np.zeros((20, 20, 20), dtype=np.uint8)
+        arr[9:11, 9:11, 9:11] = 1
+        self.assertFalse(_make_nii(arr).is_segmentation_in_border())
+
+
 if __name__ == "__main__":
     unittest.main()

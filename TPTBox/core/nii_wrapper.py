@@ -2072,6 +2072,11 @@ class NII(NII_Math):
         - bool: True if the segmentation is within the defined tolerance of the
         border, False otherwise.
         """
+        # compute_crop(raise_error=False) returns full-extent slices for an empty mask rather
+        # than None, so an explicit emptiness check is needed - otherwise "nothing segmented"
+        # is reported as "touching the border".
+        if self.is_empty:
+            return False
         slices = self.compute_crop(minimum,dist=0,use_mm=use_mm,raise_error=False)
         if slices is None:
             return False
