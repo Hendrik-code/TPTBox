@@ -99,6 +99,33 @@ _dtype_u = {"uint8", "uint16"}
 _dtype_non_u = {"int8", "int16"}
 
 
+def _smallest_int_dtype(arr: np.ndarray, unsigned: bool) -> type:
+    """Smallest integer dtype that can represent every value in ``arr``.
+
+    Both bounds are considered: picking on ``max()`` alone silently wraps negative
+    values, because the casts here use ``casting="unsafe"``.
+
+    Args:
+        arr: Array whose value range determines the dtype.
+        unsigned: If True, choose an unsigned type (requires ``arr.min() >= 0``).
+
+    Returns:
+        The selected numpy dtype.
+    """
+    mi = arr.min()
+    ma = arr.max()
+    if unsigned:
+        assert mi >= 0, f"an unsigned dtype requires non-negative values, but the minimum is {mi}"
+        for cand, limit in ((np.uint8, 256), (np.uint16, 65536), (np.uint32, 2**32)):
+            if ma < limit:
+                return cand
+        return np.uint64
+    for cand, limit in ((np.int8, 128), (np.int16, 32768), (np.int32, 2**31)):
+        if ma < limit and mi >= -limit:
+            return cand
+    return np.int64
+
+
 def _check_if_nifty_is_lying_about_its_dtype(self: NII):
     """Infers the correct dtype by inspecting the actual value range of the NIfTI dataobj."""
     change_dtype = False
@@ -240,7 +267,7 @@ class NII(NII_Math):
         self.set_description(desc)
         if seg:
             self._unpack()
-            if isinstance(self.dtype,np.floating):
+            if np.issubdtype(self.dtype,np.floating):
                 self.set_dtype_("smallest_uint")
 
 
@@ -672,7 +699,7 @@ class NII(NII_Math):
             arr = arr.astype(np.uint8)
         if arr.dtype == np.float16:
             arr = arr.astype(np.float32)
-        if self.seg and isinstance(arr, (np.floating, float)):
+        if self.seg and np.issubdtype(arr.dtype, np.floating):
             arr = arr.astype(np.int32)
         #if self.dtype == arr.dtype: #type: ignore
         nii:_unpacked_nii = (arr,self.affine,self.header.copy())
@@ -712,22 +739,8 @@ class NII(NII_Math):
             The NII with the new dtype (``self`` when ``inplace=True``, a new NII otherwise).
         """
         sel = self if inplace else self.copy()
-        if dtype == "smallest_uint":
-            arr = self.get_array()
-            if arr.max()<256:
-                dtype = np.uint8
-            elif arr.max()<65536:
-                dtype = np.uint16
-            else:
-                dtype = np.int32
-        elif dtype == "smallest_int":
-            arr = self.get_array()
-            if arr.max()<128:
-                dtype = np.int8
-            elif arr.max()<32768:
-                dtype = np.int16
-            else:
-                dtype = np.int32
+        if dtype in ("smallest_uint", "smallest_int"):
+            dtype = _smallest_int_dtype(self.get_array(), unsigned=dtype == "smallest_uint")
         if self.__unpacked:
             self._unpack()
             sel._arr = sel._arr.astype(dtype)
@@ -2361,9 +2374,10 @@ class NII(NII_Math):
             return self.save_nrrd(file,verbose=verbose)
 
         arr = self.get_array() if not self.seg else self.get_seg_array()
-        if isinstance(arr,np.floating) and self.seg:
-            self.set_dtype_("smallest_uint")
-            arr = self.get_array() if not self.seg else self.get_seg_array()
+        if self.seg and np.issubdtype(arr.dtype, np.floating):
+            # A segmentation must never be written out as float. Cast the local array:
+            # `save` is a query and must not mutate `self`.
+            arr = arr.astype(_smallest_int_dtype(arr, unsigned=True))
 
         self.header.set_data_dtype(arr.dtype)
         out = Nifti1Image(arr, self.affine,self.header)#,dtype=arr.dtype)

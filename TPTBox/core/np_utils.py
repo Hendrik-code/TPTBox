@@ -663,7 +663,10 @@ def np_map_labels(arr: UINTARRAY, label_map: LABEL_MAP) -> np.ndarray:
 
     max_value = max(arr.max(), *k, *v) + 1
 
-    mapping_ar = np.arange(max_value, dtype=arr.dtype)
+    # The lookup table must be able to hold every mapping target. Building it in the input
+    # dtype silently wraps targets outside that range (uint8: 300 -> 44, -5 -> 251).
+    lut_dtype = np.result_type(arr.dtype, np.min_scalar_type(int(v.max())), np.min_scalar_type(int(v.min())))
+    mapping_ar = np.arange(max_value, dtype=lut_dtype)
     mapping_ar[k] = v
     return mapping_ar[arr]
 

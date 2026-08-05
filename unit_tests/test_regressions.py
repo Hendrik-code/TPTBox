@@ -147,5 +147,69 @@ class Test_Inplace_Contract(unittest.TestCase):
         self.assertIsNot(nii.extract_label(None, keep_label=True), nii)
 
 
+class Test_Float_Seg_Downcast(unittest.TestCase):
+    """`isinstance(dtype, np.floating)` is never True, so float segs stayed float (8x memory)."""
+
+    def test_float64_seg_is_downcast_on_construction(self):
+        arr = np.zeros((8, 8, 8), dtype=np.float64)
+        arr[2:5, 2:5, 2:5] = 1
+        self.assertEqual(_make_nii(arr).dtype, np.uint8)
+
+    def test_float_seg_keeps_its_labels(self):
+        arr = np.zeros((8, 8, 8), dtype=np.float32)
+        arr[2:5, 2:5, 2:5] = 7
+        self.assertEqual(list(_make_nii(arr).unique()), [7])
+
+    def test_non_seg_float_is_left_alone(self):
+        arr = np.zeros((8, 8, 8), dtype=np.float32)
+        self.assertEqual(_make_nii(arr, seg=False).dtype, np.float32)
+
+
+class Test_Map_Labels_Dtype(unittest.TestCase):
+    """np_map_labels built its lookup table in the input dtype, wrapping out-of-range targets."""
+
+    @staticmethod
+    def _arr() -> np.ndarray:
+        arr = np.zeros((8, 8, 8), dtype=np.uint8)
+        arr[2:5, 2:5, 2:5] = 1
+        return arr
+
+    def test_target_above_input_dtype_range(self):
+        from TPTBox.core.np_utils import np_map_labels
+
+        self.assertIn(300, np_map_labels(self._arr(), {1: 300}))
+
+    def test_negative_target(self):
+        from TPTBox.core.np_utils import np_map_labels
+
+        self.assertIn(-5, np_map_labels(self._arr(), {1: -5}))
+
+    def test_in_range_target_keeps_dtype(self):
+        from TPTBox.core.np_utils import np_map_labels
+
+        self.assertEqual(np_map_labels(self._arr(), {1: 2}).dtype, np.uint8)
+
+
+class Test_Smallest_Int_Dtype(unittest.TestCase):
+    """set_dtype('smallest_int') picked from max() only, wrapping negative values."""
+
+    def test_negative_range_uses_wide_enough_type(self):
+        arr = np.full((4, 4, 4), -200, dtype=np.int32)
+        arr[0, 0, 0] = 100
+        nii = _make_nii(arr, seg=False)
+        self.assertEqual(nii.set_dtype("smallest_int").dtype, np.int16)
+
+    def test_values_survive_the_cast(self):
+        arr = np.full((4, 4, 4), -200, dtype=np.int32)
+        arr[0, 0, 0] = 100
+        out = _make_nii(arr, seg=False).set_dtype("smallest_int").get_array()
+        self.assertEqual(sorted(set(out.ravel().tolist())), [-200, 100])
+
+    def test_smallest_uint_rejects_negatives(self):
+        arr = np.full((4, 4, 4), -1, dtype=np.int32)
+        with self.assertRaises(AssertionError):
+            _make_nii(arr, seg=False).set_dtype("smallest_uint")
+
+
 if __name__ == "__main__":
     unittest.main()
