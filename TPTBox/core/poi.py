@@ -21,6 +21,7 @@ from TPTBox.core import bids_files
 from TPTBox.core.compat import zip_strict
 from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.nii_wrapper import NII, Image_Reference, to_nii, to_nii_optional
+from TPTBox.core.np_utils import np_center_of_mass
 from TPTBox.core.poi_fun import save_load
 from TPTBox.core.poi_fun.poi_abstract import Abstract_POI, POI_Descriptor
 from TPTBox.core.vert_constants import (
@@ -35,6 +36,7 @@ from TPTBox.core.vert_constants import (
     Location,
     Sentinel,
     Vertebra_Instance,
+    _same_direction,
     log,
     logging,
     v_name2idx,
@@ -258,6 +260,19 @@ class POI(Abstract_POI, Has_Grid):
             a = (-a[0], -a[1], a[2])
         # return tuple(a.tolist())
         return tuple(round(float(v), ROUNDING_LVL) for v in a)
+
+    def local_to_global_arr(self, coords: np.ndarray, itk_coords=False) -> np.ndarray:
+        """Vectorized :meth:`local_to_global` for an ``(N, 3)`` array of coordinates.
+
+        Equivalent to applying ``local_to_global`` to each row but in a single batched
+        affine matmul (much faster for many points).
+        """
+        assert self.zoom is not None and self.rotation is not None and self.origin is not None
+        a = (np.asarray(coords, dtype=float) * np.asarray(self.zoom)) @ np.asarray(self.rotation).T + np.asarray(self.origin)
+        if itk_coords:
+            a[:, 0] *= -1
+            a[:, 1] *= -1
+        return np.round(a, ROUNDING_LVL)
 
     def global_to_local(self, x: COORDINATE) -> COORDINATE:
         """Converts global coordinates to local coordinates using zoom, rotation, and origin.
@@ -641,7 +656,7 @@ class POI(Abstract_POI, Has_Grid):
             self, out_path, make_parents, additional_info, verbose=verbose, save_hint=save_hint, resample_reference=resample_reference
         )
 
-    def make_point_cloud_nii(self, affine=None, s=8, sphere=False) -> tuple[NII, NII]:
+    def make_point_cloud_nii(self, affine=None, s=8, sphere=True) -> tuple[NII, NII]:
         """Create point cloud NIfTI images from the POI coordinates.
 
         This method generates two NIfTI images, one for the regions and another for the subregions,
@@ -669,9 +684,6 @@ class POI(Abstract_POI, Has_Grid):
             affine = self.affine
         arr = np.zeros(self.shape_int)
         arr2 = np.zeros(self.shape_int)
-        s1 = max(s // 2, 1)
-        s2 = max(s - s1, 1)
-        from math import ceil, floor
 
         if sphere:
             zoom = np.asarray(self.zoom)
@@ -690,7 +702,9 @@ class POI(Abstract_POI, Has_Grid):
 
             for region, subregion, (x, y, z) in self.items():
                 x, y, z = round(x), round(y), round(z)  # noqa: PLW2901
-
+                if not (0 <= x < self.shape[0] and 0 <= y < self.shape[1] and 0 <= z < self.shape[2]):
+                    print(f"Skipping POI outside image: {region}, {subregion},{(x, y, z)} shape={self.shape}")
+                    continue
                 # image bounds
                 x0 = max(x - rx, 0)
                 x1 = min(x + rx + 1, self.shape[0])
@@ -712,24 +726,68 @@ class POI(Abstract_POI, Has_Grid):
                 kz1 = kz0 + (z1 - z0)
 
                 local_mask = sphere_mask[kx0:kx1, ky0:ky1, kz0:kz1]
-
+                if region == 0:
+                    region = 1  # noqa: PLW2901
+                if subregion == 0:
+                    subregion = 1  # noqa: PLW2901
                 arr[x0:x1, y0:y1, z0:z1][local_mask] = region
                 arr2[x0:x1, y0:y1, z0:z1][local_mask] = subregion
         else:
             for region, subregion, (x, y, z) in self.items():
+                if region == 0:
+                    region = 1  # noqa: PLW2901
+                if subregion == 0:
+                    subregion = 1  # noqa: PLW2901
+                if not (0 <= x < self.shape[0] and 0 <= y < self.shape[1] and 0 <= z < self.shape[2]):
+                    print(f"Skipping POI outside image: {region}, {subregion}, {(x, y, z)} shape={self.shape}")
+                    continue
+                rx = int(np.ceil((s / 2) / self.zoom[0]))
+                ry = int(np.ceil((s / 2) / self.zoom[1]))
+                rz = int(np.ceil((s / 2) / self.zoom[2]))
                 arr[
-                    max((floor(x - s1 / self.zoom[0])) + 1, 0) : min((ceil(x + s2 / self.zoom[0] + 1)), self.shape[0]),
-                    max((floor(y - s1 / self.zoom[1])) + 1, 0) : min((ceil(y + s2 / self.zoom[1] + 1)), self.shape[1]),
-                    max((floor(z - s1 / self.zoom[2])) + 1, 0) : min((ceil(z + s2 / self.zoom[2] + 1)), self.shape[2]),
+                    int(max(x - rx, 0)) : int(min(x + rx + 1, self.shape[0])),
+                    int(max(y - ry, 0)) : int(min(y + ry + 1, self.shape[1])),
+                    int(max(z - rz, 0)) : int(min(z + rz + 1, self.shape[2])),
                 ] = region
+
                 arr2[
-                    max((floor(x - s1 / self.zoom[0])) + 1, 0) : min((ceil(x + s2 / self.zoom[0] + 1)), self.shape[0]),
-                    max((floor(y - s1 / self.zoom[1])) + 1, 0) : min((ceil(y + s2 / self.zoom[1] + 1)), self.shape[1]),
-                    max((floor(z - s1 / self.zoom[2])) + 1, 0) : min((ceil(z + s2 / self.zoom[2] + 1)), self.shape[2]),
+                    int(max(x - rx, 0)) : int(min(x + rx + 1, self.shape[0])),
+                    int(max(y - ry, 0)) : int(min(y + ry + 1, self.shape[1])),
+                    int(max(z - rz, 0)) : int(min(z + rz + 1, self.shape[2])),
                 ] = subregion
         nii = nib.Nifti1Image(arr, affine=affine)
         nii2 = nib.Nifti1Image(arr2, affine=affine)
         return NII(nii, seg=True), NII(nii2, seg=True)
+
+    def flip(self, axis: int | str, keep_global_coords: bool = True, inplace: bool = False) -> Self:
+        """Flip the POIs along a spatial axis.
+
+        Args:
+            axis: Axis to flip, either as an integer or anatomical direction
+                string (e.g. ``"S"``, ``"R"``).
+            keep_global_coords: If True, perform the flip by changing the
+                orientation, preserving world-space coordinates. If False,
+                mirror the voxel coordinates without changing the affine.
+            inplace: Whether to modify this POI in place.
+
+        Returns:
+            The flipped POI.
+        """
+        axis = self.get_axis(axis) if not isinstance(axis, int) else axis
+
+        if keep_global_coords:
+            orient = list(self.orientation)
+            orient[axis] = _same_direction[orient[axis]]
+            return self.reorient(tuple(orient), inplace=inplace)
+
+        assert self.shape is not None, "Cannot flip voxel coordinates without shape information."
+
+        def _flip(x: float, y: float, z: float):
+            p = [x, y, z]
+            p[axis] = self.shape[axis] - 1 - p[axis]
+            return tuple(p)
+
+        return self.apply_all(_flip, inplace=inplace)
 
     def filter_points_inside_shape(self, inplace=False) -> Self:
         """Filter out POI points that are outside the defined shape.
@@ -1029,7 +1087,7 @@ def calc_poi_from_subreg_vert(
             level_two_info=Location,
         )
         if extend_to is None
-        else extend_to.apply_crop(crop, inplace=True)
+        else extend_to.resample_from_to_(vert_msk)
     )
 
     if _vert_ids is None:
@@ -1272,26 +1330,23 @@ def calc_centroids(
             extend_to = extend_to.copy()
         ctd_list = extend_to.centroids
         extend_to.assert_affine(msk_nii, shape_tolerance=1, origin_tolerance=1)
-    u = msk_nii.unique()
-    if bar:
-        from tqdm import tqdm
-
-        u = tqdm(u)
-    for i in u:
-        if _crop:
-            # TODO test implementation and remove old
-            m = msk_nii.extract_label(i)
-            crop = m.compute_crop()
-            m2: NII = m[crop]
-            ctr_mass: Sequence[float] = center_of_mass(m2.get_seg_array())  # type: ignore
-            out_coord = tuple(round(x + crop.start, decimals) for x, crop in zip(ctr_mass, crop))
-        else:
+    if _crop:
+        # all per-label centroids in a single cc3d pass (bit-identical to the per-label
+        # extract_label + crop + scipy center_of_mass loop, but ~5-9x faster)
+        coords = [(int(i), tuple(round(float(x), decimals) for x in c)) for i, c in np_center_of_mass(msk_data).items()]
+    else:
+        coords = []
+        for i in msk_nii.unique():
             # OLD
             msk_temp = np.zeros(msk_data.shape, dtype=bool)
             msk_temp[msk_data == i] = True
             ctr_mass: Sequence[float] = center_of_mass(msk_temp)  # type: ignore
-            out_coord = tuple(round(x, decimals) for x in ctr_mass)
+            coords.append((int(i), tuple(round(x, decimals) for x in ctr_mass)))
+    if bar:
+        from tqdm import tqdm
 
+        coords = tqdm(coords)
+    for i, out_coord in coords:
         if second_stage == -1:
             ctd_list[first_stage, int(i)] = out_coord
         else:

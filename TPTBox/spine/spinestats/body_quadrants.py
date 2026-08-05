@@ -99,6 +99,7 @@ def make_quadrants(
             Location.Vertebra_Corpus,
             Location.Vertebra_Direction_Inferior,
             Location.Vertebra_Direction_Inferior,
+            Location.Endplate,
         ],
         buffer_file=poi_buffer,
     )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Literal
 from warnings import warn
 
 import numpy as np
@@ -8,7 +9,7 @@ from numpy.linalg import norm
 
 from TPTBox import NII, POI, Print_Logger, calc_poi_from_subreg_vert
 from TPTBox.core.poi_fun._help import make_spine_plot, sacrum_w_o_direction
-from TPTBox.core.vert_constants import DIRECTIONS, Location, _plane_dict, never_called
+from TPTBox.core.vert_constants import DIRECTIONS, Location, Vertebra_Instance, _plane_dict, never_called
 
 Vertebra_Orientation = tuple[np.ndarray, np.ndarray, np.ndarray]
 _log = Print_Logger()
@@ -27,8 +28,21 @@ def calc_orientation_of_vertebra_PIR(
     spine_plot_path: None | str = None,
     save_normals_in_info=False,
     _orientation_version=0,
+    method: Literal["spline", "endplate"] = "endplate",
 ) -> tuple[POI, NII | None]:
-    """Calculate the orientation of vertebrae using PIR (Posterior, Inferior, Right) DIRECTIONS.
+    """Compute the PIR (Posterior–Inferior–Right) orientation for each vertebra.
+
+    The algorithm proceeds in four stages:
+
+    1. Estimate the inferior direction from vertebral endplates when available,
+       otherwise fall back to the local spline tangent.
+    2. Construct a plane through the vertebral corpus orthogonal to the
+       inferior direction and intersect it with the posterior vertebral
+       structures.
+    3. Compute the posterior direction from the corpus to the intersection
+       centroid.
+    4. Construct the PIR coordinate frame and store the corresponding
+       direction landmarks.
 
     Args:
         poi (POI | None): Point of interest. If None, computed from `vert` and `subreg`.
@@ -49,12 +63,61 @@ def calc_orientation_of_vertebra_PIR(
 
     if _orientation_version != 0:
         warn("out dated _orientation_version; Set is to 0", stacklevel=1)
-    # Step 1 compute the up direction
+    # ---------------------------------------------------------------------
+    # 1. Compute inferior directions
+    # ---------------------------------------------------------------------
     # check if label 50 is already computed in POI
     if poi is None or spline_subreg_point_id.value not in poi.keys_subregion():
         poi = calc_poi_from_subreg_vert(vert, subreg, extend_to=poi, subreg_id=spline_subreg_point_id)
     # compute Spline in ISO space
     poi_iso = poi.rescale().reorient()
+    vert_keys = list(poi.keys_region())
+    down_vector: dict[int, np.ndarray] = {}
+
+    if method == "endplate":
+        for key in poi_iso.keys_region():
+            if (key, Location.Vertebra_Corpus.value) not in poi_iso:
+                continue
+
+            corpus = np.asarray(poi_iso[key, Location.Vertebra_Corpus], float)
+            directions = []
+
+            if (key, Location.Vertebral_Body_Endplate_Inferior.value) in poi_iso:
+                inf = np.asarray(poi_iso[key, Location.Vertebral_Body_Endplate_Inferior], float)
+                v = inf - corpus
+                if norm(v) > 1e-6:
+                    directions.append(v / norm(v))
+
+            if (key, Location.Vertebral_Body_Endplate_Superior.value) in poi_iso:
+                sup = np.asarray(poi_iso[key, Location.Vertebral_Body_Endplate_Superior], float)
+                v = corpus - sup
+                if norm(v) > 1e-6:
+                    directions.append(v / norm(v))
+
+            if len(directions) == 1:
+                down_vector[key] = directions[0]
+            elif len(directions) == 2:
+                down = directions[0] + directions[1]
+                if norm(down) > 1e-6:
+                    down_vector[key] = down / norm(down)
+    ### Add last endplate to spline
+    last_vert = 25
+    while last_vert not in vert_keys:
+        last_vert -= 1
+        if last_vert == 20:
+            last_vert = None
+            break
+    max_vert_key = max(vert_keys)
+    if (Vertebra_Instance.S1.value, Location.Vertebral_Body_Endplate_Superior.value) in poi_iso:
+        poi_iso[max_vert_key + 1, spline_subreg_point_id] = poi_iso[
+            (Vertebra_Instance.S1.value, Location.Vertebral_Body_Endplate_Superior.value)
+        ]
+        max_vert_key += 1
+    if last_vert is not None and (last_vert, Location.Vertebral_Body_Endplate_Inferior.value) in poi_iso:
+        poi_iso[max_vert_key + 1, spline_subreg_point_id] = poi_iso[(last_vert, Location.Vertebral_Body_Endplate_Inferior.value)]
+        max_vert_key += 1
+    #####
+    # spline:
     body_spline, body_spline_der = poi_iso.fit_spline(location=spline_subreg_point_id, vertebra=True)
     # Step 2 compute the back direction by Spinosus_Process or arcus
     intersection_target = [Location.Spinosus_Process, Location.Arcus_Vertebrae]
@@ -79,14 +142,17 @@ def calc_orientation_of_vertebra_PIR(
     out = target_labels * 0
     fill_back_nii = subreg_iso.copy() if do_fill_back else None
     fill_back = out.copy() if do_fill_back else None
-    down_vector: dict[int, np.ndarray] = {}
     # Draw a plain with the up_vector an cut it with intersection_target
     for reg_label, _, cords in poi_iso.extract_subregion(source_subreg_point_id).items():
         # calculate_normal_vector
-        distances = np.sqrt(np.sum((body_spline - np.array(cords)) ** 2, -1))
-        normal_vector_post = body_spline_der[np.argmin(distances)]
-        normal_vector_post /= np.linalg.norm(normal_vector_post)
-        down_vector[reg_label] = normal_vector_post.copy()
+        if reg_label in down_vector:
+            normal_vector_down = down_vector[reg_label]
+        else:
+            # spline fallback
+            distances = np.sqrt(np.sum((body_spline - np.array(cords)) ** 2, -1))
+            normal_vector_down = body_spline_der[np.argmin(distances)]
+            normal_vector_down /= np.linalg.norm(normal_vector_down)
+            down_vector[reg_label] = normal_vector_down.copy()
         # create_plane_coords
         # The main axis will be treated differently
         idx = [_plane_dict[i] for i in subreg_iso.orientation]
@@ -98,9 +164,9 @@ def calc_orientation_of_vertebra_PIR(
         # Make a plane through start_point with the norm of "normal_vector", which is shifted by "shift" along the norm
         start_point_np = np.array(cords)
         start_point_np[axis] = start_point_np[axis]
-        shift_total = -start_point_np.dot(normal_vector_post)
+        shift_total = -start_point_np.dot(normal_vector_down)
         xx, yy = np.meshgrid(range(subreg_iso.shape[dim1]), range(subreg_iso.shape[dim2]))  # type: ignore
-        zz = (-normal_vector_post[dim1] * xx - normal_vector_post[dim2] * yy - shift_total) * 1.0 / normal_vector_post[axis]
+        zz = (-normal_vector_down[dim1] * xx - normal_vector_down[dim2] * yy - shift_total) * 1.0 / normal_vector_down[axis]
         z_max = subreg_iso.shape[axis] - 1
         zz[zz < 0] = 0
         zz[zz > z_max] = 0

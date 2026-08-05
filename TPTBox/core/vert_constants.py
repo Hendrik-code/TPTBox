@@ -262,13 +262,29 @@ class Full_Body_Instance_Vibe(Abstract_lvl):
     sternum = 63
     costal_cartilages = 64
     subcutaneous_fat = 65
-    muscle = 66
+    muscle_other = 66
     inner_fat = 67
     IVD = 68
     vertebra_body = 69
     vertebra_posterior_elements = 70
     spinal_channel = 71
     bone_other = 72
+
+    @classmethod
+    def muscle_(cls) -> list[Full_Body_Instance_Vibe]:
+        """Return individually segmented muscle group instance labels."""
+        return [
+            Full_Body_Instance_Vibe.gluteus_maximus_right,
+            Full_Body_Instance_Vibe.gluteus_maximus_left,
+            Full_Body_Instance_Vibe.gluteus_medius_right,
+            Full_Body_Instance_Vibe.gluteus_medius_left,
+            Full_Body_Instance_Vibe.gluteus_minimus_right,
+            Full_Body_Instance_Vibe.gluteus_minimus_left,
+            Full_Body_Instance_Vibe.autochthon_right,
+            Full_Body_Instance_Vibe.autochthon_left,
+            Full_Body_Instance_Vibe.iliopsoas_right,
+            Full_Body_Instance_Vibe.iliopsoas_left,
+        ]
 
     @classmethod
     def get_Full_Body_Instance_mapping(cls) -> dict[int, int]:
@@ -323,8 +339,8 @@ class Full_Body_Instance_Vibe(Abstract_lvl):
             Full_Body_Instance.clavicula_right.value: cls.clavicula_right.value,  # clavicula_right
             Full_Body_Instance.femur_left.value: cls.femur_left.value,  # femur_left
             Full_Body_Instance.femur_right.value: cls.femur_right.value,  # femur_right
-            Full_Body_Instance.pelvis_left.value: cls.hip_left.value,  # hip_left
-            Full_Body_Instance.pelvis_right.value: cls.hip_right.value,  # hip_right
+            Full_Body_Instance.pelvis_left.value: cls.pelvis_left.value,  # hip_left
+            Full_Body_Instance.pelvis_right.value: cls.pelvis_right.value,  # hip_right
             Full_Body_Instance.channel.value: cls.spinal_cord.value,  # spinal_cord
             Full_Body_Instance.gluteus_maximus_left.value: cls.gluteus_maximus_left.value,  # gluteus_maximus_left
             Full_Body_Instance.gluteus_maximus_right.value: cls.gluteus_maximus_right.value,  # gluteus_maximus_right
@@ -339,7 +355,7 @@ class Full_Body_Instance_Vibe(Abstract_lvl):
             Full_Body_Instance.sternum.value: cls.sternum.value,  # sternum
             Full_Body_Instance.costal_cartilage.value: cls.costal_cartilages.value,  # costal_cartilages
             Full_Body_Instance.subcutaneous_fat.value: cls.subcutaneous_fat.value,  # subcutaneous_fat
-            Full_Body_Instance.muscle_other.value: cls.muscle.value,  # muscle
+            Full_Body_Instance.muscle_other.value: cls.muscle_other.value,  # muscle
             Full_Body_Instance.inner_fat.value: cls.inner_fat.value,  # inner_fat
             Full_Body_Instance.ivd.value: cls.IVD.value,  # IVD
             Full_Body_Instance.vert_body.value: cls.vertebra_body.value,  # vertebra_body
@@ -821,6 +837,7 @@ class Lower_Body(Abstract_lvl):
     LATERAL_CONDYLE_DISTAL = 16
     MEDIAL_CONDYLE_DISTAL = 17
     NOTCH_POINT = 18
+    TGPP = 99
     # Femur, Tibia
     ANATOMICAL_AXIS_PROXIMAL = 19
     ANATOMICAL_AXIS_DISTAL = 20
@@ -837,7 +854,6 @@ class Lower_Body(Abstract_lvl):
     LATERAL_CONDYLE_LATERAL = 29
     ANKLE_CENTER = 30
     MEDIAL_MALLEOLUS = 31
-    TGPP = 99
     TTP = 98
     # Fibula
     LATERAL_MALLEOLUS = 32
@@ -893,7 +909,7 @@ _ABBREVIATION_TO_ENUM = {
     "TMM": (Full_Body_Instance.tibia_right, Lower_Body.MEDIAL_MALLEOLUS),
     "TAAP": (Full_Body_Instance.tibia_right, Lower_Body.ANATOMICAL_AXIS_PROXIMAL),
     "TADP": (Full_Body_Instance.tibia_right, Lower_Body.ANATOMICAL_AXIS_DISTAL),
-    "TGPP": (Full_Body_Instance.tibia_right, Lower_Body.TGPP),
+    "TGPP": (Full_Body_Instance.femur_right, Lower_Body.TGPP),
     "TTP": (Full_Body_Instance.tibia_right, Lower_Body.TTP),
     # Fibula
     "FLM": (Full_Body_Instance.fibula_right, Lower_Body.LATERAL_MALLEOLUS),
@@ -1247,6 +1263,9 @@ class Location(Abstract_lvl):
     Implant_Entry_Right = 91
     Implant_Target_Left = 92
     Implant_Target_Right = 93
+
+    Articular_Process_Midpoint_Left = 94
+    Articular_Process_Midpoint_Right = 95
 
     # Muscle_Inserts_Rib_left = 90
     # Muscle_Inserts_Rib_right = 91

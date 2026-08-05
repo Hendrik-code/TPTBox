@@ -99,6 +99,7 @@ def run_vibeseg(
     padd: int = 5,
     keep_size: bool = False,
     memory_max=9900000,  # in MB
+    model_path=None,
     **args,
 ) -> NII:
     """Run the VibeSeg whole-body segmentation model on a single image.
@@ -125,7 +126,7 @@ def run_vibeseg(
                 args[k] = v
     return run_inference_on_file(
         dataset_id,
-        [to_nii(i)] if not isinstance(i, (list, tuple)) else [to_nii(j) for j in i],
+        [to_nii(i)] if not isinstance(i, list | tuple) else [to_nii(j) for j in i],
         out_file=out_seg,
         override=override,
         gpu=gpu,
@@ -133,8 +134,9 @@ def run_vibeseg(
         padd=padd,
         keep_size=keep_size,
         memory_max=memory_max,
+        model_path=model_path,
         **args,
-    )[0]
+    )[0]  # type: ignore
 
 
 def run_nnunet(

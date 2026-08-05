@@ -78,9 +78,15 @@ class Preview_Settings:
                 color = default_poi_nii if is_poi else default_color_nii
             yield mesh, color
         elif isinstance(img, NII):
+            # reorient/rescale the whole image ONCE instead of per label. They commute with
+            # extract_label for nearest-neighbour seg resampling, so each label's array (and
+            # therefore its marching-cubes mesh) is identical to the per-label version.
+            img = img.reorient()
+            if rescale_to_iso:
+                img = img.rescale()
             for u in img.unique():
                 color = get_color_by_label(u)
-                mesh = SegmentationMesh.from_segmentation_nii(img.extract_label(u), rescale_to_iso=rescale_to_iso)
+                mesh = SegmentationMesh(img.extract_label(u).get_seg_array())
                 if self.offset is not None:
                     mesh = mesh.get_mesh_with_offset(self.offset)
                 yield mesh, color

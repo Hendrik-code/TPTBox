@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 import traceback
 import warnings
 import zlib
@@ -43,6 +42,7 @@ from TPTBox.core.np_utils import (
     np_filter_connected_components,
     np_get_connected_components_center_of_mass,
     np_is_empty,
+    np_isin,
     np_map_labels,
     np_map_labels_based_on_majority_label_mask_overlap,
     np_point_coordinates,
@@ -1180,33 +1180,36 @@ class NII(NII_Math):
             if mapping.assert_affine(self,raise_error=False,origin_tolerance=0.000001,error_tolerance=0.000001,shape_tolerance=0):
                 log.print(f"resample_from_to skipped; already in space: {self}",verbose=verbose)
                 return self if inplace else self.copy()
-
             m1 = mapping if mapping.orientation == self.orientation else mapping.make_empty_POI().reorient(self.orientation)
             if m1.assert_affine(self,raise_error=False,origin_tolerance=0.00001,error_tolerance=0.00001,shape_tolerance=0):
                 log.print(f"resample_from_to only need reorientation; {self.orientation}",verbose=verbose)
                 ret = self.reorient(mapping.orientation,inplace=inplace)
                 ret.affine = mapping.affine #remove floating point error
                 return ret
-            if self.orientation == mapping.orientation and np.allclose(self.zoom , mapping.zoom, atol=1e-6):
-                shift = (np.array(self.origin) - np.array(m1.origin)) / np.array(m1.zoom)
-                if np.allclose(shift, np.round(shift), atol=1e-6):
-                    s = self.reorient(mapping.orientation,inplace=inplace)  # noqa: PLW0642
-                    shift = (np.array(self.origin) - np.array(mapping.origin)) / np.array(mapping.zoom)
-                    shift = np.round(shift).astype(int)
-                    dst_shape = np.array(mapping.shape)
-                    src_shape = np.array(s.shape)
-                    # padding before = how much dst starts before src
-                    pad_before = shift
-                    # padding after = remaining dst size after src
-                    pad_after = dst_shape-shift-src_shape
-                    pad = tuple((int(b), int(a)) for b, a in zip(pad_before, pad_after))
-                    ret = s.apply_pad(pad, mode=mode,inplace=inplace,verbose=verbose)
+            if np.allclose(self.zoom, m1.zoom, atol=1e-6):
+                s = self.reorient(mapping.orientation, inplace=inplace)
+                # Compute voxel offset directly from the affines after both
+                # images are in the same orientation. This is robust to axis
+                # permutations and flips.
+                voxel_offset = np.linalg.inv(mapping.affine) @ s.affine @ np.array([0, 0, 0, 1])
+                shift = np.round(voxel_offset[:3]).astype(int)
 
+                dst_shape = np.array(mapping.shape)
+                src_shape = np.array(s.shape)
+                # padding before = how much dst starts before src
+                pad_before = shift
+                # padding after = remaining dst size after src
+                pad_after = dst_shape - shift - src_shape
+                pad = tuple((int(b), int(a)) for b, a in zip(pad_before, pad_after))
+                try:
+                    ret = s.apply_pad(pad,mode=mode,inplace=inplace,verbose=verbose)
                     valid = ret.assert_affine(mapping,raise_error=False,origin_tolerance=0.0001,error_tolerance=0.0001,shape_tolerance=0)
                     if valid:
                         log.print(f"resample_from_to only needs padding/cropping {pad}",verbose=verbose)
-                        ret.affine = mapping.affine #remove floating point error
+                        ret.affine = mapping.affine  # remove floating point error
                         return ret
+                except ValueError as e:
+                    log.warning("Padding failed.",e,verbose=verbose)
 
 
         assert mapping is not None
@@ -1271,10 +1274,11 @@ class NII(NII_Math):
             import ants.ops.bias_correction as bc  # install antspyx not ants!
         except ModuleNotFoundError:
             import ants.utils.bias_correction as bc  # install antspyx not ants!
-        from ants.utils.convert_nibabel import from_nibabel
         from scipy.ndimage import binary_dilation, generate_binary_structure
+
+        from TPTBox.core.internal import ants_to_nifti, nifti_to_ants
         dtype = self.dtype
-        input_ants:ants.ANTsImage = from_nibabel(nib.nifti1.Nifti1Image(self.get_array(),self.affine))
+        input_ants:ants.ANTsImage = self.to_ants()
         if threshold != 0:
             mask_arr = self.get_array()
             mask_arr[mask_arr < threshold] = 0
@@ -1283,7 +1287,7 @@ class NII(NII_Math):
             struct = generate_binary_structure(3, 3)
             mask_arr = binary_dilation(mask_arr.copy(), structure=struct, iterations=3)
             mask_arr = mask_arr.astype(np.uint8)
-            mask:ants.ANTsImage = from_nibabel(nib.nifti1.Nifti1Image(mask_arr,self.affine))#self.set_array(mask,verbose=False).nii
+            mask:ants.ANTsImage = self.set_array(mask_arr,verbose=False).to_ants()
             mask = mask.set_spacing(input_ants.spacing) # type: ignore
         out = bc.n4_bias_field_correction(
             input_ants,
@@ -1296,11 +1300,10 @@ class NII(NII_Math):
 
         )
 
-
-        out_nib:Nifti1Image = out.to_nibabel()
+        out_nib:Nifti1Image = ants_to_nifti(out)
         if crop:
             # Crop to regions that had a normalization applied. Removes a lot of dead space
-            dif = NII((input_ants - out).to_nibabel())
+            dif = NII(ants_to_nifti(input_ants - out))
             dif_arr = dif.get_array()
             dif_arr[dif_arr != 0] = 1
             dif.set_array_(dif_arr,verbose=verbose)
@@ -1510,7 +1513,14 @@ class NII(NII_Math):
             log.print_error()
             log.on_fail("run 'pip install antspyx' to install hf-deepali")
             raise
-        return ants.from_nibabel(self.nii)
+        try:
+            from ants.utils.convert_nibabel import from_nibabel
+
+            return from_nibabel(self.nii)
+        except ModuleNotFoundError:
+            from ants.utils.nibabel_nifti_to_ants import from_nibabel_nifti
+
+            return from_nibabel_nifti(self.nii)
 
     def to_simpleITK(self) -> Any:
         """Converts this NII to a SimpleITK image.
@@ -2034,27 +2044,35 @@ class NII(NII_Math):
         assert self.seg and mask_other.seg
         return np_calc_overlapping_labels(self.get_seg_array(), mask_other.get_seg_array())
 
-    def is_segmentation_in_border(self,minimum=0, voxel_tolerance: int = 2,use_mm=False) -> bool:
-        """Checks if the segmentation is touching the border of the image volume.
+    def is_segmentation_in_border(self,minimum=0,voxel_tolerance: int = 2,use_mm: bool = False) -> bool:
+        """Checks if the segmentation touches the border of the image volume.
 
         Parameters:
-        - minimum (int, optional): Minimum intensity threshold for segmentation. Defaults to 0.
-        - voxel_tolerance (int, optional): Number of voxels allowed as tolerance from the border. Defaults to 2.
-        - use_mm (bool, optional): Whether to use millimeter units instead of voxels. Defaults to False.
+        - minimum (int, optional): Minimum intensity threshold for segmentation.
+        Defaults to 0.
+        - voxel_tolerance (int, optional): Number of voxels allowed as tolerance
+        from the border. Defaults to 2.
+        - use_mm (bool, optional): Whether to use millimeter units instead of
+        voxels. Defaults to False.
 
         Returns:
-        - bool: True if the segmentation is within the defined voxel tolerance of the border, False otherwise.
+        - bool: True if the segmentation is within the defined tolerance of the
+        border, False otherwise.
         """
         slices = self.compute_crop(minimum,dist=0,use_mm=use_mm,raise_error=False)
         if slices is None:
             return False
-        shp = self.shape
-        seg_at_border = False
-        for d in range(3):
-            if slices[d].start <= voxel_tolerance or slices[d].stop - 1 >= shp[d] - voxel_tolerance:
-                seg_at_border = True
-                break
-        return seg_at_border
+        for dim, s in enumerate(slices):
+            shape_dim = self.shape[dim]
+            # Interpret open-ended slices as full image bounds
+            start = 0 if s.start is None else s.start
+            stop = shape_dim if s.stop is None else s.stop
+            # stop is exclusive, so the last occupied voxel is stop - 1
+            if start <= voxel_tolerance:
+                return True
+            if stop - 1 >= shape_dim - voxel_tolerance:
+                return True
+        return False
 
     def truncate_labels_beyond_reference_(
         self, idx: int | list[int] = 1, not_beyond: int | list[int] = 1, fill: int = 0,  axis: DIRECTIONS = "S", inclusion: bool = False, inplace: bool = True
@@ -2089,10 +2107,11 @@ class NII(NII_Math):
         flip = self.orientation[axis_] != axis  # Check orientation for flipping
         # Get the array data
         np_array = self.get_array()
-        np_array_cond = self.extract_label(idx).get_seg_array()
+        # both masks come directly from np_array via np_isin (avoids two extract_label round-trips)
+        np_array_cond = np_isin(np_array, idx)
 
         # Find the lowest point (smallest index) along the axis where `not_above` exists
-        threshold = np.where(self.extract_label(not_beyond).get_seg_array() == 1)
+        threshold = np.where(np_isin(np_array, not_beyond))
         if len(threshold[axis_]) == 0:
             return self if inplace else self.copy()
         flip_up = flip
@@ -2112,7 +2131,7 @@ class NII(NII_Math):
         mask = np.broadcast_to(mask, self.shape)
 
         # Replace values of `idx` with `fill` in the masked region
-        np_array = np.where((np_array_cond == 1) & mask, fill, np_array)
+        np_array = np.where(np_array_cond & mask, fill, np_array)
 
         # Update the NIfTI object with the modified array
         return self.set_array(np_array, inplace=inplace)
@@ -2250,7 +2269,11 @@ class NII(NII_Math):
             If inplace is True, returns the current NIfTI image object with mapped labels. Otherwise, returns a new NIfTI image object with mapped labels.
         """
         data_orig = self.get_seg_array()
-        labels_before = [v for v in np_unique(data_orig) if v > 0]
+        if len(label_map) == 0:
+            log.print("Skip map_labels; map is empty", verbose=verbose)
+            return self if inplace else self.copy()
+        # the before/after np_unique scans are only used for the verbose log line; skip them otherwise
+        labels_before = [v for v in np_unique(data_orig) if v > 0] if verbose else None
         # enforce keys to be str to support both str and int
         label_map_ = {
             (v_name2idx[k] if k in v_name2idx else int(k)): (
@@ -2260,15 +2283,16 @@ class NII(NII_Math):
         }
         log.print("label_map_ =", label_map_, verbose=verbose)
         data = np_map_labels(data_orig, label_map_)
-        labels_after = [v for v in np_unique(data) if v > 0]
-        log.print(
-                "N =",
-                len(label_map_),
-                "labels reassigned, before labels: ",
-                labels_before,
-                " after: ",
-                labels_after,verbose=verbose
-            )
+        if verbose:
+            labels_after = [v for v in np_unique(data) if v > 0]
+            log.print(
+                    "N =",
+                    len(label_map_),
+                    "labels reassigned, before labels: ",
+                    labels_before,
+                    " after: ",
+                    labels_after,verbose=verbose
+                )
         nii = data.astype(np.uint16), self.affine, self.header
         if inplace:
             self.nii = nii
@@ -2533,7 +2557,7 @@ class NII(NII_Math):
                 elif number_path:
                     out_path.with_name(f"{out_path.stem}_{label}.stl")
                 log.on_save(f"Saving STL to {out_path}")
-                out_path.parent.mkdir(exist_ok=True)
+                out_path.parent.mkdir(exist_ok=True,parents=True)
                 cube.save(str(out_path))
 
         if include_normals:
@@ -2634,7 +2658,7 @@ class NII(NII_Math):
             return True
         return min_v < x2[2] < max_v
 
-    def get_intersecting_volume(self, b: Self) -> float:
+    def get_intersecting_volume_slow(self, b: Self) -> float:
         """Returns the number of voxels in ``self``'s grid that overlap with image ``b``.
 
         ``b`` is binarised (all non-zero → 1) and resampled into ``self``'s voxel
@@ -2682,9 +2706,8 @@ class NII(NII_Math):
         seg_arr = self.get_seg_array()
 
         if isinstance(label, Sequence):
-            label_int:list[int] = [idx.value if isinstance(idx,Enum) else idx for idx in label]
-            assert 0 not in label_int, 'Zero label does not make sense. This is the background'
-            seg_arr = np_extract_label(seg_arr, label_int, to_label=1, inplace=True)
+            labels:int|list[int] = [idx.value if isinstance(idx,Enum) else idx for idx in label]
+            assert 0 not in labels, 'Zero label does not make sense. This is the background'
         else:
             if isinstance(label,Enum):
                 label = label.value
@@ -2692,25 +2715,45 @@ class NII(NII_Math):
                 label = int(label)
 
             assert label != 0, 'Zero label does not make sense. This is the background'
-            seg_arr = np_extract_label(seg_arr, label, to_label=1, inplace=True)
+            labels = label
         if keep_label:
-            seg_arr = seg_arr * self.get_seg_array()
+            # keep the original label values where in `labels`, zero everywhere else.
+            # single get_seg_array() copy + one np_isin mask (faster than extract + a second copy/multiply)
+            seg_arr[~np_isin(seg_arr, labels)] = 0
+        else:
+            seg_arr = np_extract_label(seg_arr, labels, to_label=1, inplace=True)
         return self.set_array(seg_arr,inplace=inplace)
+    def ravel(self,order:Literal["K", "A", "C", "F"] | None="C")->np.ndarray:
+        """Return a contiguous flattened array.
+
+        A 1-D array, containing the elements of the input, is returned. A copy is made only if needed.
+
+        As of NumPy 1.10, the returned array will have the same type as the input array. (for example, a masked array will be returned for a masked array input)
+
+        Args:
+            order (Literal[&quot;K&quot;, &quot;A&quot;, &quot;C&quot;, &quot;F&quot;] | None, optional): The elements of a are read using this index order. ‘C’ means to index the elements in row-major, C-style order, with the last axis index changing fastest, back to the first axis index changing slowest. ‘F’ means to index the elements in column-major, Fortran-style order, with the first index changing fastest, and the last index changing slowest. Note that the ‘C’ and ‘F’ options take no account of the memory layout of the underlying array, and only refer to the order of axis indexing. ‘A’ means to read the elements in Fortran-like index order if a is Fortran contiguous in memory, C-like order otherwise. ‘K’ means to read the elements in the order they occur in memory, except for reversing the data when strides are negative. By default, ‘C’ index order is used. Defaults to "C".
+
+        Returns:
+            np.ndarray
+        """
+        return self.get_array().ravel(order=order)
     def extract_label_(self, label: int | Enum | Sequence[int] | Sequence[Enum], keep_label=False) -> Self:
         """In-place variant of `extract_label`."""
         return self.extract_label(label,keep_label,inplace=True)
     def remove_labels(self,label:int|Enum|Sequence[int]|Sequence[Enum], inplace=False, verbose:logging=True, removed_to_label=0) -> Self:
         """If this NII is a segmentation you can single out one label."""
         assert label != 0, 'Zero label does not make sens.  This is the background'
-        seg_arr = self.get_seg_array()
         if not isinstance(label,Sequence):
             label = [label] # type: ignore
+        flat: list[int] = []
         for l in label:
             if isinstance(l, list):
-                for g in l:
-                    seg_arr[seg_arr == g] = removed_to_label
+                flat.extend(g.value if isinstance(g, Enum) else g for g in l)
             else:
-                seg_arr[seg_arr == l] = removed_to_label
+                flat.append(l.value if isinstance(l, Enum) else l)
+        # one np_map_labels gather is constant-time in the number of labels (a per-label
+        # `seg_arr == l` loop costs one full pass per label).
+        seg_arr = np_map_labels(self.get_seg_array(), dict.fromkeys(flat, removed_to_label))
         return self.set_array(seg_arr,inplace=inplace, verbose=verbose)
     def remove_labels_(self, label: int | Enum | Sequence[int] | Sequence[Enum], removed_to_label=0, verbose: logging = True) -> Self:
         """In-place variant of `remove_labels`."""
@@ -2747,10 +2790,7 @@ class NII(NII_Math):
         out = np_unique_withoutzero(arr)
         log.print(out,verbose=verbose)
         return out
-    def voxel_volume(self) -> float:
-        """Returns the volume of a single voxel in mm³ (product of all zoom values)."""
-        product = math.prod(self.spacing)
-        return product
+
 
     def volumes(self, include_zero: bool = False, in_mm3=False,sort=False) -> dict[int, float]|dict[int, int]:
         """Returns a dict stating how many pixels are present for each label."""
