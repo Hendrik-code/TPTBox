@@ -808,7 +808,7 @@ class NII(NII_Math):
             new_img = arr, new_aff,self.header
             log.print("Image reoriented from", nio.ornt2axcodes(ornt_fr), "to", axcodes_to,verbose=verbose)
         else:
-            return self if not inplace else self.copy()
+            return self if inplace else self.copy()
         if inplace:
             self.nii = new_img
             return self
@@ -1118,13 +1118,13 @@ class NII(NII_Math):
             NII: A new NII object with the resampled image data.
         """
         if isinstance(voxel_spacing, (int,float)):
-            voxel_spacing =(voxel_spacing for _ in range(min(3,self.affine.shape[0]-1)))
+            voxel_spacing =tuple(voxel_spacing for _ in range(min(3,self.affine.shape[0]-1)))
         n = self.dims
         while  n> len(voxel_spacing):
             voxel_spacing = (*voxel_spacing, -1)
         if all(a in (-1, b) for a,b in zip(voxel_spacing, self.zoom)):
             log.print(f"Image already resampled to voxel size {self.zoom}",verbose=verbose)
-            return self.copy() if inplace else self
+            return self if inplace else self.copy()
 
         c_val = self.get_c_val(c_val)
         # resample to new voxel spacing based on the current x-y-z-orientation
@@ -1137,7 +1137,7 @@ class NII(NII_Math):
         voxel_spacing = tuple([v if v != -1 else z for v,z in zip_strict(voxel_spacing,zms)])
         if np.isclose(voxel_spacing, self.zoom,atol=atol).all():
             log.print(f"Image already resampled to voxel size {self.zoom}",verbose=verbose)
-            return self.copy() if inplace else self
+            return self if inplace else self.copy()
 
         # Calculate new shape
         new_shp = tuple(np.rint([shp[i] * zms[i] / voxel_spacing[i] for i in range(len(voxel_spacing))]).astype(int))
@@ -2697,7 +2697,7 @@ class NII(NII_Math):
         assert self.seg, "extracting a label only makes sense for a segmentation mask"
         if label is None:
             if keep_label:
-                return self.copy() if inplace else self
+                return self if inplace else self.copy()
             else:
                 return self.clamp(0,1,inplace=inplace)
         seg_arr = self.get_seg_array()

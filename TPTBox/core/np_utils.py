@@ -468,14 +468,12 @@ def np_dilate_msk_euclid(arr: np.ndarray, n_pixel: int = 3, use_crop=True, label
 
     if use_crop:
         crop = np_bbox_binary(arr_bin, px_dist=1 + n_pixel, raise_error=False)
-        arrc = arr[crop]
+        # use the label-filtered array so `labels` is honoured here too, not just on the no-crop path
+        arrc = arr_bin[crop]
     else:
-        arrc = arr
-        if labels is not None:
-            arrc = arrc.copy()
-            arrc[np_isin(arr_bin, labels, invert=True)] = 0
+        arrc = arr_bin
     if mask is not None:
-        mask[mask != 0] = 1
+        mask = mask != 0  # do not mutate the caller's array
         if use_crop:
             mask = mask[crop]
     foreground = arrc > 0
@@ -544,7 +542,7 @@ def np_dilate_msk(
         arrc = arr
 
     if mask is not None:
-        mask[mask != 0] = 1
+        mask = mask != 0  # do not mutate the caller's array
         if use_crop:
             mask = mask[crop]
     if ignore_axis is None:
@@ -568,7 +566,8 @@ def np_dilate_msk(
                 oc = out[lcrop] == 0
                 out[lcrop][oc] = msk_ibe_data[oc] * i
                 if mask is not None:
-                    out[lcrop][mask == 0] = 0
+                    # `mask` follows the global crop; index it with the per-label crop to match `out[lcrop]`
+                    out[lcrop][mask[lcrop] == 0] = 0
             else:
                 out[out == 0] = msk_ibe_data[out == 0] * i
                 if mask is not None:
