@@ -102,7 +102,6 @@ def max_distance_ray_cast_convex_npfast(
         y = start_coord[1] + norm_vec[1] * mid
         z = start_coord[2] + norm_vec[2] * mid
         val = trilinear_interpolate(region_array, x, y, z)
-        print(f"Raycast check at distance {mid:.2f}: value={val:.4f}")
         if val > 0.5:
             min_v = mid
         else:

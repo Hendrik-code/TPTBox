@@ -1023,7 +1023,6 @@ def _buffer_it(func):
         len_pref = 0
         if buffer_file is not None and Path(buffer_file).exists():
             assert extend_to is None
-            print("load")
             extend_to = POI.load(buffer_file)
             len_pref = len(extend_to)
         kwargs["extend_to"] = extend_to

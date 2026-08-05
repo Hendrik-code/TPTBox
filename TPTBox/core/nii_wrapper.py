@@ -72,7 +72,6 @@ from TPTBox.logger.log_file import Log_Type
 if TYPE_CHECKING:
     from stl.mesh import Mesh
     from torch import device
-MODES = Literal["constant", "nearest", "reflect", "wrap"]
 _unpacked_nii = tuple[np.ndarray, AFFINE, nib.nifti1.Nifti1Header]
 _formatwarning = warnings.formatwarning
 
