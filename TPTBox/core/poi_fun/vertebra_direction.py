@@ -111,7 +111,8 @@ def calc_orientation_of_vertebra_PIR(
         plane_coords = plane_coords.astype(int)
         # create_subregion
         # 1 where the selected subreg is, else 0
-        select = subreg_iso.get_array() * 0
+        # get_array() copies the whole volume and `* 0` allocates a second one, per iteration
+        select = np.zeros(subreg_iso.shape, dtype=subreg_iso.dtype)
         select[plane_coords[:, :, 0], plane_coords[:, :, 1], plane_coords[:, :, 2]] = 1
         out[out == 0] += (target_labels * select * reg_label)[out == 0]
 
@@ -403,7 +404,8 @@ def calc_center_spinal_cord(
         plane_coords = plane_coords.astype(int)
         # create_subregion
         # 1 where the selected subreg is, else 0
-        select = subreg_iso.get_array() * 0
+        # get_array() copies the whole volume and `* 0` allocates a second one, per iteration
+        select = np.zeros(subreg_iso.shape, dtype=subreg_iso.dtype)
         select[plane_coords[:, :, 0], plane_coords[:, :, 1], plane_coords[:, :, 2]] = 1
         out += target_labels * select * reg_label
 

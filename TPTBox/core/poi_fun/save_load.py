@@ -279,7 +279,7 @@ def _open_file(ctd_path: Union[Path, str, bids_files.BIDS_FILE]) -> dict | list:
 
     # --- 1) try JSON ---
     try:
-        with path.open("r") as f:
+        with path.open("r", encoding="utf-8") as f:
             return json.load(f)
     except json.JSONDecodeError:
         pass  # not JSON → continue
@@ -778,7 +778,7 @@ def _load_landmark_txt(path: Path) -> list:
     label_name = {}
     label_group_id = 1
     current_group: str | None = None
-    with path.open("r") as f:
+    with path.open("r", encoding="utf-8") as f:
         for raw_line in f:
             line = raw_line.strip()
             if not line:

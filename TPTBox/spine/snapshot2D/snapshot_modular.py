@@ -1363,10 +1363,14 @@ def create_snapshot(  # noqa: C901
 
     if not isinstance(snp_path, list):
         snp_path = [str(snp_path)]
-    for path in snp_path:
-        fig.savefig(str(path))
-        print("[*] Snapshot saved:", path) if verbose else None
-    plt.close()
+    try:
+        for path in snp_path:
+            fig.savefig(str(path))
+            print("[*] Snapshot saved:", path) if verbose else None
+    finally:
+        # close THIS figure (bare plt.close() closes the current one, which may be another
+        # figure entirely) and do it even if savefig raises, so failures do not leak
+        plt.close(fig)
     return snp_path
 
 

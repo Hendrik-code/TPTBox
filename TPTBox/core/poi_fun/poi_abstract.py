@@ -66,7 +66,7 @@ class _Abstract_POI_Definition:
     ) -> None:
         """Placeholder class to move string names to integers with multiple definitions."""
         if path is not None:
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 info = json.load(f)
                 region = info["region"]
                 subregion = info["subregion"]

@@ -305,10 +305,10 @@ class Logger(Logger_Interface):
 
         # Creates logs folder if not existent
         log_path = Path(path).joinpath("logs")
-        if not Path.exists(log_path):
-            Path.mkdir(log_path)
-        # Open log file
-        self.f = open(log_path.joinpath(log_filename_full), "w")  # noqa: SIM115
+        log_path.mkdir(parents=True, exist_ok=True)  # exist_ok: parallel jobs race here
+        # Open log file. encoding is explicit: print_statistic emits "±", which raises
+        # UnicodeEncodeError under a C/POSIX locale (Docker, cron, CI).
+        self.f = open(log_path.joinpath(log_filename_full), "w", encoding="utf-8")  # noqa: SIM115
         # calls close() if program terminates
         self._finalizer = weakref.finalize(self.f, self.close)
         self.default_verbose = default_verbose

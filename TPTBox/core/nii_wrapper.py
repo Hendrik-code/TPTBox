@@ -739,8 +739,10 @@ class NII(NII_Math):
             The NII with the new dtype (``self`` when ``inplace=True``, a new NII otherwise).
         """
         sel = self if inplace else self.copy()
+        arr = None  # get_array() copies the whole volume; fetch it at most once
         if dtype in ("smallest_uint", "smallest_int"):
-            dtype = _smallest_int_dtype(self.get_array(), unsigned=dtype == "smallest_uint")
+            arr = self.get_array()
+            dtype = _smallest_int_dtype(arr, unsigned=dtype == "smallest_uint")
         if self.__unpacked:
             self._unpack()
             sel._arr = sel._arr.astype(dtype)
@@ -748,7 +750,9 @@ class NII(NII_Math):
         else:
             sel.nii.set_data_dtype(dtype)
             if sel.nii.get_data_dtype() != self.dtype: #type: ignore
-                sel.nii = Nifti1Image(self.get_array().astype(dtype,casting=casting,order=order),self.affine,self.header)
+                if arr is None:
+                    arr = self.get_array()
+                sel.nii = Nifti1Image(arr.astype(dtype,casting=casting,order=order),self.affine,self.header)
 
         return sel
     def set_dtype_(self, dtype: type | Literal['smallest_uint', 'smallest_int'] = np.float32, order: Literal["C", "F", "A", "K"] = 'K', casting: Literal["no", "equiv", "safe", "same_kind", "unsafe"] = "unsafe") -> Self:

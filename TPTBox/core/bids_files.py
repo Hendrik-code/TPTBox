@@ -1336,7 +1336,7 @@ class BIDS_FILE:
         Raises:
             KeyError: If no JSON file is registered in :attr:`file`.
         """
-        with open(self.file["json"]) as f:
+        with open(self.file["json"], encoding="utf-8") as f:
             return json.load(f)
 
     def open_poi(self, nii: TPTBox.Image_Reference | None = None) -> TPTBox.POI:

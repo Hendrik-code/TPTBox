@@ -5,8 +5,6 @@ from numbers import Number
 from typing import TYPE_CHECKING, Union
 
 import numpy as np
-from skimage.metrics import peak_signal_noise_ratio as psnr
-from skimage.metrics import structural_similarity as ssim
 from typing_extensions import Self
 
 from TPTBox.core.np_utils import np_dice
@@ -454,6 +452,9 @@ class NII_Math(NII_Proxy, Has_Grid):
         Returns:
             float: SSIM score in the range [-1, 1] (1 = identical).
         """
+        # imported here: skimage.metrics pulls in scipy.stats, ~35% of `import TPTBox`
+        from skimage.metrics import structural_similarity as ssim
+
         img_1 = nii.get_array() - min_v
         img_2 = self.get_array() - min_v
         img_1 = img_1/ img_1.max()  # out-of-place: /= fails on integer arrays
@@ -478,6 +479,9 @@ class NII_Math(NII_Proxy, Has_Grid):
         Returns:
             float: PSNR score in dB (higher is better; inf when images are identical).
         """
+        # imported here: skimage.metrics pulls in scipy.stats, ~35% of `import TPTBox`
+        from skimage.metrics import peak_signal_noise_ratio as psnr
+
         img_1 = nii.get_array() - min_v
         img_2 = self.get_array() - min_v
         img_1 = img_1/ img_1.max()  # out-of-place: /= fails on integer arrays
