@@ -266,6 +266,7 @@ def get_vert_direction_PIR(poi: POI, vert_id: int, do_norm: bool = True, to_pir:
     """
     if vert_id in poi._vert_orientation_pir and to_pir:
         return poi._vert_orientation_pir[vert_id]  # Elusive buffer of iso/PIR directions.
+    cache_owner = poi  # `poi` is rebound below; the cache belongs on the object we were called with
     poi = poi.extract_subregion(
         Location.Vertebra_Corpus,
         Location.Vertebra_Direction_Posterior,
@@ -284,7 +285,7 @@ def get_vert_direction_PIR(poi: POI, vert_id: int, do_norm: bool = True, to_pir:
     right = np.array(poi[vert_id : Location.Vertebra_Direction_Right])
     out = n(post - center), n(down - center), n(right - center)
     if to_pir:
-        poi._vert_orientation_pir[vert_id] = out
+        cache_owner._vert_orientation_pir[vert_id] = out
 
     return out
 

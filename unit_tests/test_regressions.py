@@ -281,5 +281,46 @@ class Test_Segmentation_In_Border(unittest.TestCase):
         self.assertFalse(_make_nii(arr).is_segmentation_in_border())
 
 
+class Test_Global_Vert_Order(unittest.TestCase):
+    """sag_cor_curve_projection aliased the module-level v_idx_order list and extended it in place."""
+
+    def test_v_idx_order_matches_its_definition(self):
+        from TPTBox.core.vert_constants import v_idx2name, v_idx_order
+
+        self.assertEqual(list(v_idx_order), list(v_idx2name.keys()))
+
+    def test_snapshot_module_does_not_extend_it(self):
+        import TPTBox
+        from TPTBox.spine.snapshot2D import snapshot_modular  # noqa: F401
+
+        self.assertEqual(len(TPTBox.v_idx_order), len(TPTBox.v_idx2name))
+
+
+class Test_POI_PIR_Cache(unittest.TestCase):
+    """_vert_orientation_pir was a class attribute, so it was shared by every POI in the process."""
+
+    @staticmethod
+    def _poi(value: float):
+        from TPTBox import POI
+
+        return POI({1: {50: (value, value, value)}}, orientation=("R", "A", "S"), zoom=(1, 1, 1), shape=(10, 10, 10))
+
+    def test_cache_is_not_shared_between_instances(self):
+        first = self._poi(1.0)
+        second = self._poi(4.0)
+        first._vert_orientation_pir[99] = "subject-1"
+        self.assertNotIn(99, second._vert_orientation_pir)
+
+    def test_own_cache_is_retained(self):
+        poi = self._poi(1.0)
+        poi._vert_orientation_pir[99] = "subject-1"
+        self.assertEqual(poi._vert_orientation_pir[99], "subject-1")
+
+    def test_copy_starts_with_an_empty_cache(self):
+        poi = self._poi(1.0)
+        poi._vert_orientation_pir[99] = "subject-1"
+        self.assertNotIn(99, poi.copy()._vert_orientation_pir)
+
+
 if __name__ == "__main__":
     unittest.main()

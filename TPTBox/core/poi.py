@@ -122,7 +122,10 @@ class POI(Abstract_POI, Has_Grid):
     # internal
     _rotation: ROTATION = field(init=False, default=None, repr=False, compare=False)  # type: ignore
     _zoom: ZOOMS = field(init=False, default=(1, 1, 1), repr=False, compare=False)
-    _vert_orientation_pir = {}  # Elusive; will not be saved; will not be copied. For Buffering results  # noqa: RUF012
+    # Elusive; will not be saved; will not be copied. For buffering results.
+    # Must be a per-instance field: as a bare class attribute it was shared by every POI
+    # object in the process, so cached directions leaked between subjects.
+    _vert_orientation_pir: dict = field(init=False, default_factory=dict, repr=False, compare=False)
 
     def _set_inplace(self, poi: Self) -> Self:
         """Copy all grid/affine attributes and centroids from ``poi`` into ``self``."""

@@ -28,7 +28,6 @@ from TPTBox import (
     to_nii,
     to_nii_optional,
     v_idx2name,
-    v_idx_order,
 )
 from TPTBox.mesh3D.mesh_colors import _color_map_in_row, get_color_by_label
 
@@ -162,8 +161,6 @@ def sag_cor_curve_projection(
     # Sagittal and coronal projections of a curved plane defined by centroids
     # Note: Will assume IPL orientation!
     # if x-direction (=S/I) is not fully incremental, a straight, not an interpolated plane will be returned
-    order = v_idx_order
-    order += [i for i in range(256) if i not in v_idx_order]
     # ctd_list.sorting_list = v_idx_order
     ctd_list.round_(3)
 
