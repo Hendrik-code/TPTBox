@@ -111,6 +111,10 @@ def measure_ivd_and_vertebra_geometry(
         - ``width_lateral_x5``, ``width_sagittal_x6``: directional widths
         - ``signal``: mean T2 signal in the structure divided by the mean
           T2 signal in the spinal canal (only if ``t2w`` is given)
+        - ``structure_signal``: mean T2 signal inside the (eroded) structure
+          mask (only if ``t2w`` is given)
+        - ``spinal_canal_signal``: mean T2 signal inside the (eroded)
+          spinal canal reference region (only if ``t2w`` is given)
 
         If evaluation of a label fails, its entry instead contains
         ``"error"`` (the exception message) plus all the same keys set to
@@ -186,6 +190,8 @@ _RESULT_FIELDS = (
     "width_lateral_x5",
     "width_sagittal_x6",
     "signal",
+    "structure_signal",
+    "spinal_canal_signal",
 )
 
 
@@ -206,6 +212,8 @@ def _result_from_info(info: "_StructureMeasurements") -> dict[str, float]:
         "width_lateral_x5": info.width_lateral_x5,
         "width_sagittal_x6": info.width_sagittal_x6,
         "signal": info.signal,
+        "structure_signal": info.structure_signal,
+        "spinal_canal_signal": info.spinal_canal_signal,
     }  # type: ignore
 
 
@@ -247,6 +255,8 @@ class _StructureMeasurements:
     x_values: bool = False
     signal_values: bool = False
     signal: float = np.nan
+    structure_signal: float = np.nan
+    spinal_canal_signal: float = np.nan
 
     @property
     def mean_diameter(self):
@@ -773,5 +783,7 @@ def _compute_t2_signal_ratio(t2w_nii: NII, nii: NII, subregs: NII, label: int = 
     structure_signal = t2w_nii.mean(where=structure_mask)
     spinal_canal_signal = t2w_nii.mean(where=subregs.extract_label(61).erode_msk(1, connectivity=1, verbose=False))
     info.signal = structure_signal / spinal_canal_signal
+    info.structure_signal = structure_signal
+    info.spinal_canal_signal = spinal_canal_signal
     info.signal_values = True
     return raw
