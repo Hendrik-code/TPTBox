@@ -389,7 +389,7 @@ def compute_lordosis_and_kyphosis(poi: POI, project_2D=True) -> dict[str, float 
     Returns:
         dict: A dictionary containing the following key-value pairs:
             - "cervical_lordosis": The angle of cervical lordosis, calculated between C2 and C7.
-            - "thoracic_kyphosis": The angle of thoracic kyphosis, calculated between T1 and the last thoracic vertebra.
+            - "thoracic_kyphosis": The angle of thoracic kyphosis, calculated between T4 and the last thoracic vertebra.
             - "lumbar_lordosis": The angle of lumbar lordosis, calculated between L1 and the last lumbar vertebra.
 
     Raises:
@@ -397,7 +397,7 @@ def compute_lordosis_and_kyphosis(poi: POI, project_2D=True) -> dict[str, float 
 
     Notes:
         - It is essential that the `poi` contains the posterior vertebra direction for accurate angle calculations.
-        - Thoracic kyphosis is calculated from T1 to the last thoracic vertebra identified in the POI.
+        - Thoracic kyphosis is calculated from T4 to the last thoracic vertebra identified in the POI.
         - Lumbar lordosis is calculated from L1 to the last lumbar vertebra identified in the POI.
 
     Example:

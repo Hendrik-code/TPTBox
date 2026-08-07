@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Literal
 
 import numpy as np
@@ -5,6 +7,69 @@ import numpy as np
 from TPTBox import NII
 from TPTBox.core.nii_wrapper import NII
 from TPTBox.core.vert_constants import Full_Body_Instance, Full_Body_Instance_Vibe, Location, Vertebra_Instance
+
+
+def peak_centered_mean(
+    values: np.ndarray,
+    bins: int = 64,
+    peak_frac_height: float = 0.5,
+) -> float:
+    """Robust mean of a 1D intensity sample, centered on the histogram peak.
+
+    Steps:
+        1. Build a histogram of ``values``.
+        2. Locate the mode (tallest bin).
+        3. Grow a contiguous window outward from the mode as long as each
+           neighbouring bin still has at least
+           ``peak_frac_height`` * peak_height counts.
+        4. Average only the values falling inside that window.
+
+    Useful for estimating cerebrospinal fluid signal from a spinal canal
+    mask that may include darker structures such as nerve roots or vessel
+    walls at the border. Those low-signal tails sit outside the peak
+    window and are excluded before averaging.
+
+    Parameters
+    ----------
+    values : np.ndarray
+        1D array of intensity samples already extracted from the mask.
+    bins : int, default=64
+        Histogram resolution used to locate the peak. Higher values give a
+        more precise peak but are more sensitive to shot noise.
+    peak_frac_height : float, default=0.5
+        Fractional height cutoff. Bins whose count is at least this
+        fraction of the peak count are kept; the default ``0.5`` matches
+        the full-width half-maximum criterion. Lower values keep more of
+        the tails; ``1.0`` reduces to the peak bin only.
+
+    Returns:
+    -------
+    float
+        Mean of the values inside the peak window. Returns ``nan`` for an
+        empty input; falls back to the plain mean when the window is
+        degenerate.
+    """
+    values = np.asarray(values).ravel()
+    values = values[np.isfinite(values)]
+    if values.size == 0:
+        return float("nan")
+    hist, edges = np.histogram(values, bins=bins)
+    if hist.max() == 0:
+        return float(np.mean(values))
+    peak_idx = int(np.argmax(hist))
+    threshold = hist[peak_idx] * peak_frac_height
+    left = peak_idx
+    while left > 0 and hist[left - 1] >= threshold:
+        left -= 1
+    right = peak_idx
+    while right < len(hist) - 1 and hist[right + 1] >= threshold:
+        right += 1
+    lo = edges[left]
+    hi = edges[right + 1]
+    kept = values[(values >= lo) & (values <= hi)]
+    if kept.size == 0:
+        return float(np.mean(values))
+    return float(np.mean(kept))
 
 
 def VBQ_score(
@@ -15,6 +80,8 @@ def VBQ_score(
     subregs_ids=None,
     spinal_channel_id=Location.Spinal_Canal,
     n_erode=2,
+    spinal_bins: int = 64,
+    spinal_peak_frac_height: float = 0.5,
 ) -> dict[str, int]:
     """Compute vertebral bone quality (VBQ) scores from a T2-weighted MRI.
 
@@ -54,14 +121,29 @@ def VBQ_score(
     n_erode : int, default=2
         Number of erosion iterations applied to the vertebral body mask
         before signal extraction.
+    spinal_bins : int, default=64
+        Histogram bin count forwarded to :func:`peak_centered_mean` when
+        estimating the CSF signal.
+    spinal_peak_frac_height : float, default=0.5
+        Fractional height cutoff forwarded to :func:`peak_centered_mean`.
+        Bins with count >= ``peak_frac_height * peak`` are kept; the
+        default 0.5 corresponds to FWHM.
 
     Returns:
     -------
     dict[str, float]
         Dictionary containing, for each region:
-        - ``mean_signal_vertebra_<start>-<end>``
-        - ``mean_signal_liquor_<start>-<end>``
-        - ``VBQ_<start>-<end>``
+
+        - ``mean_signal_vertebra_<start>-<end>`` : mean T2 signal inside
+          the (eroded) vertebral body mask.
+        - ``mean_signal_liquor_<start>-<end>`` : peak-centered mean T2
+          signal inside the spinal canal (robust to nerve-root voxels).
+        - ``mean_signal_liquor_<start>-<end>_old`` : plain mean T2 signal
+          inside the spinal canal, kept for backward comparison.
+        - ``VBQ_<start>-<end>`` : ratio using the peak-centered CSF
+          signal.
+        - ``VBQ_<start>-<end>_old`` : ratio using the plain-mean CSF
+          signal.
 
     Notes:
     -----
@@ -112,11 +194,17 @@ def VBQ_score(
         slicer[axis] = bbox[axis]
         spinal_crop = spinal_crop[slicer]
 
-        signal_sfs = t2w.mean(where=spinal_crop)
+        signal_sfs_old = t2w.mean(where=spinal_crop)
+
+        t2w_slab = t2w.get_array()[tuple(slicer)]
+        spinal_arr = spinal_crop.get_array().astype(bool)
+        signal_sfs = peak_centered_mean(t2w_slab[spinal_arr], bins=spinal_bins, peak_frac_height=spinal_peak_frac_height)
 
         out[f"mean_signal_vertebra_{start.name}-{goal.name}"] = signal_vertebra
         out[f"mean_signal_liquor_{start.name}-{goal.name}"] = signal_sfs
+        out[f"mean_signal_liquor_{start.name}-{goal.name}_old"] = signal_sfs_old
         out[f"VBQ_{start.name}-{goal.name}"] = signal_vertebra / signal_sfs
+        out[f"VBQ_{start.name}-{goal.name}_old"] = signal_vertebra / signal_sfs_old
 
     return out
 
@@ -164,7 +252,27 @@ def body_composition_score(
     Returns:
     -------
     dict[str, float]
-        Dictionary containing body composition measurements for each region.
+        Dictionary containing body composition measurements for each
+        region. Region tags are formatted as ``{start.name}-{goal.name}``
+        (e.g. ``T12-L1``). For each region the following keys are set:
+
+        - ``mean_{tissue}_area_{region}`` : mean cross-sectional area of
+          the tissue over all axial slices intersecting the vertebral
+          body region (mm²). ``tissue`` is one of
+          ``muscle``, ``VAT``, ``SAT``, ``psoas``, ``autochthon``.
+        - ``max_{tissue}_area_{region}`` : maximum cross-sectional area
+          over the same slice range (mm²).
+        - ``n_slices_{region}`` : number of axial slices contributing to
+          the ``muscle`` statistic (integer).
+        - ``muscle_index_{region}`` : skeletal muscle index
+          (``mean_muscle_area / height_m^2``, unit mm²/m²). Only present
+          when ``height_m`` is provided.
+        - ``muscle_fat_ratio_{region}`` : ``mean_muscle_area /
+          (mean_VAT_area + mean_SAT_area)`` (unitless). ``NaN`` when the
+          denominator is zero.
+
+        A region is silently skipped (no keys emitted) when no vertebral
+        body voxels fall inside its label range.
     """
     if regions is None:
         regions = [
@@ -290,7 +398,7 @@ def muscle_fat_infiltration(
     roi_ids: tuple[int, ...] = tuple(range(3, 9)),
     dataset_id: Literal[100, 12] = 100,
     threshold: float = 0.20,
-    erode: int = 0,
+    erode: dict[str, int] | None = None,
     per_muscle: bool = True,
 ) -> dict[str, float]:
     """Compute muscle fat infiltration from Dixon VIBE water/fat images.
@@ -305,7 +413,10 @@ def muscle_fat_infiltration(
 
     Measurements can optionally be restricted to vertebral levels and/or a
     supplied ROI. The analysis can be performed for total muscle and
-    individual muscle groups.
+    individual muscle groups. For each muscle group, muscle volumes are
+    reported both with and without erosion of the muscle mask, so callers
+    can compare the eroded region used for fat-fraction statistics against
+    the raw segmentation volume.
 
     Parameters
     ----------
@@ -340,8 +451,14 @@ def muscle_fat_infiltration(
     threshold : float, default=0.20
         Fat fraction threshold separating lean muscle and IMAT.
 
-    erode : int, default=0
-        Number of erosions applied to each muscle mask.
+    erode : dict[str, int], optional
+        Per-muscle number of erosion iterations applied to the muscle mask
+        before fat-fraction statistics are computed. Defaults to
+        ``{"all_muscle": 1, "iliopsoas_left": 1, "iliopsoas_right": 1,
+        "autochthon_left": 2, "autochthon_right": 2, "muscle_other": 1}``.
+        Erosion reduces partial-volume contamination at the muscle border
+        but shrinks the mask; the pre-erosion volume is always reported
+        alongside the eroded volume so both can be inspected.
 
     per_muscle : bool, default=True
         If True, compute values for individual muscles in addition to total
@@ -350,8 +467,32 @@ def muscle_fat_infiltration(
     Returns:
     -------
     dict[str, float]
-        Muscle fat infiltration measurements.
+        Muscle fat infiltration measurements. For each ``{region}_{muscle}``
+        suffix the dictionary contains:
+
+        - ``mean_fat_fraction_{suffix}`` : mean FF over the eroded mask.
+        - ``median_fat_fraction_{suffix}`` : median FF over the eroded mask.
+        - ``mean_lean_fat_fraction_{suffix}`` : mean FF of lean voxels
+          (FF < ``threshold``).
+        - ``mean_IMAT_fat_fraction_{suffix}`` : mean FF of IMAT voxels
+          (FF >= ``threshold``).
+        - ``muscle_volume_{suffix}`` : muscle volume after erosion (mm^3).
+        - ``muscle_volume_no_erosion_{suffix}`` : muscle volume before
+          erosion (mm^3); equals ``muscle_volume_{suffix}`` when no
+          erosion is applied.
+        - ``lean_muscle_volume_{suffix}`` : lean-muscle volume within the
+          eroded mask (mm^3).
+        - ``lean_muscle_volume_no_erosion_{suffix}`` : lean-muscle volume
+          within the un-eroded mask (mm^3).
+        - ``IMAT_volume_{suffix}`` : IMAT volume within the eroded mask
+          (mm^3).
+        - ``IMAT_volume_no_erosion_{suffix}`` : IMAT volume within the
+          un-eroded mask (mm^3).
+        - ``IMAT_fraction_{suffix}`` : IMAT voxel fraction within the
+          eroded mask.
     """
+    if erode is None:
+        erode = {"all_muscle": 1, "iliopsoas_left": 1, "iliopsoas_right": 1, "autochthon_left": 2, "autochthon_right": 2, "muscle_other": 1}
     if water.shape != vibe_seg.shape:
         vibe_seg = vibe_seg.resample_from_to(water)
     if fat.shape != water.shape:
@@ -426,28 +567,42 @@ def muscle_fat_infiltration(
                 muscle_mask *= roi.extract_label(roi_ids)
             if slicer is not None:
                 muscle_mask = muscle_mask[slicer]
-            if erode > 0:
-                muscle_mask.erode_msk_(erode, verbose=False)
-            mask = muscle_mask.get_array().astype(bool)
-            if mask.sum() == 0:
+
+            mask_no_erode = muscle_mask.get_array().astype(bool)
+            if erode[muscle_name] > 0:
+                mask = muscle_mask.erode_msk(erode[muscle_name], verbose=False).get_array().astype(bool)
+            else:
+                mask = mask_no_erode
+
+            if mask_no_erode.sum() == 0:
                 continue
+
             water_arr = water.get_array()
             fat_arr = fat.get_array()
             if slicer is not None:
                 water_arr = water_arr[slicer]  # type: ignore
                 fat_arr = fat_arr[slicer]  # type: ignore
             denom = water_arr + fat_arr
-            ff = np.zeros_like(denom, dtype=np.float32)
+            ff_full = np.zeros_like(denom, dtype=np.float32)
             valid = denom > 0
-            ff[valid] = fat_arr[valid] / denom[valid]
-            ff = ff[mask]
-            if ff.size == 0:
-                continue
+            ff_full[valid] = fat_arr[valid] / denom[valid]
+
+            ff = ff_full[mask]
+            ff_no_erode = ff_full[mask_no_erode]
 
             lean = ff < threshold
             imat = ff >= threshold
+            lean_no_erode = ff_no_erode < threshold
+            imat_no_erode = ff_no_erode >= threshold
 
             suffix = f"{region_name}_{muscle_name}"
+
+            out[f"muscle_volume_no_erosion_{suffix}"] = float(ff_no_erode.size * voxel_volume)
+            out[f"lean_muscle_volume_no_erosion_{suffix}"] = float(np.sum(lean_no_erode) * voxel_volume)
+            out[f"IMAT_volume_no_erosion_{suffix}"] = float(np.sum(imat_no_erode) * voxel_volume)
+
+            if ff.size == 0:
+                continue
 
             out[f"mean_fat_fraction_{suffix}"] = float(np.mean(ff))
             out[f"median_fat_fraction_{suffix}"] = float(np.median(ff))

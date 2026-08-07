@@ -1,53 +1,10 @@
-# Spine Statistics (`spine/spinestats`)
+# `_run_all.py` — Radiologist Reference
 
-Clinical spine and body-composition measurements computed from `POI`
-objects and `NII` segmentations.
-
-## Modules
-
-| Module | Description |
-|---|---|
-| `angles.py` | Cobb angle, cervical lordosis, thoracic kyphosis, lumbar lordosis |
-| `measure_ivd_and_vertebra_geometry.py` | Per-structure geometry (heights, widths, x1–x6) and T2 signal ratio for vertebrae and IVDs |
-| `torso_vat_sat.py` | VBQ score, body composition CSA, muscle fat infiltration, torso VAT/SAT/muscle volumes; also `peak_centered_mean` |
-| `vertebra_anatomical_widths.py` | Anatomical distances per vertebra (IVD height, body height, LR/AP widths) stored on `POI.info` |
-| `body_quadrants.py` | Subdivides vertebra bodies into anatomical quadrants |
-| `_run_all.py` | End-to-end NAKO pipeline: resolves paths, runs all analyses, writes one json per subject, streams Excel summaries |
-| `poi_fun/` | Points-of-interest sub-package used by the geometry code |
-
-## Key functions
-
-| Function | Module | Description |
-|---|---|---|
-| `compute_max_cobb_angle` / `compute_max_cobb_angle_multi` | `angles.py` | Maximum Cobb angle (single value or list of scoliotic segments) |
-| `compute_lordosis_and_kyphosis` | `angles.py` | Cervical / thoracic / lumbar curvature angles |
-| `plot_cobb_and_lordosis_and_kyphosis` | `angles.py` | Combined computation + snapshot |
-| `measure_ivd_and_vertebra_geometry` | `measure_ivd_and_vertebra_geometry.py` | Geometry + signal per label |
-| `VBQ_score` | `torso_vat_sat.py` | Vertebral Bone Quality score (T2 vertebra / T2 CSF) |
-| `body_composition_score` | `torso_vat_sat.py` | Per-level axial CSA of muscle / VAT / SAT / psoas / autochthon |
-| `muscle_fat_infiltration` | `torso_vat_sat.py` | Dixon fat-fraction based muscle-quality metrics |
-| `torso_vat_sat_muscle_mass` | `torso_vat_sat.py` | Whole-torso VAT / SAT / muscle volumes inside an ROI |
-| `peak_centered_mean` | `torso_vat_sat.py` | Robust mean around the histogram peak (used to suppress non-CSF voxels) |
-| `compute_all_distances` | `vertebra_anatomical_widths.py` | Compute IVD/vertebra distances and store them on `POI.info` |
-| `run_all` | `_run_all.py` | Full pipeline: geometry + signal + composition + torso volumes, writes one json |
-| `ExcelCollector` | `_run_all.py` | Background process that turns per-subject jsons into rolling Excel summaries |
-
-## Coordinate convention
-
-All measurement functions consume `POI` objects (voxel or world space)
-produced by `calc_centroids` or `calc_poi_from_subreg_vert` from the
-`core` module.
-
----
-
-# Pipeline output reference (`run_all`)
-
-This section documents every key produced by `run_all(file_dict)` in
-`_run_all.py`, together with its unit and important implementation
-details. It is aimed at radiologists reviewing the numbers, so it
-focuses on "what does this mean clinically" and "how was it computed",
-not on the Python API. A standalone copy of this reference lives at
-`all_output_reference.md` in the same folder.
+This document lists every key produced by `run_all(file_dict)` in
+`_run_all.py`, together with its unit and important implementation details.
+It is aimed at radiologists reviewing the numbers, so it focuses on
+"what does this mean clinically" and "how was it computed", not on the
+Python API.
 
 ## How the pipeline is organised
 
@@ -63,15 +20,9 @@ not on the Python API. A standalone copy of this reference lives at
 | `torso_vat_sat_muscle_mass` | `torso_vat_sat_muscle_mass` | whole-torso VAT / SAT / muscle volume |
 | `cobb`, `curv` | `plot_cobb_and_lordosis_and_kyphosis` | only when called with `cobb=True` |
 
-Distance metrics from `vertebra_anatomical_widths.compute_all_distances`
-are not currently written into the json by `run_all`; they live on the
-returned `POI.info` dict (see the `vertebra_anatomical_widths.py`
-section below).
-
 Angles are in **degrees**, lengths in **millimetres**, areas in **mm²**,
-volumes in **mm³**, fat fractions are **unitless** in `[0, 1]`, MR
-signal values are in **arbitrary units (a.u.)** and only meaningful as
-ratios.
+volumes in **mm³**, fat fractions are **unitless** in `[0, 1]`, MR signal
+values are in **arbitrary units (a.u.)** and only meaningful as ratios.
 
 Caching: `run_all(..., override=False)` (the default) reuses the json
 when it exists, is newer than every input segmentation file, and
@@ -96,30 +47,23 @@ force recomputation.
   `torso_vat_sat_muscle_mass` explicitly verifies that both the
   clavicula and the pelvis are present in the VIBESeg mask; if either
   is missing it aborts, returns `NaN` volumes and stores the reason in
-  the `reason` key. Partially-covered scans should either be skipped
-  or handled outside this pipeline.
+  the `reason` key.
 
 ### How to produce the segmentations
 
 All required segmentations can be produced from
 `TPTBox.segmentation`:
 
-- **`vert` / `spine`** — run **SPINEPS** on the T2w image. Import from
-  `TPTBox.segmentation` (`run_spineps`, `get_outpaths_spineps`,
-  `_run_spineps_all`). SPINEPS returns both the per-vertebra instance
-  segmentation and the spine subregion segmentation used by every
-  spine-side function in this package.
+- **`vert` / `spine`** — run **SPINEPS** on the T2w image
+  (`run_spineps`, `get_outpaths_spineps`, `_run_spineps_all`).
 - **`vibeseg100`** — run **VIBESegmentator** with
-  `run_vibeseg(..., dataset_id=100)` on the VIBE stack. Dataset **100**
-  is the general MR/CT body-composition model that `run_all` targets.
-  Dataset **12** is the 0.8 mm iso CT model and is also supported by
-  `body_composition_score`, `muscle_fat_infiltration` and
-  `torso_vat_sat_muscle_mass` (pass `dataset_id=12`).
+  `run_vibeseg(..., dataset_id=100)` on the VIBE stack. Dataset
+  **100** (MR and CT) is what `run_all` targets; dataset **12**
+  (0.8 mm iso CT) is also supported by the composition/infiltration
+  functions via `dataset_id=12`.
 - **`roi`** — run VIBESegmentator with dataset **278** on the VIBE
-  stack. Note: the raw dataset-278 ROI is **not perfect** and needs
-  postprocessing before it is fed into `run_all`; without cleanup the
-  torso extent used to gate VAT/SAT/muscle volumes and the per-region
-  muscle statistics will be off.
+  stack. The raw dataset-278 ROI is **not perfect** and needs
+  postprocessing before it is fed into `run_all`.
 
 ## Signal-based conventions used everywhere
 
@@ -131,7 +75,8 @@ Two things are worth understanding before reading the T2 signal keys:
    averages only voxels whose intensity falls in a window around the
    histogram peak. When both a peak-centered and a plain-mean version
    are stored, the plain-mean version is suffixed with `_old` for
-   comparison. See `peak_centered_mean` in `torso_vat_sat.py`.
+   comparison. See `peak_centered_mean` in
+   `TPTBox/spine/spinestats/torso_vat_sat.py`.
 2. **Erosion.** Muscle and vertebral-body masks are eroded by one or
    two voxels before signal extraction to reduce partial-volume mixing
    at the boundary. Volume metrics are reported both after erosion
@@ -301,37 +246,10 @@ Implementation notes:
 
 ---
 
-## `vertebra_anatomical_widths.py`
-
-Not written into the json by `run_all`, but part of this package.
-`compute_all_distances(poi, vert=..., subreg=...)` fills
-``poi.info[key]`` for each of the four registered distances. Each entry
-is a dict `{vertebra_region_id: distance_mm}`.
-
-| `poi.info` key | Unit | Endpoints (`Location`) | Meaning |
-|---|---|---|---|
-| `ivd_heights_center_mm` | mm | `Vertebra_Disc_Inferior` → `Vertebra_Disc_Superior` | IVD height at the disc centre |
-| `vertebra_heights_center_mm` | mm | `Additional_Vertebral_Body_Middle_Superior_Median` → `Additional_Vertebral_Body_Middle_Inferior_Median` | Vertebral body height through the mid-body |
-| `vertebra_width_LR_center_mm` | mm | `Muscle_Inserts_Vertebral_Body_Right` → `Muscle_Inserts_Vertebral_Body_Left` | Left–right (lateral) vertebral body width |
-| `vertebra_width_AP_center_mm` | mm | `Additional_Vertebral_Body_Posterior_Central_Median` → `Additional_Vertebral_Body_Anterior_Central_Median` | Anterior–posterior (sagittal) vertebral body width |
-
-Implementation notes:
-- `_compute_distance` short-circuits when the key already exists in
-  ``poi.info`` unless ``recompute=True`` is passed.
-- POIs for the required endpoints are computed on demand via
-  ``calc_poi_from_subreg_vert(vert, subreg, ...)`` when
-  ``all_pois_computed=False`` and the endpoint locations are not yet in
-  the POI object.
-- Distances are Euclidean in mm regardless of the input POI zoom
-  (`keep_zoom=False`).
-
----
-
 ## Excel collector
 
-`ExcelCollector` in `_run_all.py` runs a background process that turns
-each finished json into two rolling Excel files in a configurable
-folder:
+`ExcelCollector` in `all.py` runs a background process that turns each
+finished json into two rolling Excel files in a configurable folder:
 
 - `per_subject.xlsx` — one row per subject with every scalar top-level
   metric flattened to dotted keys
@@ -347,9 +265,9 @@ collector = ExcelCollector(out_folder="/tmp/nako_summary")
 collector.start()
 for nako_id in ids:
     f = get_nako_paths(nako_id)
-    run_all(f)                       # writes the per-subject json
+    run_all(f)  # writes the per-subject json
     collector.submit(nako_id, _final_json_path(f))
-collector.close()                    # flushes and joins
+collector.close()  # flushes and joins
 ```
 
 The collector re-writes the Excel files every `flush_every` submissions

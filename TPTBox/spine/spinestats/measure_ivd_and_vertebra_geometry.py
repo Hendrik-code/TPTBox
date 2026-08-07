@@ -43,6 +43,7 @@ from sklearn.decomposition import PCA
 from TPTBox import NII, POI, Location, Vertebra_Instance, calc_poi_from_subreg_vert
 from TPTBox.core.nii_wrapper import NII
 from TPTBox.core.poi import POI
+from TPTBox.spine.spinestats.torso_vat_sat import peak_centered_mean
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -110,12 +111,20 @@ def measure_ivd_and_vertebra_geometry(
           ``right_height_x3``, ``left_height_x4``: directional heights,
           see the figure/table below
         - ``width_lateral_x5``, ``width_sagittal_x6``: directional widths
-        - ``signal``: mean T2 signal in the structure divided by the mean
-          T2 signal in the spinal canal (only if ``t2w`` is given)
-        - ``structure_signal``: mean T2 signal inside the (eroded) structure
-          mask (only if ``t2w`` is given)
-        - ``spinal_canal_signal``: mean T2 signal inside the (eroded)
-          spinal canal reference region (only if ``t2w`` is given)
+        - ``signal``: peak-centered T2 signal in the structure divided
+          by the peak-centered T2 signal in the spinal canal (unitless).
+          Peak-centered means only voxels around the histogram mode of
+          the mask are averaged; this suppresses darker contamination
+          such as nerve roots inside the canal (only if ``t2w`` is given)
+        - ``structure_signal``: peak-centered mean T2 signal inside the
+          (eroded) structure mask, a.u. (only if ``t2w`` is given)
+        - ``spinal_canal_signal``: peak-centered mean T2 signal inside
+          the (eroded) spinal canal reference region, a.u. (only if
+          ``t2w`` is given)
+        - ``signal_old`` / ``structure_signal_old`` /
+          ``spinal_canal_signal_old``: same three quantities computed as
+          plain per-voxel means (no peak centering). Kept for backward
+          comparison so a user can see the effect of the peak filter.
 
         If evaluation of a label fails, its entry instead contains
         ``"error"`` (the exception message) plus all the same keys set to
@@ -193,6 +202,9 @@ _RESULT_FIELDS = (
     "signal",
     "structure_signal",
     "spinal_canal_signal",
+    "signal_old",
+    "structure_signal_old",
+    "spinal_canal_signal_old",
 )
 
 
@@ -215,6 +227,9 @@ def _result_from_info(info: "_StructureMeasurements") -> dict[str, float]:
         "signal": info.signal,
         "structure_signal": info.structure_signal,
         "spinal_canal_signal": info.spinal_canal_signal,
+        "signal_old": info.signal_old,
+        "structure_signal_old": info.structure_signal_old,
+        "spinal_canal_signal_old": info.spinal_canal_signal_old,
     }  # type: ignore
 
 
@@ -258,6 +273,9 @@ class _StructureMeasurements:
     signal: float = np.nan
     structure_signal: float = np.nan
     spinal_canal_signal: float = np.nan
+    signal_old: float = np.nan
+    structure_signal_old: float = np.nan
+    spinal_canal_signal_old: float = np.nan
 
     @property
     def mean_diameter(self):
@@ -689,7 +707,16 @@ def _compute_directional_heights_widths(nii: NII, subreg: NII, poi, label: int =
     return raw
 
 
-def _compute_t2_signal_ratio(t2w_nii: NII, nii: NII, subregs: NII, label: int = 123, raw: dict | None = None, erode=1):
+def _compute_t2_signal_ratio(
+    t2w_nii: NII,
+    nii: NII,
+    subregs: NII,
+    label: int = 123,
+    raw: dict | None = None,
+    erode=1,
+    spinal_bins: int = 64,
+    spinal_peak_frac_height: float = 0.5,
+):
     """Compute the normalized T2 signal for one structure (stage 3).
 
     How it's computed
@@ -699,6 +726,20 @@ def _compute_t2_signal_ratio(t2w_nii: NII, nii: NII, subregs: NII, label: int = 
     spinal canal (subregion label 61, also eroded). The spinal canal is used
     as an internal reference to normalize away scanner/sequence-dependent
     intensity scaling.
+
+    The spinal canal segmentation may contain darker structures such as
+    nerve roots. To reduce their influence, both the structure and canal
+    signals are also estimated as the mean over a window around the
+    histogram peak (see :func:`peak_centered_mean`). Both the plain-mean
+    values (``*_old``) and the peak-centered values are stored so the
+    caller can compare them.
+
+    Parameters
+    ----------
+    spinal_bins : int, default=64
+        Histogram bin count passed to :func:`peak_centered_mean`.
+    spinal_peak_frac_height : float, default=0.5
+        Fractional height cutoff passed to :func:`peak_centered_mean`.
     """
     assert "R" in nii.orientation[2]
     assert "P" in nii.orientation[0]
@@ -712,10 +753,23 @@ def _compute_t2_signal_ratio(t2w_nii: NII, nii: NII, subregs: NII, label: int = 
     structure_mask = nii.extract_label(label)
     eroded_mask = structure_mask.erode_msk(erode, connectivity=1, verbose=False)
     structure_mask = eroded_mask if eroded_mask.sum() != 0 else structure_mask
-    structure_signal = t2w_nii.mean(where=structure_mask)
-    spinal_canal_signal = t2w_nii.mean(where=subregs.extract_label(61).erode_msk(erode, connectivity=1, verbose=False))
+    spinal_mask = subregs.extract_label(61).erode_msk(erode, connectivity=1, verbose=False)
+
+    t2w_arr = t2w_nii.get_array()
+    structure_vals = t2w_arr[structure_mask.get_array().astype(bool)]
+    spinal_vals = t2w_arr[spinal_mask.get_array().astype(bool)]
+
+    structure_signal_old = float(np.mean(structure_vals)) if structure_vals.size > 0 else np.nan
+    spinal_canal_signal_old = float(np.mean(spinal_vals)) if spinal_vals.size > 0 else np.nan
+
+    structure_signal = peak_centered_mean(structure_vals, bins=spinal_bins, peak_frac_height=spinal_peak_frac_height)
+    spinal_canal_signal = peak_centered_mean(spinal_vals, bins=spinal_bins, peak_frac_height=spinal_peak_frac_height)
+
     info.signal = structure_signal / spinal_canal_signal
     info.structure_signal = structure_signal
     info.spinal_canal_signal = spinal_canal_signal
+    info.signal_old = structure_signal_old / spinal_canal_signal_old
+    info.structure_signal_old = structure_signal_old
+    info.spinal_canal_signal_old = spinal_canal_signal_old
     info.signal_values = True
     return raw
