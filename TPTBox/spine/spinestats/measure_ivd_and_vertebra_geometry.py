@@ -40,7 +40,7 @@ from numpy.linalg import norm
 from skimage import measure
 from sklearn.decomposition import PCA
 
-from TPTBox import NII, POI, Location, calc_poi_from_subreg_vert
+from TPTBox import NII, POI, Location, Vertebra_Instance, calc_poi_from_subreg_vert
 from TPTBox.core.nii_wrapper import NII
 from TPTBox.core.poi import POI
 
@@ -56,6 +56,7 @@ def measure_ivd_and_vertebra_geometry(
     step_size_mm: float = 0.5,
     instance_labels: list[int] | None = None,
     structure_label: int = 100,
+    erode=1,
 ) -> dict[int, dict[str, float]]:
     """Extract geometric (and optionally T2 signal) measurements per structure.
 
@@ -151,7 +152,7 @@ def measure_ivd_and_vertebra_geometry(
         ],
     )
     if instance_labels is None:
-        instance_labels = [int(i) for i in vert.unique() if i > structure_label]
+        instance_labels = [int(i) for i in vert.unique() if i > structure_label and i < structure_label + 100]
     for label in instance_labels:
         try:
             raw = {}
@@ -163,7 +164,7 @@ def measure_ivd_and_vertebra_geometry(
             raw = _compute_directional_heights_widths(vert, structure_mask * spine, poi, label, step_size_mm=step_size_mm, raw=raw)
             # 3. normalized T2 signal
             if t2w is not None:
-                raw = _compute_t2_signal_ratio(t2w, vert, spine, label, raw=raw)
+                raw = _compute_t2_signal_ratio(t2w, vert, spine, label, raw=raw, erode=erode)
             results[label] = _result_from_info(info)
         except Exception as e:
             results[label] = _nan_result(error=str(e))
@@ -461,87 +462,6 @@ def _get_mesh_and_directions(nii: NII, poi: POI | None, label: int, raw: dict, r
     return mesh, direction_vectors, segmentation
 
 
-def _estimate_right_posterior_axes(subreg: NII, down_vector: np.ndarray, center_of_mass_point=(49, 50), intersection_target=None):
-    """Estimate the anatomical right and posterior axes of a vertebra from its bony subregions.
-
-    Used for x1-x6 in *both* IVD and vertebra mode, since the disc shares
-    its neighbouring vertebra's anatomical frame.
-
-    How it's computed
-    ------------------
-    1. The vertebral body's center of mass is used as an anchor point.
-    2. A plane through that point, perpendicular to ``down_vector``
-       ("up"/"inferior" axis), is intersected with the spinous process and
-       vertebral arch (``Spinosus_Process`` / ``Arcus_Vertebrae``) subregions.
-       These are dilated a few mm first so the thin plane reliably catches
-       enough of the structure (a true projection onto the plane would be
-       ideal, but this approximation is cheaper and works well in practice).
-    3. The centroid of that intersection is computed; the vector from the
-       vertebral body's center of mass to this centroid points anteriorly
-       (spinous process/arch sit posteriorly), and the posterior axis is
-       the reverse of that vector, normalized.
-    4. The right axis is the cross product of the posterior axis and the
-       "up" axis.
-
-    Returns:
-    -------
-    tuple[np.ndarray, np.ndarray]
-        (right_vector, posterior_vector), both unit length.
-    """
-    subreg = subreg.apply_crop(subreg.compute_crop(dist=1))
-
-    center_of_mass = _center_of_mass_voxels(subreg.extract_label(center_of_mass_point).get_array())
-    if intersection_target is None:
-        intersection_target = [Location.Spinosus_Process, Location.Arcus_Vertebrae]
-    from TPTBox import calc_centroids
-
-    # All of the following is computed in the (possibly anisotropic) image's own voxel space.
-    subreg_iso = subreg
-
-    target_labels = subreg_iso.extract_label(intersection_target).get_array()
-    # Dilate along one axis so the plane sees more of the spinous process/arch than a
-    # razor-thin intersection would, reducing instability from missing most of the structure.
-    # TODO: this dilation approach assumes the vertebra is roughly aligned with the S/I image axis.
-    for _ in range(15):
-        target_labels[:, :-1] += target_labels[:, 1:]
-        target_labels[:, 1:] += target_labels[:, :-1]
-    target_labels = np.clip(target_labels, 0, 1)
-    out = target_labels * 0
-
-    # Build the plane through center_of_mass, perpendicular to down_vector.
-    axis = down_vector.argmax().item()
-    dims = [0, 1, 2]
-    dims.remove(axis)
-    dim1, dim2 = dims
-    start_point_np = np.array(center_of_mass)
-    shift_total = -start_point_np.dot(down_vector)
-    xx, yy = np.meshgrid(range(subreg_iso.shape[dim1]), range(subreg_iso.shape[dim2]))  # type: ignore
-    zz = (-down_vector[dim1] * xx - down_vector[dim2] * yy - shift_total) * 1.0 / down_vector[axis]
-    z_max = subreg_iso.shape[axis] - 1
-    zz[zz < 0] = 0
-    zz[zz > z_max] = 0
-    plane_coords = np.zeros([xx.shape[0], xx.shape[1], 3])
-    plane_coords[:, :, axis] = zz
-    plane_coords[:, :, dim1] = xx
-    plane_coords[:, :, dim2] = yy
-    plane_coords = plane_coords.astype(int)
-
-    # Keep only the voxels of the plane that also belong to the (dilated) target subregions.
-    select = subreg_iso.get_array() * 0
-    select[plane_coords[:, :, 0], plane_coords[:, :, 1], plane_coords[:, :, 2]] = 1
-    out[out == 0] += (target_labels * select)[out == 0]
-
-    ret = calc_centroids(subreg_iso.set_array(out), second_stage=99, inplace=True)
-
-    a = np.array(center_of_mass)
-    b = np.array(ret[1:99])
-    post_vector = a - b
-    post_vector = post_vector / norm(post_vector)
-    right = np.cross(post_vector, down_vector * 10)
-    right = right / norm(right)
-    return right, post_vector
-
-
 # ---------------------------------------------------------------------------
 # Measurement stages (called in order from measure_ivd_and_vertebra_geometry)
 # ---------------------------------------------------------------------------
@@ -698,7 +618,6 @@ def _compute_directional_heights_widths(nii: NII, subreg: NII, poi, label: int =
     How it's computed
     ------------------
     1. The right/posterior anatomical axes are estimated from the
-       neighbouring vertebra's subregions (:func:`_estimate_right_posterior_axes`) --
        this is shared between IVD and vertebra mode.
     2. ``width_lateral_x5``: widest ray parallel to "right", scanned over a
        grid in the (posterior, up) plane -> also yields the right-most and
@@ -723,7 +642,20 @@ def _compute_directional_heights_widths(nii: NII, subreg: NII, poi, label: int =
     try:
         mesh, direction_vectors, _ = _get_mesh_and_directions(nii, poi, label, raw, recompute_mesh=True)
         up = direction_vectors[0]
-        right, front = _estimate_right_posterior_axes(subreg, up)
+        center = np.asarray(poi[label % 100, Location.Vertebra_Corpus], dtype=float)
+
+        right = np.asarray(poi[label % 100, Location.Vertebra_Direction_Right], dtype=float) - center
+        front = np.asarray(poi[label % 100, Location.Vertebra_Direction_Posterior], dtype=float) - center
+        right /= norm(right)
+        front /= norm(front)
+        if label >= 100:
+            next_vert = Vertebra_Instance(label % 100).get_next_poi(poi)
+            right2 = np.asarray(poi[next_vert, Location.Vertebra_Direction_Right], dtype=float) - center
+            front2 = np.asarray(poi[next_vert, Location.Vertebra_Direction_Posterior], dtype=float) - center
+            right2 /= norm(right2)
+            front2 /= norm(front2)
+            right = (right + right2) / 2
+            front = (front + front2) / 2
 
         (width_lateral_x5, p_r, p_l, *_) = _max_diameter_in_plane(right, front, up, mesh, 30, step_size_mm)
         axis = nii.get_axis("R")
@@ -757,7 +689,7 @@ def _compute_directional_heights_widths(nii: NII, subreg: NII, poi, label: int =
     return raw
 
 
-def _compute_t2_signal_ratio(t2w_nii: NII, nii: NII, subregs: NII, label: int = 123, raw: dict | None = None):
+def _compute_t2_signal_ratio(t2w_nii: NII, nii: NII, subregs: NII, label: int = 123, raw: dict | None = None, erode=1):
     """Compute the normalized T2 signal for one structure (stage 3).
 
     How it's computed
@@ -778,10 +710,10 @@ def _compute_t2_signal_ratio(t2w_nii: NII, nii: NII, subregs: NII, label: int = 
     if t2w_nii.shape != nii.shape:
         t2w_nii.resample_from_to_(nii)
     structure_mask = nii.extract_label(label)
-    eroded_mask = structure_mask.erode_msk(1, connectivity=1, verbose=False)
+    eroded_mask = structure_mask.erode_msk(erode, connectivity=1, verbose=False)
     structure_mask = eroded_mask if eroded_mask.sum() != 0 else structure_mask
     structure_signal = t2w_nii.mean(where=structure_mask)
-    spinal_canal_signal = t2w_nii.mean(where=subregs.extract_label(61).erode_msk(1, connectivity=1, verbose=False))
+    spinal_canal_signal = t2w_nii.mean(where=subregs.extract_label(61).erode_msk(erode, connectivity=1, verbose=False))
     info.signal = structure_signal / spinal_canal_signal
     info.structure_signal = structure_signal
     info.spinal_canal_signal = spinal_canal_signal

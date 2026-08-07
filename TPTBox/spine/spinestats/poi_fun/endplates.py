@@ -4,7 +4,6 @@ from collections.abc import Sequence
 
 import numpy as np
 import trimesh
-from stl import Mesh
 
 from TPTBox import NII, POI, Location, Logger_Interface, Print_Logger
 from TPTBox.core.vert_constants import Vertebra_Instance
@@ -12,7 +11,7 @@ from TPTBox.core.vert_constants import Vertebra_Instance
 _log = Print_Logger()
 
 # --------------------------------------------------------------------------
-# Geometry helpers
+# Grid-based geometry helpers
 # --------------------------------------------------------------------------
 
 
@@ -79,27 +78,65 @@ def _ray_cast_to_mesh(mesh: Mesh | trimesh.Trimesh, origin: np.ndarray, directio
     return origin + np.mean(ts) * direction
 
 
-def _local_curvature(mesh: Mesh | trimesh.Trimesh, point: np.ndarray, radius: float = 8.0) -> float:
-    """Rough curvature estimate (1/mm) of ``mesh`` near ``point``.
+def _sample_ray_voxels(
+    mask_shape: tuple[int, int, int], start: np.ndarray, direction_unit: np.ndarray, two_sided: bool = False, max_steps: int = 1024
+) -> tuple[np.ndarray, np.ndarray]:
+    """Sample integer voxel indices along a ray (step = 1 voxel).
 
-    Fits a best-fit plane (via SVD) to all mesh vertices within ``radius``
-    of ``point`` and returns the RMS deviation of those vertices from the
-    plane, normalized by ``radius**2``. This is a cheap proxy for how
-    "bowl-shaped" the surface is locally -- 0 for a flat patch, larger for
-    a more curved one. Swap out for principal-curvature-from-quadric-fit
-    if you need a more rigorous measure.
+    Returns (int_coords, t) where ``int_coords`` is the (N, 3) array of voxel
+    indices visited by the ray inside ``mask_shape`` and ``t`` is the signed
+    distance from ``start`` for each step (negative behind the origin when
+    ``two_sided`` is True).
     """
-    verts = mesh.vertices if isinstance(mesh, trimesh.Trimesh) else np.vstack([mesh.v0, mesh.v1, mesh.v2])
-    dists = np.linalg.norm(verts - point, axis=1)
-    neighborhood = verts[dists <= radius]
+    shape_arr = np.asarray(mask_shape)
+
+    def _t_exit(direction: np.ndarray) -> float:
+        t = np.inf
+        for i in range(3):
+            if direction[i] > 1e-9:
+                t = min(t, (shape_arr[i] - 1 - start[i]) / direction[i])
+            elif direction[i] < -1e-9:
+                t = min(t, -start[i] / direction[i])
+        return float(max(0.0, t))
+
+    t_fwd = _t_exit(direction_unit)
+    t_pos = np.arange(0.0, min(t_fwd, max_steps), 1.0)
+    if two_sided:
+        t_bwd = _t_exit(-direction_unit)
+        t_neg = -np.arange(1.0, min(t_bwd, max_steps), 1.0)  # -1, -2, -3, ...
+        t = np.concatenate([t_neg[::-1], t_pos])
+    else:
+        t = t_pos
+
+    coords = start[None, :] + t[:, None] * direction_unit[None, :]
+    int_coords = np.floor(coords).astype(int)
+    valid = np.all((int_coords >= 0) & (int_coords < shape_arr), axis=1)
+    return int_coords[valid], t[valid]
+
+
+def _local_curvature_grid(
+    voxel_pts_full: np.ndarray,
+    poi: POI,
+    casted_full: np.ndarray,
+    radius: float = 8.0,
+) -> float:
+    """Rough curvature estimate (1/mm) of the endplate near ``casted_full``.
+
+    Fits a best-fit plane (via SVD) to all endplate voxels within ``radius`` mm
+    of the casted point (in world coordinates) and returns the RMS deviation of
+    those points from the plane, normalized by ``radius**2``. 0 for a flat
+    patch, larger for a more bowl-shaped one.
+    """
+    world_pts = poi.local_to_global_arr(voxel_pts_full)
+    casted_world = np.asarray(poi.local_to_global(tuple(casted_full)), dtype=float)
+    dists = np.linalg.norm(world_pts - casted_world, axis=1)
+    neighborhood = world_pts[dists <= radius]
     if len(neighborhood) < 3:
         return 0.0
-    centroid = neighborhood.mean(axis=0)
-    centered = neighborhood - centroid
+    centered = neighborhood - neighborhood.mean(axis=0)
     _, _, vt = np.linalg.svd(centered)
     normal = vt[-1]
-    deviations = centered @ normal
-    rms = float(np.sqrt(np.mean(deviations**2)))
+    rms = float(np.sqrt(np.mean((centered @ normal) ** 2)))
     return rms / (radius**2)
 
 
@@ -127,55 +164,145 @@ def _endplate(
     if nii.max() == 0:
         log.print(f"[calc_endplate_points] no {endplate.name} voxels for vertebra {vert_id}, skipping.")
         return
+
     bb = nii.compute_crop(0, 1)
-    mesh = nii.apply_crop(bb).to_stl(1, to_world=True)
-    verts_ = np.vstack([mesh.v0, mesh.v1, mesh.v2])
-    cms_local = poi[vert_id, Location.Vertebra_Corpus] if cms_local_override is None else cms_local_override
-    cms_global = np.asarray(poi.local_to_global(cms_local), dtype=float)
-    # Remove duplicate vertices (optional but recommended)
-    verts = np.unique(verts_, axis=0)
-    # Center the point cloud
-    centroid = verts.mean(axis=0)
-    X = verts - centroid
-    # PCA via SVD
-    _, _, Vt = np.linalg.svd(X, full_matrices=False)
+    nii_c = nii.apply_crop(bb)
 
-    # Smallest variance direction = plane normal
-    direction = Vt[-1]
-    to_endplate = centroid - cms_global
-    if np.dot(direction, to_endplate) < 0:
-        direction *= -1
-    direction /= np.linalg.norm(direction)
-
-    casted_point = _ray_cast_to_mesh(mesh, cms_global, direction)
-    if casted_point is None:
-        faces = np.arange(len(verts_)).reshape(-1, 3)
-        mesh = trimesh.Trimesh(vertices=verts_, faces=faces, process=False)
-        trimesh.repair.fill_holes(mesh)
-        trimesh.repair.fix_normals(mesh)
-        casted_point = _ray_cast_to_mesh(mesh, cms_global, direction)
-    if casted_point is None:
-        log.print(f"[calc_endplate_points] ray cast missed {endplate.name} mesh for vertebra {vert_id};")
+    mask = nii_c.get_array() > 0
+    idx_local = np.argwhere(mask).astype(float)
+    if len(idx_local) < 3:
+        log.print(f"[calc_endplate_points] too few {endplate.name} voxels for vertebra {vert_id}, skipping.")
         return
-        # Ray missed (e.g. off-axis endplate) -- fall back to the
-        # nearest mesh vertex to the centroid.
-        verts_all = np.vstack([mesh.v0, mesh.v1, mesh.v2])
-        idx = int(np.argmin(np.linalg.norm(verts_all - cms_global, axis=1)))
-        casted_point = verts_all[idx]
-        log.print(f"[calc_endplate_points] ray cast missed {endplate.name} mesh for vertebra {vert_id}; using nearest mesh vertex instead.")
-    local_point = poi.global_to_local(tuple(casted_point))
-    poi[vert_id, endplate] = tuple(local_point)
 
-    normal_at_point = casted_point - np.array(cms_global)
+    zoom = np.asarray(nii.zoom, dtype=float)
+    bb_start = np.array([s.start for s in bb], dtype=float)
+
+    # PCA on voxel positions (scaled by voxel spacing).
+    pts_scaled = idx_local * zoom
+    centroid_scaled = pts_scaled.mean(axis=0)
+    _, _, Vt = np.linalg.svd(pts_scaled - centroid_scaled, full_matrices=False)
+    direction_world = Vt[-1]
+
+    # Origin of the ray.
+    cms_local = poi[vert_id, Location.Vertebra_Corpus] if cms_local_override is None else cms_local_override
+    cms_full = np.asarray(cms_local, dtype=float)
+    cms_cropped = cms_full - bb_start
+
+    # Orient the normal toward the endplate.
+    to_endplate_world = (idx_local.mean(axis=0) + bb_start - cms_full) * zoom
+    if np.dot(direction_world, to_endplate_world) < 0:
+        direction_world = -direction_world
+    direction_world /= np.linalg.norm(direction_world)
+
+    # Convert world normal to voxel direction.
+    direction_vox = direction_world / zoom
+    direction_vox /= np.linalg.norm(direction_vox)
+
+    # ------------------------------------------------------------------
+    # Fast path: voxel ray cast.
+    # ------------------------------------------------------------------
+    coords_r, t_r = _sample_ray_voxels(
+        mask.shape,
+        cms_cropped,
+        direction_vox,
+        two_sided=False,
+    )
+    hits = mask[coords_r[:, 0], coords_r[:, 1], coords_r[:, 2]] if len(coords_r) else np.zeros(0, dtype=bool)
+
+    if not np.any(hits):
+        coords_r, t_r = _sample_ray_voxels(
+            mask.shape,
+            cms_cropped,
+            direction_vox,
+            two_sided=True,
+        )
+        hits = mask[coords_r[:, 0], coords_r[:, 1], coords_r[:, 2]] if len(coords_r) else np.zeros(0, dtype=bool)
+
+    if np.any(hits):
+        mean_t = float(t_r[hits].mean())
+        casted_cropped = cms_cropped + mean_t * direction_vox
+        casted_full = casted_cropped + bb_start
+
+    else:
+        # ------------------------------------------------------------------
+        # Fallback: build an STL and retry using mesh ray casting.
+        # ------------------------------------------------------------------
+        mesh = nii_c.to_stl(1, to_world=True)
+
+        verts_ = np.vstack([mesh.v0, mesh.v1, mesh.v2])
+        verts = np.unique(verts_, axis=0)
+
+        centroid = verts.mean(axis=0)
+        _, _, Vt = np.linalg.svd(verts - centroid, full_matrices=False)
+
+        direction = Vt[-1]
+
+        cms_world = np.asarray(
+            poi.local_to_global(tuple(cms_local)),
+            dtype=float,
+        )
+
+        to_endplate = centroid - cms_world
+        if np.dot(direction, to_endplate) < 0:
+            direction *= -1
+        direction /= np.linalg.norm(direction)
+
+        casted_point = _ray_cast_to_mesh(mesh, cms_world, direction)
+
+        if casted_point is None:
+            faces = np.arange(len(verts_)).reshape(-1, 3)
+            mesh = trimesh.Trimesh(
+                vertices=verts_,
+                faces=faces,
+                process=False,
+            )
+            trimesh.repair.fill_holes(mesh)
+            trimesh.repair.fix_normals(mesh)
+
+            casted_point = _ray_cast_to_mesh(
+                mesh,
+                cms_world,
+                direction,
+            )
+
+        if casted_point is None:
+            log.print(f"[calc_endplate_points] ray cast missed {endplate.name} mesh for vertebra {vert_id};")
+            return
+
+        casted_full = np.asarray(
+            poi.global_to_local(tuple(casted_point)),
+            dtype=float,
+        )
+
+    poi[vert_id, endplate] = tuple(float(v) for v in casted_full)
+
+    # Normal at the casted point in world coordinates.
+    cms_world = np.asarray(
+        poi.local_to_global(tuple(cms_local)),
+        dtype=float,
+    )
+    casted_world = np.asarray(
+        poi.local_to_global(tuple(casted_full)),
+        dtype=float,
+    )
+
+    normal_at_point = casted_world - cms_world
     normal_at_point /= np.linalg.norm(normal_at_point)
+
     if flip_direction:
         normal_at_point *= -1
-    normals_by_vert.setdefault((vert_id), {})[endplate] = normal_at_point
+
+    normals_by_vert.setdefault(vert_id, {})[endplate] = normal_at_point
+
     if compute_curvature:
-        curvature = _local_curvature(mesh, casted_point)
+        curvature = _local_curvature_grid(
+            idx_local + bb_start,
+            poi,
+            casted_full,
+        )
         poi.info[_endplate_curvature_key[endplate]][Vertebra_Instance(vert_id).name] = curvature
 
-    poi.info[_endplate_angle_key[endplate]][Vertebra_Instance(vert_id).name] = tuple(direction)
+    poi.info[_endplate_angle_key[endplate]][Vertebra_Instance(vert_id).name] = tuple(direction_world)
 
 
 # --------------------------------------------------------------------------
@@ -195,10 +322,12 @@ def calc_endplate_points_(
     """Estimate superior/inferior vertebral endplate landmark points.
 
     For every relevant vertebra id, this extracts the superior and
-    inferior endplate surface mesh (from ``spine``, restricted to that
-    vertebra via ``vert``), ray-casts from the vertebral body centroid
-    (``Location.Vertebra_Corpus``) toward each endplate surface, and
-    stores the intersection ("casted") point back into ``poi`` under
+    inferior endplate voxel mask (from ``spine``, restricted to that
+    vertebra via ``vert``), fits its plane normal via PCA on the mask
+    voxels (zoom-scaled), and casts a voxel-resolution ray from the
+    vertebral body centroid (``Location.Vertebra_Corpus``) toward the
+    endplate. The midpoint of the intersected voxels along that ray is
+    stored back into ``poi`` under
     ``Location.Vertebral_Body_Endplate_Superior`` /
     ``Location.Vertebral_Body_Endplate_Inferior``.
 
@@ -209,8 +338,8 @@ def calc_endplate_points_(
       their respective casted points. This is a proxy for local vertebral
       body wedging (0 deg = perfectly parallel endplates).
     - ``"curvature_superior_endplate"``: ``{vert_id: float}`` -- curvature
-      proxy (see ``_local_curvature``) of the superior endplate surface
-      near its casted point.
+      proxy (see ``_local_curvature_grid``) of the superior endplate
+      surface near its casted point.
     - ``"curvature_inferior_endplate"``: ``{vert_id: float}`` -- same, for
       the inferior endplate.
 
@@ -399,30 +528,31 @@ def endplate_to_super_infer_endplate(vert: NII, spine: NII) -> tuple[NII, NII]:
 if __name__ == "__main__":
     from pathlib import Path
 
-    from TPTBox import calc_poi_from_subreg_vert
+    from TPTBox import calc_poi_from_subreg_vert, to_nii
 
-    p = Path("/DATA/NAS/datasets_processed/CT_spine/dataset-myelom/derivatives-final/sub-CTFU00065/ses-00000")
-    poi = calc_poi_from_subreg_vert(
-        p / "sub-CTFU00065_ses-00000_sequ-2_mod-ct_seg-vert_msk.nii.gz",
-        p / "sub-CTFU00065_ses-00000_sequ-2_mod-ct_seg-spine_msk.nii.gz",
-        subreg_id=Location.Endplate,
-    )
-    poi.make_point_cloud_nii(s=3)[1].save(p / "out_point.nii.gz")
-    poi.save(p / "out.json")
-    print(poi.centroids)
-    # p = Path("TPTBox/tests/sample_mri")
     #
-    ## vert, spine = endplate_to_super_infer_endplate(
-    ##    to_nii(p / "sub-mri_seg-vert_label-6_msk.nii.gz", True),
-    ##    to_nii(p / "sub-mri_seg-subreg_label-6_msk.nii.gz", True),
-    ## )
-    ## vert.save(p / "out_v.nii.gz")
-    ## spine.save(p / "out_s.nii.gz")
+    # p = Path("/DATA/NAS/datasets_processed/CT_spine/dataset-myelom/derivatives-final/sub-CTFU00065/ses-00000")
     # poi = calc_poi_from_subreg_vert(
-    #    p / "sub-mri_seg-vert_label-6_msk.nii.gz",
-    #    p / "sub-mri_seg-subreg_label-6_msk.nii.gz",
+    #    p / "sub-CTFU00065_ses-00000_sequ-2_mod-ct_seg-vert_msk.nii.gz",
+    #    p / "sub-CTFU00065_ses-00000_sequ-2_mod-ct_seg-spine_msk.nii.gz",
     #    subreg_id=Location.Endplate,
     # )
-    ## poi.make_point_cloud_nii(s=3)[1].save(p / "out_point.nii.gz")
-    ## poi.save(p / "out.json")
+    # poi.make_point_cloud_nii(s=3)[1].save(p / "out_point.nii.gz")
+    # poi.save(p / "out.json")
     # print(poi.centroids)
+    p = Path("TPTBox/tests/sample_mri")
+
+    vert, spine = endplate_to_super_infer_endplate(
+        to_nii(p / "sub-mri_seg-vert_label-6_msk.nii.gz", True),
+        to_nii(p / "sub-mri_seg-subreg_label-6_msk.nii.gz", True),
+    )
+    # vert.save(p / "out_v.nii.gz")
+    # spine.save(p / "out_s.nii.gz")
+    poi = calc_poi_from_subreg_vert(
+        p / "sub-mri_seg-vert_label-6_msk.nii.gz",
+        p / "sub-mri_seg-subreg_label-6_msk.nii.gz",
+        subreg_id=Location.Endplate,
+    )
+    # poi.make_point_cloud_nii(s=3)[1].save(p / "out_point.nii.gz")
+    # poi.save(p / "out.json")
+    print(poi.centroids)
