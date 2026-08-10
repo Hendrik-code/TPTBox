@@ -24,6 +24,7 @@ from TPTBox.core.bids_files import BIDS_FILE
 from TPTBox.core.dicom.dicom2nii_utils import load_json
 from TPTBox.core.internal.nii_help import save_json
 from TPTBox.core.nii_wrapper import to_nii
+from TPTBox.spine.spinestats._load_nako import loop_over_repaired_nako
 
 DATASET_ROOT = Path("/DATA/NAS/datasets_processed/NAKO/dataset-nako")
 
@@ -102,7 +103,11 @@ def get_nako_paths(nako_id: str) -> dict[str, Path | None]:
 def _segmentation_inputs(file_dict: dict) -> list[Path]:
     """Segmentation files whose mtime should invalidate a cached json."""
     keys = ("vert", "spine", "vibeseg100", "roi")
-    return [Path(file_dict[k]) for k in keys if file_dict.get(k) is not None]
+    return [
+        file_dict[k].file["nii.gz"] if isinstance(file_dict[k], BIDS_FILE) else Path(file_dict[k])
+        for k in keys
+        if file_dict.get(k) is not None
+    ]
 
 
 def _is_cache_valid(json_path: Path, seg_files: list[Path], required_keys: tuple[str, ...]) -> tuple[bool, dict | None]:
@@ -169,7 +174,7 @@ def run_all(file_dict, cobb: bool = False, override: bool = False) -> dict[str, 
     )
     from TPTBox.spine.spinestats.torso_vat_sat import VBQ_score, body_composition_score, muscle_fat_infiltration, torso_vat_sat_muscle_mass
 
-    t2w_bf = BIDS_FILE(file_dict["t2w"], file_dict["dataset"])
+    t2w_bf = file_dict["t2w"] if isinstance(file_dict["t2w"], BIDS_FILE) else BIDS_FILE(file_dict["t2w"], file_dict["dataset"])
     poi_out = t2w_bf.get_changed_path(
         "json",
         "poi",
@@ -193,8 +198,8 @@ def run_all(file_dict, cobb: bool = False, override: bool = False) -> dict[str, 
             return cached
 
     t2w = to_nii(file_dict["t2w"])
-    vibe_water = to_nii(file_dict["vibe-water"], False)
-    vibe_fat = to_nii(file_dict["vibe-fat"], False)
+    vibe_water = to_nii(file_dict["vibe_part-water"], False)
+    vibe_fat = to_nii(file_dict["vibe_part-fat"], False)
     vert = to_nii(file_dict["vert"], True)
     spine = to_nii(file_dict["spine"], True)
     vibe_seg = to_nii(file_dict["vibeseg100"], True)
@@ -209,9 +214,7 @@ def run_all(file_dict, cobb: bool = False, override: bool = False) -> dict[str, 
     )
     out: dict[str, Any] = {}
     if cobb:
-        cobb_val, curv, _ = plot_cobb_and_lordosis_and_kyphosis(
-            cobb_jpg_out, poi, file_dict["t2w"], file_dict["vert"], project_2D=False
-        )
+        cobb_val, curv, _ = plot_cobb_and_lordosis_and_kyphosis(cobb_jpg_out, poi, file_dict["t2w"], file_dict["vert"], project_2D=False)
         out["cobb"] = cobb_val
         out["curv"] = curv
 
@@ -371,9 +374,7 @@ def _final_json_path(file_dict: dict) -> Path:
     """Recreate the json path run_all writes to, without re-running it."""
     t2w_bf = BIDS_FILE(file_dict["t2w"], file_dict["dataset"])
     return Path(
-        t2w_bf.get_changed_path(
-            "json", "stat", "derivatives_spine_inference_162_sacrumfix_subregionmeasures-v2", info={"seg": "all"}
-        )
+        t2w_bf.get_changed_path("json", "stat", "derivatives_spine_inference_162_sacrumfix_subregionmeasures-v2", info={"seg": "all"})
     )
 
 
@@ -382,12 +383,11 @@ if __name__ == "__main__":
 
     log = No_Logger()
 
-    collector = ExcelCollector(out_folder="/tmp/nako_summary")
+    collector = ExcelCollector(out_folder="/DATA/NAS/ongoing_projects/robert/test/NAKO-stats")
     collector.start()
     try:
-        for nako_id in ["100000"]:
-            f = get_nako_paths(nako_id)
+        for f in loop_over_repaired_nako(test=True):
             run_all(f)
-            collector.submit(nako_id, _final_json_path(f))
+            collector.submit(f["id"], _final_json_path(f))
     finally:
         collector.close()
