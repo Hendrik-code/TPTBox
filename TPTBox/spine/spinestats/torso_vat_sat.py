@@ -80,6 +80,7 @@ def VBQ_score(
     subregs_ids=None,
     spinal_channel_id=Location.Spinal_Canal,
     n_erode=2,
+    full_cord=False,
     spinal_bins: int = 64,
     spinal_peak_frac_height: float = 0.5,
 ) -> dict[str, int]:
@@ -189,10 +190,11 @@ def VBQ_score(
         axis = spinal_channel.get_axis(direction="S")
 
         spinal_crop = spinal_channel.copy()
-
-        slicer = [slice(None)] * 3
-        slicer[axis] = bbox[axis]
-        spinal_crop = spinal_crop[slicer]
+        if not full_cord:
+            slicer = [slice(None)] * 3
+            slicer[axis] = bbox[axis]
+            spinal_crop *= 0
+            spinal_crop = spinal_channel[slicer]
 
         signal_sfs_old = t2w.mean(where=spinal_crop)
 
