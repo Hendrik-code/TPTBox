@@ -31,6 +31,8 @@ labels (i.e. label > 100), or ``0`` to evaluate vertebra labels instead
 (i.e. label > 0).
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from math import ceil
 from pathlib import Path
@@ -214,7 +216,7 @@ _RESULT_FIELDS = (
 )
 
 
-def _result_from_info(info: "_StructureMeasurements") -> dict[str, float]:
+def _result_from_info(info: _StructureMeasurements) -> dict[str, float]:
     """Build the public result dict (see Returns section of the public API) from a filled-in measurement object."""
     return {
         "volume_voxel": round(info.volume_voxel, 4),
