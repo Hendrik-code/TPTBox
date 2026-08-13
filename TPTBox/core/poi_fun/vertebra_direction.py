@@ -199,7 +199,7 @@ def calc_orientation_of_vertebra_PIR(
         dim1, dim2 = dims
         # Make a plane through start_point with the norm of "normal_vector", which is shifted by "shift" along the norm
         # create_subregion: 1 where the selected subreg is, else 0
-        select = _create_plane_mask(subreg_iso.shape, np.array(cords), normal_vector_post, axis, dim1, dim2)  # type: ignore
+        select = _create_plane_mask(subreg_iso.shape, np.array(cords), normal_vector_down, axis, dim1, dim2)  # type: ignore
         out[out == 0] += (target_labels * select * reg_label)[out == 0]
 
         if fill_back is not None:

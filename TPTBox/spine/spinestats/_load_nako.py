@@ -308,4 +308,4 @@ if __name__ == "__main__":
     for d in loop_over_repaired_nako():
         print(d.keys())
         print(d["t2w"])
-        exit()
+        break

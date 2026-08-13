@@ -660,6 +660,11 @@ class BIDS_FILE:
 
     @property
     def file(self) -> dict[str, Path]:
+        """Returns a dict mapping file types to paths. ["nii.gz", "json", "png"] are automatic searched for.
+
+        Returns:
+            dict[str, Path]: _description_
+        """
         if not self._checked:
             files = {p.parent for p in self._file.values()}
             for f in files:

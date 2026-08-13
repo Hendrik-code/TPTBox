@@ -718,7 +718,7 @@ def plot_sag_centroids(
                 (text, a) = x
                 b = zms[0] * ctd[color, curve_location][0]
             if isinstance(color, int):
-                color = get_color_by_label(color).rgb / 255
+                color = get_color_by_label(color).rgb / 255  # noqa: PLW2901
             axs.text(
                 a,
                 b,

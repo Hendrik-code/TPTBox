@@ -5,6 +5,7 @@ from collections.abc import Sequence
 
 import numpy as np
 import trimesh
+from stl.mesh import Mesh
 
 from TPTBox import NII, POI, Location, Logger_Interface, Print_Logger
 from TPTBox.core.vert_constants import Vertebra_Instance

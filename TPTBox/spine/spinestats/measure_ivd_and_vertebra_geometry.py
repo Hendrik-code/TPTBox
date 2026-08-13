@@ -636,7 +636,7 @@ def _max_diameter_in_plane(ray_vector, v1, v2, mesh, diameter: float = 30, step_
     return out
 
 
-def _compute_directional_heights_widths(nii: NII, subreg: NII, poi, label: int = 123, step_size_mm: float = 0.5, raw: dict | None = None):
+def _compute_directional_heights_widths(nii: NII, subreg: NII, poi, label: int = 123, step_size_mm: float = 0.5, raw: dict | None = None):  # noqa: ARG001
     """Compute the x1-x6 directional heights and widths for one structure (stage 2).
 
     How it's computed
