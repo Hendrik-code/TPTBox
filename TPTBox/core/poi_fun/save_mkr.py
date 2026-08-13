@@ -533,7 +533,7 @@ def _save_mrk(
                     display=_get_display_dict(
                         display,
                         selectedColor=_get_markup_color(
-                            {"color": color}, region, subregion, split_by_region=split_by_subregion, split_by_subregion=split_by_subregion
+                            {"color": color}, region, subregion, split_by_region=split_by_region, split_by_subregion=split_by_subregion
                         ),
                         **addendum,
                     ),

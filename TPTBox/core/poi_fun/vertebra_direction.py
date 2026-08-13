@@ -147,8 +147,9 @@ def calc_orientation_of_vertebra_PIR(
             cond = np.where(curr_slice != 0)
             x_slice[cond] = np.minimum(curr_slice[cond], x_slice[cond])
             fill_back[i] = x_slice
-        subreg_sar.set_array(fill_back).reorient(poi.orientation).rescale_(poi.zoom)
-        arr = subreg_sar.get_array()
+        # set_array/reorient are out-of-place: the chained result must be captured, otherwise
+        # `arr` is still in (S,A,R) at iso spacing. Mirrors calc_center_spinal_cord below.
+        arr = subreg_sar.set_array(fill_back).reorient(poi.orientation).rescale_(poi.zoom).get_array()
         fill_back_nii.set_array_(arr)
 
     ret = calc_centroids(subreg_iso.set_array(out), second_stage=subreg_id, extend_to=poi_iso.copy(), inplace=True)
@@ -292,6 +293,7 @@ def get_vert_direction_PIR(poi: POI, vert_id: int, do_norm: bool = True, to_pir:
     """
     if vert_id in poi._vert_orientation_pir and to_pir:
         return poi._vert_orientation_pir[vert_id]  # Elusive buffer of iso/PIR directions.
+    cache_owner = poi  # `poi` is rebound below; the cache belongs on the object we were called with
     poi = poi.extract_subregion(
         Location.Vertebra_Corpus,
         Location.Vertebra_Direction_Posterior,
@@ -310,7 +312,7 @@ def get_vert_direction_PIR(poi: POI, vert_id: int, do_norm: bool = True, to_pir:
     right = np.array(poi[vert_id : Location.Vertebra_Direction_Right])
     out = n(post - center), n(down - center), n(right - center)
     if to_pir:
-        poi._vert_orientation_pir[vert_id] = out
+        cache_owner._vert_orientation_pir[vert_id] = out
 
     return out
 

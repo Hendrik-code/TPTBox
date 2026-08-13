@@ -122,7 +122,10 @@ class POI(Abstract_POI, Has_Grid):
     # internal
     _rotation: ROTATION = field(init=False, default=None, repr=False, compare=False)  # type: ignore
     _zoom: ZOOMS = field(init=False, default=(1, 1, 1), repr=False, compare=False)
-    _vert_orientation_pir = {}  # Elusive; will not be saved; will not be copied. For Buffering results  # noqa: RUF012
+    # Elusive; will not be saved; will not be copied. For buffering results.
+    # Must be a per-instance field: as a bare class attribute it was shared by every POI
+    # object in the process, so cached directions leaked between subjects.
+    _vert_orientation_pir: dict = field(init=False, default_factory=dict, repr=False, compare=False)
 
     def _set_inplace(self, poi: Self) -> Self:
         """Copy all grid/affine attributes and centroids from ``poi`` into ``self``."""
@@ -1020,7 +1023,6 @@ def _buffer_it(func):
         len_pref = 0
         if buffer_file is not None and Path(buffer_file).exists():
             assert extend_to is None
-            print("load")
             extend_to = POI.load(buffer_file)
             len_pref = len(extend_to)
         kwargs["extend_to"] = extend_to
@@ -1314,12 +1316,14 @@ def calc_centroids(
         - NaN values in the binary mask are ignored.
     """
     args = {}
+    # Capture the enum class BEFORE unwrapping to .value, otherwise type() just reports int
+    # and the POI header records "int" instead of e.g. "Location".
     if isinstance(second_stage, Abstract_lvl):
-        second_stage = second_stage.value
         args["level_two_info"] = type(second_stage)
+        second_stage = second_stage.value
     if isinstance(first_stage, Abstract_lvl):
-        first_stage = first_stage.value
         args["level_one_info"] = type(first_stage)
+        first_stage = first_stage.value
     assert first_stage == -1 or second_stage == -1, "first or second dimension must be fixed."
     msk_nii = to_nii(msk, seg=True)
     msk_data = msk_nii.get_seg_array()

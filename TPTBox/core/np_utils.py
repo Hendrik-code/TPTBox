@@ -214,7 +214,9 @@ def old_np_unique(arr: np.ndarray) -> list[int]:
             return [idx for idx, i in enumerate(cc3dstatistics(arr)["voxel_counts"]) if i > 0]
         except Exception:
             pass
-    return list(np.unique(arr))
+    # .tolist() yields native Python scalars; list() would leak numpy scalars, which are
+    # not JSON-serializable and differ from the ints the cc3d/bincount paths return.
+    return np.unique(arr).tolist()
 
 
 def np_unique(arr: np.ndarray) -> list[int]:
@@ -256,8 +258,8 @@ def np_unique_withoutzero(arr: UINTARRAY) -> list[int]:
             return []
         if max_val < 2**20:
             counts = np.bincount(arr.ravel())
-            return list(np.where(counts[1:] > 0)[0] + 1)
-    return [i for i in np.unique(arr) if i != 0]
+            return (np.where(counts[1:] > 0)[0] + 1).tolist()
+    return [i for i in np.unique(arr).tolist() if i != 0]
 
 
 def old_np_unique_withoutzero(arr: UINTARRAY) -> list[int]:
@@ -468,14 +470,12 @@ def np_dilate_msk_euclid(arr: np.ndarray, n_pixel: int = 3, use_crop=True, label
 
     if use_crop:
         crop = np_bbox_binary(arr_bin, px_dist=1 + n_pixel, raise_error=False)
-        arrc = arr[crop]
+        # use the label-filtered array so `labels` is honoured here too, not just on the no-crop path
+        arrc = arr_bin[crop]
     else:
-        arrc = arr
-        if labels is not None:
-            arrc = arrc.copy()
-            arrc[np_isin(arr_bin, labels, invert=True)] = 0
+        arrc = arr_bin
     if mask is not None:
-        mask[mask != 0] = 1
+        mask = mask != 0  # do not mutate the caller's array
         if use_crop:
             mask = mask[crop]
     foreground = arrc > 0
@@ -544,7 +544,7 @@ def np_dilate_msk(
         arrc = arr
 
     if mask is not None:
-        mask[mask != 0] = 1
+        mask = mask != 0  # do not mutate the caller's array
         if use_crop:
             mask = mask[crop]
     if ignore_axis is None:
@@ -568,7 +568,8 @@ def np_dilate_msk(
                 oc = out[lcrop] == 0
                 out[lcrop][oc] = msk_ibe_data[oc] * i
                 if mask is not None:
-                    out[lcrop][mask == 0] = 0
+                    # `mask` follows the global crop; index it with the per-label crop to match `out[lcrop]`
+                    out[lcrop][mask[lcrop] == 0] = 0
             else:
                 out[out == 0] = msk_ibe_data[out == 0] * i
                 if mask is not None:
@@ -664,7 +665,10 @@ def np_map_labels(arr: UINTARRAY, label_map: LABEL_MAP) -> np.ndarray:
 
     max_value = max(arr.max(), *k, *v) + 1
 
-    mapping_ar = np.arange(max_value, dtype=arr.dtype)
+    # The lookup table must be able to hold every mapping target. Building it in the input
+    # dtype silently wraps targets outside that range (uint8: 300 -> 44, -5 -> 251).
+    lut_dtype = np.result_type(arr.dtype, np.min_scalar_type(int(v.max())), np.min_scalar_type(int(v.min())))
+    mapping_ar = np.arange(max_value, dtype=lut_dtype)
     mapping_ar[k] = v
     return mapping_ar[arr]
 
@@ -735,7 +739,7 @@ def np_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 
     n = img.ndim
     shp = img.shape
     if isinstance(px_dist, int):
-        px_dist = np.ones(n, dtype=np.uint8) * px_dist
+        px_dist = np.ones(n, dtype=int) * px_dist  # uint8 overflows for px_dist > 255
     assert len(px_dist) == n, f"dimension mismatch, got img shape {shp} and px_dist {px_dist}"
 
     bbox: list[float] = []
@@ -752,7 +756,8 @@ def np_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 
     out: tuple[slice, ...] = tuple(
         slice(
             max(bbox[i] - px_dist[i // 2], 0),
-            min(bbox[i + 1] + px_dist[i // 2], shp[i // 2]) + 1,
+            # clamp AFTER the +1, otherwise a bbox touching the far border yields stop == shape + 1
+            min(bbox[i + 1] + px_dist[i // 2] + 1, shp[i // 2]),
         )
         for i in range(0, len(bbox), 2)
     )
@@ -1009,7 +1014,9 @@ def np_filter_connected_components(
     largest_k_components = min(largest_k_components, len(label_volume_pairs))
     label_volume_pairs.sort(key=lambda x: x[1], reverse=True)
 
-    if len(labels) == 1 or label_volume_pairs == largest_k_components or largest_k_components_org is None or k_larges_global:
+    # `label_volume_pairs == largest_k_components` compared a list[tuple] to an int and was
+    # therefore always False, so this shortcut never fired when every component is kept.
+    if len(labels) == 1 or len(label_volume_pairs) == largest_k_components or largest_k_components_org is None or k_larges_global:
         preserve: list[int] = [x[0] for x in label_volume_pairs[:largest_k_components]]
     else:
         counter = dict.fromkeys(labels, 0)
@@ -1289,7 +1296,10 @@ def np_smooth_gaussian_labelwise(
     seg_arr_s = seg_arr_smoothed.copy()
 
     if background_threshold is not None:
-        seg_arr_smoothed[seg_arr_smoothed < background_threshold] = len(sem_labels_plus_background) - 1  # background label
+        # Threshold the winning *confidence*, not the argmax index: seg_arr_smoothed holds
+        # label indices, so comparing it to a probability threshold zeroed out whichever
+        # labels happened to sort below it.
+        seg_arr_smoothed[arr_stack.max(axis=0) < background_threshold] = len(sem_labels_plus_background) - 1  # background label
 
     for idx, l in enumerate(sem_labels_plus_background):
         seg_arr_s[seg_arr_smoothed == idx] = l
