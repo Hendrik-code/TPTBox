@@ -15,6 +15,42 @@ _log = Print_Logger()
 #### Directions ####
 
 
+def _create_plane_mask(
+    shape: tuple[int, int, int], start_point: np.ndarray, normal_vector: np.ndarray, axis: int, dim1: int, dim2: int
+) -> np.ndarray:
+    """Rasterize the plane through ``start_point`` with normal ``normal_vector`` into a voxel mask.
+
+    For every ``(dim1, dim2)`` grid position the position along ``axis`` is solved from the plane
+    equation. Grid positions whose solution falls outside the volume are dropped. Clamping them into
+    the volume instead (as this code used to do) collapses them onto slice 0 of ``axis``, which lays a
+    spurious sheet across the top of the volume and contaminates whatever the plane is intersected with.
+
+    Args:
+        shape: Shape of the volume to rasterize into.
+        start_point: A point lying on the plane, in voxel coordinates.
+        normal_vector: Plane normal. Must not be perpendicular to ``axis``.
+        axis: Index of the axis that is solved for (the S/I axis).
+        dim1: First of the two axes spanning the sampling grid.
+        dim2: Second of the two axes spanning the sampling grid.
+
+    Returns:
+        ``uint8`` array of ``shape`` that is 1 on the rasterized plane and 0 elsewhere.
+    """
+    z_max = shape[axis] - 1
+    shift_total = -start_point.dot(normal_vector)
+    xx, yy = np.meshgrid(range(shape[dim1]), range(shape[dim2]), indexing="ij")
+    zz = (-normal_vector[dim1] * xx - normal_vector[dim2] * yy - shift_total) * 1.0 / normal_vector[axis]
+    inside = (zz >= 0) & (zz <= z_max)
+    plane_coords = np.zeros([*xx.shape, 3])
+    plane_coords[:, :, axis] = np.clip(zz, 0, z_max)
+    plane_coords[:, :, dim1] = xx
+    plane_coords[:, :, dim2] = yy
+    plane_coords = plane_coords.astype(int)[inside]
+    select = np.zeros(shape, dtype=np.uint8)
+    select[plane_coords[:, 0], plane_coords[:, 1], plane_coords[:, 2]] = 1
+    return select
+
+
 #### Vertebra Direction ###
 def calc_orientation_of_vertebra_PIR(
     poi: POI | None,
@@ -96,23 +132,8 @@ def calc_orientation_of_vertebra_PIR(
         dims.remove(axis)
         dim1, dim2 = dims
         # Make a plane through start_point with the norm of "normal_vector", which is shifted by "shift" along the norm
-        start_point_np = np.array(cords)
-        start_point_np[axis] = start_point_np[axis]
-        shift_total = -start_point_np.dot(normal_vector_post)
-        xx, yy = np.meshgrid(range(subreg_iso.shape[dim1]), range(subreg_iso.shape[dim2]))  # type: ignore
-        zz = (-normal_vector_post[dim1] * xx - normal_vector_post[dim2] * yy - shift_total) * 1.0 / normal_vector_post[axis]
-        z_max = subreg_iso.shape[axis] - 1
-        zz[zz < 0] = 0
-        zz[zz > z_max] = 0
-        plane_coords = np.zeros([xx.shape[0], xx.shape[1], 3])
-        plane_coords[:, :, axis] = zz
-        plane_coords[:, :, dim1] = xx
-        plane_coords[:, :, dim2] = yy
-        plane_coords = plane_coords.astype(int)
-        # create_subregion
-        # 1 where the selected subreg is, else 0
-        select = subreg_iso.get_array() * 0
-        select[plane_coords[:, :, 0], plane_coords[:, :, 1], plane_coords[:, :, 2]] = 1
+        # create_subregion: 1 where the selected subreg is, else 0
+        select = _create_plane_mask(subreg_iso.shape, np.array(cords), normal_vector_post, axis, dim1, dim2)  # type: ignore
         out[out == 0] += (target_labels * select * reg_label)[out == 0]
 
         if fill_back is not None:
@@ -143,18 +164,23 @@ def calc_orientation_of_vertebra_PIR(
             b = np.array(ret[vert_id : source_subreg_point_id.value]) - 1
             normal_vector_post = a - b
             normal_vector_post = normal_vector_post / norm(normal_vector_post)
+            # The posterior direction is a two-point estimate while the inferior direction comes from the body
+            # spline; nothing ties the two together, so they end up a degree or two off perpendicular and the
+            # cross product is shorter than 1. Orthonormalize -- keeping the smoother spline direction fixed --
+            # so the triad is a proper basis. get_vert_direction_matrix() inverts it.
+            normal_vector_post = normal_vector_post - normal_down * normal_vector_post.dot(normal_down)
+            normal_vector_post = normal_vector_post / norm(normal_vector_post)
+            normal_right = np.cross(normal_vector_post, normal_down)
             poi._vert_orientation_pir[vert_id] = (
                 normal_vector_post,
                 normal_down,
-                np.cross(normal_vector_post, normal_down),
+                normal_right,
             )
 
             ### MAKE DIRECTIONS POIs ###
             ret[vert_id, Location.Vertebra_Direction_Posterior] = tuple(ret[vert_id, source_subreg_point_id] + normal_vector_post * 10)
             ret[vert_id, Location.Vertebra_Direction_Inferior] = tuple(ret[vert_id, source_subreg_point_id] + normal_down * 10)
-            ret[vert_id, Location.Vertebra_Direction_Right] = tuple(
-                ret[vert_id:source_subreg_point_id] + np.cross(normal_vector_post, normal_down * 10)
-            )
+            ret[vert_id, Location.Vertebra_Direction_Right] = tuple(ret[vert_id, source_subreg_point_id] + normal_right * 10)
         except KeyError as e:
             if vert_id not in sacrum_w_o_direction:
                 _log.on_fail(f"calc_orientation_of_vertebra_PIR {vert_id=} - KeyError=", e)
@@ -386,23 +412,8 @@ def calc_center_spinal_cord(
         dims.remove(axis)
         dim1, dim2 = dims
         # Make a plane through start_point with the norm of "normal_vector", which is shifted by "shift" along the norm
-        start_point_np = np.array(cords)
-        start_point_np[axis] = start_point_np[axis]
-        shift_total = -start_point_np.dot(normal_vector)
-        xx, yy = np.meshgrid(range(subreg_iso.shape[dim1]), range(subreg_iso.shape[dim2]))  # type: ignore
-        zz = (-normal_vector[dim1] * xx - normal_vector[dim2] * yy - shift_total) * 1.0 / normal_vector[axis]
-        z_max = subreg_iso.shape[axis] - 1
-        zz[zz < 0] = 0
-        zz[zz > z_max] = 0
-        plane_coords = np.zeros([xx.shape[0], xx.shape[1], 3])
-        plane_coords[:, :, axis] = zz
-        plane_coords[:, :, dim1] = xx
-        plane_coords[:, :, dim2] = yy
-        plane_coords = plane_coords.astype(int)
-        # create_subregion
-        # 1 where the selected subreg is, else 0
-        select = subreg_iso.get_array() * 0
-        select[plane_coords[:, :, 0], plane_coords[:, :, 1], plane_coords[:, :, 2]] = 1
+        # create_subregion: 1 where the selected subreg is, else 0
+        select = _create_plane_mask(subreg_iso.shape, np.array(cords), normal_vector, axis, dim1, dim2)  # type: ignore
         out += target_labels * select * reg_label
 
         if fill_back is not None:
