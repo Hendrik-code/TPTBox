@@ -80,7 +80,10 @@ measurements, and never gate.
 python benchmarks/nii_poi/bench_speed.py --json head.json
 python benchmarks/nii_poi/bench_mem.py   --json head_mem.json
 
-# what CI runs: 3 repeats + 1 warmup, 256^3 synthetic case  (~2 min each)
+# what CI runs: real CT/MRI cases only, 5 repeats + 1 warmup  (~1 min each)
+python benchmarks/nii_poi/bench_speed.py --cases ct_3d,ct_2d,mri_3d,mri_2d --repeats 5 --json head.json
+
+# quick local run including the 256^3 synthetic case  (~2 min each)
 python benchmarks/nii_poi/bench_speed.py --quick --json head.json
 
 # one case, fast iteration
@@ -92,10 +95,16 @@ python benchmarks/nii_poi/compare_mem.py baseline_mem.json head_mem.json
 ```
 
 `--quick` lowers the synthetic edge length to 256 as well as the repeat count. A
-full pass over 400³ is ~2 minutes, and the workflow needs four of them (head and
-baseline × speed and memory); 256³ is ~4× cheaper and still a large 3D volume.
-Both sides of any comparison always use the same value, so this changes
+full pass over 400³ is ~2 minutes; 256³ is ~4× cheaper and still a large 3D
+volume. Both sides of any comparison always use the same value, so this changes
 sensitivity, never correctness.
+
+**CI skips the synthetic cases entirely** and only runs the real CT/MRI 3D/2D
+cases: the synthetic 400³/256³ workloads dominate wall time (~30s per case per
+run, four runs per PR) and are also the noisiest single knob in the workflow,
+since they exercise code paths whose runtime scales with volume rather than with
+what a spine workflow actually looks like. Regressions specific to very large
+volumes are still catchable locally by omitting `--cases`.
 
 To reproduce the baseline swap locally:
 
@@ -116,7 +125,14 @@ Both comparison tools emit one table per case:
 ```
 
 `±` is half the min→p90 range, i.e. how noisy that measurement was, not a
-standard deviation. 🔴 marks a gated regression, 🟢 a gated improvement.
+standard deviation. 🔴 marks a gated regression, 🟢 a gated improvement, and
+`(noise)` flags a row whose baseline is below the display noise floor (3 ms /
+3 MiB): its Δ% is dominated by shared-runner jitter, not by any real change.
+
+Each per-case table shows only the **five most-changed rows**; the rest fold
+into a `<details>` block so the PR comment stays scannable. Rank order is by
+`|Δ%|`, with `(noise)` rows always sorted after real changes so a large swing
+on a sub-ms measurement cannot push a real regression out of the headline.
 
 ### The gate
 

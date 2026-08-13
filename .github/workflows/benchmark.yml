@@ -32,11 +32,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e .
 
+      # CI runs only the real CT/MRI cases. The 400^3 / 256^3 synthetic cases
+      # dominate wall time (~30s per case per run × 4 runs) and are the noisiest
+      # single knob in the workflow; they stay available locally by omitting
+      # --cases. --repeats 5 buys back a little statistical stability now that
+      # we are not paying for synth.
       - name: Benchmark HEAD (speed)
-        run: python benchmarks/nii_poi/bench_speed.py --quick --json head.json
+        run: python benchmarks/nii_poi/bench_speed.py --cases ct_3d,ct_2d,mri_3d,mri_2d --repeats 5 --json head.json
 
       - name: Benchmark HEAD (memory)
-        run: python benchmarks/nii_poi/bench_mem.py --quick --json head_mem.json
+        run: python benchmarks/nii_poi/bench_mem.py --cases ct_3d,ct_2d,mri_3d,mri_2d --repeats 5 --json head_mem.json
 
       - name: Benchmark baseline (base commit's TPTBox, HEAD's harness)
         if: github.event_name == 'pull_request'
@@ -51,8 +56,8 @@ jobs:
           # old and new modules fails with TypeError on unknown kwargs.
           rm -rf TPTBox
           git checkout ${{ github.event.pull_request.base.sha }} -- TPTBox
-          python benchmarks/nii_poi/bench_speed.py --quick --json baseline.json
-          python benchmarks/nii_poi/bench_mem.py --quick --json baseline_mem.json
+          python benchmarks/nii_poi/bench_speed.py --cases ct_3d,ct_2d,mri_3d,mri_2d --repeats 5 --json baseline.json
+          python benchmarks/nii_poi/bench_mem.py --cases ct_3d,ct_2d,mri_3d,mri_2d --repeats 5 --json baseline_mem.json
           rm -rf TPTBox
           cp -a /tmp/TPTBox-head TPTBox
 

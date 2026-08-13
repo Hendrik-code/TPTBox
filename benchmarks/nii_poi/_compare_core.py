@@ -14,6 +14,13 @@ The gate is deliberately hard to trip. A measurement fails the build only when
 3. it is statistically significant: Welch's t-test over the two samples gives
    ``p < --alpha``. With fewer than two samples per side there is no t-test, so
    it falls back to "head's best run is still worse than baseline's p90".
+
+The rendered report shows only the ``TOP_N`` most-changed measurements per case
+in the visible table; the rest go in a collapsible ``<details>`` block so the PR
+comment stays scannable. Rows whose baseline is below ``NOISE_FLOOR`` get a
+``(noise)`` tag: with only three repeats on a shared runner, a sub-unit
+baseline can swing ±30% between runs without anything in the code having
+changed, and that must be visually obvious.
 """
 
 from __future__ import annotations
@@ -24,6 +31,11 @@ from dataclasses import dataclass
 from typing import Any
 
 MIN_GATED = 1.0
+#: Baselines below this are shown with a ``(noise)`` tag; sub-unit measurements
+#: on a shared runner jitter by tens of percent between repeats.
+NOISE_FLOOR = 3.0
+#: How many rows to show up-front per case. The rest go into a <details> block.
+TOP_N = 5
 
 
 def _stats(entry: Any) -> dict[str, float] | None:
@@ -75,6 +87,15 @@ class Row:
     def gateable(self) -> bool:
         return self.base["median"] >= MIN_GATED and not self.key.startswith("metric_")
 
+    @property
+    def is_noisy(self) -> bool:
+        """True for rows whose baseline sits in the sub-unit / near-floor range.
+
+        Δ% on these is dominated by runner jitter and should be read as such,
+        not as a real change.
+        """
+        return not self.key.startswith("metric_") and self.base["median"] < NOISE_FLOOR
+
     def regressed(self, threshold_pct: float, alpha: float) -> bool:
         pct = self.pct
         if not self.gateable or pct is None or pct < threshold_pct:
@@ -98,9 +119,35 @@ def _fmt_pct(row: Row, threshold_pct: float, alpha: float) -> str:
         mark = " 🔴"
     elif row.gateable and pct <= -threshold_pct:
         mark = " 🟢"
+    elif row.is_noisy:
+        mark = " (noise)"
     else:
         mark = ""
     return f"{pct:+.1f}%{mark}"
+
+
+def _rank_key(row: Row) -> tuple[int, float]:
+    """Sort order for the visible top-N: real changes first, noise last, then |Δ%|.
+
+    Noisy rows are pushed to the bottom of the ranking so a big-percentage swing
+    on a sub-ms row does not push a real 15% regression on a 200 ms row into
+    the collapsed block.
+    """
+    pct = row.pct if row.pct is not None else 0.0
+    return (1 if row.is_noisy else 0, -abs(pct))
+
+
+def _render_rows(rows: list[Row], unit: str, threshold_pct: float, alpha: float) -> list[str]:
+    lines = [
+        f"| Measurement | baseline {unit} (median ±½·range) | head {unit} (median ±½·range) | Δ % | p |",
+        "| --- | ---: | ---: | :--- | ---: |",
+    ]
+    for r in rows:
+        p = r.p_value
+        lines.append(
+            f"| `{r.key}` | {_fmt(r.base)} | {_fmt(r.head)} | {_fmt_pct(r, threshold_pct, alpha)} | {'—' if p is None else f'{p:.3f}'} |"
+        )
+    return lines
 
 
 def compare(
@@ -125,6 +172,12 @@ def compare(
         + (f" · measurement floor ≈ {head['floor_mib']:.2f} MiB" if head.get("floor_mib") else "")
     )
     lines.append("")
+    lines.append(
+        f"_Showing the {TOP_N} most-changed measurements per case; the rest are collapsed. "
+        f"Rows with a baseline below {NOISE_FLOOR:g} {unit} are tagged `(noise)` — runner jitter "
+        f"on those swamps any real change._"
+    )
+    lines.append("")
 
     any_regression = False
     for name, head_case in head_cases.items():
@@ -140,7 +193,7 @@ def compare(
         b_meas = base_case.get(measurements_key, {})
         h_meas = head_case.get(measurements_key, {})
         rows: list[Row] = []
-        new_keys, removed_keys = [], []
+        new_keys: list[str] = []
         for key, entry in h_meas.items():
             h = _stats(entry)
             b = _stats(b_meas.get(key)) if key in b_meas else None
@@ -152,16 +205,21 @@ def compare(
                 rows.append(Row(key, b, h))
         removed_keys = [k for k in b_meas if k not in h_meas]
 
-        rows.sort(key=lambda r: r.pct if r.pct is not None else -1e9, reverse=True)
-        lines.append(f"| Measurement | baseline {unit} (median ±½·range) | head {unit} (median ±½·range) | Δ % | p |")
-        lines.append("| --- | ---: | ---: | :--- | ---: |")
+        rows.sort(key=_rank_key)
         for r in rows:
-            p = r.p_value
-            lines.append(
-                f"| `{r.key}` | {_fmt(r.base)} | {_fmt(r.head)} | {_fmt_pct(r, threshold_pct, alpha)} | {'—' if p is None else f'{p:.3f}'} |"
-            )
             any_regression = any_regression or r.regressed(threshold_pct, alpha)
+
+        top = rows[:TOP_N]
+        rest = rows[TOP_N:]
+        lines.extend(_render_rows(top, unit, threshold_pct, alpha))
         lines.append("")
+        if rest:
+            lines.append(f"<details><summary>… {len(rest)} more measurements</summary>")
+            lines.append("")
+            lines.extend(_render_rows(rest, unit, threshold_pct, alpha))
+            lines.append("")
+            lines.append("</details>")
+            lines.append("")
         if new_keys:
             lines.append(f"_new (no baseline): {', '.join(f'`{k}`' for k in new_keys)}_")
             lines.append("")
