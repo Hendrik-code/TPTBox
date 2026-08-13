@@ -224,7 +224,7 @@ class NII(NII_Math):
     Fields:
     - `nii`: The NIfTI image object
     - `seg`: A flag indicating whether the image is a segmentation mask
-    - `c_val`: The default value for the segmentation mask
+    - `c_val`: Background / fill value used for non-segmentation images (segmentations always use 0)
 
     Note: This class assumes that the input NIfTI images are in the NIfTI-1 format.
     """
@@ -659,7 +659,7 @@ class NII(NII_Math):
                 ``self.seg`` is True.
             inplace: If True, modifies this NII in place and returns ``self``.
                 Defaults to False.
-            verbose: Controls verbosity of dtype-change log messages. Defaults to False.
+            verbose: Currently unused; accepted for API parity with other setters. Defaults to False.
             seg: Override the ``seg`` flag on the returned/modified NII. Defaults to None
                 (keep the current value).
 
@@ -774,7 +774,7 @@ class NII(NII_Math):
             inplace (bool): If True, modifies the input image in place. Default value is False.
 
         Returns:
-            If inplace is True, returns None. Otherwise, returns a new instance of the NII class representing the reoriented image.
+            This instance if ``inplace=True``, otherwise a new NII with the reoriented image.
 
         Note:
         The nibabel axes codes describe the direction, not the origin, of axes. The direction "PIR+" corresponds to the origin "ASL".
@@ -822,18 +822,21 @@ class NII(NII_Math):
 
 
     def compute_crop(self,minimum: float=0, dist: float = 0, use_mm=False, other_crop:tuple[slice,...]|None=None, maximum_size:tuple[slice,...]|int|tuple[int,...]|None=None, raise_error=True)->tuple[slice,slice,slice]:
-        """Computes the minimum slice that removes unused space from the image and returns the corresponding slice tuple along with the origin shift required for centroids.
+        """Computes the minimum slice that removes unused space from the image and returns the corresponding slice tuple.
 
         Args:
             minimum (int): The minimum value of the array (0 for MRI, -1024 for CT). Default value is 0.
             dist (int): The amount of padding to be added to the cropped image. Default value is 0.
             use_mm: dist will be mm instead of number of voxels
             other_crop (tuple[slice,...], optional): A tuple of slice objects representing the slice of an other image to be combined with the current slice. Default value is None.
+            maximum_size: If given, expand each axis of the crop so it reaches at
+                least this size (int → same for every axis; tuple → per-axis). The
+                expansion is centred on the original crop and clamped to the image
+                bounds. Defaults to None (no expansion).
             raise_error: if crop is empty a "ValueError: bbox_nd: img is empty, cannot calculate a bbox" is produced. When False return None instead.
 
         Returns:
-            ex_slice: A tuple of slice objects that need to be applied to crop the image.
-            origin_shift: A tuple of integers representing the shift required to obtain the centroids of the cropped image.
+            A tuple of slice objects that need to be applied to crop the image.
 
         Note:
             - The computed slice removes the unused space from the image based on the minimum value.
@@ -979,9 +982,10 @@ class NII(NII_Math):
         new voxel (0, 0, 0) corresponds to the same world coordinate as before).
 
         Args:
-            padd: A sequence of ``(before, after)`` integer tuples, one per spatial
-                dimension. ``None`` as the ``before`` value means no padding on that
-                side. Pass ``None`` for the whole argument to skip padding entirely.
+            padd: Either a sequence of ``(before, after)`` integer tuples, one per
+                spatial dimension (``None`` in either slot means no padding on that
+                side), or a single ``int`` / ``float`` applied symmetrically to every
+                axis. Pass ``None`` for the whole argument to skip padding entirely.
             mode: Padding mode forwarded to ``numpy.pad``. Defaults to ``"constant"``.
                 In ``"constant"`` mode the fill value is ``self.get_c_val()``.
             inplace: If True, modifies this NII in place. Defaults to False.
@@ -1111,7 +1115,9 @@ class NII(NII_Math):
                 False.
             inplace (bool, optional): Whether to modify the current object or return a new one. Defaults to False.
             mode (str, optional): One of the supported modes by scipy.ndimage.interpolation (e.g., "constant", "nearest",
-                "reflect", "wrap"). See the documentation for more details. Defaults to "constant".
+                "reflect", "wrap"). See the documentation for more details. Defaults to "nearest".
+            order (int | None, optional): Interpolation order (0..5) passed to the resampler. Defaults to
+                None, which selects 0 for segmentations and 3 otherwise.
             align_corners (bool|default): If True or not set and seg==True. Aline corners for scaling. This prevents segmentation mask to shift in a direction.
             atol: absolute tolerance for skipping if already close in voxel_spacing
         Returns:
@@ -1161,9 +1167,11 @@ class NII(NII_Math):
 
         Args:
             to_vox_map (Image_Reference|Proxy): If object, has attributes shape giving input voxel shape, and affine giving mapping of input voxels to output space. If length 2 sequence, elements are (shape, affine) with same meaning as above. The affine is a (4, 4) array-like.\n
-            mode (str, optional): Points outside the boundaries of the input are filled according to the given mode ('constant', 'nearest', 'reflect' or 'wrap').Defaults to 'constant'.\n
-            cval (float, optional): Value used for points outside the boundaries of the input if mode='nearest'. Defaults to 0.0.\n
-            aline_corners (bool|default): If True or not set and seg==True. Aline corners for scaling. This prevents segmentation mask to shift in a direction.
+            mode (str, optional): Points outside the boundaries of the input are filled according to the given mode ('constant', 'nearest', 'reflect' or 'wrap'). Defaults to 'nearest'.\n
+            order (int | None, optional): Interpolation order (0..5) passed to the resampler. Defaults to
+                None, which selects 0 for segmentations and 3 otherwise.\n
+            c_val (float, optional): Value used for points outside the boundaries of the input when mode='constant'. Defaults to None (inferred from the image / segmentation).\n
+            align_corners (bool|default): If True or not set and seg==True. Aline corners for scaling. This prevents segmentation mask to shift in a direction.
             inplace (bool, optional): Defaults to False.
 
         Returns:
@@ -1254,13 +1262,13 @@ class NII(NII_Math):
         Args:
             threshold (int, optional): If != 0, will mask the input based on the threshold. Defaults to 60.
             mask (_type_, optional): If threshold==0, this can be set to input a individual mask. If none, lets the algorithm automatically determine the mask. Defaults to None.
-            shrink_factor (int, optional): _description_. Defaults to 4.
-            convergence (dict, optional): _description_. Defaults to {"iters": [50, 50, 50, 50], "tol": 1e-07}.
-            spline_param (int, optional): _description_. Defaults to 200.
-            verbose (bool, optional): _description_. Defaults to False.
-            weight_mask (_type_, optional): _description_. Defaults to None.
-            crop (bool, optional): _description_. Defaults to False.
-            inplace (bool, optional): _description_. Defaults to False.
+            shrink_factor (int, optional): Downsampling factor for the coarse bias estimation stage. Defaults to 4.
+            convergence (dict, optional): Iteration / tolerance schedule forwarded to ANTs. Defaults to {"iters": [50, 50, 50, 50], "tol": 1e-07}.
+            spline_param (int, optional): B-spline mesh resolution (mm) for the bias field. Defaults to 200.
+            verbose (bool, optional): If True, ANTs prints progress information. Defaults to False.
+            weight_mask (_type_, optional): Optional per-voxel weighting image passed through to ANTs. Defaults to None.
+            crop (bool, optional): If True, crop the output to the region actually touched by the correction. Defaults to False.
+            inplace (bool, optional): If True, mutate this NII and return ``self``; otherwise return a new NII. Defaults to False.
 
         Returns:
             NII: The NII with bias field corrected image
@@ -1348,7 +1356,7 @@ class NII(NII_Math):
 
         Args:
             bins (int, optional): Number of bins for the histogram. Defaults to 256.
-            range (tuple, optional): Range of values to consider for the histogram. Defaults to None.
+            hrange (tuple, optional): Range of values to consider for the histogram (forwarded to ``numpy.histogram`` as ``range``). Defaults to None.
             density (bool, optional): If True, the result is the probability density function at the bin, normalized such that the integral over the range is 1. Defaults to False.
             c_val (float|None, optional): The value below which all values are set to c_val. Defaults to None.
 
@@ -1446,9 +1454,12 @@ class NII(NII_Math):
             truncate (int, optional): Truncate of the gaussian blur. Defaults to 4.
             boundary_mode (str, optional): Boundary Mode of the gaussian blur. Defaults to "nearest".
             dilate_prior (int, optional): Dilate this many voxels before starting the gaussian blur algorithm. Defaults to 0.
-            dilate_connectivity (int, optional): Connectivity of the dilation process, if applied. Defaults to 3.
+            dilate_connectivity (int, optional): Connectivity of the dilation process, if applied. Defaults to 1.
+            dilate_channelwise (bool, optional): If True, dilate each per-label channel separately instead of on the joint mask. Defaults to False.
             smooth_background (bool, optional): If true, will also smooth the background. If False, the background voxels stay the same and the segmentation cannot add voxels. Defaults to True.
+            background_threshold (float | None, optional): Cutoff on the smoothed background probability below which a voxel is assigned to the foreground argmax; ``None`` disables the cutoff. Defaults to None.
             inplace (bool, optional): If true, will overwrite the input NII instead of making a copy. Defaults to False.
+            verbose (bool, optional): If True, log that ``smooth_gaussian_labelwise`` is running. Defaults to False.
 
         Returns:
             NII: The smoothed NII object.
@@ -1615,12 +1626,14 @@ class NII(NII_Math):
         """Erodes the binary segmentation mask by the specified number of voxels.
 
         Args:
-            mm (int, optional): The number of voxels to erode the mask by. Defaults to 5.
+            n_pixel (int, optional): The number of voxels to erode the mask by. Defaults to 5.
             labels (LABEL_REFERENCE, optional): Labels that should be dilated. If None, will erode all labels (not including zero!)
             connectivity (int, optional): Elements up to a squared distance of connectivity from the center are considered neighbors. connectivity may range from 1 (no diagonal elements are neighbors) to rank (all elements are neighbors).
             inplace (bool, optional): Whether to modify the mask in place or return a new object. Defaults to False.
             verbose (bool, optional): Whether to print a message indicating that the mask was eroded. Defaults to True.
+            border_value: Value used for voxels outside the image when eroding at the border. Defaults to 0.
             use_crop: speed up computation by cropping and un-cropping the segmentation. Minor overhead if the segmentation fills most of the image
+            ignore_direction: Axis (as ``DIRECTIONS`` code or int) that should NOT be eroded — the structuring element is flattened along this axis. Defaults to None.
         Returns:
             NII: The eroded mask.
 
@@ -1802,7 +1815,7 @@ class NII(NII_Math):
             return self.set_array_(convex_hull_arr)
         return self.set_array(convex_hull_arr)
 
-    def calc_convex_hull_(self, axis: None | DIRECTIONS = "S", verbose: bool = False) -> Self:
+    def calc_convex_hull_(self, axis: DIRECTIONS | None = "S", verbose: bool = False) -> Self:
         """In-place variant of `calc_convex_hull`."""
         return self.calc_convex_hull(axis=axis, inplace=True, verbose=verbose)
 
@@ -1811,8 +1824,8 @@ class NII(NII_Math):
         """Calculate a boundary mask based on the input image.
 
         Parameters:
-        - img (NII): The image used to create the boundary mask.
-        - threshold(float): threshold
+        - threshold (float): Intensity threshold used to seed the boundary infection.
+        - inplace (bool): If True, modifies this NII in place. Defaults to False.
 
         Returns:
         NII: A segmentation of the boundary.
@@ -1880,10 +1893,12 @@ class NII(NII_Math):
         max_count_component (int | None): Maximum number of components to retain. Once this limit is reached, remaining components will be removed.
         connectivity (int): Connectivity criterion for defining connected components (default is 3).
         removed_to_label (int): Label to assign to removed components (default is 0).
+        keep_label (bool): If True, preserve the original label values on retained components instead of replacing them with component indices. Defaults to False.
+        inplace (bool): If True, modify this NII in place. Defaults to False.
         TODO : max_count_component currently filters over all labels instead of per label. will be changed.
         TODO : removed_to_label does not work when keep_label=False
         Returns:
-        None
+        NII: The filtered segmentation.
         """
         assert self.seg, "This only works on segmentations"
         arr = np_filter_connected_components(self.get_seg_array(), largest_k_components=max_count_component,label_ref=labels,connectivity=connectivity,return_original_labels=keep_label,min_volume=min_volume,max_volume=max_volume,removed_to_label=removed_to_label,)
@@ -1923,13 +1938,23 @@ class NII(NII_Math):
 
 
     def get_largest_k_segmentation_connected_components(self, k: int | None, labels: int | list[int] | None = None, connectivity: int = 1, return_original_labels: bool = True,inplace=False,min_volume:int=0,max_volume:int|None=None,removed_to_label=0) -> Self:
-        """Finds the largest k connected components in a given array (does NOT work with zero as label!).
+        """DEPRECATED — always raises ``DeprecationWarning``; use :meth:`filter_connected_components` instead.
+
+        The signature is kept for backwards compatibility only; calling this method never
+        performs any computation.
 
         Args:
-            arr (np.ndarray): input array
             k (int | None): finds the k-largest components. If k is None, will find all connected components and still sort them by size
             labels (int | list[int] | None, optional): Labels that the algorithm should be applied to. If none, applies on all labels found in this NII. Defaults to None.
+            connectivity (int): Voxel connectivity forwarded to the underlying filter. Defaults to 1.
             return_original_labels (bool): If set to False, will label the components from 1 to k. Defaults to True
+            inplace (bool): Would modify this NII in place. Defaults to False.
+            min_volume (int): Minimum component volume to keep. Defaults to 0.
+            max_volume (int | None): Maximum component volume to keep. Defaults to None.
+            removed_to_label (int): Label assigned to removed components. Defaults to 0.
+
+        Raises:
+            DeprecationWarning: Always.
         """
         raise DeprecationWarning("Use filter_connected_components instead")
         msk_i_data = self.get_seg_array()
@@ -1986,10 +2011,11 @@ class NII(NII_Math):
         """Relabels all individual labels from input array to the majority labels of a given label_mask.
 
         Args:
-            label_mask (np.ndarray): the mask from which to pull the target labels.
+            label_mask (Self): the segmentation NII from which to pull the target labels.
             labels (int | list[int] | None, optional): Which labels in the input to process. Defaults to None.
             dilate_pixel (int, optional): If true, will dilate the input to calculate the overlap. Defaults to 1.
             inplace (bool, optional): Defaults to False.
+            no_match_label (int, optional): Label assigned to input voxels whose relabeling has no majority match in ``label_mask``. Defaults to 0.
 
         Returns:
             NII: Relabeled nifti
@@ -2002,7 +2028,8 @@ class NII(NII_Math):
         """Calculates an NII that represents the segmentation difference between self and given groundtruth mask.
 
         Args:
-            mask_groundtruth (Self): The ground truth mask. Must match in orientation, zoom, and shape
+            mask_gt (Self): The ground truth mask. Must match in orientation, zoom, and shape.
+            ignore_background_tp (bool): If True, background-background matches (both zero) are left as 0 instead of being counted as TP. Defaults to False.
 
         Returns:
             NII: Difference NII (1: FN, 2: TP, 3: FP, 4: Wrong label)
@@ -2082,7 +2109,6 @@ class NII(NII_Math):
         Replaces those voxels with ``fill`` (default 0).
 
         Parameters:
-            nii (NII): The NIfTI-like object with 3D imaging data.
             idx (int or list[int]): The index/label(s) to process in the array. Default is 1.
             not_beyond (int or list[int]): The label/index used to determine the reference position. Default is 1.
             fill (int): The value to set for voxels beyond the reference point. Default is 0.
@@ -2381,11 +2407,14 @@ class NII(NII_Math):
 
     @secure_save
     def save_nrrd(self:Self, file: str | Path|bids_files.BIDS_FILE,make_parents=True,verbose:logging=True,**args) -> None:
-        """Save an NII object to an NRRD file.
+        """Save this NII to an NRRD file.
 
         Args:
-            nii_obj (NII): The NII object to be saved.
-            path (str | Path): The file path where the NRRD file will be saved.
+            file (str | Path | BIDS_FILE): Destination path (or a BIDS_FILE whose
+                ``file["nrrd"]`` gives the path).
+            make_parents (bool, optional): Create missing parent directories. Defaults to True.
+            verbose (bool, optional): If True, log the save. Defaults to True.
+            **args: Additional keyword arguments forwarded to :func:`save_slicer_nrrd`.
 
         Raises:
             ImportError: If the `pynrrd` package is not installed.
@@ -2415,8 +2444,6 @@ class NII(NII_Math):
         applies `to_stl_single` to each label independently.
 
         Args:
-            seg (NII):
-                Segmentation object containing one or more labels.
             out_path (Path | dict[int, Path] | None, optional):
                 Output specification:
                     - Path → save all meshes into the same directory or file pattern
@@ -2475,6 +2502,7 @@ class NII(NII_Math):
         to_world: bool = True,
         include_normals: bool = False,
         number_path=False,
+        _crop = True
     ) -> Mesh:
         """Convert a binary segmentation label into an STL surface mesh using marching cubes.
 
@@ -2524,6 +2552,9 @@ class NII(NII_Math):
         from stl import mesh
         seg = self.extract_label(label)
         # Prepare binary mask
+        if _crop and to_world: # this speed up the stl generation
+            crop = seg.compute_crop(0,1)
+            seg = seg.apply_crop(crop)
         seg_arr = np.pad(seg.clamp(0, 1).get_array(), 1)
         # Marching cubes (voxel coordinates)
         try:
