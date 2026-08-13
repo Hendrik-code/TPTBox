@@ -773,7 +773,7 @@ def plot_compute_lordosis_and_kyphosis(
         vert = round((id1.value + id2.value) / 2)
         while (vert, 50) not in poi and vert != 0:
             vert -= 1
-        text_out.append((vert, (f"{str(name).split('_')[-1]}: {v:.1f}°", 25)))
+        text_out.append((vert, (f"{v:.1f}° - {str(name).split('_')[-1]}", 25)))
 
     poi.info["line_segments_sag"] = out + poi.info.get("line_segments_sag", [])
     poi.info["text_sag"] = text_out + poi.info.get("text_sag", [])

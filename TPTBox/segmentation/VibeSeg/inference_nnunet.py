@@ -345,7 +345,7 @@ def run_inference_on_file(
         unknown_strings: dict[str, int] = {"max": seg_nii.max() + 1, "Intervertebral_Disc": 100}
         mapping = {}
 
-        def to_int(a: str, k: None | int = None):
+        def to_int(a: str, k: int | None = None):
             if a in unknown_strings:
                 return unknown_strings[a]
             try:
@@ -370,8 +370,8 @@ def run_inference_on_file(
         for k, v in mapping_.items():
             key = to_int(k)
             value = to_int(v, key)
-            if k != value:
-                mapping[k] = value
+            if key != value:  # `k` is the raw string: map_labels_ needs the int key
+                mapping[key] = value
             unknown_strings[v] = value
         logger.print(f"{unknown_strings}")
         logger.print(f"{mapping=}")
@@ -481,7 +481,6 @@ def run_VibeSeg(
     if (in_niis[0].affine == np.eye(4)).all():
         logger.on_warning(
             "Your affine matrix is the identity. Make sure that the spacing and orientation is correct. For NAKO VIBE it should be 1.40625 mm for R/L and A/P and 3 mm S/I. For UKBB R/L and A/P should be around 2.2 mm",
-            stacklevel=3,
         )
     return run_inference_on_file(
         dataset_id,

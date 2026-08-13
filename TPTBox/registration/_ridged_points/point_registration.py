@@ -377,8 +377,10 @@ class Point_Registration:
         ) = w
         a: Has_Grid
         b: Has_Grid
-        self._img_fixed = nii_to_sitk(a.make_nii())
-        self._img_moving = nii_to_sitk(b.make_nii())
+        # get_dump() writes (version, moving, fixed, ...); these were assigned the wrong way
+        # round, so every reloaded registration resampled into the wrong space.
+        self._img_moving = nii_to_sitk(a.make_nii())
+        self._img_fixed = nii_to_sitk(b.make_nii())
         assert version == 1, f"Version mismatch {version=}"
         return self
 

@@ -181,9 +181,11 @@ class Any(Abstract_lvl):
             if n == self_name:
                 continue
             try:
-                s = cl._get_id(cls, s, no_raise=False)
-                return s  # type: ignore # noqa: TRY300
-            except Exception:
+                # _get_id is a classmethod: passing `cls` positionally bound it to `s`
+                # and shifted `s` into `no_raise`, so every lookup raised TypeError and
+                # name resolution silently never worked.
+                return cl._get_id(s, no_raise=False)  # type: ignore # noqa: TRY300
+            except (KeyError, ValueError, AttributeError):
                 pass
         return int(s)
 
@@ -299,10 +301,11 @@ class Full_Body_Instance_Vibe(Abstract_lvl):
             Full_Body_Instance.pancreas.value: cls.pancreas.value,  # pancreas
             Full_Body_Instance.adrenal_gland_right.value: cls.adrenal_gland_right.value,  # adrenal_gland_right
             Full_Body_Instance.adrenal_gland_left.value: cls.adrenal_gland_left.value,  # adrenal_gland_left
-            Full_Body_Instance.lung_left.value: cls.lung_upper_lobe_left.value,  # lung_upper_lobe_left
+            # Full_Body_Instance has one label per lung, while the Vibe scheme splits each
+            # lung into lobes. Only one lobe can be the target, so the lower lobe is used -
+            # this preserves the behaviour of the previous duplicate-key literal, where the
+            # last entry silently won. The shadowed upper/middle-lobe entries were dead.
             Full_Body_Instance.lung_left.value: cls.lung_lower_lobe_left.value,  # lung_lower_lobe_left
-            Full_Body_Instance.lung_right.value: cls.lung_upper_lobe_right.value,  # lung_upper_lobe_right
-            Full_Body_Instance.lung_right.value: cls.lung_middle_lobe_right.value,  # lung_middle_lobe_right
             Full_Body_Instance.lung_right.value: cls.lung_lower_lobe_right.value,  # lung_lower_lobe_right
             Full_Body_Instance.esophagus.value: cls.esophagus.value,  # esophagus
             Full_Body_Instance.trachea.value: cls.trachea.value,  # trachea

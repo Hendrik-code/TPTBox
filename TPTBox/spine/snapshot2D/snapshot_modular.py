@@ -28,7 +28,6 @@ from TPTBox import (
     to_nii,
     to_nii_optional,
     v_idx2name,
-    v_idx_order,
 )
 from TPTBox.mesh3D.mesh_colors import _color_map_in_row, get_color_by_label
 
@@ -162,8 +161,6 @@ def sag_cor_curve_projection(
     # Sagittal and coronal projections of a curved plane defined by centroids
     # Note: Will assume IPL orientation!
     # if x-direction (=S/I) is not fully incremental, a straight, not an interpolated plane will be returned
-    order = v_idx_order
-    order += [i for i in range(256) if i not in v_idx_order]
     # ctd_list.sorting_list = v_idx_order
     ctd_list.round_(3)
 
@@ -703,7 +700,7 @@ def plot_sag_centroids(
                     v[0] * zms[0],
                     c,
                     d,
-                    color=cmap(color - 1 % LABEL_MAX % cmap.N),
+                    color=cmap((color - 1) % LABEL_MAX % cmap.N),
                 )
             )
     if "text_sag" in ctd.info:
@@ -816,7 +813,7 @@ def plot_cor_centroids(
                     v[0] * zms[0],
                     c,
                     d,
-                    color=cmap(color - 1 % LABEL_MAX % cmap.N),
+                    color=cmap((color - 1) % LABEL_MAX % cmap.N),
                 )
             )
     if "text_cor" in ctd.info:
@@ -1368,10 +1365,14 @@ def create_snapshot(  # noqa: C901
 
     if not isinstance(snp_path, list):
         snp_path = [str(snp_path)]
-    for path in snp_path:
-        fig.savefig(str(path))
-        print("[*] Snapshot saved:", path) if verbose else None
-    plt.close()
+    try:
+        for path in snp_path:
+            fig.savefig(str(path))
+            print("[*] Snapshot saved:", path) if verbose else None
+    finally:
+        # close THIS figure (bare plt.close() closes the current one, which may be another
+        # figure entirely) and do it even if savefig raises, so failures do not leak
+        plt.close(fig)
     return snp_path
 
 

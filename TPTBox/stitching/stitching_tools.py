@@ -166,7 +166,7 @@ def n4_bias(
     mask[mask != 0] = 1
     mask_nii = nii.set_array(mask)
     mask_nii.seg = True
-    mask_nii.dilate_msk_(mm=3, verbose=False)
+    mask_nii.dilate_msk_(n_pixel=3, verbose=False)
     n4: NII = nii.n4_bias_field_correction(mask=from_nibabel(mask_nii.nii), spline_param=spline_param)
     if norm != -1:
         n4 *= norm / n4.max()
