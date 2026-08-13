@@ -1,8 +1,12 @@
+import json
 import os
 from pathlib import Path
 
+from TPTBox import Print_Logger
 from TPTBox.core.bids_files import BIDS_FILE, BIDS_Family, Buffered_BIDS_Global_info
 from TPTBox.core.nii_wrapper import to_nii
+
+log = Print_Logger()
 
 
 def _check(l: list[BIDS_FILE]):
@@ -163,6 +167,8 @@ def loop_over_repaired_nako(
     dataset="/DATA/NAS/datasets_processed/NAKO/dataset-nako/",
     test=True,
     verbose=False,
+    sort=True,
+    test_key="/110/11089",  # path matching. if you want on specific us a 6 digits
 ):
     """Iterate over the repaired NAKO dataset yielding per-subject file dicts.
 
@@ -187,36 +193,55 @@ def loop_over_repaired_nako(
     """
     gbi = Buffered_BIDS_Global_info(
         datasets=dataset,
-        parents=["rawdata", "rawdata_stitched", "derivatives_Abdominal-Segmentation", "derivatives_mevibe", "derivatives_inversion"],
+        parents=[
+            "rawdata",
+            "rawdata_stitched",
+            "derivatives_Abdominal-Segmentation",
+            # "derivatives_mevibe", #coopied into "derivatives_Abdominal-Segmentation"
+            "derivatives_inversion",
+        ],
         # sequence_splitting_keys=["sub", "ses"],
         # "/107/107472"
-        filter_file=(lambda x: "/110/11089" in str(x)) if test else None,  # Figures sent to Paul "/117/117001"; "/113/113508"
+        filter_file=(lambda x: test_key in str(x)) if test else None,  # Figures sent to Paul "/117/117001"; "/113/113508"
     )
 
-    mapping = {
-        "T2w": "t2w",
-        "msk_seg-MRSegmentator_part-inphase": "MRSegmentator",
-        "msk_seg-VibeSeg-100_mod-vibe_part-inphase": "vibeseg100",
-        "msk_seg-ROI_mod-vibe": "roi",
-    }
-    keys = ["pd", "T2haste", *mapping.keys(), "msk_seg-body-composition_mod-vibe"]
-    for sub, subj in gbi.enumerate_subjects(sort=True):
+    for sub, subj in gbi.enumerate_subjects(sort=sort, shuffle=not sort):
         subj_dict = {"id": sub, "dataset": dataset}
+        q = subj.new_query(flatten=True)
+        q.filter_filetype("json")
+        for f in q.loop_list():
+            try:
+                if not f.file["json"].exists():
+                    continue
+                js = f.open_json()
+                if "PatientSize" in js:
+                    subj_dict["height_m"] = js["PatientSize"]
+                    break
+            except json.decoder.JSONDecodeError:
+                log.on_fail(f, "json.decoder.JSONDecodeError")
         if verbose:
             log.on_log(sub)
+        mapping = {"T2w": "t2w"}
         q = subj.new_query()
         q.filter("chunk", lambda _: False, required=False)
+        # q.filter("mod", lambda x: str(x) not in "mevibe", required=False)
+        # q.filter_format(lambda x: str(x) not in ["mevibe"])
+        keys = ["pd", "T2haste", *mapping.keys()]
+        mult_ok = ["pd", "T2haste"]
         for fam in q.loop_dict(key_addendum=["mod", "part", "desc"]):
             for k, v in fam.items():
-                print(fam)
                 if k in keys:
                     k = mapping.get(k, k)  # noqa: PLW2901
+
                     if raise_on_duplicate:
-                        assert len(v) == 1, v
-                        assert k not in subj_dict, (k, subj_dict, v, subj_dict[k])
+                        if k in mult_ok and k in subj_dict:
+                            if int(v[0].get("sequ", 0)) < int(subj_dict[k].get("sequ", 0)):
+                                continue
+                        else:
+                            assert len(v) == 1, v
+                            assert k not in subj_dict, (k, subj_dict, v, subj_dict[k])
                     subj_dict[k] = v[0]
-                print()
-        # exit()
+
         keys = ["msk_seg-body-composition_mod-mevibe"]
         if add_mevibe:
             q = subj.new_query()
@@ -233,16 +258,36 @@ def loop_over_repaired_nako(
                         subj_dict[k] = v[0]
 
         if add_vibe:
+            mapping = {
+                "msk_seg-MRSegmentator_part-inphase": "MRSegmentator",
+                "msk_seg-VibeSeg-100_mod-vibe_part-inphase": "vibeseg100",
+                "msk_seg-ROI_mod-vibe": "roi",
+            }
             q = subj.new_query()
             q.filter_format("vibe")
             q.filter("chunk", lambda _: False, required=False)
+            # q.filter("run", lambda x: x != "2", required=False)
+            keys = [
+                "vibe_part-inphase",
+                "vibe_part-outphase",
+                "vibe_part-fat",
+                "vibe_part-water",
+                "msk_seg-body-composition_mod-vibe",
+                *mapping.keys(),
+            ]
             for fam in q.loop_dict(key_addendum=["mod", "part", "desc"]):
+                # print(fam)
                 for k, v in fam.items():
-                    if k in ["vibe_part-inphase", "vibe_part-outphase", "vibe_part-fat", "vibe_part-water"]:
-                        # k = mapping.get(k, k)  # noqa: PLW2901
+                    # print("-", k)
+                    if k in keys:
+                        k = mapping.get(k, k)  # noqa: PLW2901
+                        # print(k)
+                        # print("*")
                         if raise_on_duplicate:
                             assert len(v) == 1, v
-                            assert k not in subj_dict, (k, subj_dict, v, subj_dict[k])
+                            # assert k not in subj_dict, (k, subj_dict, v, subj_dict[k])
+                        if k in subj_dict and int(v[0].get("run", 0)) > int(subj_dict[k].get("run", 0)):
+                            continue
                         subj_dict[k] = v[0]
 
                 mapp = {"vibe_part-water_desc-reconstructed": "vibe_part-water", "vibe_part-fat_desc-reconstructed": "vibe_part-fat"}

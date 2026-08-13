@@ -113,7 +113,7 @@ def VBQ_score(
     regions : list[tuple[Vertebra_Instance, Vertebra_Instance]], optional
         Vertebral ranges over which to compute VBQ scores. Each tuple
         specifies the first and last vertebra (inclusive). Defaults to
-        C3–C6, T5–T8, and L1.
+        C3–C6, T5–T8, and L1-L4. According to https://link.springer.com/article/10.1007/s00586-022-07484-5
     subregs_ids : list[Location], optional
         Spine subregion labels defining the vertebral body. Defaults to
         ``[Location.Vertebra_Corpus, Location.Vertebra_Corpus_border]``.
@@ -163,7 +163,7 @@ def VBQ_score(
         regions = [
             (Vertebra_Instance.C3, Vertebra_Instance.C6),
             (Vertebra_Instance.T5, Vertebra_Instance.T8),
-            (Vertebra_Instance.L1, Vertebra_Instance.L1),
+            (Vertebra_Instance.L1, Vertebra_Instance.L4),
         ]
 
     spinal_channel = spine.extract_label(spinal_channel_id).erode_msk(1, connectivity=1, verbose=False)
@@ -189,25 +189,29 @@ def VBQ_score(
         bbox = bodies.compute_crop()  # (slice_x, slice_y, slice_z)
         axis = spinal_channel.get_axis(direction="S")
 
-        spinal_crop = spinal_channel.copy()
         if not full_cord:
             slicer = [slice(None)] * 3
             slicer[axis] = bbox[axis]
-            spinal_crop *= 0
+            slicer = tuple(slicer)
             spinal_crop = spinal_channel[slicer]
+            t2w_slab = t2w.get_array()[slicer]
+        else:
+            t2w_slab = t2w
+            spinal_crop = spinal_channel
 
-        signal_sfs_old = t2w.mean(where=spinal_crop)
-
-        t2w_slab = t2w.get_array()[tuple(slicer)]
+        signal_sfs_old = t2w_slab.mean(where=spinal_crop)
         spinal_arr = spinal_crop.get_array().astype(bool)
         signal_sfs = peak_centered_mean(t2w_slab[spinal_arr], bins=spinal_bins, peak_frac_height=spinal_peak_frac_height)
 
-        out[f"mean_signal_vertebra_{start.name}-{goal.name}"] = signal_vertebra
-        out[f"mean_signal_liquor_{start.name}-{goal.name}"] = signal_sfs
-        out[f"mean_signal_liquor_{start.name}-{goal.name}_old"] = signal_sfs_old
-        out[f"VBQ_{start.name}-{goal.name}"] = signal_vertebra / signal_sfs
-        out[f"VBQ_{start.name}-{goal.name}_old"] = signal_vertebra / signal_sfs_old
-
+        out[f"mean_signal_vertebra_{start.name}-{goal.name}"] = round(signal_vertebra, 4)
+        out[f"mean_signal_liquor_{start.name}-{goal.name}"] = round(signal_sfs, 4)
+        out[f"mean_signal_liquor_{start.name}-{goal.name}_old"] = round(signal_sfs_old, 4)
+        out[f"VBQ_{start.name}-{goal.name}"] = round(signal_vertebra / signal_sfs, 4)
+        out[f"VBQ_{start.name}-{goal.name}_old"] = round(signal_vertebra / signal_sfs_old, 4)
+    out["n_erode"] = n_erode
+    out["signal_by_full_cord"] = full_cord
+    out["spinal_bins"] = spinal_bins
+    out["spinal_peak_frac_height"] = spinal_peak_frac_height
     return out
 
 
@@ -279,6 +283,7 @@ def body_composition_score(
     if regions is None:
         regions = [
             (Vertebra_Instance.T12, Vertebra_Instance.L1),
+            (Vertebra_Instance.L3, Vertebra_Instance.L4),
             (Vertebra_Instance.L3, Vertebra_Instance.L3),
         ]
 
@@ -288,41 +293,24 @@ def body_composition_score(
     if spine.shape != vert.shape:
         spine = spine.resample_from_to(vert)
 
-    voxel_area = float(np.prod(vibe_seg.zoom[:2]))
+    body_mask = spine.extract_label([Location.Vertebra_Corpus, Location.Vertebra_Corpus_border])
 
-    body_mask = spine.extract_label(Location.Vertebra_Corpus)
-
-    if dataset_id == 100:
+    if dataset_id == 12:
         measurements = {
             "muscle": [*Full_Body_Instance.muscle(), Full_Body_Instance.muscle_other],
             "VAT": Full_Body_Instance.inner_fat,
             "SAT": Full_Body_Instance.subcutaneous_fat,
-            "psoas": [
-                Full_Body_Instance.iliopsoas_left,
-                Full_Body_Instance.iliopsoas_right,
-            ],
-            "autochthon": [
-                Full_Body_Instance.autochthon_left,
-                Full_Body_Instance.autochthon_right,
-            ],
+            "psoas": [Full_Body_Instance.iliopsoas_left, Full_Body_Instance.iliopsoas_right],
+            "autochthon": [Full_Body_Instance.autochthon_left, Full_Body_Instance.autochthon_right],
         }
 
-    elif dataset_id == 12:
+    elif dataset_id == 100:
         measurements = {
-            "muscle": [
-                Full_Body_Instance_Vibe.muscle_(),
-                Full_Body_Instance_Vibe.muscle_other,
-            ],
+            "muscle": [*Full_Body_Instance_Vibe.muscle_(), Full_Body_Instance_Vibe.muscle_other],
             "VAT": Full_Body_Instance_Vibe.inner_fat,
             "SAT": Full_Body_Instance_Vibe.subcutaneous_fat,
-            "psoas": [
-                Full_Body_Instance_Vibe.iliopsoas_left,
-                Full_Body_Instance_Vibe.iliopsoas_right,
-            ],
-            "autochthon": [
-                Full_Body_Instance_Vibe.autochthon_left,
-                Full_Body_Instance_Vibe.autochthon_right,
-            ],
+            "psoas": [Full_Body_Instance_Vibe.iliopsoas_left, Full_Body_Instance_Vibe.iliopsoas_right],
+            "autochthon": [Full_Body_Instance_Vibe.autochthon_left, Full_Body_Instance_Vibe.autochthon_right],
         }
 
     else:
@@ -331,15 +319,18 @@ def body_composition_score(
     verts_order = Vertebra_Instance.order()
     axis = vibe_seg.get_axis(direction="S")
 
+    other_axes = tuple(i for i in range(3) if i != axis)
+    voxel_area = float(vibe_seg.zoom[other_axes[0]] * vibe_seg.zoom[other_axes[1]])
     out = {}
-
+    u = vert.unique()
     for start, goal in regions:
-        end = verts_order.index(goal) + 1
+        end = verts_order.index(goal.get_next_poi(u))
         labels = verts_order[verts_order.index(start) : end]
 
         vertebral_body = vert.extract_label(labels) * body_mask
 
         if vertebral_body.sum() == 0:
+            # print("no vertebra", labels, vert.unique())
             continue
 
         bbox = vertebral_body.compute_crop()
@@ -347,7 +338,7 @@ def body_composition_score(
         slicer = [slice(None)] * 3
         slicer[axis] = bbox[axis]
 
-        region = vibe_seg[slicer]
+        region: NII = vibe_seg[slicer]
 
         region_name = f"{start.name}-{goal.name}"
 
@@ -355,11 +346,11 @@ def body_composition_score(
             mask = region.extract_label(label_ids)
             arr = mask.get_array().astype(bool)
 
-            other_axes = tuple(i for i in range(3) if i != axis)
             areas = arr.sum(axis=other_axes).astype(float) * voxel_area
             areas = areas[areas > 0]
 
             if len(areas) == 0:
+                print(name, [int(a) for a in region.unique()], label_ids)
                 mean_area = np.nan
                 max_area = np.nan
                 n_slices = 0
@@ -368,21 +359,21 @@ def body_composition_score(
                 max_area = float(np.max(areas))
                 n_slices = len(areas)
 
-            out[f"mean_{name}_area_{region_name}"] = mean_area
-            out[f"max_{name}_area_{region_name}"] = max_area
+            out[f"mean_{name}_area_{region_name}"] = round(mean_area, 4)
+            out[f"max_{name}_area_{region_name}"] = round(max_area, 4)
 
             if name == "muscle":
                 out[f"n_slices_{region_name}"] = n_slices
 
                 if height_m is not None and np.isfinite(mean_area):
-                    out[f"muscle_index_{region_name}"] = mean_area / (height_m**2)
+                    out[f"muscle_index_{region_name}"] = round(mean_area / (height_m**2))
 
         vat = out[f"mean_VAT_area_{region_name}"]
         sat = out[f"mean_SAT_area_{region_name}"]
         muscle = out[f"mean_muscle_area_{region_name}"]
 
         if np.isfinite(vat) and np.isfinite(sat) and np.isfinite(muscle) and (vat + sat) > 0:
-            out[f"muscle_fat_ratio_{region_name}"] = muscle / (vat + sat)
+            out[f"muscle_fat_ratio_{region_name}"] = round(muscle / (vat + sat), 4)
         else:
             out[f"muscle_fat_ratio_{region_name}"] = np.nan
 
@@ -509,7 +500,7 @@ def muscle_fat_infiltration(
     # ------------------------------------------------------------------
     # Muscle label definitions
     # ------------------------------------------------------------------
-    if dataset_id == 100:
+    if dataset_id == 12:
         muscle_groups = {
             "all_muscle": [*Full_Body_Instance.muscle(), Full_Body_Instance.muscle_other],
             "iliopsoas_left": Full_Body_Instance.iliopsoas_left,
@@ -518,9 +509,9 @@ def muscle_fat_infiltration(
             "autochthon_right": Full_Body_Instance.autochthon_right,
             "muscle_other": Full_Body_Instance.muscle_other,
         }
-    elif dataset_id == 12:
+    elif dataset_id == 100:
         muscle_groups = {
-            "all_muscle": [Full_Body_Instance_Vibe.muscle_(), Full_Body_Instance_Vibe.muscle_other],
+            "all_muscle": [*Full_Body_Instance_Vibe.muscle_(), Full_Body_Instance_Vibe.muscle_other],
             "iliopsoas_left": Full_Body_Instance_Vibe.iliopsoas_left,
             "iliopsoas_right": Full_Body_Instance_Vibe.iliopsoas_right,
             "autochthon_left": Full_Body_Instance_Vibe.autochthon_left,
@@ -599,22 +590,23 @@ def muscle_fat_infiltration(
 
             suffix = f"{region_name}_{muscle_name}"
 
-            out[f"muscle_volume_no_erosion_{suffix}"] = float(ff_no_erode.size * voxel_volume)
-            out[f"lean_muscle_volume_no_erosion_{suffix}"] = float(np.sum(lean_no_erode) * voxel_volume)
-            out[f"IMAT_volume_no_erosion_{suffix}"] = float(np.sum(imat_no_erode) * voxel_volume)
+            out[f"muscle_volume_no_erosion_{suffix}"] = round(float(ff_no_erode.size * voxel_volume), 4)
+            out[f"lean_muscle_volume_no_erosion_{suffix}"] = round(float(np.sum(lean_no_erode) * voxel_volume), 4)
+            out[f"IMAT_volume_no_erosion_{suffix}"] = round(float(np.sum(imat_no_erode) * voxel_volume), 4)
 
             if ff.size == 0:
                 continue
 
-            out[f"mean_fat_fraction_{suffix}"] = float(np.mean(ff))
-            out[f"median_fat_fraction_{suffix}"] = float(np.median(ff))
-            out[f"mean_lean_fat_fraction_{suffix}"] = float(np.mean(ff[lean])) if np.any(lean) else np.nan
-            out[f"mean_IMAT_fat_fraction_{suffix}"] = float(np.mean(ff[imat])) if np.any(imat) else np.nan
-            out[f"muscle_volume_{suffix}"] = float(ff.size * voxel_volume)
-            out[f"lean_muscle_volume_{suffix}"] = float(np.sum(lean) * voxel_volume)
-            out[f"IMAT_volume_{suffix}"] = float(np.sum(imat) * voxel_volume)
-            out[f"IMAT_fraction_{suffix}"] = float(np.mean(imat))
-
+            out[f"mean_fat_fraction_{suffix}"] = round(float(np.mean(ff)), 4)
+            out[f"median_fat_fraction_{suffix}"] = round(float(np.median(ff)), 4)
+            out[f"mean_lean_fat_fraction_{suffix}"] = round(float(np.mean(ff[lean])) if np.any(lean) else np.nan, 4)
+            out[f"mean_IMAT_fat_fraction_{suffix}"] = round(float(np.mean(ff[imat])) if np.any(imat) else np.nan, 4)
+            out[f"muscle_volume_{suffix}"] = round(float(ff.size * voxel_volume), 4)
+            out[f"lean_muscle_volume_{suffix}"] = round(float(np.sum(lean) * voxel_volume), 4)
+            out[f"IMAT_volume_{suffix}"] = round(float(np.sum(imat) * voxel_volume), 4)
+            out[f"IMAT_fraction_{suffix}"] = round(float(np.mean(imat)), 4)
+    out["threshold"] = threshold
+    out["erode"] = erode
     return out
 
 
@@ -695,10 +687,7 @@ def torso_vat_sat_muscle_mass(
     try:
         labels = vibe_seg.unique()
 
-        if dataset_id == 100:
-            if vibe_seg.max() > 72:
-                raise AssertionError("Not a VIBESeg-100 (or compatible) segmentation.")
-
+        if dataset_id == 12:
             vat_id = Full_Body_Instance.inner_fat
             sat_id = Full_Body_Instance.subcutaneous_fat
             muscle_ids = [*Full_Body_Instance.muscle(), Full_Body_Instance.muscle_other]
@@ -708,10 +697,12 @@ def torso_vat_sat_muscle_mass(
             if Full_Body_Instance.pelvis_left.value not in labels:
                 raise ValueError("Not the full torso visible (pelvis is missing)")
 
-        elif dataset_id == 12:
+        elif dataset_id == 100:
+            if vibe_seg.max() > 80:
+                raise AssertionError("Not a VIBESeg-100 (or compatible) segmentation.", vibe_seg.unique())
             vat_id = Full_Body_Instance_Vibe.inner_fat
             sat_id = Full_Body_Instance_Vibe.subcutaneous_fat
-            muscle_ids = [Full_Body_Instance_Vibe.muscle_(), Full_Body_Instance_Vibe.muscle_other]
+            muscle_ids = [*Full_Body_Instance_Vibe.muscle_(), Full_Body_Instance_Vibe.muscle_other]
             if Full_Body_Instance_Vibe.clavicula_left.value not in labels:
                 raise ValueError("Not the full torso visible (clavicula is missing)")
 
@@ -726,9 +717,9 @@ def torso_vat_sat_muscle_mass(
         SAT = body_comp.extract_label(sat_id)
         muscle_mass = body_comp.extract_label(muscle_ids)
 
-        results["VAT"] = voxel_volume * VAT.sum()
-        results["SAT"] = voxel_volume * SAT.sum()
-        results["muscle_mass"] = voxel_volume * muscle_mass.sum()
+        results["VAT"] = round(voxel_volume * VAT.sum(), 4)
+        results["SAT"] = round(voxel_volume * SAT.sum(), 4)
+        results["muscle_mass"] = round(voxel_volume * muscle_mass.sum(), 4)
 
     except Exception as exc:
         body_comp = None

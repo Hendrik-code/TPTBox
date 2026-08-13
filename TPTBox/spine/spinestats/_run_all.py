@@ -20,6 +20,9 @@ import queue as _queue
 from pathlib import Path
 from typing import Any
 
+from tqdm import tqdm
+
+from TPTBox import Print_Logger
 from TPTBox.core.bids_files import BIDS_FILE
 from TPTBox.core.dicom.dicom2nii_utils import load_json
 from TPTBox.core.internal.nii_help import save_json
@@ -27,7 +30,7 @@ from TPTBox.core.nii_wrapper import to_nii
 from TPTBox.spine.spinestats._load_nako import loop_over_repaired_nako
 
 DATASET_ROOT = Path("/DATA/NAS/datasets_processed/NAKO/dataset-nako")
-
+logger = Print_Logger()
 # Top-level keys we require inside a finished json before we consider a
 # subject "done" and skip recomputation. cobb/curv are optional and only
 # added when run_all is called with cobb=True.
@@ -137,7 +140,7 @@ def _is_cache_valid(json_path: Path, seg_files: list[Path], required_keys: tuple
     return True, data
 
 
-def run_all(file_dict, cobb: bool = False, override: bool = False) -> dict[str, Any]:
+def run_all(file_dict, cobb: bool = True, override: bool = False, update_something=True) -> dict[str, Any] | None:
     """Run the full pipeline for one subject and return the results dict.
 
     Parameters
@@ -174,6 +177,9 @@ def run_all(file_dict, cobb: bool = False, override: bool = False) -> dict[str, 
     )
     from TPTBox.spine.spinestats.torso_vat_sat import VBQ_score, body_composition_score, muscle_fat_infiltration, torso_vat_sat_muscle_mass
 
+    if "t2w" not in file_dict:
+        return None
+
     t2w_bf = file_dict["t2w"] if isinstance(file_dict["t2w"], BIDS_FILE) else BIDS_FILE(file_dict["t2w"], file_dict["dataset"])
     poi_out = t2w_bf.get_changed_path(
         "json",
@@ -192,44 +198,175 @@ def run_all(file_dict, cobb: bool = False, override: bool = False) -> dict[str, 
     required = REQUIRED_MAIN_KEYS + (("cobb", "curv") if cobb else ())
     seg_files = _segmentation_inputs(file_dict)
 
+    out: dict[str, Any] = {}
     if not override:
         valid, cached = _is_cache_valid(final_out, seg_files, required)
-        if valid and cached is not None:
+        if valid and cached is not None and not update_something:
+            if _merge_endplate_angles(cached, Path(poi_out)):
+                save_json(final_out, cached)
             return cached
+        # Reload existing json (if any) and only recompute the missing top-level keys.
+        if final_out.exists():
+            try:
+                loaded = load_json(final_out)
+                if isinstance(loaded, dict):
+                    out = loaded
+            except Exception:
+                out = {}
 
-    t2w = to_nii(file_dict["t2w"])
-    vibe_water = to_nii(file_dict["vibe_part-water"], False)
-    vibe_fat = to_nii(file_dict["vibe_part-fat"], False)
-    vert = to_nii(file_dict["vert"], True)
-    spine = to_nii(file_dict["spine"], True)
-    vibe_seg = to_nii(file_dict["vibeseg100"], True)
-    roi = to_nii(file_dict["roi"], True)
+    def _need(*keys: str) -> bool:
+        return override or any(k not in out for k in keys)
+
+    need_cobb = cobb and _need("cobb", "curv")
+    need_ivd = _need("ivd_geometry")
+    need_vert = _need("vert_geometry")
+    need_vbq = _need("VBQ_score")
+    need_bcs = _need("body_composition_score")
+    need_mfi = _need("muscle_fat_infiltration")
+    need_torso = _need("torso_vat_sat_muscle_mass")
+    # Recompute area
+
+    if "VBQ_score" in out and "VBQ_L1-L1_old" in out["VBQ_score"]:
+        logger.on_warning("redo vbq", t2w_bf.get("sub"))
+        need_vbq = True
+        del out["VBQ_score"]
+    if "torso_vat_sat_muscle_mass" in out and "Not a VIBESeg-100" in str(out.get("torso_vat_sat_muscle_mass", {}).get("reason", "")):
+        logger.on_warning("redo torso_vat_sat_muscle_mass", t2w_bf.get("sub"))
+        need_torso = True
+        del out["torso_vat_sat_muscle_mass"]
+
+    ####
+    need_poi = need_cobb or need_ivd or need_vert or need_vbq or need_bcs or need_mfi
+    need_t2w = need_ivd or need_vert or need_vbq
+    need_vert_nii = need_poi or need_vbq or need_bcs or need_mfi
+    need_spine_nii = need_vert_nii
+    need_vibe_seg = need_bcs or need_mfi or need_torso
+    need_roi = need_mfi or need_torso
+    need_vibe_wf = need_mfi
+
+    if not (need_cobb or need_ivd or need_vert or need_vbq or need_bcs or need_mfi or need_torso):
+        if _merge_endplate_angles(out, Path(poi_out)):
+            save_json(final_out, out)
+        return out
+
+    logger.on_debug("load nii")
+    t2w = to_nii(file_dict["t2w"]) if need_t2w or need_cobb else None
+    vibe_water = to_nii(file_dict["vibe_part-water"], False) if need_vibe_wf else None
+    vibe_fat = to_nii(file_dict["vibe_part-fat"], False) if need_vibe_wf else None
+    vert = to_nii(file_dict["vert"], True) if need_vert_nii else None
+    spine = to_nii(file_dict["spine"], True) if need_spine_nii else None
+    vibe_seg = to_nii(file_dict["vibeseg100"], True) if need_vibe_seg else None
+    roi = to_nii(file_dict["roi"], True) if need_roi else None
     height_m = file_dict.get("height_m")
-    poi = calc_poi_from_subreg_vert(
-        vert,
-        spine,
-        subreg_id=[Location.Vertebra_Corpus, Location.Vertebra_Direction_Posterior, Location.Endplate, Location.Vertebra_Disc],
-        buffer_file=poi_out,
-        save_buffer_file=True,
-    )
-    out: dict[str, Any] = {}
-    if cobb:
-        cobb_val, curv, _ = plot_cobb_and_lordosis_and_kyphosis(cobb_jpg_out, poi, file_dict["t2w"], file_dict["vert"], project_2D=False)
+
+    poi = None
+    if need_poi:
+        logger.on_debug("calc_poi_from_subreg_vert")
+        poi = calc_poi_from_subreg_vert(
+            vert,
+            spine,
+            subreg_id=[Location.Vertebra_Corpus, Location.Vertebra_Direction_Posterior, Location.Endplate, Location.Vertebra_Disc],
+            buffer_file=poi_out,
+            save_buffer_file=True,
+        )
+    if need_cobb:
+        project_2D = False
+        threshold_deg = 10
+        logger.on_debug("cobb")
+        cobb_val, curv, _ = plot_cobb_and_lordosis_and_kyphosis(
+            cobb_jpg_out, poi, file_dict["t2w"], file_dict["vert"], project_2D=project_2D, threshold_deg=threshold_deg
+        )
         out["cobb"] = cobb_val
         out["curv"] = curv
+        out["project_2D"] = project_2D
+        out["min coop angle"] = threshold_deg
 
-    out["ivd_geometry"] = measure_ivd_and_vertebra_geometry(t2w, vert, spine, structure_label=100)
-    out["vert_geometry"] = measure_ivd_and_vertebra_geometry(t2w, vert, spine, structure_label=50)
+    if need_ivd:
+        logger.on_debug("measure_ivd_and_vertebra_geometry (ivd)")
+        out["ivd_geometry"] = measure_ivd_and_vertebra_geometry(t2w, vert, spine, buffer_poi=poi_out, structure_label=100)
+    if need_vert:
+        logger.on_debug("measure_ivd_and_vertebra_geometry (vert)")
+        out["vert_geometry"] = measure_ivd_and_vertebra_geometry(t2w, vert, spine, buffer_poi=poi_out, structure_label=0)
 
-    out["VBQ_score"] = VBQ_score(t2w, vert, spine)
-    out["body_composition_score"] = body_composition_score(vibe_seg, vert, spine, dataset_id=100, height_m=height_m)
-    out["muscle_fat_infiltration"] = muscle_fat_infiltration(vibe_water, vibe_fat, vibe_seg, vert, spine, roi=roi, dataset_id=100)
-    # torso_vat_sat_muscle_mass returns (results_dict, body_comp_nii). Keep
-    # only the serializable results dict so the whole json stays writable.
-    torso_results, _body_comp = torso_vat_sat_muscle_mass(vibe_seg, roi, dataset_id=100)
-    out["torso_vat_sat_muscle_mass"] = torso_results
+    if need_vbq:
+        logger.on_debug("VBQ_score")
+        out["VBQ_score"] = VBQ_score(t2w, vert, spine, full_cord=True)
+
+    if need_bcs:
+        logger.on_debug("body_composition_score")
+        out["body_composition_score"] = body_composition_score(vibe_seg, vert, spine, dataset_id=100, height_m=height_m)
+        assert len(out["body_composition_score"]) != 0
+    if need_mfi:
+        logger.on_debug("muscle_fat_infiltration")
+        out["muscle_fat_infiltration"] = muscle_fat_infiltration(vibe_water, vibe_fat, vibe_seg, vert, spine, roi=roi, dataset_id=100)
+        out["muscle_fat_infiltration"]["physics_model"] = "2-Point-Dixon"
+    if need_torso:
+        # torso_vat_sat_muscle_mass returns (results_dict, body_comp_nii). Keep
+        # only the serializable results dict so the whole json stays writable.
+        logger.on_debug("torso_vat_sat_muscle_mass")
+        torso_results, _body_comp = torso_vat_sat_muscle_mass(vibe_seg, roi, dataset_id=100)
+        out["torso_vat_sat_muscle_mass"] = torso_results
+    _merge_endplate_angles(out, Path(poi_out))
+    logger.on_debug("save", final_out.name)
     save_json(final_out, out)
     return out
+
+
+def _read_endplate_internal_angles(poi_json_path: Path) -> dict[str, Any]:
+    """Read the ``endplate_internal_angle`` dict from a POI json (if present).
+
+    The POI json is a list; the first element is the metadata dict where the
+    endplate-angle map (vertebra name -> angle in degrees) lives.
+    """
+    if not poi_json_path.exists():
+        return {}
+    try:
+        data = load_json(poi_json_path)
+    except Exception:
+        return {}
+    if isinstance(data, list):
+        for entry in data:
+            if isinstance(entry, dict) and isinstance(entry.get("endplate_internal_angle"), dict):
+                return entry["endplate_internal_angle"]
+        return {}
+    if isinstance(data, dict) and isinstance(data.get("endplate_internal_angle"), dict):
+        return data["endplate_internal_angle"]
+    return {}
+
+
+def _merge_endplate_angles(out: dict[str, Any], poi_json_path: Path) -> bool:
+    """Attach the POI's per-vertebra endplate_internal_angle to ``out``.
+
+    Adds a top-level ``endplate_internal_angle`` (vertebra-name -> angle) and,
+    for every entry in ``vert_geometry``, injects the matching angle as
+    ``endplate_internal_angle`` so it shows up in per-vertebra Excel rows.
+    Returns True iff ``out`` was modified.
+    """
+    angles = _read_endplate_internal_angles(poi_json_path)
+    if not angles:
+        return False
+    from TPTBox.core.vert_constants import Vertebra_Instance
+
+    changed = False
+    if out.get("endplate_internal_angle") != angles:
+        out["endplate_internal_angle"] = angles
+        changed = True
+    vg = out.get("vert_geometry")
+    if isinstance(vg, dict):
+        for label, metrics in vg.items():
+            if not isinstance(metrics, dict):
+                continue
+            try:
+                vname = Vertebra_Instance(int(label)).name
+            except Exception:
+                continue
+            angle = angles.get(vname)
+            if angle is None:
+                continue
+            if metrics.get("endplate_internal_angle") != angle:
+                metrics["endplate_internal_angle"] = angle
+                changed = True
+    return changed
 
 
 # ---------------------------------------------------------------------------
@@ -372,22 +509,103 @@ class ExcelCollector:
 
 def _final_json_path(file_dict: dict) -> Path:
     """Recreate the json path run_all writes to, without re-running it."""
-    t2w_bf = BIDS_FILE(file_dict["t2w"], file_dict["dataset"])
+    t2w_bf = BIDS_FILE(file_dict["t2w"], file_dict["dataset"]) if not isinstance(file_dict["t2w"], BIDS_FILE) else file_dict["t2w"]
     return Path(
         t2w_bf.get_changed_path("json", "stat", "derivatives_spine_inference_162_sacrumfix_subregionmeasures-v2", info={"seg": "all"})
     )
 
 
+# Ordered list of required inputs for run_all. Order matters: for the
+# missing-file report each subject is attributed to the FIRST missing
+# key in this list, so a subject with several gaps is still counted once.
+REQUIRED_INPUT_KEYS: tuple[str, ...] = (
+    "t2w",
+    "vibe_part-water",
+    "vibe_part-fat",
+    "vert",
+    "spine",
+    "vibeseg100",
+    "roi",
+)
+
+
+def _first_missing_input(file_dict: dict) -> str | None:
+    """Return the first REQUIRED_INPUT_KEYS entry not present/on disk, else None."""
+    for k in REQUIRED_INPUT_KEYS:
+        v = file_dict.get(k)
+        if v is None:
+            return k
+        p = v.file["nii.gz"] if isinstance(v, BIDS_FILE) else Path(v)
+        if not Path(p).exists():
+            return k
+    return None
+
+
+def _run_one(args: tuple[dict, bool, bool]) -> tuple[str, str | None]:
+    """Worker: run_all for one subject; returns (subject_id, missing_key_or_None)."""
+    f, override, update_something = args
+    sub_id = str(f.get("id"))
+    missing = _first_missing_input(f)
+    if missing is not None:
+        return sub_id, missing
+
+    try:
+        run_all(f, override=override, update_something=update_something)
+    except Exception as e:
+        logger.on_fail(f"run_all failed for {sub_id}: {e}")
+        return sub_id, f"error:{type(e).__name__}, {str(e)!s}"
+    return sub_id, None
+
+
 if __name__ == "__main__":
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+
+    import pandas as pd
+
     from TPTBox import No_Logger
 
     log = No_Logger()
 
-    collector = ExcelCollector(out_folder="/DATA/NAS/ongoing_projects/robert/test/NAKO-stats")
-    collector.start()
+    OUT_FOLDER = Path("/DATA/NAS/ongoing_projects/robert/test/NAKO-stats")
+    OUT_FOLDER.mkdir(parents=True, exist_ok=True)
+    N_CPUS = 40  # set >1 to parallelize
+    OVERRIDE = False
+    aggregate = False
+    if aggregate:
+        collector = ExcelCollector(out_folder=OUT_FOLDER)
+        collector.start()
+    missing_rows: list[dict[str, str]] = []
     try:
-        for f in loop_over_repaired_nako(test=True):
-            run_all(f)
-            collector.submit(f["id"], _final_json_path(f))
+        # subjects = list(tqdm(loop_over_repaired_nako(test=True), total=10))
+        if aggregate:
+            subjects = list(tqdm(loop_over_repaired_nako(test=False, sort=aggregate), total=30645))
+        else:
+            l = loop_over_repaired_nako(test=False, sort=aggregate)
+            subjects = list(tqdm([next(l) for _ in range(1000)], total=1000))
+        if N_CPUS <= 1:
+            for f in subjects:
+                sub_id, missing = _run_one((f, OVERRIDE, not aggregate))
+
+                if missing is not None:
+                    logger.on_fail("missing", list(f.keys()), missing)
+                    missing_rows.append({"subject": sub_id, "missing": missing})
+                    continue
+                if aggregate:
+                    collector.submit(sub_id, _final_json_path(f))
+        else:
+            id_to_f = {str(f.get("id")): f for f in subjects}
+            with ProcessPoolExecutor(max_workers=N_CPUS) as ex:
+                futs = {ex.submit(_run_one, (f, OVERRIDE, not aggregate)): str(f.get("id")) for f in subjects}
+                for fut in as_completed(futs):
+                    sub_id, missing = fut.result()
+                    if missing is not None:
+                        logger.on_fail("missing", (sub_id), missing)
+                        missing_rows.append({"subject": sub_id, "missing": missing})
+                        continue
+                    if aggregate:
+                        collector.submit(sub_id, _final_json_path(id_to_f[sub_id]))
     finally:
-        collector.close()
+        if aggregate:
+            collector.close()
+            if missing_rows:
+                pd.DataFrame(missing_rows).to_excel(OUT_FOLDER / "missing_inputs.xlsx", index=False)
