@@ -67,7 +67,7 @@ def run_spineps(
     model_semantic: str | Path = "t2w",  # t2w, vibe, ct
     model_instance: str | Path = "instance",  # instance, ct_instance
     model_labeling: str | None = "t2w_labeling",  # t2w_labeling, ct_labeling
-    derivative_name: str = "derivative",
+    derivative_name: str = "derivatives",
     override_semantic: bool = False,
     override_instance: bool = False,
     lambda_semantic=None,

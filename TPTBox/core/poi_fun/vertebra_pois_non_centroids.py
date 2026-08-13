@@ -93,21 +93,30 @@ class Strategy_Pattern:
     Args:
         target (Location): The target location for which this strategy is defined.
         strategy (Callable): The strategy function that implements the desired behavior.
-        prerequisite (set[Location] | None, optional): A set of prerequisite locations that must be satisfied before applying this strategy. Defaults to None.
-        **args: Additional keyword arguments to be passed to the strategy function.
+        prerequisite (set[Location] | None, optional): A set of prerequisite locations that must be
+            satisfied before applying this strategy. Defaults to None.
+        prio (int, optional): Scheduling offset added to ``target.value`` in :meth:`prority`.
+            Strategies with a lower resulting priority run first. Defaults to 0.
+        sakrum (bool, optional): When ``True``, this strategy is also applied to sacrum vertebra IDs;
+            otherwise sacrum vertebrae are skipped in :func:`compute_non_centroid_pois`. Defaults to False.
+        **args: Additional keyword arguments to be passed to the strategy function. Any ``Location``
+            values found in ``args`` (including inside sequences) are auto-added to ``prerequisite``,
+            and passing ``direction=...`` additionally adds ``Location.Vertebra_Direction_Inferior``.
 
     Attributes:
         target (Location): The target location for which this strategy is defined.
         args (dict): Additional keyword arguments to be passed to the strategy function.
         prerequisite (set[Location]): A set of prerequisite locations that must be satisfied before applying this strategy.
         strategy (Callable): The strategy function that implements the desired behavior.
+        sacrum (bool): Whether this strategy also applies to sacrum vertebrae.
 
     Note:
         The strategy function should accept the following arguments:
-        - poi (POI): The point of interest.
-        - current_subreg (NII): The current subregion.
-        - vert_id (int): The vertex ID.
-        - bb: The bounding box.
+        - poi (POI): The point of interest container being populated.
+        - current_subreg (NII): The current (cropped) subregion segmentation for this vertebra.
+        - location (Location): The target ``Location`` this strategy is computing.
+        - vert_id (int): The vertebra ID currently being processed.
+        - bb: The bounding box used to crop the vertebra.
         - log (Logger_Interface, optional): The logger interface. Defaults to _log, which should be defined globally.
 
     Example:
@@ -317,10 +326,14 @@ def compute_non_centroid_pois(  # noqa: C901
 
     Runs the full non-centroid POI pipeline:
 
+    0. Vertebral body endplates — computed via
+       :func:`~TPTBox.spine.spinestats.poi_fun.endplates.calc_endplate_points_`
+       when any of ``Vertebral_Body_Endplate_Inferior``,
+       ``Vertebral_Body_Endplate_Superior`` or ``Endplate`` is requested.
     1. Vertebra orientation (PIR direction vectors) — always computed first if
        ``Location.Vertebra_Direction_Inferior`` is requested.
-    2. Global landmarks: spinal canal / cord centres, intervertebral disc
-       POIs, dense-axis tip.
+    2. Global landmarks: spinal canal / cord centres, spinal canal at IVD
+       level, dens-axis tip, and articular process midpoints (left/right).
     3. Per-vertebra landmarks via the registered :class:`Strategy_Pattern`
        functions (extreme points, ray casts, corner finders, etc.).
     4. Intervertebral disc (IVD) POIs.
