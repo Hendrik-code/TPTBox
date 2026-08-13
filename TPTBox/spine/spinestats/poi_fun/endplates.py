@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import warnings
 from collections.abc import Sequence
 
 import numpy as np
 import trimesh
+from stl.mesh import Mesh
 
 from TPTBox import NII, POI, Location, Logger_Interface, Print_Logger
 from TPTBox.core.vert_constants import Vertebra_Instance
@@ -59,7 +61,9 @@ def _ray_cast_to_mesh(mesh: Mesh | trimesh.Trimesh, origin: np.ndarray, directio
     direction = direction / np.linalg.norm(direction)
 
     if isinstance(mesh, trimesh.Trimesh):
-        locations, _, _ = mesh.ray.intersects_location(ray_origins=origin[None], ray_directions=direction[None])
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            locations, _, _ = mesh.ray.intersects_location(ray_origins=origin[None], ray_directions=direction[None])
         if len(locations) == 0:
             return None
         # closest hit

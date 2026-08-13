@@ -365,7 +365,7 @@ def compute_non_centroid_pois(  # noqa: C901
 
         log.on_text("Compute Vertebra Endplate DIRECTIONS", verbose=verbose)
         sub_regions = poi.keys_subregion()
-        if any(a.value not in sub_regions for a in endplate):  # skip if all exists
+        if any(a.value not in sub_regions for a in endplate[:2]):  # skip if all exists
             poi, *_ = calc_endplate_points_(poi, vert, subreg, _vert_ids=_vert_ids, log=log)
     ### STEP 1 Vert Direction###
     if Location.Vertebra_Direction_Inferior in locations:

@@ -36,7 +36,7 @@ force recomputation.
 - **T2w image** — must cover the **full spine** (cervical through
   sacrum). Curvature angles and per-vertebra geometry silently return
   `None`/`NaN` for any level that is cropped away, and the VBQ ranges
-  (`C3-C6`, `T5-T8`, `L1-L1`) need every vertebra in the range to be
+  (`C3-C6`, `T5-T8`, `L1-L4`) need every vertebra in the range to be
   visible.
 - **VIBE water/fat images** — must cover the **full torso**. Fat
   fraction and muscle CSA are computed on whatever axial slices are
@@ -125,7 +125,7 @@ Implementation notes:
 ## `VBQ_score`
 
 `dict[str, float]`; one triple of entries per configured spinal range.
-Default ranges are `C3-C6`, `T5-T8`, `L1-L1`.
+Default ranges are `C3-C6`, `T5-T8`, `L1-L4`.
 
 | Key template | Unit | Meaning |
 |---|---|---|
@@ -253,7 +253,7 @@ finished json into two rolling Excel files in a configurable folder:
 
 - `per_subject.xlsx` — one row per subject with every scalar top-level
   metric flattened to dotted keys
-  (e.g. `VBQ_score.VBQ_L1-L1`, `torso_vat_sat_muscle_mass.VAT`).
+  (e.g. `VBQ_score.VBQ_L1-L4`, `torso_vat_sat_muscle_mass.VAT`).
 - `per_vertebra.xlsx` — one row per (subject, label), populated from
   `vert_geometry` and `ivd_geometry`. The `source` column indicates
   which of the two sections the row came from.

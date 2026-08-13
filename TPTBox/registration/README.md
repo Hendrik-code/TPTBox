@@ -38,15 +38,16 @@ pip install hf-deepali   # only needed for General_Registration / Rigid_Elements
 ## Example
 
 ```python
-from TPTBox.registration import ridged_points_from_poi
+from TPTBox import NII, POI
+from TPTBox.registration import Point_Registration
 
-fixed_nii = NII.load("fixed.nii.gz", seg=False)
-moving_nii = NII.load("moving.nii.gz", seg=False)
+poi_fixed = POI.load("path/to/poi.json")
+poi_moving = POI.load("path/to/poi.json")
+# update resolution/orientation of poi_fixed, if you would like the resampe into an specific space
+reg_obj = Point_Registration(poi_fixed, poi_moving)
+# appling the transformation
+nii_moving = NII.load("path/to/moving_img.nii.gz", False)
+nii_moved = reg_obj.transform_nii(nii_moving)
+poi_moved = reg_obj.transform_poi(poi_moving)
 
-registered, transform = ridged_points_from_poi(
-    fixed_nii, moving_nii,
-    poi_fixed=poi_fixed,
-    poi_moving=poi_moving,
-)
-registered.save("registered.nii.gz")
 ```

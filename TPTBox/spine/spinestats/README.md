@@ -75,8 +75,11 @@ ratios.
 
 Caching: `run_all(..., override=False)` (the default) reuses the json
 when it exists, is newer than every input segmentation file, and
-contains all of the required top-level keys. Pass `override=True` to
-force recomputation.
+contains all of the required top-level keys. When some (but not all)
+required keys are missing, the existing json is loaded and only the
+missing top-level keys are recomputed; NII inputs that are not needed
+for any missing key are skipped so partial reruns are cheap. Pass
+`override=True` to force recomputation of every key.
 
 ### Input requirements
 
@@ -85,7 +88,7 @@ force recomputation.
 - **T2w image** — must cover the **full spine** (cervical through
   sacrum). Curvature angles and per-vertebra geometry silently return
   `None`/`NaN` for any level that is cropped away, and the VBQ ranges
-  (`C3-C6`, `T5-T8`, `L1-L1`) need every vertebra in the range to be
+  (`C3-C6`, `T5-T8`, `L1-L4`) need every vertebra in the range to be
   visible.
 - **VIBE water/fat images** — must cover the **full torso**. Fat
   fraction and muscle CSA are computed on whatever axial slices are
@@ -180,7 +183,7 @@ Implementation notes:
 ## `VBQ_score`
 
 `dict[str, float]`; one triple of entries per configured spinal range.
-Default ranges are `C3-C6`, `T5-T8`, `L1-L1`.
+Default ranges are `C3-C6`, `T5-T8`, `L1-L4`.
 
 | Key template | Unit | Meaning |
 |---|---|---|
@@ -335,7 +338,7 @@ folder:
 
 - `per_subject.xlsx` — one row per subject with every scalar top-level
   metric flattened to dotted keys
-  (e.g. `VBQ_score.VBQ_L1-L1`, `torso_vat_sat_muscle_mass.VAT`).
+  (e.g. `VBQ_score.VBQ_L1-L4`, `torso_vat_sat_muscle_mass.VAT`).
 - `per_vertebra.xlsx` — one row per (subject, label), populated from
   `vert_geometry` and `ivd_geometry`. The `source` column indicates
   which of the two sections the row came from.
@@ -355,3 +358,22 @@ collector.close()                    # flushes and joins
 The collector re-writes the Excel files every `flush_every` submissions
 (default 25) and once more at shutdown, so partial runs still produce
 usable summaries.
+
+## Batch entry point (`python -m ..._run_all`)
+
+Running the module directly loops over the NAKO cohort via
+`loop_over_repaired_nako`, calls `run_all` per subject and streams the
+results through `ExcelCollector`. Two knobs are exposed at the top of
+the `__main__` block:
+
+- `N_CPUS` — set `>1` to run subjects in parallel through a
+  `ProcessPoolExecutor`; `1` keeps the sequential path.
+- `OVERRIDE` — forwarded to `run_all` (see the caching note above).
+
+Before running, each subject is checked against `REQUIRED_INPUT_KEYS`
+(ordered: `t2w`, `vert`, `spine`, `vibeseg100`, `roi`,
+`vibe_part-water`, `vibe_part-fat`). Subjects with at least one missing
+input are skipped and recorded in `missing_inputs.xlsx` under the
+output folder, attributed to the **first** missing key in that order —
+so a subject with several gaps still counts once. Subjects whose
+`run_all` raises are also logged there with `error:<ExceptionType>`.

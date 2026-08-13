@@ -886,7 +886,7 @@ class intermediate_slice:
         if self.max_s is None:
             self.max_s = [s.stop for s in s[1:]]
         else:
-            self.max_s = [max(s.stop, m) for s, m in zip(s[1:], self.min_s)]
+            self.max_s = [max(s.stop, m) for s, m in zip(s[1:], self.max_s)]  # was accumulating from min_s
 
         assert len(s) - 1 == len(self.meta_slice)
         self.slicers.append(s)

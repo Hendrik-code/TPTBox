@@ -82,7 +82,7 @@ class Test_test_samples(unittest.TestCase):
 
         self.assertFalse(Path(td).exists() and not keep_images)
 
-    def make_POIs(self, vert_nii: NII, subreg_nii: NII, vert_id: int, ignore_list: list[Location], locs: None | list[Location] = None, n=5):
+    def make_POIs(self, vert_nii: NII, subreg_nii: NII, vert_id: int, ignore_list: list[Location], locs: list[Location] | None = None, n=5):
         for i in range(n):
             locs2 = [l for l in Location if l not in ignore_list and random.random() < (i + 1) / n * 3] if locs is None else locs
             poi = calc_poi_from_subreg_vert(vert_nii, subreg_nii, subreg_id=locs2, verbose=False, _print_phases=True).extract_region(

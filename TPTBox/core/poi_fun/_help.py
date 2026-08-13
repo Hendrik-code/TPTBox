@@ -147,11 +147,14 @@ def make_spine_plot(pois: POI, body_spline: np.ndarray, vert_nii: NII, filenames
     vert_nii = vert_nii.reorient().rescale(pois.zoom)
     body_center_list = list(np.array(pois.values()))
     # fitting a curve to the poi and getting it's first derivative
-    plt.figure(figsize=(10, 10))
-    plt.imshow(
-        np.swapaxes(np.max(vert_nii.get_array(), axis=vert_nii.get_axis(direction="R")), 0, 1),
-        cmap=plt.cm.gray,  # type: ignore
-    )
-    plt.plot(np.asarray(body_center_list)[:, 0], np.asarray(body_center_list)[:, 1])
-    plt.plot(np.asarray(body_spline[:, 0]), np.asarray(body_spline[:, 1]), "-")
-    plt.savefig(filenames)
+    fig = plt.figure(figsize=(10, 10))
+    try:
+        plt.imshow(
+            np.swapaxes(np.max(vert_nii.get_array(), axis=vert_nii.get_axis(direction="R")), 0, 1),
+            cmap=plt.cm.gray,  # type: ignore
+        )
+        plt.plot(np.asarray(body_center_list)[:, 0], np.asarray(body_center_list)[:, 1])
+        plt.plot(np.asarray(body_spline[:, 0]), np.asarray(body_spline[:, 1]), "-")
+        plt.savefig(filenames)
+    finally:
+        plt.close(fig)  # otherwise every call leaks a figure

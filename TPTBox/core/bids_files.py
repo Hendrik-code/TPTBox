@@ -660,6 +660,11 @@ class BIDS_FILE:
 
     @property
     def file(self) -> dict[str, Path]:
+        """Returns a dict mapping file types to paths. ["nii.gz", "json", "png"] are automatic searched for.
+
+        Returns:
+            dict[str, Path]: _description_
+        """
         if not self._checked:
             files = {p.parent for p in self._file.values()}
             for f in files:
@@ -1143,10 +1148,9 @@ class BIDS_FILE:
                 return out_path
             if not out_path.exists():
                 return out_path
-            if "run" in info:
-                info["run"] += 1
-            else:
-                info["run"] = 2
+            # "run" is a decimal entity and must stay a string: validate_entities() calls
+            # .isdecimal() on it, which an int does not support.
+            info["run"] = str(int(info["run"]) + 1) if "run" in info else "2"
 
     def save_changed_path(
         self,
@@ -1333,7 +1337,7 @@ class BIDS_FILE:
         Raises:
             KeyError: If no JSON file is registered in :attr:`file`.
         """
-        with open(self.file["json"]) as f:
+        with open(self.file["json"], encoding="utf-8") as f:
             return json.load(f)
 
     def open_poi(self, nii: TPTBox.Image_Reference | None = None) -> TPTBox.POI:
