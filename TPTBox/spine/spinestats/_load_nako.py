@@ -2,6 +2,8 @@ import json
 import os
 from pathlib import Path
 
+import pandas as pd
+
 from TPTBox import Print_Logger
 from TPTBox.core.bids_files import BIDS_FILE, BIDS_Family, Buffered_BIDS_Global_info
 from TPTBox.core.nii_wrapper import to_nii
@@ -169,6 +171,7 @@ def loop_over_repaired_nako(
     verbose=False,
     sort=True,
     test_key="/110/11089",  # path matching. if you want on specific us a 6 digits
+    baseline_metadata="/DATA/NAS/datasets_processed/NAKO/NAKO-732_Begleitdaten/NAKO-732_export_baseline.csv",
 ):
     """Iterate over the repaired NAKO dataset yielding per-subject file dicts.
 
@@ -191,6 +194,10 @@ def loop_over_repaired_nako(
     Yields:
         Dict mapping short keys to ``BIDS_FILE`` entries for one subject.
     """
+    baseline = pd.read_csv(baseline_metadata, sep=";", decimal=",")
+    # ID is unique and matches `sub`
+    height_from_csv = baseline.set_index("ID")["a_anthro_groe_q"].replace(7777, pd.NA)
+
     gbi = Buffered_BIDS_Global_info(
         datasets=dataset,
         parents=[
@@ -207,18 +214,24 @@ def loop_over_repaired_nako(
 
     for sub, subj in gbi.enumerate_subjects(sort=sort, shuffle=not sort):
         subj_dict = {"id": sub, "dataset": dataset}
-        q = subj.new_query(flatten=True)
-        q.filter_filetype("json")
-        for f in q.loop_list():
-            try:
-                if not f.file["json"].exists():
-                    continue
-                js = f.open_json()
-                if "PatientSize" in js:
-                    subj_dict["height_m"] = js["PatientSize"]
-                    break
-            except json.decoder.JSONDecodeError:
-                log.on_fail(f, "json.decoder.JSONDecodeError")
+        # Primary source: baseline CSV, height is in cm.
+        height_cm = height_from_csv.get(sub, pd.NA)
+
+        if pd.notna(height_cm):
+            subj_dict["height_m"] = float(height_cm) / 100.0  # type: ignore
+        else:
+            q = subj.new_query(flatten=True)
+            q.filter_filetype("json")
+            for f in q.loop_list():
+                try:
+                    if not f.file["json"].exists():
+                        continue
+                    js = f.open_json()
+                    if "PatientSize" in js:
+                        subj_dict["height_m"] = js["PatientSize"]
+                        break
+                except json.decoder.JSONDecodeError:
+                    log.on_fail(f, "json.decoder.JSONDecodeError")
         if verbose:
             log.on_log(sub)
         mapping = {"T2w": "t2w"}

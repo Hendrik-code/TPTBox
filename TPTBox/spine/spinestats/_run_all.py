@@ -15,6 +15,7 @@ reviewing the numbers.
 
 from __future__ import annotations
 
+import gc
 import multiprocessing as mp
 import queue as _queue
 from pathlib import Path
@@ -140,7 +141,18 @@ def _is_cache_valid(json_path: Path, seg_files: list[Path], required_keys: tuple
     return True, data
 
 
-def run_all(file_dict, cobb: bool = True, override: bool = False, update_something=True) -> dict[str, Any] | None:
+def run_all(
+    file_dict,
+    override: bool = False,
+    do_not_update=False,
+    need_cobb=False,
+    need_ivd=False,
+    need_vert=False,
+    need_vbq=True,
+    need_bcs=True,
+    need_mfi=True,
+    need_torso=True,
+) -> dict[str, Any] | None:
     """Run the full pipeline for one subject and return the results dict.
 
     Parameters
@@ -185,7 +197,7 @@ def run_all(file_dict, cobb: bool = True, override: bool = False, update_somethi
         "json",
         "poi",
         "derivatives_spine_inference_162_sacrumfix_subregionmeasures-v2",
-        info={"seg": "vert", "mod": "T2w", "desc": "vert-rotation-new"},
+        info={"seg": "vert", "mod": "T2w", "desc": "vert-rotation"},
     )
     cobb_jpg_out = t2w_bf.get_changed_path(
         "jpg", "snp", "derivatives_spine_inference_162_sacrumfix_subregionmeasures-v2", info={"seg": "cobb"}
@@ -195,15 +207,13 @@ def run_all(file_dict, cobb: bool = True, override: bool = False, update_somethi
     )
     final_out = Path(final_out)
 
-    required = REQUIRED_MAIN_KEYS + (("cobb", "curv") if cobb else ())
+    required = (*REQUIRED_MAIN_KEYS, "cobb", "curv")
     seg_files = _segmentation_inputs(file_dict)
 
     out: dict[str, Any] = {}
     if not override:
         valid, cached = _is_cache_valid(final_out, seg_files, required)
-        if valid and cached is not None and not update_something:
-            if _merge_endplate_angles(cached, Path(poi_out)):
-                save_json(final_out, cached)
+        if valid and cached is not None and do_not_update:
             return cached
         # Reload existing json (if any) and only recompute the missing top-level keys.
         if final_out.exists():
@@ -214,38 +224,39 @@ def run_all(file_dict, cobb: bool = True, override: bool = False, update_somethi
             except Exception:
                 out = {}
 
-    def _need(*keys: str) -> bool:
-        return override or any(k not in out for k in keys)
+    def _need(*keys: str, compute: bool) -> bool:
+        return override or (any(k not in out for k in keys) and compute)
 
-    need_cobb = cobb and _need("cobb", "curv")
-    need_ivd = _need("ivd_geometry")
-    need_vert = _need("vert_geometry")
-    need_vbq = _need("VBQ_score")
-    need_bcs = _need("body_composition_score")
-    need_mfi = _need("muscle_fat_infiltration")
-    need_torso = _need("torso_vat_sat_muscle_mass")
+    need_cobb = _need("cobb", "curv", compute=need_cobb)
+    need_ivd = _need("ivd_geometry", compute=need_ivd)
+    need_vert = _need("vert_geometry", compute=need_vert)
+    need_vbq = _need("VBQ_score", compute=need_vbq)
+    need_bcs = _need("body_composition_score", compute=need_bcs)
+    need_mfi = _need("muscle_fat_infiltration", compute=need_mfi)
+    need_torso = _need("torso_vat_sat_muscle_mass", compute=need_torso)
     # Recompute area
-
+    save = False
     if "VBQ_score" in out and "VBQ_L1-L1_old" in out["VBQ_score"]:
         logger.on_warning("redo vbq", t2w_bf.get("sub"))
         need_vbq = True
         del out["VBQ_score"]
+        save = True
     if "torso_vat_sat_muscle_mass" in out and "Not a VIBESeg-100" in str(out.get("torso_vat_sat_muscle_mass", {}).get("reason", "")):
         logger.on_warning("redo torso_vat_sat_muscle_mass", t2w_bf.get("sub"))
         need_torso = True
         del out["torso_vat_sat_muscle_mass"]
-
+        save = True
     ####
-    need_poi = need_cobb or need_ivd or need_vert or need_vbq or need_bcs or need_mfi
+    need_poi = need_cobb or need_ivd or need_vert
     need_t2w = need_ivd or need_vert or need_vbq
     need_vert_nii = need_poi or need_vbq or need_bcs or need_mfi
-    need_spine_nii = need_vert_nii
+    need_spine_nii = need_vert_nii or need_vbq
     need_vibe_seg = need_bcs or need_mfi or need_torso
     need_roi = need_mfi or need_torso
     need_vibe_wf = need_mfi
 
     if not (need_cobb or need_ivd or need_vert or need_vbq or need_bcs or need_mfi or need_torso):
-        if _merge_endplate_angles(out, Path(poi_out)):
+        if _merge_endplate_angles(out, Path(poi_out)) or save:
             save_json(final_out, out)
         return out
 
@@ -279,7 +290,7 @@ def run_all(file_dict, cobb: bool = True, override: bool = False, update_somethi
         out["cobb"] = cobb_val
         out["curv"] = curv
         out["project_2D"] = project_2D
-        out["min coop angle"] = threshold_deg
+        out["min_coop_angle"] = threshold_deg
 
     if need_ivd:
         logger.on_debug("measure_ivd_and_vertebra_geometry (ivd)")
@@ -307,7 +318,7 @@ def run_all(file_dict, cobb: bool = True, override: bool = False, update_somethi
         torso_results, _body_comp = torso_vat_sat_muscle_mass(vibe_seg, roi, dataset_id=100)
         out["torso_vat_sat_muscle_mass"] = torso_results
     _merge_endplate_angles(out, Path(poi_out))
-    logger.on_debug("save", final_out.name)
+    logger.on_save("save", final_out.name)
     save_json(final_out, out)
     return out
 
@@ -342,6 +353,8 @@ def _merge_endplate_angles(out: dict[str, Any], poi_json_path: Path) -> bool:
     ``endplate_internal_angle`` so it shows up in per-vertebra Excel rows.
     Returns True iff ``out`` was modified.
     """
+    if out.get("endplate_internal_angle") is not None:
+        return False
     angles = _read_endplate_internal_angles(poi_json_path)
     if not angles:
         return False
@@ -475,7 +488,7 @@ class ExcelCollector:
         out_folder: str | Path,
         per_subject_name: str = "per_subject.xlsx",
         per_vertebra_name: str = "per_vertebra.xlsx",
-        flush_every: int = 25,
+        flush_every: int = 200,
     ) -> None:
         self.out_folder = Path(out_folder)
         self.per_subject_name = per_subject_name
@@ -541,20 +554,21 @@ def _first_missing_input(file_dict: dict) -> str | None:
     return None
 
 
-def _run_one(args: tuple[dict, bool, bool]) -> tuple[str, str | None]:
+def _run_one(args: tuple[dict, bool, bool]) -> tuple[str, str | None, dict]:
     """Worker: run_all for one subject; returns (subject_id, missing_key_or_None)."""
-    f, override, update_something = args
+    f, override, do_not_update = args
     sub_id = str(f.get("id"))
     missing = _first_missing_input(f)
     if missing is not None:
-        return sub_id, missing
+        return sub_id, missing, f
 
     try:
-        run_all(f, override=override, update_something=update_something)
+        run_all(f, override=override, do_not_update=do_not_update)
     except Exception as e:
         logger.on_fail(f"run_all failed for {sub_id}: {e}")
-        return sub_id, f"error:{type(e).__name__}, {str(e)!s}"
-    return sub_id, None
+        logger.print_error()
+        return sub_id, f"error:{type(e).__name__}, {str(e)!s}", f
+    return sub_id, None, f
 
 
 if __name__ == "__main__":
@@ -570,22 +584,30 @@ if __name__ == "__main__":
     OUT_FOLDER.mkdir(parents=True, exist_ok=True)
     N_CPUS = 40  # set >1 to parallelize
     OVERRIDE = False
-    aggregate = False
+    aggregate = True
+    do_not_update = False
+    test = False
     if aggregate:
         collector = ExcelCollector(out_folder=OUT_FOLDER)
         collector.start()
     missing_rows: list[dict[str, str]] = []
+    total = 30645
     try:
-        # subjects = list(tqdm(loop_over_repaired_nako(test=True), total=10))
-        if aggregate:
-            subjects = list(tqdm(loop_over_repaired_nako(test=False, sort=aggregate), total=30645))
+        if test:
+            subjects = loop_over_repaired_nako(test=True)
+            total = 10
+            aggregate = False
+        elif aggregate:
+            subjects = loop_over_repaired_nako(test=False, sort=aggregate)
         else:
+            # subjects = tqdm(loop_over_repaired_nako(test=False, sort=aggregate), total=30645)
             l = loop_over_repaired_nako(test=False, sort=aggregate)
-            subjects = list(tqdm([next(l) for _ in range(1000)], total=1000))
+            total = 1000
+            subjects = iter([next(l) for _ in range(total)])
+
         if N_CPUS <= 1:
             for f in subjects:
-                sub_id, missing = _run_one((f, OVERRIDE, not aggregate))
-
+                sub_id, missing, _ = _run_one((f, OVERRIDE, do_not_update))
                 if missing is not None:
                     logger.on_fail("missing", list(f.keys()), missing)
                     missing_rows.append({"subject": sub_id, "missing": missing})
@@ -593,17 +615,27 @@ if __name__ == "__main__":
                 if aggregate:
                     collector.submit(sub_id, _final_json_path(f))
         else:
-            id_to_f = {str(f.get("id")): f for f in subjects}
+            from itertools import islice
+
             with ProcessPoolExecutor(max_workers=N_CPUS) as ex:
-                futs = {ex.submit(_run_one, (f, OVERRIDE, not aggregate)): str(f.get("id")) for f in subjects}
-                for fut in as_completed(futs):
-                    sub_id, missing = fut.result()
-                    if missing is not None:
-                        logger.on_fail("missing", (sub_id), missing)
-                        missing_rows.append({"subject": sub_id, "missing": missing})
-                        continue
-                    if aggregate:
-                        collector.submit(sub_id, _final_json_path(id_to_f[sub_id]))
+                batch_size = 1000
+                l = tqdm(total=total)
+                while True:
+                    gc.collect()
+                    futs = [ex.submit(_run_one, (f, OVERRIDE, do_not_update)) for f in list(islice(subjects, batch_size))]
+
+                    if not futs:
+                        break
+                    for fut in as_completed(futs):
+                        l.update(1)
+                        sub_id, missing, f = fut.result()
+                        if missing is not None:
+                            logger.on_fail("missing", (sub_id), missing)
+                            missing_rows.append({"subject": sub_id, "missing": missing})
+                            continue
+                        if aggregate:
+                            collector.submit(sub_id, _final_json_path(f))
+
     finally:
         if aggregate:
             collector.close()
