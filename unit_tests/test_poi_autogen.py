@@ -100,7 +100,7 @@ class TestPOI(unittest.TestCase):
         expected_affine[:3, 3] = origin
 
         # Check that the 'affine' property returns the expected value
-        assert assert np.allclose(poi.affine,expected_affine,rtol=1e-5,atol=1e-5)
+        assert np.allclose(poi.affine, expected_affine, rtol=1e-5, atol=1e-5)
 
     def test_affine_property_2(self):
         for _ in range(10):
