@@ -886,7 +886,7 @@ def plot_cobb_angle(
 
 def plot_cobb_and_lordosis_and_kyphosis(
     jpg_path: str | Path | None,
-    poi: POI,
+    poi: POI | Path,
     img: Image_Reference,
     seg: Image_Reference | None = None,
     line_len=100,
@@ -938,6 +938,8 @@ def plot_cobb_and_lordosis_and_kyphosis(
         >>> print(lordosis_kyphosis)
         {'cervical_lordosis': 35.2, 'thoracic_kyphosis': 41.5, 'lumbar_lordosis': 48.1}
     """
+    if not isinstance(poi, POI):
+        poi = POI.load(poi)
     out_cobb, frame1 = plot_cobb_angle(
         None,
         poi,

@@ -757,7 +757,7 @@ def _compute_t2_signal_ratio(
     if info.signal_values:
         return raw
     if t2w_nii.shape != nii.shape:
-        t2w_nii.resample_from_to_(nii)
+        t2w_nii.resample_from_to_(nii, verbose=False)
     structure_mask = nii.extract_label(label)
     eroded_mask = structure_mask.erode_msk(erode, connectivity=1, verbose=False)
     structure_mask = eroded_mask if eroded_mask.sum() != 0 else structure_mask

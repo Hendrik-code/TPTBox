@@ -288,10 +288,10 @@ def body_composition_score(
         ]
 
     if vibe_seg.shape != vert.shape:
-        vibe_seg = vibe_seg.resample_from_to(vert)
+        vibe_seg = vibe_seg.resample_from_to(vert, verbose=False)
 
     if spine.shape != vert.shape:
-        spine = spine.resample_from_to(vert)
+        spine = spine.resample_from_to(vert, verbose=False)
 
     body_mask = spine.extract_label([Location.Vertebra_Corpus, Location.Vertebra_Corpus_border])
 
@@ -487,15 +487,15 @@ def muscle_fat_infiltration(
     if erode is None:
         erode = {"all_muscle": 1, "iliopsoas_left": 1, "iliopsoas_right": 1, "autochthon_left": 2, "autochthon_right": 2, "muscle_other": 1}
     if water.shape != vibe_seg.shape:
-        vibe_seg = vibe_seg.resample_from_to(water)
+        vibe_seg = vibe_seg.resample_from_to(water, verbose=False)
     if fat.shape != water.shape:
-        fat = fat.resample_from_to(water)
+        fat = fat.resample_from_to(water, verbose=False)
     if vert is not None and vert.shape != water.shape:
-        vert = vert.resample_from_to(water)
+        vert = vert.resample_from_to(water, verbose=False)
     if spine is not None and spine.shape != water.shape:
-        spine = spine.resample_from_to(water)
+        spine = spine.resample_from_to(water, verbose=False)
     if roi is not None and roi.shape != water.shape:
-        roi = roi.resample_from_to(water)
+        roi = roi.resample_from_to(water, verbose=False)
 
     # ------------------------------------------------------------------
     # Muscle label definitions
@@ -675,7 +675,7 @@ def torso_vat_sat_muscle_mass(
     fails, NaN values are returned together with the failure reason.
     """
     if roi.shape != vibe_seg.shape:
-        roi = roi.resample_from_to(vibe_seg)
+        roi = roi.resample_from_to(vibe_seg, verbose=False)
 
     # Restrict computation to the requested ROI.
     body_comp = vibe_seg * roi.extract_label(roi_ids)
