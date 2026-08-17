@@ -25,7 +25,6 @@ from TPTBox.segmentation import (
 | `run_totalvibeseg(img_nii, ...)` | `VibeSeg/vibeseg.py` | Run TotalVibeSeg — extended label set |
 | `run_nnunet(img_nii, model_dir, ...)` | `VibeSeg/vibeseg.py` | Generic nnU-Net inference on a single NIfTI |
 | `run_inference_on_file(path, ...)` | `nnUnet_utils/inference_api.py` | Low-level nnU-Net inference on a file path |
-| `extract_vertebra_bodies_from_VibeSeg(seg)` | `VibeSeg/vibeseg.py` | Post-process VibeSeg output to isolate vertebra bodies |
 
 ## Dependencies
 
@@ -47,4 +46,44 @@ from TPTBox.segmentation import run_spineps
 ct = NII.load("ct.nii.gz", seg=False)
 vert_seg, subreg_seg = run_spineps(ct, model="small")
 vert_seg.save("vertebrae.nii.gz")
+```
+
+
+Full script example for VIBEseg:
+```python
+"""
+Example usage of VIBESeg for full-body MRI segmentation.
+
+This script demonstrates how to run the VIBESeg pipeline on a single
+NIfTI image and store the resulting segmentation to disk.
+"""
+
+from TPTBox.segmentation import run_vibeseg
+
+
+def main() -> None:
+    """
+    Run VIBESeg on a single input image.
+    """
+    image = "path_or_nii_of_img.nii.gz"
+    output_path = "VIBESeg.nii.gz"
+
+    run_vibeseg(
+        image=image,
+        out_path=output_path,
+        override=True,
+        gpu=0,
+        ddevice="cuda",
+        # dataset_id=100,  # defaults to the newest available model
+        padd=5,
+        # Update the memory estimation
+        memory_base=5000,  # Base memory in MB, default is 5GB
+        memory_factor=160,  # prod(shape)*memory_factor/1000, 160 -> 30 GB
+        memory_max=16000,  # in MB, here is 16GB
+        wait_till_gpu_percent_is_free=0.1,
+    )
+
+
+if __name__ == "__main__":
+    main()
 ```

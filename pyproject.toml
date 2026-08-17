@@ -7,7 +7,7 @@ authors = [
     "Hendrik Möller <hendrik.moeller@tum.de>",
 ]
 repository = "https://github.com/Hendrik-code/TPTBox"
-license = "GNU AFFERO GENERAL PUBLIC LICENSE v3.0, 19 November 2007"
+license = "Apache License Version 2.0, January 2004"
 readme = "README.md"
 packages = [{ include = "TPTBox" }]
 
@@ -194,6 +194,8 @@ ignore = [
     "ANN202",
     # En-dashes (–) in docstrings are legitimate range notation (e.g. "C1–C7")
     "RUF002",
+    "PLR0917", # Too many positional arguments
+    "UP038", #  Use `X | Y` in `isinstance` call instead of `(X, Y)`
     ]
 
 # Allow fix for all enabled rules (when `--fix`) is provided.

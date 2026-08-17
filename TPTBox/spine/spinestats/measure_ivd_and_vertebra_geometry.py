@@ -31,8 +31,11 @@ labels (i.e. label > 100), or ``0`` to evaluate vertebra labels instead
 (i.e. label > 0).
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from math import ceil
+from pathlib import Path
 
 import numpy as np
 import trimesh
@@ -54,6 +57,7 @@ def measure_ivd_and_vertebra_geometry(
     t2w: NII | None,
     vert: NII,
     spine: NII,
+    buffer_poi: Path | None = None,
     step_size_mm: float = 0.5,
     instance_labels: list[int] | None = None,
     structure_label: int = 100,
@@ -159,10 +163,14 @@ def measure_ivd_and_vertebra_geometry(
             Location.Vertebra_Corpus,
             Location.Endplate,
         ],
+        buffer_file=buffer_poi,
+        save_buffer_file=True,
     )
     if instance_labels is None:
         instance_labels = [int(i) for i in vert.unique() if i > structure_label and i < structure_label + 100]
     for label in instance_labels:
+        if label == 26:
+            continue
         try:
             raw = {}
             # Isolate the current structure (disc or vertebra).
@@ -208,28 +216,28 @@ _RESULT_FIELDS = (
 )
 
 
-def _result_from_info(info: "_StructureMeasurements") -> dict[str, float]:
+def _result_from_info(info: _StructureMeasurements) -> dict[str, float]:
     """Build the public result dict (see Returns section of the public API) from a filled-in measurement object."""
     return {
-        "volume_voxel": info.volume_voxel,
-        "volume_mesh": info.volume_mesh,
-        "height_center": info.height_center,
-        "mean_height": info.mean_height,
-        "max_height": info.max_height,
-        "lower_10_percent_height": info.get_quantile(10),
-        "mean_diameter": info.mean_diameter,
-        "anterior_height_x1": info.anterior_height_x1,
-        "posterior_height_x2": info.posterior_height_x2,
-        "right_height_x3": info.right_height_x3,
-        "left_height_x4": info.left_height_x4,
-        "width_lateral_x5": info.width_lateral_x5,
-        "width_sagittal_x6": info.width_sagittal_x6,
-        "signal": info.signal,
-        "structure_signal": info.structure_signal,
-        "spinal_canal_signal": info.spinal_canal_signal,
-        "signal_old": info.signal_old,
-        "structure_signal_old": info.structure_signal_old,
-        "spinal_canal_signal_old": info.spinal_canal_signal_old,
+        "volume_voxel": round(info.volume_voxel, 4),
+        "volume_mesh": round(info.volume_mesh, 4),
+        "height_center": round(info.height_center, 4),
+        "mean_height": round(info.mean_height, 4),
+        "max_height": round(info.max_height, 4),
+        "lower_10_percent_height": round(info.get_quantile(10), 4),
+        "mean_diameter": round(info.mean_diameter, 4),
+        "anterior_height_x1": round(info.anterior_height_x1, 4),
+        "posterior_height_x2": round(info.posterior_height_x2, 4),
+        "right_height_x3": round(info.right_height_x3, 4),
+        "left_height_x4": round(info.left_height_x4, 4),
+        "width_lateral_x5": round(info.width_lateral_x5, 4),
+        "width_sagittal_x6": round(info.width_sagittal_x6, 4),
+        "signal": round(info.signal, 4),
+        "structure_signal": round(info.structure_signal, 4),
+        "spinal_canal_signal": round(info.spinal_canal_signal, 4),
+        "signal_old": round(info.signal_old, 4),
+        "structure_signal_old": round(info.structure_signal_old, 4),
+        "spinal_canal_signal_old": round(info.spinal_canal_signal_old, 4),
     }  # type: ignore
 
 
@@ -630,7 +638,7 @@ def _max_diameter_in_plane(ray_vector, v1, v2, mesh, diameter: float = 30, step_
     return out
 
 
-def _compute_directional_heights_widths(nii: NII, subreg: NII, poi, label: int = 123, step_size_mm: float = 0.5, raw: dict | None = None):
+def _compute_directional_heights_widths(nii: NII, subreg: NII, poi, label: int = 123, step_size_mm: float = 0.5, raw: dict | None = None):  # noqa: ARG001
     """Compute the x1-x6 directional heights and widths for one structure (stage 2).
 
     How it's computed
@@ -749,7 +757,7 @@ def _compute_t2_signal_ratio(
     if info.signal_values:
         return raw
     if t2w_nii.shape != nii.shape:
-        t2w_nii.resample_from_to_(nii)
+        t2w_nii.resample_from_to_(nii, verbose=False)
     structure_mask = nii.extract_label(label)
     eroded_mask = structure_mask.erode_msk(erode, connectivity=1, verbose=False)
     structure_mask = eroded_mask if eroded_mask.sum() != 0 else structure_mask

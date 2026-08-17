@@ -123,7 +123,7 @@ class SegmentationMesh(Mesh3D):
         # Force dtype to uint
         if np.issubdtype(int_arr.dtype, np.floating):
             print("input is of type float, converting to int")
-            int_arr.astype(np.uint16)
+            int_arr = int_arr.astype(np.uint16)  # astype returns a new array; the result was discarded
         # calculate bounding box cutout
         bbox_crop = np_bbox_binary(int_arr, px_dist=2)
         x1, y1, z1 = bbox_crop[0].start, bbox_crop[1].start, bbox_crop[2].start

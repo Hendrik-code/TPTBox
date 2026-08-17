@@ -414,14 +414,9 @@ def compute_lordosis_and_kyphosis(poi: POI, project_2D=True) -> dict[str, float 
     poi = poi.copy()
 
     for k, i in curvature_definition.items():
-        out[k] = compute_angel_between_two_points_(
-            poi,
-            i.get_start_vert(poi),
-            i.get_stop_vert(poi),
-            "P",
-            i.start_move,
-            i.stop_move,
-            project_2D,
+        out[k] = round(
+            compute_angel_between_two_points_(poi, i.get_start_vert(poi), i.get_stop_vert(poi), "P", i.start_move, i.stop_move, project_2D),
+            4,
         )
     return out
 
@@ -559,7 +554,7 @@ def compute_max_cobb_angle(
             if cos_dis < cos_new:
                 cos_dis = cos_new
                 apex = i.value
-    return max_angle, from_vert, to_vert, apex
+    return round(max_angle, 4), from_vert, to_vert, apex
 
 
 def compute_max_cobb_angle_multi(
@@ -670,19 +665,40 @@ def compute_max_cobb_angle_multi(
 
 
 def _add_artificial_ivd(poi: POI) -> POI:
-    """Insert synthetic IVD centroids midway between adjacent vertebra centroids if missing."""
-    ## ADD IVD if nessasary
-    if 100 not in poi.keys_subregion():
-        last = None
-        last_id = 1
-        for j in Vertebra_Instance.order():
-            if (j, 50) in poi:
-                current = np.array(poi[j, 50])
-                if last is not None:
-                    poi[last_id, 100] = tuple((last + current) / 2)
-                last = current
-                last_id = j.value
-    #####
+    """Insert synthetic IVD landmarks (center + superior/inferior) wherever they are missing.
+
+    For every adjacent pair of vertebrae (upper, lower) that both have a centroid,
+    a missing IVD landmark on the ``upper`` vertebra is synthesized as follows,
+    using the median endplate centers when available:
+
+    - ``Vertebra_Disc_Superior`` (upper side of the disc)  -> upper's inferior endplate median
+      (fallback: upper's centroid).
+    - ``Vertebra_Disc_Inferior`` (lower side of the disc)  -> lower's superior endplate median
+      (fallback: lower's centroid).
+    - ``Vertebra_Disc`` (disc center) -> midpoint of the two above.
+
+    This makes the Cobb / lordosis / kyphosis paths degrade gracefully when a
+    single IVD is missing (e.g. severe degeneration), instead of raising
+    KeyError.
+    """
+    inf_med = Location.Additional_Vertebral_Body_Middle_Inferior_Median.value
+    sup_med = Location.Additional_Vertebral_Body_Middle_Superior_Median.value
+    disc = Location.Vertebra_Disc.value
+    disc_sup = Location.Vertebra_Disc_Superior.value
+    disc_inf = Location.Vertebra_Disc_Inferior.value
+
+    ordered = [v for v in Vertebra_Instance.order() if (v.value, 50) in poi]
+    for i in range(len(ordered) - 1):
+        uv = ordered[i].value
+        lv = ordered[i + 1].value
+        up = np.array(poi[uv, inf_med]) if (uv, inf_med) in poi else np.array(poi[uv, 50])
+        lo = np.array(poi[lv, sup_med]) if (lv, sup_med) in poi else np.array(poi[lv, 50])
+        if (uv, disc_sup) not in poi:
+            poi[uv, disc_sup] = tuple(up)
+        if (uv, disc_inf) not in poi:
+            poi[uv, disc_inf] = tuple(lo)
+        if (uv, disc) not in poi:
+            poi[uv, disc] = tuple((up + lo) / 2)
     return poi
 
 
@@ -734,8 +750,6 @@ def plot_compute_lordosis_and_kyphosis(
     poi = _add_artificial_ivd(poi)
     out = []
     text_out = []
-    last_t = _get_last_thoracic(poi)
-    last_l = _get_last_lumbar(poi)
     for definition in curvature_definition.values():
         for id1, vert_id1_mv in [
             (definition.get_start_vert(poi), definition.start_move),
@@ -759,7 +773,7 @@ def plot_compute_lordosis_and_kyphosis(
         vert = round((id1.value + id2.value) / 2)
         while (vert, 50) not in poi and vert != 0:
             vert -= 1
-        text_out.append((vert, (f"{str(name).split('_')[-1]}: {v:.1f}°", 25)))
+        text_out.append((vert, (f"{v:.1f}° - {str(name).split('_')[-1]}", 25)))
 
     poi.info["line_segments_sag"] = out + poi.info.get("line_segments_sag", [])
     poi.info["text_sag"] = text_out + poi.info.get("text_sag", [])
@@ -872,7 +886,7 @@ def plot_cobb_angle(
 
 def plot_cobb_and_lordosis_and_kyphosis(
     jpg_path: str | Path | None,
-    poi: POI,
+    poi: POI | Path,
     img: Image_Reference,
     seg: Image_Reference | None = None,
     line_len=100,
@@ -924,6 +938,8 @@ def plot_cobb_and_lordosis_and_kyphosis(
         >>> print(lordosis_kyphosis)
         {'cervical_lordosis': 35.2, 'thoracic_kyphosis': 41.5, 'lumbar_lordosis': 48.1}
     """
+    if not isinstance(poi, POI):
+        poi = POI.load(poi)
     out_cobb, frame1 = plot_cobb_angle(
         None,
         poi,

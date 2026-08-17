@@ -72,7 +72,6 @@ from TPTBox.logger.log_file import Log_Type
 if TYPE_CHECKING:
     from stl.mesh import Mesh
     from torch import device
-MODES = Literal["constant", "nearest", "reflect", "wrap"]
 _unpacked_nii = tuple[np.ndarray, AFFINE, nib.nifti1.Nifti1Header]
 _formatwarning = warnings.formatwarning
 
@@ -97,6 +96,33 @@ _dtype_max = {
 }  # uint32 not supported by nifty
 _dtype_u = {"uint8", "uint16"}
 _dtype_non_u = {"int8", "int16"}
+
+
+def _smallest_int_dtype(arr: np.ndarray, unsigned: bool) -> type:
+    """Smallest integer dtype that can represent every value in ``arr``.
+
+    Both bounds are considered: picking on ``max()`` alone silently wraps negative
+    values, because the casts here use ``casting="unsafe"``.
+
+    Args:
+        arr: Array whose value range determines the dtype.
+        unsigned: If True, choose an unsigned type (requires ``arr.min() >= 0``).
+
+    Returns:
+        The selected numpy dtype.
+    """
+    mi = arr.min()
+    ma = arr.max()
+    if unsigned:
+        assert mi >= 0, f"an unsigned dtype requires non-negative values, but the minimum is {mi}"
+        for cand, limit in ((np.uint8, 256), (np.uint16, 65536), (np.uint32, 2**32)):
+            if ma < limit:
+                return cand
+        return np.uint64
+    for cand, limit in ((np.int8, 128), (np.int16, 32768), (np.int32, 2**31)):
+        if ma < limit and mi >= -limit:
+            return cand
+    return np.int64
 
 
 def _check_if_nifty_is_lying_about_its_dtype(self: NII):
@@ -240,7 +266,7 @@ class NII(NII_Math):
         self.set_description(desc)
         if seg:
             self._unpack()
-            if isinstance(self.dtype,np.floating):
+            if np.issubdtype(self.dtype,np.floating):
                 self.set_dtype_("smallest_uint")
 
 
@@ -672,7 +698,7 @@ class NII(NII_Math):
             arr = arr.astype(np.uint8)
         if arr.dtype == np.float16:
             arr = arr.astype(np.float32)
-        if self.seg and isinstance(arr, (np.floating, float)):
+        if self.seg and np.issubdtype(arr.dtype, np.floating):
             arr = arr.astype(np.int32)
         #if self.dtype == arr.dtype: #type: ignore
         nii:_unpacked_nii = (arr,self.affine,self.header.copy())
@@ -712,22 +738,10 @@ class NII(NII_Math):
             The NII with the new dtype (``self`` when ``inplace=True``, a new NII otherwise).
         """
         sel = self if inplace else self.copy()
-        if dtype == "smallest_uint":
+        arr = None  # get_array() copies the whole volume; fetch it at most once
+        if dtype in ("smallest_uint", "smallest_int"):
             arr = self.get_array()
-            if arr.max()<256:
-                dtype = np.uint8
-            elif arr.max()<65536:
-                dtype = np.uint16
-            else:
-                dtype = np.int32
-        elif dtype == "smallest_int":
-            arr = self.get_array()
-            if arr.max()<128:
-                dtype = np.int8
-            elif arr.max()<32768:
-                dtype = np.int16
-            else:
-                dtype = np.int32
+            dtype = _smallest_int_dtype(arr, unsigned=dtype == "smallest_uint")
         if self.__unpacked:
             self._unpack()
             sel._arr = sel._arr.astype(dtype)
@@ -735,7 +749,9 @@ class NII(NII_Math):
         else:
             sel.nii.set_data_dtype(dtype)
             if sel.nii.get_data_dtype() != self.dtype: #type: ignore
-                sel.nii = Nifti1Image(self.get_array().astype(dtype,casting=casting,order=order),self.affine,self.header)
+                if arr is None:
+                    arr = self.get_array()
+                sel.nii = Nifti1Image(arr.astype(dtype,casting=casting,order=order),self.affine,self.header)
 
         return sel
     def set_dtype_(self, dtype: type | Literal['smallest_uint', 'smallest_int'] = np.float32, order: Literal["C", "F", "A", "K"] = 'K', casting: Literal["no", "equiv", "safe", "same_kind", "unsafe"] = "unsafe") -> Self:
@@ -808,7 +824,7 @@ class NII(NII_Math):
             new_img = arr, new_aff,self.header
             log.print("Image reoriented from", nio.ornt2axcodes(ornt_fr), "to", axcodes_to,verbose=verbose)
         else:
-            return self if not inplace else self.copy()
+            return self if inplace else self.copy()
         if inplace:
             self.nii = new_img
             return self
@@ -1124,13 +1140,13 @@ class NII(NII_Math):
             NII: A new NII object with the resampled image data.
         """
         if isinstance(voxel_spacing, (int,float)):
-            voxel_spacing =(voxel_spacing for _ in range(min(3,self.affine.shape[0]-1)))
+            voxel_spacing =tuple(voxel_spacing for _ in range(min(3,self.affine.shape[0]-1)))
         n = self.dims
         while  n> len(voxel_spacing):
             voxel_spacing = (*voxel_spacing, -1)
         if all(a in (-1, b) for a,b in zip(voxel_spacing, self.zoom)):
             log.print(f"Image already resampled to voxel size {self.zoom}",verbose=verbose)
-            return self.copy() if inplace else self
+            return self if inplace else self.copy()
 
         c_val = self.get_c_val(c_val)
         # resample to new voxel spacing based on the current x-y-z-orientation
@@ -1143,7 +1159,7 @@ class NII(NII_Math):
         voxel_spacing = tuple([v if v != -1 else z for v,z in zip_strict(voxel_spacing,zms)])
         if np.isclose(voxel_spacing, self.zoom,atol=atol).all():
             log.print(f"Image already resampled to voxel size {self.zoom}",verbose=verbose)
-            return self.copy() if inplace else self
+            return self if inplace else self.copy()
 
         # Calculate new shape
         new_shp = tuple(np.rint([shp[i] * zms[i] / voxel_spacing[i] for i in range(len(voxel_spacing))]).astype(int))
@@ -1163,7 +1179,7 @@ class NII(NII_Math):
         return self.rescale( voxel_spacing=voxel_spacing, c_val=c_val, verbose=verbose,mode=mode, inplace=True)
 
     def resample_from_to(self, to_vox_map:Image_Reference|Has_Grid|tuple[SHAPE,AFFINE,ZOOMS], mode:MODES='nearest', order: int |None=None, c_val=None, inplace = False,verbose:logging=True,align_corners:bool=False) -> Self:
-        r"""Self will be resampled in coordinate of given other image. Adheres to global space not to local pixel space.
+        """Self will be resampled in coordinate of given other image. Adheres to global space not to local pixel space.
 
         Args:
             to_vox_map (Image_Reference|Proxy): If object, has attributes shape giving input voxel shape, and affine giving mapping of input voxels to output space. If length 2 sequence, elements are (shape, affine) with same meaning as above. The affine is a (4, 4) array-like.\n
@@ -2086,6 +2102,11 @@ class NII(NII_Math):
         - bool: True if the segmentation is within the defined tolerance of the
         border, False otherwise.
         """
+        # compute_crop(raise_error=False) returns full-extent slices for an empty mask rather
+        # than None, so an explicit emptiness check is needed - otherwise "nothing segmented"
+        # is reported as "touching the border".
+        if self.is_empty:
+            return False
         slices = self.compute_crop(minimum,dist=0,use_mm=use_mm,raise_error=False)
         if slices is None:
             return False
@@ -2390,9 +2411,10 @@ class NII(NII_Math):
             return self.save_nrrd(file,verbose=verbose)
 
         arr = self.get_array() if not self.seg else self.get_seg_array()
-        if isinstance(arr,np.floating) and self.seg:
-            self.set_dtype_("smallest_uint")
-            arr = self.get_array() if not self.seg else self.get_seg_array()
+        if self.seg and np.issubdtype(arr.dtype, np.floating):
+            # A segmentation must never be written out as float. Cast the local array:
+            # `save` is a query and must not mutate `self`.
+            arr = arr.astype(_smallest_int_dtype(arr, unsigned=True))
 
         self.header.set_data_dtype(arr.dtype)
         out = Nifti1Image(arr, self.affine,self.header)#,dtype=arr.dtype)
@@ -2635,7 +2657,8 @@ class NII(NII_Math):
         elif isinstance(key,np.ndarray):
             return self.get_array()[key]
         elif isinstance(key,slice):
-            self.__getitem__((key,Ellipsis,Ellipsis))
+            # pad with full slices for the trailing dimensions; Ellipsis is rejected above
+            return self.__getitem__((key, *(slice(None) for _ in range(len(self.shape) - 1))))
         else:
             raise TypeError("Invalid argument type:", type(key))
     def __setitem__(self, key,value):
@@ -2731,19 +2754,19 @@ class NII(NII_Math):
         assert self.seg, "extracting a label only makes sense for a segmentation mask"
         if label is None:
             if keep_label:
-                return self.copy() if inplace else self
+                return self if inplace else self.copy()
             else:
                 return self.clamp(0,1,inplace=inplace)
         seg_arr = self.get_seg_array()
 
+        if isinstance(label,str):
+            label = int(label)  # a str is also a Sequence, so this must come first
         if isinstance(label, Sequence):
             labels:int|list[int] = [idx.value if isinstance(idx,Enum) else idx for idx in label]
             assert 0 not in labels, 'Zero label does not make sense. This is the background'
         else:
             if isinstance(label,Enum):
                 label = label.value
-            if isinstance(label,str):
-                label = int(label)
 
             assert label != 0, 'Zero label does not make sense. This is the background'
             labels = label
@@ -2774,6 +2797,8 @@ class NII(NII_Math):
     def remove_labels(self,label:int|Enum|Sequence[int]|Sequence[Enum], inplace=False, verbose:logging=True, removed_to_label=0) -> Self:
         """If this NII is a segmentation you can single out one label."""
         assert label != 0, 'Zero label does not make sens.  This is the background'
+        if isinstance(label,str):
+            label = int(label)  # a str is also a Sequence, so this must come first
         if not isinstance(label,Sequence):
             label = [label] # type: ignore
         flat: list[int] = []
