@@ -84,6 +84,10 @@ def measure_ivd_and_vertebra_geometry(
         orientation and, for the signal ratio, the spinal canal reference
         region.
 
+    buffer_poi : Path, optional
+        Cache file where the intermediate POI results are read from / written
+        to (via ``calc_poi_from_subreg_vert``). ``None`` disables caching.
+
     step_size_mm : float, default=0.5
         Grid spacing (in mm) used when sampling height/diameter profiles
         across the structure's surface. Smaller values are more accurate
@@ -98,6 +102,11 @@ def measure_ivd_and_vertebra_geometry(
         valid) or vertebra mode (``0``: only labels > 0 are valid). See the
         module docstring for details. Any value other than ``100`` is
         currently treated like vertebra mode for the minimum-label check.
+
+    erode : int, default=1
+        Number of voxels to erode each structure mask before computing the
+        peak-centered T2 signal statistics. Reduces contamination from
+        partial-volume voxels at the boundary. Set to 0 to disable erosion.
 
     Returns:
     -------

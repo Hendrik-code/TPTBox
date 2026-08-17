@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from TPTBox.core.nii_wrapper import NII
 
 
-def _read(filename, skip_voxels=False, verbos=True):
+def _read(filename, skip_voxels=False, verbose=True):
     r"""Read segmentation metadata from a .seg.nrrd file or NIFTI file and store it in a dict.
 
     Example header:
@@ -258,7 +258,9 @@ def _read(filename, skip_voxels=False, verbos=True):
         else:
             segment_id = _generate_unique_segment_id(segment_ids)
             segment_ids.add(segment_id)
-            log.on_fail(f"Segment ID was not found for index {segment_index}, use automatically generated ID: {segment_id}", verbose=verbos)
+            log.on_fail(
+                f"Segment ID was not found for index {segment_index}, use automatically generated ID: {segment_id}", verbose=verbose
+            )
 
         segment_info = {}
         segment_info["id"] = segment_id
@@ -637,7 +639,7 @@ def remove_not_supported_values(nrrd_dict: dict) -> None:
             i.pop("extent", None)
 
 
-def load_slicer_nrrd(filename: str | Path, seg: bool, skip_voxels: bool = False, verbos: bool = True) -> NII:
+def load_slicer_nrrd(filename: str | Path, seg: bool, skip_voxels: bool = False, verbose: bool = True) -> NII:
     """Load a 3D Slicer ``.seg.nrrd`` segmentation file and return a NII wrapper.
 
     Reads the NRRD header and optional voxel data, converts the LPS affine to
@@ -666,7 +668,7 @@ def load_slicer_nrrd(filename: str | Path, seg: bool, skip_voxels: bool = False,
     from TPTBox import NII
 
     # Read segmentation
-    nrrd_dict = _read(filename, skip_voxels=skip_voxels, verbos=verbos)
+    nrrd_dict = _read(filename, skip_voxels=skip_voxels, verbose=verbose)
 
     # Voxel array
     arr = nrrd_dict.pop("voxels")

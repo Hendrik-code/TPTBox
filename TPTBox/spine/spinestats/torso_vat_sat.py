@@ -249,7 +249,7 @@ def body_composition_score(
     - ``12``: VIBESeg-12 label set.
     regions : list[tuple[Vertebra_Instance, Vertebra_Instance]], optional
         Vertebral ranges to analyse. Each tuple specifies the first and last
-        vertebra (inclusive). Defaults to T12–L1 and L3.
+        vertebra (inclusive). Defaults to ``[(T12, L1), (L3, L4), (L3, L3)]``.
 
     height_m : float, optional
         Patient height in metres. If provided, the skeletal muscle index
@@ -613,11 +613,11 @@ def muscle_fat_infiltration(
 def torso_vat_sat_muscle_mass(
     vibe_seg: NII, roi: NII, dataset_id: Literal[100, 12] = 100, roi_ids: tuple[int, ...] = tuple(range(3, 9)), return_nii: bool = False
 ) -> tuple[dict, NII | None]:
-    """Compute visceral adipose tissue (VAT), subcutaneous adipose tissue (SAT), and muscle volume in mm from a torso segmentation.
+    """Compute visceral adipose tissue (VAT), subcutaneous adipose tissue (SAT), and muscle volume (in mm³) from a torso segmentation.
 
     The segmentation is optionally restricted to the supplied ROI before
     calculating tissue volumes. Volumes are reported in physical units
-    (voxel count × voxel volume).
+    (voxel count × voxel volume, i.e. mm³).
 
     Parameters
     ----------

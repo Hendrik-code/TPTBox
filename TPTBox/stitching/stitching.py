@@ -198,24 +198,25 @@ def get_max_affine_and_shape(
     return nib.Nifti1Image(np.zeros(shape.astype(int), dtype=dtype), affine)  # type: ignore
 
 
-def compute_crop_slice(nii: Nifti1Image, minimum=0, dist=0) -> tuple[slice, slice, slice]:
-    """Computes the minimum slice that removes unused space from the image and returns the corresponding slice tuple along with the origin shift required for centroids.
+def compute_crop_slice(nii: Nifti1Image, minimum: float = 0, dist: int = 0) -> tuple[slice, slice, slice]:
+    """Compute the tight 3-D crop slice that removes empty space from a NIfTI volume.
+
+    A voxel is considered "filled" when its value is strictly greater than
+    ``minimum``.  The returned slice tuple can be applied via ``nii.slicer``
+    to crop the image.
 
     Args:
-        minimum (int): The minimum value of the array (0 for MRI, -1024 for CT). Default value is 0.
-        dist (int): The amount of padding to be added to the cropped image. Default value is 0.
-        other_crop (tuple[slice,...], optional): A tuple of slice objects representing the slice of an other image to be combined with the current slice. Default value is None.
+        nii: Input NIfTI image whose bounding box is computed.
+        minimum: Background threshold. Voxels above this value delimit the crop
+            (0 for MRI, -1024 for CT).
+        dist: Padding in millimetres added on every side of the crop. Converted
+            to voxels using the image's zooms.
 
     Returns:
-        ex_slice: A tuple of slice objects that need to be applied to crop the image.
-        origin_shift: A tuple of integers representing the shift required to obtain the centroids of the cropped image.
+        A 3-tuple of ``slice`` objects to apply along the (X, Y, Z) axes.
 
-    Note:
-        - The computed slice removes the unused space from the image based on the minimum value.
-        - The padding is added to the computed slice.
-        - If the computed slice reduces the array size to zero, a ValueError is raised.
-        - If other_crop is not None, the computed slice is combined with the slice of another image to obtain a common region of interest.
-        - Only None slice is supported for combining slices.
+    Raises:
+        ValueError: If no voxels exceed ``minimum`` (crop would be empty).
     """
     shp = nii.shape
     zms = nii.header.get_zooms()  # type: ignore
@@ -323,7 +324,7 @@ def n4_bias_field_correction(
 
             Parameters
             ----------
-                img: NiftiImage
+                nib_image: nibabel Nifti1Image
 
             Returns:
             -------
@@ -493,6 +494,9 @@ def main(  # noqa: C901
         dtype: Output data type. Accepts a Python type (e.g. ``float``,
             ``np.uint16``) or a string key from the internal type mapping.
         save: If True, writes the stitched image to ``output``.
+        ramp_path: Optional explicit output path for the ramp NIfTI. Only used
+            when ``store_ramp`` is True; when None the ramp path is derived
+            from ``output``.
 
     Returns:
         A 2-tuple ``(stitched_nii, ramp_nii)`` where ``ramp_nii`` is None

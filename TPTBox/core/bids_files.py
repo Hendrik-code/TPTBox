@@ -199,8 +199,6 @@ def Buffered_BIDS_Global_info(
         additional_key: Extra BIDS entity keys beyond the official spec that
             should not trigger validation warnings.
         verbose: Print progress and cache-status messages.
-        file_name_manipulation: Optional callable applied to each filename
-            before BIDS parsing, e.g. to normalise non-conformant names.
         sequence_splitting_keys: Keys used to group files into sequences
             (families).  Defaults to the library-level constant when
             ``None``.
@@ -478,6 +476,8 @@ class BIDS_Global_info:
         Args:
             sort: If ``True``, return subjects sorted alphabetically by
                 subject ID.
+            shuffle: If ``True``, return subjects in a random order. Ignored when
+                ``sort`` is also ``True``.
 
         Returns:
             A list of ``(subject_id, Subject_Container)`` pairs.
@@ -660,10 +660,15 @@ class BIDS_FILE:
 
     @property
     def file(self) -> dict[str, Path]:
-        """Returns a dict mapping file types to paths. ["nii.gz", "json", "png"] are automatic searched for.
+        """Return the dict of file-type → path for this BIDS entry.
+
+        On first access, sibling files with the same BIDS key and one of the
+        extensions ``nii.gz``, ``json``, ``png`` are auto-discovered next to
+        the primary file.
 
         Returns:
-            dict[str, Path]: _description_
+            Dict mapping file extension (e.g. ``"nii.gz"``, ``"json"``) to its
+            resolved :class:`~pathlib.Path`, sorted alphabetically by key.
         """
         if not self._checked:
             files = {p.parent for p in self._file.values()}
@@ -1031,12 +1036,12 @@ class BIDS_FILE:
         """Changes part of the path to generate new flies. The new parent will be derivatives as a default.
 
         Examples:
-        subreg_path = ct_bids.get_changed_path(file_type="nii.gz",parent = "derivatives",info={"seg": "subreg"}, format="cdt")
+        subreg_path = ct_bids.get_changed_path(file_type="nii.gz",parent = "derivatives",info={"seg": "subreg"}, bids_format="cdt")
 
         Args:
             file_type (str | None, optional): Override the file type, like nii.gz to json Defaults to "nii.gz".
 
-            format (str | None, optional): Changes the "format key" like ct, msk, T1w. Defaults to None.
+            bids_format (str | None, optional): Changes the "format key" like ct, msk, T1w. Defaults to None.
 
             parent (str, optional): derivatives or rawdata or any parent folder. Defaults to "derivatives".
 
@@ -1053,9 +1058,11 @@ class BIDS_FILE:
             dataset_path (str | None, optional): Override the dataset_path. Defaults to None.
 
             no_sorting_mode (bool): If true, will keep the order of the origin nii. Defaults to False
+            make_parent (bool, optional): If true, create missing parent directories for the returned path. Defaults to False.
+            non_strict_mode (bool, optional): If true, downgrade unknown BIDS entity errors to warnings and allow non-``sub``-prefixed keys. Defaults to False.
 
         Returns:
-            _type_: _description_
+            Path: The newly constructed BIDS-conform file path (not yet written to disk).
         """
         if info is None:
             info = {}
@@ -1951,13 +1958,16 @@ class Searchquery:
             return s
 
     def loop_list(self, sort=False) -> typing.Iterator[BIDS_FILE]:
-        """Returns an iterator. Flatten must be True.
+        """Iterate the flattened candidate list as individual BIDS_FILE objects.
+
+        Requires :meth:`flatten` to have been called first.
 
         Args:
-            sort (bool, optional): Sort alphabetically. Defaults to False.
+            sort (bool, optional): If True, iterate in alphabetical order.
+                Defaults to False.
 
         Returns:
-            typing.Iterator[BIDS_FILE]: _description_
+            Iterator over the matching :class:`BIDS_FILE` objects.
         """
         assert isinstance(self.candidates, list), "call flatten() before looping as a list"
         if sort:
@@ -1975,6 +1985,9 @@ class Searchquery:
         Args:
             sort (bool, optional): Sort alphabetically. Defaults to False.
             key_transform (typing.Callable[[BIDS_FILE], str | None]): provide alternative dict name for certain fils, if default should be used return None
+            key_addendum (list[str] | None, optional): Extra info-key names appended to each family's dict keys to
+                disambiguate otherwise-identical entries. Defaults to None.
+
         Returns:
             typing.Iterator[typing.Dict[str, BIDS_FILE | list[BIDS_FILE]]]
         """

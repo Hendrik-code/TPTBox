@@ -115,6 +115,7 @@ def run_vibeseg(
         keep_size: If True, keep the model's native output resolution instead of
             resampling back to the input image space.
         memory_max: MAX GPU memory in MB. Changes the super-batches are used. Might speed up inference. At least 8000
+        model_path: Optional override for the model weights directory. Defaults to the bundled model path.
         **args: Additional keyword arguments forwarded to ``run_inference_on_file``.
 
     Returns:
@@ -169,6 +170,17 @@ def run_nnunet(
         gpu: GPU device index to use for inference.
         ddevice: Compute device: ``"cuda"``, ``"cpu"``, or ``"mps"``.
         dataset_id: nnU-Net dataset identifier.
+        model_path: Optional override for the model weights directory. Defaults to the bundled path.
+        auto_download: If True, download missing model weights on first use. Defaults to False.
+        keep_size: If True, keep the model's native output resolution instead of resampling back. Defaults to False.
+        fill_holes: If True, fill holes in the output segmentation. Defaults to False.
+        logits: If True, also return raw softmax logits. Defaults to False.
+        mapping: Optional label remap dict applied to the segmentation. Defaults to None.
+        crop: If True, crop input images to their foreground bounding box before inference. Defaults to False.
+        max_folds: Limit the number of folds used for ensemble averaging. Defaults to None (use all).
+        mode: Resampling mode when mapping the output back to input space. Defaults to ``"nearest"``.
+        padd: Number of voxels to pad the image before inference. Defaults to 0.
+        key_ResEnc: Glob key used to locate ResEnc-style model folders under the dataset directory.
         **args: Additional keyword arguments forwarded to ``run_inference_on_file``.
     """
     run_inference_on_file(

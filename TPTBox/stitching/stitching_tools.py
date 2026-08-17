@@ -48,6 +48,8 @@ def stitching(
         dtype: NumPy dtype for the output array.
         match_histogram: If True, matches histograms between consecutive inputs.
         store_ramp: If True, also returns the per-volume blending weight array.
+        ramp_path: Optional explicit output path for the ramp NIfTI; forwarded to
+            :func:`stitching_raw`. Only used when ``store_ramp`` is True.
 
     Returns:
         A 2-tuple ``(stitched_nii, ramp_nii)`` as returned by

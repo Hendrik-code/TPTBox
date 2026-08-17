@@ -90,6 +90,9 @@ def calc_orientation_of_vertebra_PIR(
         do_fill_back (bool, optional): Whether to fill back. Defaults to False.
         spine_plot_path (None | str, optional): Path to spine plot. Defaults to None.
         save_normals_in_info (bool, optional): Whether to save normals in info. Defaults to False.
+        method (Literal["spline", "endplate"], optional): Strategy for the inferior-direction estimate — ``"endplate"``
+            uses vertebral endplate landmarks when available, ``"spline"`` uses the local spinal spline tangent.
+            Defaults to ``"endplate"``.
 
     Returns:
         Tuple[POI, NII | None]: Point of interest and filled back NII.

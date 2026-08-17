@@ -254,7 +254,10 @@ def compute_angel_between_two_points_(
             - "I" for Inferior.
         vert_id1_mv (MoveTo, optional): MoveTo instance indicating the position to consider for the first vertebra. Defaults to MoveTo.CENTER.
         vert_id2_mv (MoveTo, optional): MoveTo instance indicating the position to consider for the second vertebra. Defaults to MoveTo.CENTER.
-        project_2d (bool, optional): If True, computes the 2D projection of the angle. Defaults to False.
+        project_2D (bool, optional): If True, computes the 2D projection of the angle. Defaults to False.
+        use_ivd_direction (bool, optional): For coronal/right-directed angles, use the IVD direction (via
+            ``Location.Vertebra_Disc_Inferior``) instead of the vertebra direction for lumbar/thoracic ids
+            beyond ``IVD_MORE_ACCURATE``. Defaults to False.
 
     Returns:
         float | None: The computed angle in degrees. Returns None if either vertebra ID is invalid.
@@ -384,7 +387,7 @@ def compute_lordosis_and_kyphosis(poi: POI, project_2D=True) -> dict[str, float 
     Args:
         poi (POI): The points of interest object containing 3D coordinates for various vertebrae. It must include
             the vertebra direction information for proper calculation. (Location.Vertebra_Direction_Posterior)
-        project_2d (bool): If True, the calculation is done in 2D projection; otherwise, in 3D. Defaults to False.
+        project_2D (bool): If True, the calculation is done in 2D projection; otherwise, in 3D. Defaults to True.
 
     Returns:
         dict: A dictionary containing the following key-value pairs:
@@ -403,7 +406,7 @@ def compute_lordosis_and_kyphosis(poi: POI, project_2D=True) -> dict[str, float 
     Example:
         To compute the spinal angles for a given POI object:
 
-        >>> angles = compute_lordosis_and_kyphosis(poi, project_2d=True)
+        >>> angles = compute_lordosis_and_kyphosis(poi, project_2D=True)
         >>> print(angles)
         {'cervical_lordosis': 30.5, 'thoracic_kyphosis': 35.0, 'lumbar_lordosis': 45.2}
     """
@@ -480,7 +483,9 @@ def compute_max_cobb_angle(
             If not provided, defaults to all cervical, thoracic, and lumbar vertebrae.
         vert_id1_mv (MoveTo): Enum indicating the move direction for the first vertebra (default is MoveTo.TOP).
         vert_id2_mv (MoveTo): Enum indicating the move direction for the second vertebra (default is MoveTo.BOTTOM).
-        project_2d (bool): If True, the calculation is done in 2D projection; otherwise, in 3D. Defaults to False.
+        project_2D (bool): If True, the calculation is done in 2D projection; otherwise, in 3D. Defaults to True.
+        use_ivd_direction (bool, optional): For lumbar/thoracic ids beyond ``IVD_MORE_ACCURATE``, use the IVD direction
+            (via ``Location.Vertebra_Disc_Inferior``) instead of the vertebra direction. Defaults to False.
 
     Returns:
         tuple: A tuple containing the following elements:
@@ -501,7 +506,7 @@ def compute_max_cobb_angle(
     Example:
         To compute the maximum Cobb angle for a given POI object:
 
-        >>> max_angle, from_vert, to_vert, apex = compute_max_cobb_angle(poi, project_2d=True)
+        >>> max_angle, from_vert, to_vert, apex = compute_max_cobb_angle(poi, project_2D=True)
         >>> print(f"Max Angle: {max_angle}, From: {from_vert}, To: {to_vert}, Apex: {apex}")
         Max Angle: 35.6, From: 3, To: 12, Apex: 7
     """
@@ -595,6 +600,7 @@ def compute_max_cobb_angle_multi(
         vert_id1_mv (MoveTo): Enum indicating the move direction for the first vertebra (default is MoveTo.TOP).
         vert_id2_mv (MoveTo): Enum indicating the move direction for the second vertebra (default is MoveTo.BOTTOM).
         use_ivd_direction: Uses the IVD direction instead of the Vertebra direction for Lumbar and Thorax region.
+        project_2D (bool, optional): If True, the calculation is done in 2D projection; otherwise, in 3D. Defaults to True.
 
     Returns:
         list: A list of tuples, each containing:
@@ -723,6 +729,7 @@ def plot_compute_lordosis_and_kyphosis(
         img (Image_Reference): The reference image on which to plot the angles and lines.
         seg (Image_Reference | None): The segmentation image reference. Optional, can be None.
         line_len (int): The length of the lines representing the vertebrae directions (default is 100).
+        project_2D (bool, optional): If True, the angles are computed in the 2D sagittal projection; otherwise in 3D. Defaults to True.
 
     Returns:
         tuple: A tuple containing:
@@ -808,6 +815,9 @@ def plot_cobb_angle(
         threshold_deg (int): The angle threshold in degrees above which cobb angles are considered for plotting.
         vert_id1_mv (MoveTo): The MoveTo option for the first vertebra in each angle calculation.
         vert_id2_mv (MoveTo): The MoveTo option for the second vertebra in each angle calculation.
+        use_ivd_direction (bool, optional): For lumbar/thoracic ids beyond ``IVD_MORE_ACCURATE``, use the IVD direction
+            (via ``Location.Vertebra_Disc_Inferior``) instead of the vertebra direction. Defaults to False.
+        project_2D (bool, optional): If True, the underlying Cobb angles are computed as a 2D projection; otherwise in 3D. Defaults to True.
 
     Returns:
         tuple: A tuple containing:
@@ -906,6 +916,7 @@ def plot_cobb_and_lordosis_and_kyphosis(
         seg (Image_Reference | None): The segmentation image reference. Optional, can be None.
         line_len (int): The length of the lines representing the vertebrae directions (default is 100).
         threshold_deg (int): The threshold angle in degrees to identify significant Cobb angles (default is 10).
+        project_2D (bool, optional): If True, the underlying angles are computed as a 2D projection; otherwise in 3D. Defaults to True.
 
     Returns:
         tuple: A tuple containing:

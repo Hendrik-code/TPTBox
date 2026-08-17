@@ -396,8 +396,6 @@ def get_desc(self: POI_Global, region: int, subregion: int) -> tuple[str, str, s
     or the level-one-info enum name.
 
     Args:
-        self: The ``POI_Global`` instance providing ``info``,
-            ``level_one_info``, and ``level_two_info``.
         region: Region (vertebra) integer label.
         subregion: Subregion integer label.
 

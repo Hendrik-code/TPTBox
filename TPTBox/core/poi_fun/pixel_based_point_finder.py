@@ -61,6 +61,8 @@ def max_distance_ray_cast_pixel_level(
         normal_vector_points (Union[Tuple[Location, Location], DIRECTIONS], optional):
             Points defining the normal vector or the direction. Defaults to "R".
         start_point (Location, optional): Starting point of the ray. Defaults to Location.Vertebra_Corpus.
+        two_sided (bool, optional): If True, cast rays in both the positive and negative normal direction and keep
+            the further hit. Defaults to False.
         log (Logger_Interface, optional): Logger interface. Defaults to _log.
 
     Returns:

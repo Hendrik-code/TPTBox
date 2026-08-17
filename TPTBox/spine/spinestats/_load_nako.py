@@ -190,6 +190,10 @@ def loop_over_repaired_nako(
         dataset: Root path of the NAKO BIDS dataset.
         test: If True, restrict scanning to a single hard-coded subject subtree for quick runs.
         verbose: Log each subject id as it is processed.
+        sort: If True, iterate subjects in alphabetical order (see :meth:`BIDS_Global_info.iter_subjects`).
+        test_key: Path substring passed to the BIDS scanner's ``filter_file`` when ``test=True``; only paths
+            containing this substring are indexed. Defaults to a hard-coded example subject.
+        baseline_metadata: Path to the NAKO baseline CSV used to look up height metadata.
 
     Yields:
         Dict mapping short keys to ``BIDS_FILE`` entries for one subject.

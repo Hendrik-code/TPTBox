@@ -161,10 +161,18 @@ def _build_label_mapping(
 
 
 def build_dataset(cfg: DatasetConfig) -> None:
-    """Build a nnUnet dataset.
+    """Build a nnUNet dataset on disk from the configured file list.
+
+    Sets the ``nnUNet_raw`` / ``nnUNet_preprocessed`` / ``nnUNet_results``
+    environment variables from ``cfg.nnunet_base`` before importing nnUNet
+    helpers, builds the label mapping (including mirror pairs), and then
+    delegates to ``set_up_dataset`` / ``add_file`` / ``finalize_ds`` from the
+    ``_prep_ds`` module.
 
     Args:
-        cfg (DatasetConfig): _description_
+        cfg (DatasetConfig): Fully populated dataset configuration (ID,
+            trainer, spacing, augmentation counts, file pairs, output paths,
+            ...). See :class:`DatasetConfig`.
     """
     # ── nnUNet env MUST be set before any nnunet import ───────────────────────────
     # These are module-level so they take effect the moment this file is imported.

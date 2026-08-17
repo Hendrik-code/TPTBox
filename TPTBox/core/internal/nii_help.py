@@ -28,6 +28,8 @@ def secure_save(func, *, file_types=tuple(_supported_img_files)) -> Callable:
     Args:
         func (callable): The function to be wrapped. It should take a file path (`str`, `Path`, or `bids_files.BIDS_FILE`)
                          as one of its arguments.
+        file_types (tuple[str, ...], keyword-only): File-extension keys tried in order when a ``bids_files.BIDS_FILE`` is
+            passed in place of a path. Defaults to ``tuple(_supported_img_files)``.
 
     Returns:
         callable: The wrapped function with added safety mechanisms.

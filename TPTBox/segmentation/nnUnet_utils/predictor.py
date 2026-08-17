@@ -160,6 +160,7 @@ class nnUNetPredictor:
             cache_state_dicts: If ``True``, load all fold weights onto the
                 device up-front and cache the network instances. Reduces
                 per-sample latency at the cost of GPU memory.
+            logger: Logger used for progress and error output.
         """
         if isinstance(use_folds, str):
             use_folds = [use_folds]  # type: ignore
@@ -342,6 +343,7 @@ class nnUNetPredictor:
             save_or_return_probabilities: If ``True``, also return softmax
                 probabilities in addition to the label map. Currently raises
                 :class:`NotImplementedError` inside the conversion step.
+            logger: Logger used for progress and error output.
 
         Returns:
             The predicted segmentation array (or a tuple with probabilities if
@@ -402,6 +404,7 @@ class nnUNetPredictor:
         Args:
             data: Preprocessed image tensor with shape ``(C, X, Y, Z)``.
             attempts: Number of retry attempts on GPU OOM before raising.
+            logger: Logger used for progress and error output.
 
         Returns:
             Averaged raw logits tensor with shape
@@ -572,6 +575,9 @@ class nnUNetPredictor:
             input_image: Image tensor with shape ``(C, X, Y, Z)``.
             network: Optional network instance to use. Defaults to
                 ``self.network``.
+            idx: Fold index used only for progress reporting; forwarded to the
+                logger so multi-fold runs can be traced.
+            logger: Logger used for progress and error output.
 
         Returns:
             Aggregated logit array with shape ``(num_classes, X, Y, Z)``

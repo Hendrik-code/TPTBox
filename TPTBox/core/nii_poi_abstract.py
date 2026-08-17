@@ -272,15 +272,20 @@ class Has_Grid(Grid_Proxy):
 
         Args:
             other (Has_Grid | None, optional): If set, will assert each entry of that object instead. Defaults to None.
+            ignore_missing_values (bool, optional): If True, comparisons are skipped when the corresponding
+                attribute on ``self`` is None. Defaults to False.
             affine (AFFINE | None, optional): Affine matrix to compare against. If none, will not assert affine. Defaults to None.
-            zms (Zooms | None, optional): Zoom to compare against. If none, will not assert zoom. Defaults to None.
-            orientation (Ax_Codes | None, optional): Orientation to compare against. If none, will not assert orientation. Defaults to None.
+            zoom (ZOOMS | None, optional): Zoom to compare against. If none, will not assert zoom. Defaults to None.
+            orientation (AX_CODES | None, optional): Orientation to compare against. If none, will not assert orientation. Defaults to None.
+            rotation (ROTATION | None, optional): Rotation matrix to compare against. If none, will not assert rotation. Defaults to None.
             origin (ORIGIN | None, optional): Origin to compare against. If none, will not assert origin. Defaults to None.
             shape (SHAPE | None, optional): Shape to compare against. If none, will not assert shape. Defaults to None.
             shape_tolerance (float, optional): error tolerance in shape as float, as POIs can have float shapes. Defaults to 0.0.
-            error_tolerance (float, optional): Accepted error tolerance in all assertions except shape. Defaults to 1e-4.
+            origin_tolerance (float, optional): Accepted error tolerance for the origin comparison. Defaults to 0.01.
+            error_tolerance (float, optional): Accepted error tolerance in all assertions except shape and origin. Defaults to 1e-4.
             raise_error (bool, optional): If true, will raise AssertionError if anything is found. Defaults to True.
             verbose (logging, optional): If true, will print out each assertion mismatch. Defaults to False.
+            text (str, optional): Extra label prepended to any raised/printed assertion message for context. Defaults to "".
 
         Raises:
             AssertionError: If any of the assertions failed and raise_error is True
@@ -464,7 +469,7 @@ class Has_Grid(Grid_Proxy):
         """Make a nii with the same grid as object. Shape must fit the Grid.
 
         Args:
-            arr  np.ndarray: array. Defaults to None.
+            arr (np.ndarray | None, optional): Voxel data. Must match ``self.shape_int``. Defaults to None (zeros).
             seg (bool, optional): Is it a segmentation. Defaults to False.
 
         Returns:
@@ -482,6 +487,7 @@ class Has_Grid(Grid_Proxy):
 
         Args:
             x (COORDINATE): World-space coordinate as a 3-element sequence.
+            itk (bool, optional): If True, treat ``x`` as an ITK/LPS coordinate (negate the first two axes) before inversion. Defaults to False.
 
         Returns:
             tuple: Voxel-space coordinate rounded to 7 decimal places.
@@ -513,6 +519,7 @@ class Has_Grid(Grid_Proxy):
 
         Args:
             x (COORDINATE): Voxel-space coordinate as a 3-element sequence.
+            itk (bool, optional): If True, return the coordinate in ITK/LPS convention (negate the first two axes) after the forward transform. Defaults to False.
 
         Returns:
             tuple: World-space coordinate rounded to 7 decimal places.

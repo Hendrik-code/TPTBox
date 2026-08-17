@@ -185,6 +185,8 @@ def convert_predicted_logits_to_segmentation_with_correct_shape(
         return_probabilities: Reserved for future use. Raises
             :class:`NotImplementedError` if ``True``.
         num_threads_torch: Number of threads used by PyTorch during resampling.
+        device: Torch device on which the argmax runs; ``None`` uses the tensor's current device.
+        logger: Logger used for progress messages from the argmax GPU-fallback path.
 
     Returns:
         Integer segmentation array with dtype ``np.uint8`` or ``np.uint16``

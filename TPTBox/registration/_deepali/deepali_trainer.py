@@ -114,6 +114,10 @@ class DeepaliPairwiseImageTrainer:
         Args:
             source (Union[Image, PathStr]): The source image or file path.
             target (Union[Image, PathStr]): The target image or file path.
+            source_seg (Union[Image, PathStr] | None): Optional segmentation of the source image, used as an auxiliary
+                target by segmentation-based loss terms (e.g. Dice, MSE-on-labels). Defaults to None.
+            target_seg (Union[Image, PathStr] | None): Optional segmentation of the target image, used as an auxiliary
+                target by segmentation-based loss terms. Defaults to None.
             source_pset (optional): Source point set for point-based registration. Defaults to None.
             target_pset (optional): Target point set for point-based registration. Defaults to None.
             source_landmarks (optional): Source landmark points for registration. Defaults to None.
@@ -156,6 +160,8 @@ class DeepaliPairwiseImageTrainer:
                 - Override `on_optimizer` for finer control.
                 Defaults to "Adam".
             lr (float): Learning rate for the optimizer. Defaults to 0.01.
+            lr_end_factor (float | None): If set, wraps the optimiser in a ``LinearLR`` scheduler that
+                decays the LR to ``lr_end_factor * lr`` over the run. Defaults to None (no decay).
             optim_args (optional): Additional optimizer arguments (excluding learning rate). Defaults to None.
 
             smooth_grad (float): Smoothing factor applied to gradients. Defaults to 0.0.
