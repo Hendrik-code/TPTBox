@@ -58,8 +58,10 @@ pip install TPTBox
 ```python
 from TPTBox import NII
 from TPTBox.stitching import stitching
-out_nii,_ = stitching([NII.load("a.nii.gz",seg=False), NII.load("b.nii.gz",seg=False), NII.load("c.nii.gz",seg=False)], out="out.nii.gz")
 
+out_nii, _ = stitching(
+    [NII.load("a.nii.gz", seg=False), NII.load("b.nii.gz", seg=False), NII.load("c.nii.gz", seg=False)], out="out.nii.gz"
+)
 ```
 
 or
@@ -67,6 +69,7 @@ or
 
 ```python
 from TPTBox.stitching import stitching_raw
+
 stitching_raw(["a.nii.gz", "b.nii.gz", "c.nii.gz"], "out.nii.gz", is_segmentation=False)
 ```
 

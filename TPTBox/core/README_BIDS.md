@@ -49,11 +49,7 @@ from TPTBox import BIDS_FILE
 root = Path("path/to/dataset-dsname")
 
 # Example BIDS-compliant input file
-example_file = (
-    root
-    / "rawdata/sub-Max-Mustermann/ses-01012026/anat/"
-      "sub-Max-Mustermann_ses-01012026_acq-sag_ce-GBCA_T1w.nii.gz"
-)
+example_file = root / "rawdata/sub-Max-Mustermann/ses-01012026/anat/sub-Max-Mustermann_ses-01012026_acq-sag_ce-GBCA_T1w.nii.gz"
 
 # Create a BIDS_FILE object
 bf_file = BIDS_FILE(example_file, root)
@@ -85,5 +81,4 @@ seg_path = bf_file.get_changed_path(
     # If True, disables strict validation against predefined key--value pairs
     non_strict_mode=False,
 )
-
 ```

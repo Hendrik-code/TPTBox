@@ -12,14 +12,14 @@ from TPTBox.core.compat import zip_strict
 class TestZipStrict(unittest.TestCase):
     def test_equal_length_lists(self):
         a = [1, 2, 3]
-        b = ['a', 'b', 'c']
-        expected = [(1, 'a'), (2, 'b'), (3, 'c')]
+        b = ["a", "b", "c"]
+        expected = [(1, "a"), (2, "b"), (3, "c")]
         result = list(zip_strict(a, b))
         self.assertEqual(result, expected)
 
     def test_unequal_length_lists(self):
         a = [1, 2, 3]
-        b = ['a', 'b']
+        b = ["a", "b"]
         with self.assertRaises(ValueError) as context:
             list(zip_strict(a, b))
         self.assertIn("Length mismatch", str(context.exception))
@@ -41,6 +41,6 @@ class TestZipStrict(unittest.TestCase):
     def test_generator_iterables(self):
         a = (x for x in range(3))
         b = (chr(97 + x) for x in range(3))
-        expected = [(0, 'a'), (1, 'b'), (2, 'c')]
+        expected = [(0, "a"), (1, "b"), (2, "c")]
         result = list(zip_strict(a, b))
         self.assertEqual(result, expected)

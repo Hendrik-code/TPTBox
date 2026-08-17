@@ -32,15 +32,12 @@ Compute a full set of anatomical landmarks. The registry of supported non-centro
 from TPTBox.core.poi_fun.vertebra_pois_non_centroids import all_poi_functions
 
 poi_full = calc_poi_from_subreg_vert(
-    instance_nii, semantic_nii,
+    instance_nii,
+    semantic_nii,
     subreg_id=list(all_poi_functions.keys()),
 )
 # export as a 3D Slicer markup file
-poi_full.to_global().save_mrk(
-    "poi_as_markup.mrk.json",
-    split_by_region=True,
-    pointLabelsVisibility=True
-)
+poi_full.to_global().save_mrk("poi_as_markup.mrk.json", split_by_region=True, pointLabelsVisibility=True)
 ```
 
 
@@ -136,7 +133,4 @@ poi.save(poi_path)
 # Loading local/global Poi
 poi = POI.load(poi_path)
 poi = POI_Global.load(poi_path)
-
-
-
 ```
