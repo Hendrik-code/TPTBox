@@ -20,6 +20,7 @@ The `core` subpackage is the foundation of TPTBox. It provides the three primary
 
 ```python
 from TPTBox import NII
+
 # Image
 nii = NII.load("path/to/img.nii.gz", seg=False)
 # Segmentation

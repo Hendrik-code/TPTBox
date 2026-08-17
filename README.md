@@ -73,8 +73,8 @@ nii.get_array()  # get numpy array
 nii.affine  # Affine matrix
 nii.header  # NIFTY header
 nii.orientation  # Orientation in 3-Letters
-nii.zoom # Scale of the three image axis
-nii.shape #shape
+nii.zoom  # Scale of the three image axis
+nii.shape  # shape
 ```
 
 
