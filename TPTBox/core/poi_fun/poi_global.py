@@ -273,6 +273,9 @@ class POI_Global(Abstract_POI):
                 grid before saving.
             verbose: Emit a save log message.  Defaults to ``True``.
         """
+        if Path(out_path).name.endswith("mrk.json"):
+            logging.on_warning("use save_mrk to save .mrk.json files")
+            return self.save_mrk(out_path)
         return save_poi(
             self, out_path, make_parents, additional_info, save_hint=save_hint, resample_reference=resample_reference, verbose=verbose
         )

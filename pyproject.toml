@@ -25,6 +25,8 @@ joblib = "*"
 scikit-learn = "*"
 pynrrd = "*"
 requests = "*"
+trimesh = "*"
+numpy-stl = "*"
 
 # --- OLD STACK (Python < 3.11)
 numpy = [
@@ -164,7 +166,9 @@ ignore = [
     "PLR0912",
     "PLR0913",
     "PLR0915",
+    "PLR0917",
     "PLR2004",
+    "TRY301",
     "SIM105",
     "TRY003",
     "N999",

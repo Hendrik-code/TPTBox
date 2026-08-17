@@ -54,6 +54,9 @@ def secure_save(func, *, file_types=tuple(_supported_img_files)) -> Callable:
                 if file_type in file.file:
                     file = file.file[file_type]
                     break
+                else:
+                    raise ValueError(f"No supported file type found in BIDS_FILE. Expected one of: {file_types}")
+
         file = Path(file) if isinstance(file, str) else file  # Ensure the file is a Path object
         backup_file = file.with_suffix(file.suffix + ".backup")
         file_existed = file.exists()

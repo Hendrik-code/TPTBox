@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 
@@ -105,6 +107,55 @@ class MoveTo(Enum):
         elif len(a) == 4:
             return (np.array(poi[a[0], a[1]]) + np.array(poi[a[2], a[3]])) / 2
         raise NotImplementedError(v, poi)
+
+
+def _get_last_lumbar(poi: POI) -> Vertebra_Instance | None:
+    """Return the most inferior lumbar vertebra that has a centroid in ``poi``."""
+    for i in list(reversed(Vertebra_Instance.lumbar()))[:5]:
+        if (i.value, 50) in poi:
+            return i
+    return None
+
+
+def _get_last_thoracic(poi: POI) -> Vertebra_Instance | None:
+    """Return the most inferior thoracic vertebra that has a centroid in ``poi``."""
+    for i in list(reversed(Vertebra_Instance.thoracic()))[:3]:
+        if (i.value, 50) in poi:
+            return i
+    return None
+
+
+@dataclass
+class Def_Curvature:
+    """Define the lordosis and kyposis angle."""
+
+    start_vert: Vertebra_Instance | Literal["last_thoracic", "last_lumbar"]
+    start_move: MoveTo
+    stop_vert: Vertebra_Instance | Literal["last_thoracic", "last_lumbar"]
+    stop_move: MoveTo
+
+    def get_start_vert(self, poi) -> Vertebra_Instance:
+        """get_start_vert."""
+        if self.start_vert == "last_thoracic":
+            return _get_last_thoracic(poi)  # type: ignore
+        if self.start_vert == "last_lumbar":
+            return _get_last_lumbar(poi)  # type: ignore
+        return self.start_vert
+
+    def get_stop_vert(self, poi) -> Vertebra_Instance:
+        """get_stop_vert."""
+        if self.stop_vert == "last_thoracic":
+            return _get_last_thoracic(poi)  # type: ignore
+        if self.stop_vert == "last_lumbar":
+            return _get_last_lumbar(poi)  # type: ignore
+        return self.stop_vert
+
+
+curvature_definition = {
+    "cervical_lordosis": Def_Curvature(Vertebra_Instance.C2, MoveTo.BOTTOM, Vertebra_Instance.C7, MoveTo.BOTTOM),
+    "thoracic_kyphosis": Def_Curvature(Vertebra_Instance.T4, MoveTo.TOP, "last_thoracic", MoveTo.BOTTOM),
+    "lumbar_lordosis": Def_Curvature(Vertebra_Instance.L1, MoveTo.TOP, "last_lumbar", MoveTo.BOTTOM),
+}
 
 
 def unit_vector(vector: np.ndarray) -> np.ndarray:
@@ -338,7 +389,7 @@ def compute_lordosis_and_kyphosis(poi: POI, project_2D=True) -> dict[str, float 
     Returns:
         dict: A dictionary containing the following key-value pairs:
             - "cervical_lordosis": The angle of cervical lordosis, calculated between C2 and C7.
-            - "thoracic_kyphosis": The angle of thoracic kyphosis, calculated between T1 and the last thoracic vertebra.
+            - "thoracic_kyphosis": The angle of thoracic kyphosis, calculated between T4 and the last thoracic vertebra.
             - "lumbar_lordosis": The angle of lumbar lordosis, calculated between L1 and the last lumbar vertebra.
 
     Raises:
@@ -346,7 +397,7 @@ def compute_lordosis_and_kyphosis(poi: POI, project_2D=True) -> dict[str, float 
 
     Notes:
         - It is essential that the `poi` contains the posterior vertebra direction for accurate angle calculations.
-        - Thoracic kyphosis is calculated from T1 to the last thoracic vertebra identified in the POI.
+        - Thoracic kyphosis is calculated from T4 to the last thoracic vertebra identified in the POI.
         - Lumbar lordosis is calculated from L1 to the last lumbar vertebra identified in the POI.
 
     Example:
@@ -359,25 +410,15 @@ def compute_lordosis_and_kyphosis(poi: POI, project_2D=True) -> dict[str, float 
     assert Location.Vertebra_Direction_Posterior.value in poi.keys_subregion(), (
         "You need to compute the Direction in the Poi (Location.Vertebra_Direction_Posterior)"
     )
-    last_t = _get_last_thoracic(poi)
-    last_l = _get_last_lumbar(poi)
+    out = {}
     poi = poi.copy()
-    cervical = compute_angel_between_two_points_(
-        poi,
-        Vertebra_Instance.C2,
-        Vertebra_Instance.C7,
-        "P",
-        MoveTo.TOP,
-        MoveTo.BOTTOM,
-        project_2D,
-    )
-    thoracic = compute_angel_between_two_points_(poi, Vertebra_Instance.T1, last_t, "P", MoveTo.TOP, MoveTo.BOTTOM, project_2D)
-    lumbar = compute_angel_between_two_points_(poi, Vertebra_Instance.L1, last_l, "P", MoveTo.TOP, MoveTo.BOTTOM, project_2D)
-    return {
-        "cervical_lordosis": cervical,
-        "thoracic_kyphosis": thoracic,
-        "lumbar_lordosis": lumbar,
-    }
+
+    for k, i in curvature_definition.items():
+        out[k] = round(
+            compute_angel_between_two_points_(poi, i.get_start_vert(poi), i.get_stop_vert(poi), "P", i.start_move, i.stop_move, project_2D),
+            4,
+        )
+    return out
 
 
 def _get_norm(poi: POI, id1: int | Vertebra_Instance, mv: MoveTo, location: Location, inv: int = 1) -> np.ndarray | None:  # noqa: ARG001
@@ -394,36 +435,19 @@ def _get_norm(poi: POI, id1: int | Vertebra_Instance, mv: MoveTo, location: Loca
     if (a == b).all():
         return None
     norm1_vert = unit_vector(a - b) * inv
-    # if mix:
-    #    # This would mix the angle of two adjacent Vertebra.
-    #    if mv == MoveTo.CENTER:
-    #        return norm1_vert
-    #    elif mv == MoveTo.BOTTOM:
-    #        next_vert = id1.get_next_poi(poi)
-    #    elif mv == MoveTo.TOP:
-    #        next_vert = id1.get_previous_poi(poi)
-    #    if next_vert is None:
-    #        return norm1_vert
-    #    if (next_vert, location) in poi:
-    #        norm1_vert_2 = unit_vector(np.array(poi[next_vert, 50]) - np.array(poi[next_vert, location])) * inv
-    #        norm1_vert = (norm1_vert + norm1_vert_2) / 2
+    next_vert = None
+    if mv == MoveTo.CENTER:
+        return norm1_vert
+    elif mv == MoveTo.BOTTOM:
+        next_vert = id1.get_next_poi(poi)
+    elif mv == MoveTo.TOP:
+        next_vert = id1.get_previous_poi(poi)
+    if next_vert is None:
+        return norm1_vert
+    if (next_vert, location) in poi:
+        norm1_vert_2 = unit_vector(np.array(poi[next_vert, 50]) - np.array(poi[next_vert, location])) * inv
+        norm1_vert = (norm1_vert + norm1_vert_2) / 2
     return norm1_vert
-
-
-def _get_last_lumbar(poi: POI) -> Vertebra_Instance | None:
-    """Return the most inferior lumbar vertebra that has a centroid in ``poi``."""
-    for i in list(reversed(Vertebra_Instance.lumbar()))[:5]:
-        if (i.value, 50) in poi:
-            return i
-    return None
-
-
-def _get_last_thoracic(poi: POI) -> Vertebra_Instance | None:
-    """Return the most inferior thoracic vertebra that has a centroid in ``poi``."""
-    for i in list(reversed(Vertebra_Instance.thoracic()))[:3]:
-        if (i.value, 50) in poi:
-            return i
-    return None
 
 
 def compute_max_cobb_angle(
@@ -530,7 +554,7 @@ def compute_max_cobb_angle(
             if cos_dis < cos_new:
                 cos_dis = cos_new
                 apex = i.value
-    return max_angle, from_vert, to_vert, apex
+    return round(max_angle, 4), from_vert, to_vert, apex
 
 
 def compute_max_cobb_angle_multi(
@@ -641,19 +665,40 @@ def compute_max_cobb_angle_multi(
 
 
 def _add_artificial_ivd(poi: POI) -> POI:
-    """Insert synthetic IVD centroids midway between adjacent vertebra centroids if missing."""
-    ## ADD IVD if nessasary
-    if 100 not in poi.keys_subregion():
-        last = None
-        last_id = 1
-        for j in Vertebra_Instance.order():
-            if (j, 50) in poi:
-                current = np.array(poi[j, 50])
-                if last is not None:
-                    poi[last_id, 100] = tuple((last + current) / 2)
-                last = current
-                last_id = j.value
-    #####
+    """Insert synthetic IVD landmarks (center + superior/inferior) wherever they are missing.
+
+    For every adjacent pair of vertebrae (upper, lower) that both have a centroid,
+    a missing IVD landmark on the ``upper`` vertebra is synthesized as follows,
+    using the median endplate centers when available:
+
+    - ``Vertebra_Disc_Superior`` (upper side of the disc)  -> upper's inferior endplate median
+      (fallback: upper's centroid).
+    - ``Vertebra_Disc_Inferior`` (lower side of the disc)  -> lower's superior endplate median
+      (fallback: lower's centroid).
+    - ``Vertebra_Disc`` (disc center) -> midpoint of the two above.
+
+    This makes the Cobb / lordosis / kyphosis paths degrade gracefully when a
+    single IVD is missing (e.g. severe degeneration), instead of raising
+    KeyError.
+    """
+    inf_med = Location.Additional_Vertebral_Body_Middle_Inferior_Median.value
+    sup_med = Location.Additional_Vertebral_Body_Middle_Superior_Median.value
+    disc = Location.Vertebra_Disc.value
+    disc_sup = Location.Vertebra_Disc_Superior.value
+    disc_inf = Location.Vertebra_Disc_Inferior.value
+
+    ordered = [v for v in Vertebra_Instance.order() if (v.value, 50) in poi]
+    for i in range(len(ordered) - 1):
+        uv = ordered[i].value
+        lv = ordered[i + 1].value
+        up = np.array(poi[uv, inf_med]) if (uv, inf_med) in poi else np.array(poi[uv, 50])
+        lo = np.array(poi[lv, sup_med]) if (lv, sup_med) in poi else np.array(poi[lv, 50])
+        if (uv, disc_sup) not in poi:
+            poi[uv, disc_sup] = tuple(up)
+        if (uv, disc_inf) not in poi:
+            poi[uv, disc_inf] = tuple(lo)
+        if (uv, disc) not in poi:
+            poi[uv, disc] = tuple((up + lo) / 2)
     return poi
 
 
@@ -705,36 +750,30 @@ def plot_compute_lordosis_and_kyphosis(
     poi = _add_artificial_ivd(poi)
     out = []
     text_out = []
-    last_t = _get_last_thoracic(poi)
-    last_l = _get_last_lumbar(poi)
-    for id1, vert_id1_mv in [
-        (Vertebra_Instance.C2, MoveTo.TOP),
-        (Vertebra_Instance.T1, MoveTo.TOP),
-        (last_t, MoveTo.BOTTOM),
-        (last_l, MoveTo.BOTTOM),
-    ]:
-        vert_id1_mv: MoveTo
-        if id1 is None or (id1.value, 50) not in poi:
-            continue
-        s = vert_id1_mv.get_location(id1, poi)
-        a = _get_norm(poi, id1, vert_id1_mv, Location.Vertebra_Direction_Posterior, 1)
-        assert a is not None
-        out.append((id1.value, s, (a[0] * line_len, a[1] * line_len)))
-        out.append((id1.value, s, (-a[0] * line_len * 3, -a[1] * line_len * 3)))
+    for definition in curvature_definition.values():
+        for id1, vert_id1_mv in [
+            (definition.get_start_vert(poi), definition.start_move),
+            (definition.get_stop_vert(poi), definition.stop_move),
+        ]:
+            vert_id1_mv: MoveTo
+            if id1 is None or (id1.value, 50) not in poi:
+                continue
+            s = vert_id1_mv.get_location(id1, poi)
+            a = _get_norm(poi, id1, vert_id1_mv, Location.Vertebra_Direction_Posterior, 1)
+            assert a is not None
+            out.append((id1.value, s, (a[0] * line_len, a[1] * line_len)))
+            out.append((id1.value, s, (-a[0] * line_len * 3, -a[1] * line_len * 3)))
     out2 = compute_lordosis_and_kyphosis(poi, project_2D=project_2D)
-    for (name, v), id1, id2 in zip_strict(
-        out2.items(), [Vertebra_Instance.C7, last_t, last_l], [Vertebra_Instance.C2, Vertebra_Instance.C7, last_t]
-    ):
+    for name, v in out2.items():
         if v is None:
             continue
-        if id1 is None or id2 is None or (id1.value, 50) not in poi:
-            continue
+        id1 = curvature_definition[name].get_start_vert(poi)
+        id2 = curvature_definition[name].get_stop_vert(poi)
+
         vert = round((id1.value + id2.value) / 2)
         while (vert, 50) not in poi and vert != 0:
             vert -= 1
-        if (vert, 50) in poi:  # the body needs the key to be PRESENT; `not in` made it dead
-            cord = poi[vert, 50]
-            text_out.append((vert, (f"{str(name).split('_')[-1]}: {v:.1f}°", 15, cord[1])))
+        text_out.append((vert, (f"{v:.1f}° - {str(name).split('_')[-1]}", 25)))
 
     poi.info["line_segments_sag"] = out + poi.info.get("line_segments_sag", [])
     poi.info["text_sag"] = text_out + poi.info.get("text_sag", [])
@@ -823,6 +862,15 @@ def plot_cobb_angle(
             text_out.append((apex, (s, 25, cord[1])))
         poi.info["line_segments_cor"] = out + poi.info.get("line_segments_cor", [])
         poi.info["text_cor"] = text_out + poi.info.get("text_cor", [])
+
+    axis = poi.get_axis("R")
+    width = poi.shape[axis] / poi.zoom[axis] / 2
+    if width < 50:
+        padd = [(0, 0) for _ in range(3)]
+        padd[axis] = (int(50 - width), int(50 - width))
+        img = to_nii(img).apply_pad(padd)
+        seg = to_nii(seg, True).apply_pad(padd)
+        poi = poi.resample_from_to(seg)
     frame = Snapshot_Frame(
         img,
         seg,
@@ -837,8 +885,8 @@ def plot_cobb_angle(
 
 
 def plot_cobb_and_lordosis_and_kyphosis(
-    img_path: str | Path | None,
-    poi: POI,
+    jpg_path: str | Path | None,
+    poi: POI | Path,
     img: Image_Reference,
     seg: Image_Reference | None = None,
     line_len=100,
@@ -852,7 +900,7 @@ def plot_cobb_and_lordosis_and_kyphosis(
     on the provided spinal image and can save the resulting image to a specified path.
 
     Args:
-        img_path (str | Path | None): Path to save the generated image. If None, the image is not saved.
+        jpg_path (str | Path | None): Path to save the generated image. If None, the image is not saved.
         poi (POI): The points of interest object containing 3D coordinates for various vertebrae.
         img (Image_Reference): The reference image on which to plot the angles and lines.
         seg (Image_Reference | None): The segmentation image reference. Optional, can be None.
@@ -890,6 +938,8 @@ def plot_cobb_and_lordosis_and_kyphosis(
         >>> print(lordosis_kyphosis)
         {'cervical_lordosis': 35.2, 'thoracic_kyphosis': 41.5, 'lumbar_lordosis': 48.1}
     """
+    if not isinstance(poi, POI):
+        poi = POI.load(poi)
     out_cobb, frame1 = plot_cobb_angle(
         None,
         poi,
@@ -901,92 +951,6 @@ def plot_cobb_and_lordosis_and_kyphosis(
         project_2D=project_2D,
     )
     out_lak, frame2 = plot_compute_lordosis_and_kyphosis(None, poi, img, seg, line_len=line_len, project_2D=project_2D)
-    if img_path is not None:
-        create_snapshot(img_path, [frame1, frame2])
+    if jpg_path is not None:
+        create_snapshot(jpg_path, [frame1, frame2])
     return out_cobb, out_lak, [frame1, frame2]
-
-
-if __name__ == "__main__":
-    from TPTBox import POI, calc_poi_from_subreg_vert
-    from TPTBox.spine.spinestats.ivd_pois import compute_fake_ivd
-
-    # poi = POI.load(
-    #    "/DATA/NAS/datasets_processed/CT_spine/dataset-Cancer/derivatives_spineps/sub-mc0034/ses-20240312/sub-mc0034_ses-20240312_sequ-206_mod-ct_seg-spine_msk.nii.gz"
-    # )
-    nii = to_nii(
-        "/DATA/NAS/datasets_processed/CT_spine/dataset-Cancer/derivatives_spineps/sub-mc0034/ses-20240312//sub-mc0034_ses-20240312_sequ-206_mod-ct_seg-vert_msk.nii.gz",
-        True,
-    )
-    nii_subreg = to_nii(
-        "/DATA/NAS/datasets_processed/CT_spine/dataset-Cancer/derivatives_spineps/sub-mc0034/ses-20240312/sub-mc0034_ses-20240312_sequ-206_mod-ct_seg-spine_msk.nii.gz",
-        True,
-    )
-    nii2 = to_nii(
-        "/DATA/NAS/datasets_processed/CT_spine/dataset-Cancer/rawdata/sub-mc0034/ses-20240312/sub-mc0034_ses-20240312_sequ-206_ct.nii.gz",
-        False,
-    )
-    poi = calc_poi_from_subreg_vert(nii, nii_subreg, subreg_id=[Location.Vertebra_Direction_Right])
-
-    nii = compute_fake_ivd(nii, nii_subreg, poi=poi)
-    nii.save("/DATA/NAS/datasets_processed/CT_spine/dataset-Cancer/derivatives_spineps/sub-mc0034/ses-20240312/test.nii.gz")
-    print(nii.unique())
-    poi = calc_poi_from_subreg_vert(
-        nii,
-        nii_subreg,
-        subreg_id=[
-            Location.Vertebra_Direction_Right,
-            Location.Vertebra_Disc_Inferior,
-            Location.Vertebra_Disc,
-        ],
-    )
-    idx = 23
-
-    print(poi.extract_vert(idx))
-    # print(_get_norm(poi.rescale(), 24, None, Location.Vertebra_Direction_Right))
-    # plot_compute_lordosis_and_kyphosis("test_2.png", poi, nii)
-    plot_cobb_angle("test.png", poi, nii2, nii, use_ivd_direction=True)
-    plot_cobb_angle("test_old.png", poi, nii2, nii, use_ivd_direction=False)
-    from TPTBox.core.poi_fun.ray_casting import add_ray_to_img
-
-    cor, _ = poi.fit_spline(location=50, vertebra=False)
-    print(nii.shape)
-    print(
-        poi[idx, 50],
-        unit_vector(np.array(poi[idx, 50]) - np.array(poi[idx, Location.Vertebra_Direction_Right])),
-    )
-    a = add_ray_to_img(
-        poi[idx, 50],
-        -np.array(poi[idx, 50]) + np.array(poi[idx, Location.Vertebra_Direction_Right]),
-        nii,
-        True,
-        value=99,
-        dilate=2,
-    )
-    assert a is not None
-    a = add_ray_to_img(
-        poi[idx, 50],
-        -np.array(poi[idx, 50]) + np.array(poi[idx, Location.Vertebra_Direction_Posterior]),
-        a,
-        True,
-        value=100,
-        dilate=2,
-    )
-    assert a is not None
-    a = add_ray_to_img(
-        poi[idx, 100],
-        -np.array(poi[idx, 100]) + np.array(poi[idx, Location.Vertebra_Disc_Inferior]),
-        a,
-        True,
-        value=101,
-        dilate=2,
-    )
-    assert a is not None
-    spline = a.copy() * 0
-    # spline.rescale_()
-    for x, y, z in cor:
-        spline[round(x), round(y), round(z)] = 103
-    spline.dilate_msk_(2)
-    # spline.resample_from_to_(a)
-    a[spline != 0] = spline[spline != 0]
-    print(a.unique())
-    a.save("/DATA/NAS/datasets_processed/CT_spine/dataset-Cancer/derivatives_spineps/sub-mc0034/ses-20240312/test.nii.gz")

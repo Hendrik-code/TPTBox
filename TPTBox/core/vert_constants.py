@@ -264,13 +264,29 @@ class Full_Body_Instance_Vibe(Abstract_lvl):
     sternum = 63
     costal_cartilages = 64
     subcutaneous_fat = 65
-    muscle = 66
+    muscle_other = 66
     inner_fat = 67
     IVD = 68
     vertebra_body = 69
     vertebra_posterior_elements = 70
     spinal_channel = 71
     bone_other = 72
+
+    @classmethod
+    def muscle_(cls) -> list[Full_Body_Instance_Vibe]:
+        """Return individually segmented muscle group instance labels."""
+        return [
+            Full_Body_Instance_Vibe.gluteus_maximus_right,
+            Full_Body_Instance_Vibe.gluteus_maximus_left,
+            Full_Body_Instance_Vibe.gluteus_medius_right,
+            Full_Body_Instance_Vibe.gluteus_medius_left,
+            Full_Body_Instance_Vibe.gluteus_minimus_right,
+            Full_Body_Instance_Vibe.gluteus_minimus_left,
+            Full_Body_Instance_Vibe.autochthon_right,
+            Full_Body_Instance_Vibe.autochthon_left,
+            Full_Body_Instance_Vibe.iliopsoas_right,
+            Full_Body_Instance_Vibe.iliopsoas_left,
+        ]
 
     @classmethod
     def get_Full_Body_Instance_mapping(cls) -> dict[int, int]:
@@ -326,10 +342,9 @@ class Full_Body_Instance_Vibe(Abstract_lvl):
             Full_Body_Instance.clavicula_right.value: cls.clavicula_right.value,  # clavicula_right
             Full_Body_Instance.femur_left.value: cls.femur_left.value,  # femur_left
             Full_Body_Instance.femur_right.value: cls.femur_right.value,  # femur_right
-            # `hip_left`/`hip_right` do not exist on this enum; the labels are called
-            # pelvis_left/pelvis_right (50/51), matching `50: pelvis_left` in the inverse map.
             Full_Body_Instance.pelvis_left.value: cls.pelvis_left.value,  # hip_left
             Full_Body_Instance.pelvis_right.value: cls.pelvis_right.value,  # hip_right
+            Full_Body_Instance.channel.value: cls.spinal_cord.value,  # spinal_cord
             Full_Body_Instance.gluteus_maximus_left.value: cls.gluteus_maximus_left.value,  # gluteus_maximus_left
             Full_Body_Instance.gluteus_maximus_right.value: cls.gluteus_maximus_right.value,  # gluteus_maximus_right
             Full_Body_Instance.gluteus_medius_left.value: cls.gluteus_medius_left.value,  #  gluteus_medius_left
@@ -343,7 +358,7 @@ class Full_Body_Instance_Vibe(Abstract_lvl):
             Full_Body_Instance.sternum.value: cls.sternum.value,  # sternum
             Full_Body_Instance.costal_cartilage.value: cls.costal_cartilages.value,  # costal_cartilages
             Full_Body_Instance.subcutaneous_fat.value: cls.subcutaneous_fat.value,  # subcutaneous_fat
-            Full_Body_Instance.muscle_other.value: cls.muscle.value,  # muscle
+            Full_Body_Instance.muscle_other.value: cls.muscle_other.value,  # muscle
             Full_Body_Instance.inner_fat.value: cls.inner_fat.value,  # inner_fat
             Full_Body_Instance.ivd.value: cls.IVD.value,  # IVD
             Full_Body_Instance.vert_body.value: cls.vertebra_body.value,  # vertebra_body
@@ -1251,6 +1266,9 @@ class Location(Abstract_lvl):
     Implant_Entry_Right = 91
     Implant_Target_Left = 92
     Implant_Target_Right = 93
+
+    Articular_Process_Midpoint_Left = 94
+    Articular_Process_Midpoint_Right = 95
 
     # Muscle_Inserts_Rib_left = 90
     # Muscle_Inserts_Rib_right = 91

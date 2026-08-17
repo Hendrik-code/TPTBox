@@ -2290,6 +2290,9 @@ class NII(NII_Math):
             If inplace is True, returns the current NIfTI image object with mapped labels. Otherwise, returns a new NIfTI image object with mapped labels.
         """
         data_orig = self.get_seg_array()
+        if len(label_map) == 0:
+            log.print("Skip map_labels; map is empty", verbose=verbose)
+            return self if inplace else self.copy()
         # the before/after np_unique scans are only used for the verbose log line; skip them otherwise
         labels_before = [v for v in np_unique(data_orig) if v > 0] if verbose else None
         # enforce keys to be str to support both str and int

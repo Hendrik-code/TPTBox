@@ -612,7 +612,7 @@ class Abstract_POI:
         self,
         smoothness: int = 10,
         samples_per_poi=20,
-        location: int | Abstract_lvl = Location.Vertebra_Corpus,
+        location: int | Enum | list[int] | list[Enum] | None = Location.Vertebra_Corpus,
         vertebra=False,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Fits a spline interpolation through a set of centroids and calculates the first derivative of the spline curve.
@@ -630,12 +630,11 @@ class Abstract_POI:
                 - spline_1st_derivative: A 2D NumPy array representing the first derivative of the spline curve.
                 shape: first dimension to select a cord, second dimension to select all X/Y/Z
         """
-        if isinstance(location, Abstract_lvl):
-            location = location.value
-        if location not in self.keys_subregion() and not isinstance(location, Sequence):
-            raise ValueError(f"The location {location} is not computed in this POI class")
         # Extract subregion based on the provided location
-        poi = self.extract_subregion(*location) if isinstance(location, Sequence) else self.extract_subregion(location)
+        poi = self.copy() if location is None else self.extract_subregion(location)
+        if len(poi) == 0:
+            raise ValueError(f"The location {location} is not computed in this POI class")
+
         # If vertebra sorting is requested, perform it
         poi = poi.sort(inplace=False, order_dict=Vertebra_Instance.order_dict() if vertebra else None)
         # Convert centroids to NumPy array for processing
@@ -803,7 +802,7 @@ class Abstract_POI:
             obj.centroids.pop(loc, None)
         return obj
 
-    def extract_subregion(self, *location: int | list[int] | Enum, inplace: bool = False) -> Self:
+    def extract_subregion(self, *location: int | list[int] | list[Enum] | Enum, inplace: bool = False) -> Self:
         """Return a POI containing only the specified subregion(s).
 
         Args:
@@ -813,9 +812,9 @@ class Abstract_POI:
         Returns:
             Filtered POI.
         """
-        location = _flatten(location)
+        location_ = _flatten(location)
 
-        location_values = tuple(l if isinstance(l, int) else l.value for l in location)
+        location_values = tuple(l if isinstance(l, int) else l.value for l in location_)
         extracted_centroids = POI_Descriptor()
         for x1, x2, y in self.centroids.items():
             if x2 in location_values:

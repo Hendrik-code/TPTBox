@@ -15,6 +15,7 @@ from TPTBox.core.poi_fun.strategies import (
 from TPTBox.core.poi_fun.vertebra_direction import calc_center_spinal_cord, calc_orientation_of_vertebra_PIR
 from TPTBox.core.vert_constants import Location, vert_directions
 from TPTBox.spine.spinestats import calculate_IVD_POI
+from TPTBox.spine.spinestats.poi_fun.endplates import calc_endplate_points_
 
 _log = Print_Logger()
 all_poi_functions: dict[int, Strategy_Pattern] = {}
@@ -92,21 +93,30 @@ class Strategy_Pattern:
     Args:
         target (Location): The target location for which this strategy is defined.
         strategy (Callable): The strategy function that implements the desired behavior.
-        prerequisite (set[Location] | None, optional): A set of prerequisite locations that must be satisfied before applying this strategy. Defaults to None.
-        **args: Additional keyword arguments to be passed to the strategy function.
+        prerequisite (set[Location] | None, optional): A set of prerequisite locations that must be
+            satisfied before applying this strategy. Defaults to None.
+        prio (int, optional): Scheduling offset added to ``target.value`` in :meth:`prority`.
+            Strategies with a lower resulting priority run first. Defaults to 0.
+        sakrum (bool, optional): When ``True``, this strategy is also applied to sacrum vertebra IDs;
+            otherwise sacrum vertebrae are skipped in :func:`compute_non_centroid_pois`. Defaults to False.
+        **args: Additional keyword arguments to be passed to the strategy function. Any ``Location``
+            values found in ``args`` (including inside sequences) are auto-added to ``prerequisite``,
+            and passing ``direction=...`` additionally adds ``Location.Vertebra_Direction_Inferior``.
 
     Attributes:
         target (Location): The target location for which this strategy is defined.
         args (dict): Additional keyword arguments to be passed to the strategy function.
         prerequisite (set[Location]): A set of prerequisite locations that must be satisfied before applying this strategy.
         strategy (Callable): The strategy function that implements the desired behavior.
+        sacrum (bool): Whether this strategy also applies to sacrum vertebrae.
 
     Note:
         The strategy function should accept the following arguments:
-        - poi (POI): The point of interest.
-        - current_subreg (NII): The current subregion.
-        - vert_id (int): The vertex ID.
-        - bb: The bounding box.
+        - poi (POI): The point of interest container being populated.
+        - current_subreg (NII): The current (cropped) subregion segmentation for this vertebra.
+        - location (Location): The target ``Location`` this strategy is computing.
+        - vert_id (int): The vertebra ID currently being processed.
+        - bb: The bounding box used to crop the vertebra.
         - log (Logger_Interface, optional): The logger interface. Defaults to _log, which should be defined globally.
 
     Example:
@@ -297,7 +307,9 @@ Strategy_Computed_Before(L.Spinal_Canal_ivd_lvl,L.Vertebra_Disc,L.Vertebra_Corpu
 Strategy_Computed_Before(L.Spinal_Cord,L.Vertebra_Disc,L.Vertebra_Corpus,L.Dens_axis)
 Strategy_Computed_Before(L.Spinal_Canal,L.Vertebra_Corpus)
 Strategy_Computed_Before(L.Vertebra_Disc_Inferior,L.Vertebra_Disc_Inferior)
-
+Strategy_Computed_Before(L.Vertebral_Body_Endplate_Superior,L.Vertebra_Corpus)
+Strategy_Computed_Before(L.Vertebral_Body_Endplate_Inferior,L.Vertebra_Corpus)
+Strategy_Computed_Before(L.Endplate,L.Vertebra_Corpus)
 
 # fmt: on
 def compute_non_centroid_pois(  # noqa: C901
@@ -314,10 +326,14 @@ def compute_non_centroid_pois(  # noqa: C901
 
     Runs the full non-centroid POI pipeline:
 
+    0. Vertebral body endplates — computed via
+       :func:`~TPTBox.spine.spinestats.poi_fun.endplates.calc_endplate_points_`
+       when any of ``Vertebral_Body_Endplate_Inferior``,
+       ``Vertebral_Body_Endplate_Superior`` or ``Endplate`` is requested.
     1. Vertebra orientation (PIR direction vectors) — always computed first if
        ``Location.Vertebra_Direction_Inferior`` is requested.
-    2. Global landmarks: spinal canal / cord centres, intervertebral disc
-       POIs, dense-axis tip.
+    2. Global landmarks: spinal canal / cord centres, spinal canal at IVD
+       level, dens-axis tip, and articular process midpoints (left/right).
     3. Per-vertebra landmarks via the registered :class:`Strategy_Pattern`
        functions (extreme points, ray casts, corner finders, etc.).
     4. Intervertebral disc (IVD) POIs.
@@ -342,14 +358,21 @@ def compute_non_centroid_pois(  # noqa: C901
         _vert_ids = vert.unique()
 
     locations = list(locations) if isinstance(locations, Sequence) else [locations]
-    ### STEP 1 Vert Direction###
-    assert 52 not in poi.keys_region()
+    ### Step 0 Endplates ###
+    endplate = [Location.Vertebral_Body_Endplate_Inferior, Location.Vertebral_Body_Endplate_Superior, Location.Endplate]
+    if any(i in locations for i in endplate):
+        [locations.remove(i) for i in endplate if i in locations]
 
+        log.on_text("Compute Vertebra Endplate DIRECTIONS", verbose=verbose)
+        sub_regions = poi.keys_subregion()
+        if any(a.value not in sub_regions for a in endplate[:2]):  # skip if all exists
+            poi, *_ = calc_endplate_points_(poi, vert, subreg, _vert_ids=_vert_ids, log=log)
+    ### STEP 1 Vert Direction###
     if Location.Vertebra_Direction_Inferior in locations:
         log.on_text("Compute Vertebra DIRECTIONS", verbose=verbose)
         ### Calc vertebra direction; We always need them, so we just compute them. ###
         sub_regions = poi.keys_subregion()
-        if any(a.value not in sub_regions for a in vert_directions):
+        if any(a.value not in sub_regions for a in vert_directions):  # skip if all exists
             poi, _ = calc_orientation_of_vertebra_PIR(
                 poi, vert, subreg, do_fill_back=False, save_normals_in_info=False, _orientation_version=_orientation_version
             )
@@ -399,6 +422,11 @@ def compute_non_centroid_pois(  # noqa: C901
             poi = calc_center_spinal_cord(
                 poi, subreg, source_subreg_point_id=Location.Vertebra_Disc, subreg_id=Location.Spinal_Canal_ivd_lvl, add_dense=True
             )
+    if any(i in locations for i in [Location.Articular_Process_Midpoint_Left, Location.Articular_Process_Midpoint_Right]):
+        from TPTBox.spine.spinestats.poi_fun.articularis_midpoint import calc_all_facet_joint_pois
+
+        p = calc_all_facet_joint_pois(vert, subreg)
+        poi.join_left_(p)
     # Step 3 Compute on individual Vertebras
     ivd_location = set()
 
@@ -406,7 +434,7 @@ def compute_non_centroid_pois(  # noqa: C901
         if vert_id >= 39:
             continue
         current_vert = vert.extract_label(vert_id)
-        bb = current_vert.compute_crop()
+        bb = current_vert.compute_crop(raise_error=False)
         current_vert.apply_crop_(bb)
         current_subreg = subreg.apply_crop(bb) * current_vert
         for location in locations:
