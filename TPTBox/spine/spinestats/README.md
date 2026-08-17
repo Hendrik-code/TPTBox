@@ -350,9 +350,9 @@ collector = ExcelCollector(out_folder="/tmp/nako_summary")
 collector.start()
 for nako_id in ids:
     f = get_nako_paths(nako_id)
-    run_all(f)                       # writes the per-subject json
+    run_all(f)  # writes the per-subject json
     collector.submit(nako_id, _final_json_path(f))
-collector.close()                    # flushes and joins
+collector.close()  # flushes and joins
 ```
 
 The collector re-writes the Excel files every `flush_every` submissions
