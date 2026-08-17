@@ -1650,6 +1650,7 @@ class NII(NII_Math):
             border_value: Value used for voxels outside the image when eroding at the border. Defaults to 0.
             use_crop: speed up computation by cropping and un-cropping the segmentation. Minor overhead if the segmentation fills most of the image
             ignore_direction: Axis (as ``DIRECTIONS`` code or int) that should NOT be eroded — the structuring element is flattened along this axis. Defaults to None.
+
         Returns:
             NII: The eroded mask.
 
