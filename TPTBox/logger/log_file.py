@@ -70,15 +70,19 @@ class Logger_Interface(Protocol):
         self._log(_clean_all_color_from_text(string), end=end, ltype=ltype)
 
     def _preprocess_text(self, text: tuple[str, ...], ltype=Log_Type.TEXT, ignore_prefix: bool = False) -> str:
-        """Processes given text parts, converting manually specified datatypes, and adds the prefix and ltype corresponding color.
+        """Convert text parts to a single string with logger prefix applied.
+
+        Datatype-aware coercion is applied per element via :func:`datatype_to_string`
+        and ``Log_Type`` markers embedded in ``text`` are stripped.
 
         Args:
-            text (tuple[str, ...]): _description_
-            type (_type_, optional): _description_. Defaults to Log_Type.TEXT.
-            ignore_prefix (bool, optional): _description_. Defaults to False.
+            text: Text parts to join. ``Log_Type`` entries are removed before joining.
+            ltype: Log type used to derive the prefix color when it is not already
+                present at the beginning of the joined string.
+            ignore_prefix: If True, suppress prepending the logger prefix.
 
         Returns:
-            str: _description_
+            The fully assembled log line, ready to be written to the log target.
         """
         text_list: list[str] = [datatype_to_string(t, ltype) for t in text if not isinstance(t, Log_Type)]
         string = str.join(" ", text_list)
@@ -107,14 +111,19 @@ class Logger_Interface(Protocol):
         string = " " + "-" * ((indentation_level * 3) - 2) + " "
         return string
 
-    def _get_logger_prefix(self, ltype: Log_Type = Log_Type.TEXT):
-        """Returns the prefix based on indentation level and log_type.
+    def _get_logger_prefix(self, ltype: Log_Type = Log_Type.TEXT) -> str:
+        """Return the indented prefix string for a log line.
+
+        Combines the current indentation marker with either the user-provided
+        ``self.prefix`` (if set) or the color-coded default prefix associated
+        with ``ltype``.
 
         Args:
-            type (Log_Type, optional): _description_. Defaults to Log_Type.TEXT.
+            ltype: Log type whose default prefix is used when ``self.prefix``
+                is None.
 
         Returns:
-            _type_: _description_
+            The prefix string to prepend to the log message.
         """
         indent: str = self._prefix_indentation_level()
         if self.prefix is not None:
@@ -335,15 +344,20 @@ class Logger(Logger_Interface):
         default_verbose: bool = False,
         override_prefix: str | None = None,
     ):
-        """Creates a logger object based on metadata from a BIDS_FILE.
+        """Create a :class:`Logger` whose folder is derived from a ``BIDS_FILE``.
+
+        The log directory is placed inside the BIDS dataset root of ``bids_file``.
 
         Args:
-            bids_file (BIDS_FILE): _description_
-            log_filename (str | dict[str, str]): _description_
-            default_verbose (bool, optional): _description_. Defaults to False.
+            bids_file: BIDS file used to locate the parent dataset directory.
+            log_filename: Log filename, or a dict of BIDS-conform key/value pairs
+                that will be joined into a filename.
+            default_verbose: Default verbose behavior for subsequent calls.
+            override_prefix: If set, uses this string as the log prefix instead
+                of the automatically chosen one.
 
         Returns:
-            _type_: _description_
+            A new :class:`Logger` writing into the BIDS dataset's ``logs`` folder.
         """
         path = bids_file.dataset
         return Logger(path, log_filename, default_verbose=default_verbose, prefix=override_prefix)

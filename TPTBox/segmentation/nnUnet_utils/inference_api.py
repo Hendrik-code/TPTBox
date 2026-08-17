@@ -73,6 +73,9 @@ def load_inf_model(
         tile_batch_size: Number of sliding-window tiles per network forward pass.
             ``1`` reproduces the original per-tile path; larger values batch
             tiles to improve GPU utilisation at higher peak memory.
+        fail_on_missing_memory: If True, raise an error when the estimated GPU memory
+            exceeds the available memory instead of waiting.
+        logger: Logger used for progress and error output.
 
     Returns:
         Initialised ``nnUNetPredictor`` ready for inference.
@@ -219,6 +222,7 @@ def run_inference(
             passing it to the model.
         logits: If True, return raw softmax logits.  Currently not implemented and
             will raise ``NotImplementedError``.
+        logger: Logger used for progress and error output.
         verbose: Unused; reserved for future logging support.
 
     Raises:

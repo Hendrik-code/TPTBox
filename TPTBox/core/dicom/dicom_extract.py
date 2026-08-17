@@ -94,7 +94,7 @@ def _generate_bids_path(
     """Generate a BIDS-compatible file path for NIfTI outputs based on extracted keys from DICOM headers.
 
     Args:
-        nifti_dir (str | Path): Directory where the NIfTI file will be stored.
+        dataset_nifti_dir (str | Path): Root dataset directory where the NIfTI file will be stored.
         keys (dict): Dictionary containing metadata keys extracted from DICOM headers.
         mri_format (str): The format or sequence type of the MRI (e.g., T1, T2).
         simp_json (dict): JSON dictionary with extracted DICOM information to avoid file naming conflicts.
@@ -822,7 +822,19 @@ def extract_dicom_folder(
         verbose (bool, optional): Whether to print detailed log information. Defaults to True.
         parts_mapping (dict, optional): A dictionary mapping DICOM part identifiers to specific descriptions (e.g., "f" -> "fat").
                                         Used for categorizing DICOM series. Defaults to a predefined mapping. The parts tag is only generated if the ImageType causes an image split.
+        map_series_description_to_file_format (dict | Callable | None, optional): Overrides the default mapping from
+            SeriesDescription to output ``mri_format``. Defaults to the built-in mapping.
+        validate_slicecount (bool, optional): Enable ``dicom2nifti`` slice-count validation. Defaults to True.
+        validate_orientation (bool, optional): Enable ``dicom2nifti`` orientation validation. Defaults to True.
+        validate_orthogonal (bool, optional): Enable ``dicom2nifti`` orthogonality validation. Defaults to False.
+        validate_slice_increment (bool, optional): Enable ``dicom2nifti`` slice-increment validation. Defaults to True.
         n_cpu (int, optional): Number of CPU cores to use for parallel processing. Defaults to 1 (sequential).
+        override_subject_name (Callable[[dict, Path], str] | None, optional): Callable receiving the parsed DICOM
+            header dict and file path; returns the subject id to use in the BIDS output. Defaults to None.
+        skip_localizer (bool, optional): If True, skip series identified as scanner localisers. Defaults to True.
+        parent (str, optional): Parent folder inside ``dataset_path_out`` under which subjects are written
+            (typically ``"rawdata"``). Defaults to ``"rawdata"``.
+        censor_list (list | None, optional): List of series keys to skip entirely. Defaults to an empty list.
 
     Returns:
         dict: A dictionary with keys representing DICOM series and values as paths to the generated NIfTI files.

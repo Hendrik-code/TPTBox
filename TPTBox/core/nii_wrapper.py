@@ -310,12 +310,13 @@ class NII(NII_Math):
         return nii
 
     @classmethod
-    def load_nrrd(cls, path: str | Path, seg: bool,verbos=False):
+    def load_nrrd(cls, path: str | Path, seg: bool,verbose=False):
         """Load an NRRD file and convert it into a Nifti1Image object.
 
         Args:
             path (str | Path): The file path to the NRRD file to be loaded.
             seg (bool): A flag indicating if the data represents segmentation data.
+            verbose (bool, optional): Passed through to ``load_slicer_nrrd``; prints per-segment info when True. Defaults to False.
 
         Returns:
             NII: An NII object containing the loaded Nifti1Image and the segmentation flag.
@@ -333,7 +334,7 @@ class NII(NII_Math):
         except ModuleNotFoundError:
             raise ImportError("The `pynrrd` package is required but not installed. Install it with `pip install pynrrd`.") from None
         from TPTBox.core.internal.slicer_nrrd import load_slicer_nrrd
-        return load_slicer_nrrd(path,seg,verbos=verbos)
+        return load_slicer_nrrd(path,seg,verbose=verbose)
     @classmethod
     def load_bids(cls, nii_bids: bids_files.BIDS_FILE) -> NII:
         """Loads an NII from a BIDS_FILE object, inferring seg and c_val from the format.
@@ -948,14 +949,18 @@ class NII(NII_Math):
         return self.apply_crop_(*args,**qargs)
 
     def apply_crop(self,ex_slice:tuple[slice,slice,slice]|Sequence[slice]|None , inplace=False) -> Self:
-        """The apply_crop_slice function applies a given slice to reduce the Nifti image volume. If a list of slices is provided, it computes the minimum volume of all slices and applies it.
+        """Crop the NIfTI volume by a per-axis slice tuple (thin wrapper around ``nibabel``'s ``.slicer``).
+
+        The affine is updated automatically so the resulting image stays in the same world coordinate system.
+        To *compute* an intersection of several crops first, use :meth:`compute_crop` with ``other_crop=``.
 
         Args:
-            ex_slice (tuple[slice,slice,slice] | list[tuple[slice,slice,slice]]): A tuple or a list of tuples, where each tuple represents a slice for each axis (x, y, z).
-            inplace (bool, optional): If True, it applies the slice to the original image and returns it. If False, it returns a new NII object with the sliced image.
+            ex_slice: A 3-slice sequence ``(slice_x, slice_y, slice_z)`` — typically what :meth:`compute_crop`
+                returns. ``None`` skips cropping and returns the image unchanged.
+            inplace (bool, optional): If True, mutate this NII and return ``self``. If False, return a new NII.
 
         Returns:
-            NII: A new NII object containing the sliced image if inplace=False. Otherwise, it returns the original NII object after applying the slice.
+            NII: A new NII with the cropped volume when ``inplace=False``; otherwise ``self``.
         """
         nii = self.nii.slicer[tuple(ex_slice)] if ex_slice is not None else self.nii_abstract
         if inplace:
@@ -1189,6 +1194,7 @@ class NII(NII_Math):
             c_val (float, optional): Value used for points outside the boundaries of the input when mode='constant'. Defaults to None (inferred from the image / segmentation).\n
             align_corners (bool|default): If True or not set and seg==True. Aline corners for scaling. This prevents segmentation mask to shift in a direction.
             inplace (bool, optional): Defaults to False.
+            verbose (logging, optional): If True, log resampling shortcuts (skip / reorient-only). Defaults to True.
 
         Returns:
             NII:
@@ -1277,12 +1283,12 @@ class NII(NII_Math):
 
         Args:
             threshold (int, optional): If != 0, will mask the input based on the threshold. Defaults to 60.
-            mask (_type_, optional): If threshold==0, this can be set to input a individual mask. If none, lets the algorithm automatically determine the mask. Defaults to None.
+            mask (ants.ANTsImage | None, optional): If ``threshold == 0``, use this custom mask (as an ANTs image). If None and ``threshold == 0``, ANTs derives the mask automatically. Defaults to None.
             shrink_factor (int, optional): Downsampling factor for the coarse bias estimation stage. Defaults to 4.
             convergence (dict, optional): Iteration / tolerance schedule forwarded to ANTs. Defaults to {"iters": [50, 50, 50, 50], "tol": 1e-07}.
             spline_param (int, optional): B-spline mesh resolution (mm) for the bias field. Defaults to 200.
             verbose (bool, optional): If True, ANTs prints progress information. Defaults to False.
-            weight_mask (_type_, optional): Optional per-voxel weighting image passed through to ANTs. Defaults to None.
+            weight_mask (ants.ANTsImage | None, optional): Optional per-voxel weighting image (ANTs image) passed through to ANTs. Defaults to None.
             crop (bool, optional): If True, crop the output to the region actually touched by the correction. Defaults to False.
             inplace (bool, optional): If True, mutate this NII and return ``self``; otherwise return a new NII. Defaults to False.
 
@@ -1758,6 +1764,9 @@ class NII(NII_Math):
             inplace (bool, optional): Whether to modify the mask in place or return a new object. Defaults to False.
             verbose (bool, optional): Whether to print a message indicating that the mask was dilated. Defaults to True.
             use_crop: speed up computation by cropping and un-cropping the segmentation. Minor overhead if the segmentation fills most of the image
+            ignore_direction (DIRECTIONS | int | None, optional): Axis to exclude from the dilation structuring
+                element (e.g. ``"S"`` to disallow superior/inferior growth). ``None`` dilates isotropically. Defaults to None.
+
         Returns:
             NII: The dilated mask.
 
@@ -1823,7 +1832,9 @@ class NII(NII_Math):
         """Calculates the convex hull of this segmentation nifty.
 
         Args:
-            axis (int | None, optional): If given axis, will calculate convex hull along that axis (remaining dimension must be at least 2). Defaults to None.
+            axis (DIRECTIONS | None, optional): If given axis, will calculate convex hull along that axis (remaining dimension must be at least 2). Defaults to ``"S"``.
+            inplace (bool, optional): If True, mutate this NII and return ``self``; otherwise return a new NII. Defaults to False.
+            verbose (bool, optional): If True, print progress from the underlying ``np_calc_convex_hull``. Defaults to False.
         """
         assert self.seg, "To calculate the convex hull, this must be a segmentation"
         axis_int = self.get_axis(axis) if axis is not None else None
@@ -2304,17 +2315,25 @@ class NII(NII_Math):
         return self.infect(reference_mask, inplace=True,verbose=verbose,axis=axis,_do_crop=_do_crop)
 
     def map_labels(self, label_map:LABEL_MAP , verbose:logging=True, inplace=False) -> Self:
-        """Maps labels in the given NIfTI image according to the label_map dictionary.
+        """Remap segmentation labels according to a dict.
+
+        Keys and values may be integers or vertebra name strings — strings are
+        resolved through :data:`v_name2idx` (e.g. ``"T1"`` → ``8``); unknown
+        strings fall back to ``int(k)`` and will raise if not numeric. A value
+        of ``None`` maps its key to the background (``0``). The output array is
+        always cast to ``np.uint16``.
 
         Args:
-            label_map (dict): A dictionary that maps the original label values (str or int) to the new label values (int).
-                For example, `{"T1": 1, 2: 3, 4: 5}` will map the original labels "T1", 2, and 4 to the new labels 1, 3, and 5, respectively.
+            label_map (dict): A dictionary that maps the original label values (str or int)
+                to the new label values (int, str, or ``None`` for background).
+                For example, ``{"T1": "T2", 2: 3, 4: 5}`` remaps the T1 label to the T2 label,
+                ``2`` to ``3``, and ``4`` to ``5``.
             verbose (bool): Whether to print the label mapping and the number of labels reassigned. Default is True.
             inplace (bool): Whether to modify the current NIfTI image object in place or create a new object with the mapped labels.
                 Default is False.
 
         Returns:
-            If inplace is True, returns the current NIfTI image object with mapped labels. Otherwise, returns a new NIfTI image object with mapped labels.
+            NII: Self when ``inplace=True``, otherwise a new NII with the remapped mask.
         """
         data_orig = self.get_seg_array()
         if len(label_map) == 0:
@@ -2534,10 +2553,9 @@ class NII(NII_Math):
         into world (physical) coordinates using the NIfTI affine.
 
         Args:
-            seg (NII):
-                Segmentation object containing a 3D mask.
-            label (int, optional):
-                Label value to extract from the segmentation. Defaults to 1.
+            label (int | Enum | Sequence[int | Enum]):
+                Label value(s) to extract from the segmentation. When a sequence is
+                given, all listed labels are merged into one mask before meshing.
             out_path (Path | dict[int, Path] | None, optional):
                 Output specification:
                     - Path → save mesh to this file
@@ -2548,7 +2566,7 @@ class NII(NII_Math):
                 vertex coordinates are shifted by the bounding box start indices.
             to_world (bool, optional):
                 If True, transform vertices from voxel coordinates into world
-                coordinates using `seg.affine`. Defaults to True.
+                coordinates using this NII's affine. Defaults to True.
             include_normals (bool, optional):
                 If True, compute and include per-face normals in the returned mesh
                 using `mesh.Mesh.update_normals()`. Note that STL supports only
@@ -2556,6 +2574,10 @@ class NII(NII_Math):
             number_path (bool, optional):
                 If True, append the label to the output filename when saving.
                 Defaults to False.
+            _crop (bool, optional):
+                Internal speed optimisation: when True and ``to_world`` is True, crop
+                the mask to its bounding box before running marching cubes and shift
+                the resulting vertices back. Defaults to True.
 
         Returns:
             mesh.Mesh:
@@ -2751,7 +2773,21 @@ class NII(NII_Math):
         return self.set_array(arr_bg, inplace, False)
 
     def extract_label(self,label:int|Enum|Sequence[int]|Sequence[Enum]|None, keep_label=False,inplace=False) -> Self:
-        """If this NII is a segmentation you can single out one label with [0,1]."""
+        """Extract one or more labels from this segmentation mask.
+
+        Args:
+            label: Label id(s) to extract. Accepts an ``int``, an ``Enum`` member,
+                a sequence of either, or ``None``. When ``None`` and
+                ``keep_label=False``, the mask is binarised via ``clamp(0, 1)``.
+                Passing ``0`` is rejected — the background is never a valid label.
+            keep_label: If True, keep the original label values inside the mask
+                (voxels not in ``label`` become 0). If False (default), all
+                selected voxels are remapped to ``1`` and everything else to ``0``.
+            inplace: If True, mutate this NII and return ``self``; otherwise return a new NII.
+
+        Returns:
+            Self: The extracted segmentation.
+        """
         assert self.seg, "extracting a label only makes sense for a segmentation mask"
         if label is None:
             if keep_label:
@@ -2779,17 +2815,15 @@ class NII(NII_Math):
             seg_arr = np_extract_label(seg_arr, labels, to_label=1, inplace=True)
         return self.set_array(seg_arr,inplace=inplace)
     def ravel(self,order:Literal["K", "A", "C", "F"] | None="C")->np.ndarray:
-        """Return a contiguous flattened array.
-
-        A 1-D array, containing the elements of the input, is returned. A copy is made only if needed.
-
-        As of NumPy 1.10, the returned array will have the same type as the input array. (for example, a masked array will be returned for a masked array input)
+        """Return a contiguous 1-D flattened copy of the voxel array (thin wrapper around ``numpy.ravel``).
 
         Args:
-            order (Literal[&quot;K&quot;, &quot;A&quot;, &quot;C&quot;, &quot;F&quot;] | None, optional): The elements of a are read using this index order. ‘C’ means to index the elements in row-major, C-style order, with the last axis index changing fastest, back to the first axis index changing slowest. ‘F’ means to index the elements in column-major, Fortran-style order, with the first index changing fastest, and the last index changing slowest. Note that the ‘C’ and ‘F’ options take no account of the memory layout of the underlying array, and only refer to the order of axis indexing. ‘A’ means to read the elements in Fortran-like index order if a is Fortran contiguous in memory, C-like order otherwise. ‘K’ means to read the elements in the order they occur in memory, except for reversing the data when strides are negative. By default, ‘C’ index order is used. Defaults to "C".
+            order: NumPy iteration order — ``"C"`` (row-major, default), ``"F"`` (column-major),
+                ``"A"`` (Fortran-like if the array is F-contiguous, else C-like), or ``"K"``
+                (memory order, honouring negative strides).
 
         Returns:
-            np.ndarray
+            np.ndarray: The flattened voxel array.
         """
         return self.get_array().ravel(order=order)
     def extract_label_(self, label: int | Enum | Sequence[int] | Sequence[Enum], keep_label=False) -> Self:

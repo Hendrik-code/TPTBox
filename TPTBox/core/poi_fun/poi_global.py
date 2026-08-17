@@ -180,6 +180,8 @@ class POI_Global(Abstract_POI):
 
         Args:
             msk (Union[poi.POI, poi.NII]): The reference to the other coordinate system.
+            verbose (bool, optional): If True, take the per-point (non-batched) code path so individual
+                ``global_to_local`` calls can log. Defaults to False.
 
         Returns:
             poi.POI: The converted POI.

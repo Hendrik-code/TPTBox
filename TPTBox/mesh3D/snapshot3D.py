@@ -62,6 +62,8 @@ def make_snapshot3D(
             Defaults to the minimum zoom of the image.
         width_factor: Multiplier applied to the per-view pixel width.
         scale_factor: PNG magnification factor passed to fury's record function.
+        debug: If True, disable the off-screen ``Xvfb`` wrapper and render to a
+            visible window — useful for interactive troubleshooting.
         verbose: If True, logs the output path after saving.
         crop: If True, crops the image to its bounding box before rendering.
         png_magnify: Window pixel density multiplier for the fury renderer.
@@ -162,6 +164,10 @@ def make_snapshot3D_parallel(
         scale_factor: PNG magnification factor.
         override: If False, skips images whose output file already exists.
         crop: If True, crops each image to its bounding box before rendering.
+        opacity: Per-label opacity mapping forwarded to :func:`make_snapshot3D`.
+            ``1`` is fully opaque, ``0`` invisible.
+        debug: If True, forwards ``debug=True`` to :func:`make_snapshot3D` so each
+            worker renders to a visible window instead of ``Xvfb``.
     """
     ress = []
     with Pool(cpus) as p:  # type: ignore

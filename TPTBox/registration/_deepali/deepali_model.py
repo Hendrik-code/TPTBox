@@ -177,11 +177,17 @@ def _warp_points(
     """Warp points using a spatial transform.
 
     Args:
-        points (list): List of points to warp: (b,n) b points with n coordinates.
+        points (list): List of points to warp: (b, n) b points with n coordinates.
+        axes (Axes): Coordinate system that ``points`` are expressed in.
+        to_axes (Axes): Coordinate system requested for the returned points.
+        grid (Deepali_Grid): Grid used as the reference for ``axes``.
+        to_grid (Deepali_Grid): Grid used as the reference for ``to_axes``.
         transform (SpatialTransform): Spatial transform to apply.
-        align_corners (bool): Whether to align corners during warping.
-        device (torch.device, optional): Device to perform computation on. Defaults to default_device.
+        device (torch.device, optional): Device to perform computation on. Defaults to ``default_device``.
         inverse (bool, optional): Whether to apply the inverse transform. Defaults to True.
+
+    Returns:
+        torch.Tensor: The warped points on CPU.
     """
     with torch.inference_mode():
         data = torch.Tensor(points)
@@ -195,13 +201,24 @@ def _warp_points(
 
 
 class General_Registration(DeepaliPairwiseImageTrainer):
-    """A class for performing deformable registration between a fixed and moving image.
+    """Deep-learning-based pairwise image registration built on top of DeepALI.
+
+    Wraps :class:`DeepaliPairwiseImageTrainer` with TPTBox ``NII``/``POI`` I/O.
+    The registration flavour (rigid / affine / SVFFD / …) is chosen via
+    ``transform_name`` and matched deepali transform class; the default
+    ``"SVFFD"`` produces a non-rigid B-spline transform. Registration runs in
+    the constructor when ``auto_run=True``; results are then applied through
+    :meth:`transform_nii`, :meth:`transform_poi`, or :meth:`transform_points`.
 
     Attributes:
-        transform (torch.Tensor): The transformation matrix resulting from the registration.
-        ref_nii (NII): Reference NII object used for registration.
-        grid (torch.Tensor): Target grid for image warping.
-        mov (NII): Processed version of the moving image.
+        target_grid (Grid): Grid of the fixed / reference image the transform
+            is defined on. Used as the default target grid in
+            :meth:`transform_nii` / :meth:`transform_poi`.
+        input_grid (Grid): Grid of the moving image (before resampling).
+        source_landmarks_poi (POI | None): Landmarks on the moving image, if any.
+        target_landmarks_poi (POI | None): Landmarks on the fixed image, if any.
+        transform (SpatialTransform): Fitted spatial transform (available after
+            training completes; inherited from the trainer base class).
     """
 
     def __init__(
@@ -442,6 +459,11 @@ class General_Registration(DeepaliPairwiseImageTrainer):
 
         Args:
             img (NII): The NII image to be transformed.
+            gpu (int | None, optional): GPU index override. Defaults to the device used during registration.
+            ddevice (DEVICES | None, optional): Device family override (e.g. ``"cuda"``). Defaults to the registration device.
+            target (Has_Grid | None, optional): Target grid to resample the output into. Defaults to ``self.target_grid``.
+            align_corners (bool, optional): Whether to align corners when converting grids to Deepali grids. Defaults to True.
+            inverse (bool, optional): Apply the inverse transform. XOR-combined with ``self._is_inverted``. Defaults to False.
 
         Returns:
             NII: The transformed image as an NII object.

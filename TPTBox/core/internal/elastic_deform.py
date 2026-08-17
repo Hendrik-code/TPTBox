@@ -26,7 +26,7 @@ def deformed_nii(
     the `deform_factor`. The deformed objects are returned as a dictionary.
 
     Args:
-        arr_dic (dict[str, NII]): A dictionary containing NII objects to be deformed.
+        nii_dic (dict[str, NII]): A dictionary containing NII objects to be deformed.
         sigma (float, optional): The standard deviation of the deformation field. If not provided,
             it will be generated based on the `deform_factor`.
         points (int, optional): The number of control points for the deformation grid. If not provided,
@@ -34,7 +34,10 @@ def deformed_nii(
         deform_factor (float, optional): A factor used to determine the deformation parameters if
             `sigma` and `points` are not specified. Larger values result in stronger deformations.
         deform_padding (int, optional): The padding added to the deformed objects to avoid edge artifacts.
-        verbose (bool, optional): If True, enable verbose logging. Default is True.
+        normalize (bool, optional): If True, per-entry normalise non-segmentation images to [0, 1] before
+            deforming and re-scale them back afterwards. Ignored when ``joint_normalize`` is True. Defaults to True.
+        joint_normalize (bool, optional): If True, use a single shared max across all non-segmentation
+            images for normalisation instead of per-entry min/max. Defaults to False.
 
     Returns:
         dict[str, NII]: A dictionary where keys correspond to the input dictionary keys, and values

@@ -236,6 +236,7 @@ class POI(Abstract_POI, Has_Grid):
 
         Args:
             x (Coordinate | list[float]): The local coordinate(s) to convert.
+            itk_coords (bool, optional): If True, return the coordinate in ITK/LPS convention (negate the first two axes) after the forward transform. Defaults to False.
 
         Returns:
             Coordinate: The converted global coordinate(s).
@@ -321,41 +322,32 @@ class POI(Abstract_POI, Has_Grid):
         )
 
     def apply_crop(self: Self, o_shift: tuple[slice, slice, slice] | Sequence[slice], inplace=False) -> Self:
-        """Adjust POI coordinates after a crop operation by shifting the origin.
+        """Adjust POI coordinates for a crop applied to the underlying image.
 
-        Points outside the cropped frame are NOT removed.
-        See :meth:`~TPTBox.NII.compute_crop_slice`.
-
-        Args:
-            o_shift (tuple[slice, slice, slice]): translation of the origin, cause by the crop
-            inplace (bool, optional): inplace. Defaults to True.
-
-        Returns:
-            Self
-        """
-        """Crop the POIs based on the given origin shift due to the image crop.
-
-        When you crop an image, you have to also crop the POIs.
-        There are actually no boundaries to be moved, but the origin must be moved to the new 0, 0, 0.
-        Points outside the frame are NOT removed. See NII.compute_crop_slice().
+        When you crop an image you must also update the attached POIs. There are no
+        boundaries to move, but the origin must be shifted so that the new voxel
+        (0, 0, 0) matches the same world coordinate as before. ``self.shape`` and
+        ``self.origin`` are updated accordingly. Points outside the cropped frame
+        are **not** removed — filter them separately via :meth:`filter_points_inside_shape`.
 
         Args:
-            o_shift (tuple[slice, slice, slice]): Translation of the origin caused by the crop.
-            inplace (bool, optional): If True, perform the operation in-place. Defaults to False.
+            o_shift (tuple[slice, slice, slice]): Per-axis slices encoding the crop
+                (the same slice tuple you would pass to ``NII.apply_crop``).
+                ``slice.start`` gives the origin translation per axis.
+            inplace (bool, optional): If True, mutate this POI and return ``self``;
+                otherwise return a new POI. Defaults to False.
 
         Returns:
-            Centroids: If inplace is True, returns the modified self. Otherwise, returns a new Centroids object.
+            POI: The updated POI (same object when ``inplace=True``).
 
-        Notes:
-            The input 'o_shift' should be a tuple of slices for each dimension, specifying the crop range.
-            The 'shape' and 'origin' attributes are updated based on the crop information.
         Raises:
-            AttributeError: If the old deprecated format for 'o_shift' (a tuple of floats) is used.
+            DeprecationWarning: If ``o_shift`` is the legacy tuple-of-floats format
+                instead of the tuple-of-slices format.
 
         Examples:
-            >>> POI_obj = Centroids(...)
+            >>> poi_obj = POI(...)
             >>> crop_slice = (slice(10, 20), slice(5, 15), slice(0, 8))
-            >>> new_POIs = POI_obj.crop(crop_slice)
+            >>> new_pois = poi_obj.apply_crop(crop_slice)
         """
         origin: COORDINATE = None  # type: ignore
         shape = None  # type: ignore
@@ -422,6 +414,7 @@ class POI(Abstract_POI, Has_Grid):
             translation_vector: Per-axis slices encoding the origin shift, or ``None``
                 to return ``self`` unchanged.
             inplace (bool, optional): Whether to modify in place. Defaults to True.
+            **kwargs: Extra keyword arguments forwarded to :meth:`apply_crop`.
 
         Returns:
             Self: The updated POI (same object when ``inplace=True``).
@@ -594,17 +587,23 @@ class POI(Abstract_POI, Has_Grid):
         return self.rescale(voxel_spacing=voxel_spacing, decimals=decimals, verbose=verbose, inplace=True)
 
     def to_global(self, itk_coords=False) -> POI_Global:
-        """Converts the Centroids object to a global POI_Global object.
+        """Convert this voxel-space POI to a global (world-space) :class:`POI_Global`.
 
-        This method converts the local POI coordinates to global coordinates using the Centroids' zoom,
-        rotation, and origin attributes and returns a new POI_Global object.
+        The zoom, rotation, and origin of this POI are used to build the new
+        :class:`POI_Global`; the actual per-point conversion happens lazily as points
+        are read from it. ``level_one_info``, ``level_two_info``, and ``info`` are
+        forwarded (``info`` is deep-copied).
+
+        Args:
+            itk_coords (bool, optional): If True, produce coordinates in ITK/LPS
+                convention (first two axes negated) instead of RAS. Defaults to False.
 
         Returns:
-            POI_Global: A new POI_Global object with the converted global POI coordinates.
+            POI_Global: A new POI_Global with the same points expressed in world space.
 
         Examples:
-            >>> POI_obj = Centroids(...)
-            >>> global_obj = POI_obj.to_global()
+            >>> poi_obj = POI(...)
+            >>> global_obj = poi_obj.to_global()
         """
         from TPTBox import POI_Global
 
@@ -642,8 +641,10 @@ class POI(Abstract_POI, Has_Grid):
             out_path (Path | str): The path where the JSON file will be saved.
             make_parents (bool, optional): If True, create any necessary parent directories for the output file.
                 Defaults to False.
-            verbose (bool, optional): If True, print status messages to the console. Defaults to True.
+            additional_info (dict | None, optional): Extra key/value pairs merged into the JSON's info block. Defaults to None.
             save_hint: 0 Default, 1 Gruber, 2 POI (readable), 10 ISO-POI (outdated)
+            resample_reference (Has_Grid | None, optional): If given, resample the POI to this grid before saving. Defaults to None.
+            verbose (bool, optional): If True, print status messages to the console. Defaults to True.
 
         Returns:
             None
@@ -669,6 +670,8 @@ class POI(Abstract_POI, Has_Grid):
             affine (np.ndarray, optional): The affine transformation matrix for the NIfTI image.
                 Defaults to None. If None, the POI object's affine will be used.
             s (int, optional): The neighborhood size. Defaults to 8.
+            sphere (bool, optional): If True, place a sphere of radius ``s`` (in millimetres) around each POI;
+                if False, use a cubic ``s``-voxel neighbourhood. Defaults to True.
 
         Returns:
             tuple[NII, NII]: A tuple containing two NII objects representing the point cloud for regions and subregions.
@@ -833,6 +836,10 @@ class POI(Abstract_POI, Has_Grid):
                 - Tuple[Image_Reference, Image_Reference, list[int]]: A tuple containing two Image_Reference objects
                 and a list of integers representing the POI data.
                 - POI: An existing POI object to be loaded.
+            reference (Has_Grid | None, optional): Grid used to resample / anchor the loaded POI when its saved
+                grid is missing or differs. Defaults to None.
+            allow_global (bool, optional): If True, allow loading a :class:`POI_Global` file into this local
+                :class:`POI` (it will be converted to voxel space via ``reference``). Defaults to False.
 
         Returns:
             POI: The loaded Centroids object.
@@ -952,7 +959,8 @@ def calc_poi_from_two_segs(
         verbose (bool, optional): Whether to print verbose output during the computation.
         override (bool, optional): Whether to overwrite any existing centroids file at `out_path`.
         decimals (int, optional): The number of decimal places to round the computed centroid coordinates to.
-        additional_folder (bool, optional): Whether to add a `/ctd/` folder to the path generated for the output file.
+        check_every_point (bool, optional): If True, re-computes centroids even when ``out_path`` already exists,
+            so that every point is verified against the source segmentation. Defaults to True.
 
     Returns:
         Centroids: The computed centroids, as a `Centroids` object.
@@ -1056,14 +1064,17 @@ def calc_poi_from_subreg_vert(
     """Calculates the POIs of a subregion within a vertebral mask. This function is spine opinionated, the general implementation is "calc_poi_from_two_masks".
 
     Args:
-        vert_msk (Image_Reference): A vertebral mask image reference.
+        vert (Image_Reference): A vertebral mask image reference.
         subreg (Image_Reference): An image reference for the subregion of interest.
-        decimals (int, optional): Number of decimal places to round the output coordinates to. Defaults to 1.
+        buffer_file (str | Path | None, optional): Cache file used by the ``@_buffer_it`` wrapper — if present it is loaded and extended instead of recomputing from scratch. Defaults to None.
+        save_buffer_file (bool, optional): If True, persist the resulting POI back to ``buffer_file`` when new points were added. Defaults to False.
+        decimals (int, optional): Number of decimal places to round the output coordinates to. Defaults to 2.
         subreg_id (int | Location | list[int | Location], optional): The ID(s) of the subregion(s) to calculate POIs for. Defaults to 50.
-        axcodes_to (Ax_Codes | None, optional): A tuple of axis codes indicating the target orientation of the images. Defaults to None.
         verbose (bool, optional): Whether to print progress messages. Defaults to False.
-        fixed_offset (int, optional): A fixed offset value to add to the calculated POI coordinates. Defaults to 0.
         extend_to (POI | None, optional): An existing POI object to extend with the new POI values. Defaults to None.
+        _vert_ids (list[int] | None, optional): Restrict computation to this subset of vertebra ids. Defaults to None (all present).
+        _print_phases (bool, optional): Internal debug flag that prints per-phase timing information. Defaults to False.
+        _orientation_version (int, optional): Internal switch selecting the orientation-computation implementation to use. Defaults to 0.
 
     Returns:
         POI: A POI object containing the calculated POI coordinates.
@@ -1297,9 +1308,15 @@ def calc_centroids(
     Args:
         msk (Image_Reference): An `Image_Reference` object representing the input mask image.
         decimals (int, optional): An optional integer specifying the number of decimal places to round the centroid coordinates to (default is 3).
-        vert_id (int, optional): An optional integer specifying the fixed vertical dimension for the centroids (default is -1).
-        subreg_id (int, optional): An optional integer specifying the fixed subregion dimension for the centroids (default is 50).
+        first_stage (int | Abstract_lvl, optional): Value stored in the first (region) coordinate of each POI key.
+            Use ``-1`` to instead take the value from the mask label. Defaults to -1.
+        second_stage (int | Abstract_lvl, optional): Value stored in the second (subregion) coordinate of each POI key.
+            Use ``-1`` to instead take the value from the mask label. Defaults to 50.
         extend_to (POI, optional): An optional `POI` object to add the calculated centroids to (default is None).
+        inplace (bool, optional): If True and ``extend_to`` is provided, mutate it in place instead of copying. Defaults to False.
+        bar (bool, optional): If True, show a progress bar over the label loop when ``_crop`` is False. Defaults to False.
+        _crop (bool, optional): Internal fast path: compute all centroids with a single ``np_center_of_mass`` call
+            over the whole mask instead of per-label extraction. Defaults to True.
 
     Returns:
         POI: A `POI` object containing the calculated centroid coordinates.
@@ -1310,7 +1327,7 @@ def calc_centroids(
     Notes:
         - The function calculates the centroid coordinates of each region in the mask image.
         - The centroid coordinates are rounded to the specified number of decimal places.
-        - The fixed dimensions for the centroids can be specified using `vert_id` and `subreg_id`.
+        - Exactly one of ``first_stage`` and ``second_stage`` must be ``-1``; the other is stored as a fixed value.
         - If `extend_to` is provided, the calculated centroids will be added to the existing object and the updated object will be returned.
         - The region label is assumed to be an integer.
         - NaN values in the binary mask are ignored.

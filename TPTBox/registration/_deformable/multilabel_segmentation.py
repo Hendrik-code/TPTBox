@@ -60,25 +60,31 @@ class Template_Registration:
         """Initialize a multi-stage registration pipeline from an atlas to a target image.
 
         Args:
-            target (NII): Target image segmentation (e.g., from a subject).
-            atlas (NII): Atlas image segmentation (e.g., a reference or template).
-            target_img (NII): Target image if None the segmentation is used as an image.
-            atlas_img (NII): Atlas image if None the segmentation is used as an image.
+            target_seg (NII): Target image segmentation (e.g., from a subject).
+            atlas_seg (NII): Atlas image segmentation (e.g., a reference or template).
+            target_img (NII | None): Target intensity image; if None the segmentation is used as an image.
+            atlas_img (NII | None): Atlas intensity image; if None the segmentation is used as an image.
             poi_cms (POI | None): POI centroids of the atlas, used for initial point registration.
             same_side (bool): Whether atlas and target represent the same body side.
             verbose (int): Verbosity level for logging.
             gpu (int): GPU device ID (only relevant if using GPU).
             ddevice (DEVICES): Device type ('cuda' or 'cpu').
-            loss_terms (dict): Dictionary of loss terms for deformable registration.
-            weights (dict): Weights for the loss terms.
+            loss_terms (dict | None): Dictionary of loss terms for deformable registration.
+            weights (dict | None): Weights for the loss terms.
             lr (float): Learning rate for deformable registration optimizer.
+            lr_end_factor (float | None): If set, exponentially decay the LR by this final factor across steps.
             max_steps (int): Maximum optimization steps.
-            min_delta (float): Minimum delta for convergence.
+            min_delta (float | list[float]): Minimum delta for convergence (per pyramid level if a list is given).
             pyramid_levels (int): Number of resolution levels in multi-scale deformable registration.
             coarsest_level (int): Coarsest level index.
             finest_level (int): Finest level index.
+            crop (bool): If True, crop both target and atlas to their combined bounding box before registration.
             cms_ids (list | None): List of segmentation labels used to extract POI centroids.
             poi_target_cms (POI | None): Optional precomputed centroids for the target image.
+            max_history (int): Number of past deformable-registration parameter snapshots to keep for rollback.
+            change_after_point_reg (Callable): Hook applied to ``(target_seg, atlas_seg, target_img, atlas_img)``
+                between the point-based and deformable stages; defaults to identity.
+            tether_distance (float): Distance parameter for the segmentation-tether loss.
             **args: Additional keyword arguments passed to Deformable_Registration.
 
         Raises:
@@ -314,6 +320,8 @@ class Template_Registration:
             nii_atlas: Atlas image to be transformed (must share the atlas grid).
             allow_only_same_grid_as_moving: If True, assert that *nii_atlas* matches
                 the grid of the moving image used during point registration.
+            only_rigid: If True, apply only the point-based rigid registration and skip
+                the deformable stage. Defaults to False.
 
         Returns:
             Transformed ``NII`` aligned with the original target image space.

@@ -66,17 +66,23 @@ def make_quadrants(
     vert_ids : list of int or None, optional
         List of vertebra IDs to process. If None, all vertebrae found
         in the segmentation are processed.
+    mask_ids : tuple of int, optional
+        Spine sub-label ids that count as "vertebral body" and are intersected
+        with each vertebra mask before partitioning. Defaults to ``(49, 50, 52)``.
+    erode : int, optional
+        Number of voxels to erode the per-vertebra body mask before computing
+        the quantile bins (helps drop thin border voxels). ``0`` disables
+        erosion. Defaults to 0.
 
     Returns:
     -------
-    Image_Reference
+    NII
         An image where each vertebral body voxel is labeled with a value
         from 1 to 27, representing its anatomical subregion.
 
-    Raises:
+    Notes:
     ------
-    None
-        Vertebrae missing required POIs are silently skipped.
+    Vertebrae missing required POIs are silently skipped — no exception is raised.
 
     Examples:
     --------

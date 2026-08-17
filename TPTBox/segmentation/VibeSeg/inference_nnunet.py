@@ -32,6 +32,8 @@ def get_ds_info(idx: int, _model_path: str | Path | None = None, exit_one_fail: 
             ``None``, the bundled default path is used.
         exit_one_fail: If ``True``, call :func:`sys.exit` when the dataset is
             not found; otherwise return ``None``.
+        logger: Logger used for the "Please add Dataset ..." failure message.
+            Defaults to the module-level ``Reflection_Logger``.
 
     Returns:
         Parsed ``dataset.json`` dictionary for the requested dataset.
@@ -161,6 +163,11 @@ def run_inference_on_file(
             the cost of holding the model in GPU memory between calls. The GPU
             cache is also left warm (no ``empty_cache``) so the allocator can
             reuse buffers across images.
+        auto_download: If ``True``, download missing model weights on first use.
+            Forced to ``True`` when ``model_path`` is ``None``.
+        fail_on_missing_memory: If ``True``, raise an error when the estimated
+            GPU memory exceeds the available memory instead of waiting.
+        logger: Logger used for all progress and error output.
 
     Returns:
         A tuple ``(seg_nii, softmax_logits)`` where ``seg_nii`` is the
@@ -432,6 +439,7 @@ def run_VibeSeg(
         max_folds: Limit the number of folds used for ensemble averaging.
         _model_path: Override for the default model weights directory.
         step_size: Sliding-window step size fraction.
+        logger: Logger used for progress and error output.
         **_kargs: Additional keyword arguments forwarded to
             :func:`run_inference_on_file`.
 

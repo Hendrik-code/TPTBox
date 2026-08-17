@@ -726,6 +726,8 @@ def np_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 
     Args:
         img: input array
         px_dist: int | tuple[int]: dist (int): The amount of padding to be added to the cropped image. If int, will apply the same padding to each dim. Default value is 0.
+        raise_error (bool, optional): If True and ``img`` is empty, raise ``ValueError``. If False, return a full-image
+            slice tuple instead. Defaults to True.
 
     Returns:
         list of boundary coordinates as slices tuple
@@ -899,9 +901,9 @@ def np_connected_components(
 
     Args:
         arr: input arr
+        label_ref (int | list[int] | None, optional): Labels the algorithm should be applied to. If None, applies on all labels found in ``arr``. Defaults to None.
         connectivity: in range [1,3]. For 2D images, 2 and 3 is the same.
         include_zero (bool): If true, will treat the background (0) as another label to calculate connected components from. Significantly slower! Defaults to False.
-        verbose: If true, will print out if the array does not have any CC
 
     Returns:
         arr_cc: UINTARRAY, N: number of cc
@@ -934,7 +936,7 @@ def np_connected_components_per_label(
     Args:
         arr: input arr
         connectivity: in range [1,3]. For 2D images, 2 and 3 is the same.
-        labels (int | list[int] | None, optional): Labels that the connected components algorithm should be applied to. If none, applies on all labels found in arr. Defaults to None.
+        label_ref (int | list[int] | None, optional): Labels that the connected components algorithm should be applied to. If none, applies on all labels found in arr. Defaults to None.
         include_zero (bool): If true, will treat the background (0) as another label to calculate connected components from. Significantly slower! Defaults to False.
 
     Returns:
@@ -982,11 +984,14 @@ def np_filter_connected_components(
 
     Args:
         arr (np.ndarray): input array
-        k (int | None): finds the k-largest components. If k is None, will find all connected components and still sort them by size
-        labels (int | list[int] | None, optional): Labels that the algorithm should be applied to. If none, applies on all labels found in arr. Defaults to None.
+        largest_k_components (int | None): finds the k-largest components. If None, will find all connected components and still sort them by size.
+        label_ref (int | list[int] | None, optional): Labels that the algorithm should be applied to. If none, applies on all labels found in arr. Defaults to None.
         connectivity: in range [1,3]. For 2D images, 2 and 3 is the same.
         return_original_labels (bool): If set to False, will label the components from 1 to k. Defaults to True
-        k_larges_global(bool): If true largest_k_components is filterd over all labels instead of each lable individualy
+        min_volume (float): Discard components whose voxel volume is below this threshold. Defaults to 0.
+        max_volume (float | None): Discard components whose voxel volume exceeds this threshold. Defaults to None (no upper cap).
+        removed_to_label (int): Label value assigned to voxels of discarded components. Defaults to 0.
+        k_larges_global (bool): If true largest_k_components is filterd over all labels instead of each lable individualy
     Returns:
         np.ndarray: array with the largest k connected components
     """
@@ -1149,8 +1154,10 @@ def np_fill_holes(
 
     Args:
         arr (np.ndarray): Input segmentation array
-        labels (int | list[int] | None, optional): Labels that the hole-filling should be applied to. If none, applies on all labels found in arr. Defaults to None.
+        label_ref (int | list[int] | None, optional): Labels that the hole-filling should be applied to. If none, applies on all labels found in arr. Defaults to None.
         slice_wise_dim (int | None, optional): If the input is 3D, the specified dimension here cna be used for 2D slice-wise filling. Defaults to None.
+        use_crop (bool, optional): If True, crop to the label's bounding box before filling — significantly faster for sparse volumes. Defaults to True.
+        pbar (bool, optional): If True, wrap the per-label loop with a tqdm progress bar. Defaults to False.
 
     Returns:
         np.ndarray: The array with holes filled
@@ -1227,13 +1234,19 @@ def np_smooth_gaussian_labelwise(
     Args:
         arr (UINTARRAY): Input Segmentation Mask Array
         label_to_smooth (list[int] | int): Which labels to smooth in the mask. Every other label will be untouched
+        label_weights (dict[int, float] | None, optional): Per-label multiplicative weight applied to each label's
+            probability map before the argmax step. Labels not in the dict get weight 1.0. Defaults to no weighting.
         sigma (float, optional): Sigma of the gaussian blur. Defaults to 3.0.
         radius (int, optional): Radius of the gaussian blur. Defaults to 6.
         truncate (int, optional): Truncate of the gaussian blur. Defaults to 4.
         boundary_mode (str, optional): Boundary Mode of the gaussian blur. Defaults to "nearest".
         dilate_prior (int, optional): Dilate this many voxels before starting the gaussian blur algorithm. Defaults to 0.
         dilate_connectivity (int, optional): Connectivity of the dilation process, if applied. Defaults to 3.
+        dilate_channelwise (bool, optional): If True, dilate each label's binary mask independently instead of dilating
+            the joint segmentation. Defaults to False.
         smooth_background (bool, optional): If true, will also smooth the background. If False, the background voxels stay the same and the segmentation cannot add voxels. Defaults to True.
+        background_threshold (float | None, optional): Optional threshold used to build the background probability
+            map when ``smooth_background=False``. Defaults to None (auto).
 
     Returns:
         UINTARRAY: The resulting smoothed array of the segmentation (with the same labels as the input)
@@ -1513,9 +1526,8 @@ def np_calc_overlapping_labels(
     """Calculates the pairs of labels that are overlapping in at least one voxel (fast).
 
     Args:
-        prediction_arr (np.ndarray): Numpy array containing the prediction labels.
         reference_arr (np.ndarray): Numpy array containing the reference labels.
-        ref_labels (list[int]): List of unique reference labels.
+        prediction_arr (np.ndarray): Numpy array containing the prediction labels.
 
     Returns:
         list[tuple[int, int]]: List of tuples of labels that overlap in at least one voxel
@@ -1561,6 +1573,7 @@ def np_fill_holes_global_with_majority_voting(arr: UINTARRAY, connectivity: int 
         arr (UINTARRAY): input array
         connectivity (int, optional): connectivity of connected components of the holes. Defaults to 3.
         inplace (bool, optional): Defaults to False.
+        verbose (bool, optional): Currently unused; reserved for future progress reporting. Defaults to False.
 
     Returns:
         arr: Array with all global holes filled
@@ -1602,9 +1615,10 @@ def np_map_labels_based_on_majority_label_mask_overlap(
     Args:
         arr (UINTARRAY): input array to be relabeled
         label_mask (np.ndarray): the mask from which to pull the target labels.
-        labels (int | list[int] | None, optional): Which labels in the input to process. Defaults to None.
-        dilate_pixel (int, optional): If true, will dilate the input to calculate the overlap. Defaults to 1.
+        label_ref (int | list[int] | None, optional): Which labels in the input to process. Defaults to None.
+        dilate_pixel (int, optional): If > 0, dilate the input by this many voxels before computing overlap. Defaults to 1.
         inplace (bool, optional): Defaults to False.
+        no_match_label (int, optional): Label assigned when a component has no overlap with any label in ``label_mask``. Defaults to 0.
 
     Returns:
         arr: input array with all labels in labels relabeled
@@ -1638,14 +1652,17 @@ def _pad_to_parameters(
     origin_shape: list[int] | tuple[int, int, int],
     target_shape: list[int] | tuple[int, int, int],
 ):
-    """Returns the parameter to pad the input to the target shape.
+    """Compute the (padding, crop) parameters that reshape ``origin_shape`` to ``target_shape``.
 
     Args:
-        arr (np.ndarray): input array
-        target_shape (list[int] | tuple[int,int,int]): target shape
+        origin_shape (list[int] | tuple[int, int, int]): The current array shape.
+        target_shape (list[int] | tuple[int, int, int]): Desired output shape.
 
     Returns:
-        np.ndarray: padded array
+        Tuple of (padding, crop, requires_crop) where ``padding`` is a list of
+        ``(before, after)`` pad widths per axis, ``crop`` is a list of ``slice``
+        objects to apply after padding, and ``requires_crop`` indicates whether
+        any crop slice is non-trivial.
     """
     padding = []
     crop = []

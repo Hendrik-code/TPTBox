@@ -19,7 +19,29 @@ def calc_all_facet_joint_pois(
     surface_tolerance_mm: float = 1.5,
     log: Logger_Interface = _log,
 ) -> POI:
-    """Call :func:`calc_facet_joint_pois` for every vertebra present in ``vert``."""
+    """Compute facet-joint midpoints for every vertebra present in ``vert``.
+
+    Iterates ids in ascending order (skipping C1) up to id 29 and delegates
+    each pair to :func:`_calc_facet_joint_pois`, which places a midpoint POI
+    between the Inferior_Articular process of the upper vertebra and the
+    Superior_Articular process of its lower neighbour.
+
+    Args:
+        vert: Vertebra instance segmentation (image reference).
+        subreg: Subregion / semantic segmentation on the same grid as ``vert``.
+        ids: Optional override for the two POI subregion ids the midpoints
+            are stored under. Defaults to
+            ``{"left": Articular_Process_Midpoint_Left, "right": Articular_Process_Midpoint_Right}``.
+        max_gap_mm: Skip a joint if the two articular surfaces are further
+            apart than this in millimetres. Defaults to 8.0.
+        surface_tolerance_mm: Point pairs within ``(min_distance + tolerance)``
+            are averaged as the contact surface. Defaults to 1.5.
+        log: Logger for status messages.
+
+    Returns:
+        POI: A fresh POI built from ``vert``'s grid containing the facet-joint
+        midpoints for all successfully processed vertebra pairs.
+    """
     vert_: NII = to_nii(vert, True)
     subreg_ = to_nii(subreg, True)
     poi = vert_.make_empty_POI()

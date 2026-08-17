@@ -144,6 +144,7 @@ def sag_cor_curve_projection(
     Args:
         ctd_list: given Centroids
         img_data: given img_data
+        ctd_fallback: Fallback POI used if ``ctd_list`` has 3 or fewer points at ``curve_location`` to interpolate.
         cor_savgol_filter: If true, will perform the savgol filter also in coronal view
         curve_location: Location of the curve's centroids to be used.
 
@@ -1062,15 +1063,29 @@ def create_snapshot(  # noqa: C901
     dpi=96,
     verbose: bool = False,
 ) -> None:
-    """Create virtual dx, sagittal, and coronal curved-planar CT snapshots with mask overlay.
+    """Render one or more :class:`Snapshot_Frame`s into a single figure and save it.
+
+    Each frame independently selects its views (sagittal / coronal / axial),
+    slice mode (regular slice, MIP, curve-projection, …), and overlay style;
+    this function only handles layout, common pre-processing (crop / reorient
+    / resample), and file I/O. The output file format is inferred from
+    ``snp_path``'s suffix (typically ``.png`` or ``.jpg``).
 
     Args:
-        snp_path (str): Path to the new jpg
-        frames (List[Snapshot_Frame]): List of Images
-        crop (bool): crop output to vertebral masks (seg-vert). Defaults to False.
-        check (bool): if true, check if snap is present and do not re-create. Defaults to False.
-        to_ax (Orientation): Sets the Orientation. Can be used for flipping the image or fixing false rotations of the original inputs.
-        dpi (int): Set the resolution.
+        snp_path (str | Path | list[str | Path]): Destination path, or list of paths
+            when several output files should share the same rendered figure
+            (useful for writing both a ``.png`` and a ``.jpg``).
+        frames (list[Snapshot_Frame]): One frame per row in the output figure.
+            ``None`` entries are silently skipped.
+        crop (bool): Crop each frame to the vertebra segmentation bounding box
+            before rendering. Defaults to False.
+        check (bool): If True and every ``snp_path`` already exists on disk,
+            return without re-rendering. Defaults to False.
+        to_ax (Orientation): Reorientation applied to every frame's image /
+            segmentation / POI before rendering. Use to flip axes or correct
+            rotated inputs. Defaults to ``("I", "P", "L")``.
+        dpi (int): Matplotlib DPI for the output figure. Defaults to 96.
+        verbose (bool, optional): If True, log the output path and progress. Defaults to False.
     """
     # Checks if snaps already exists, does nothing if true and check is true
     exist = all(Path(i).is_file() for i in snp_path) if isinstance(snp_path, list) else Path(snp_path).is_file()
