@@ -1987,6 +1987,7 @@ class Searchquery:
             key_transform (typing.Callable[[BIDS_FILE], str | None]): provide alternative dict name for certain fils, if default should be used return None
             key_addendum (list[str] | None, optional): Extra info-key names appended to each family's dict keys to
                 disambiguate otherwise-identical entries. Defaults to None.
+
         Returns:
             typing.Iterator[typing.Dict[str, BIDS_FILE | list[BIDS_FILE]]]
         """
