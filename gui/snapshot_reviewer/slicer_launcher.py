@@ -93,12 +93,12 @@ SLICER_EXE = _default_slicer_exe()
 # ``build_fam_for_snapshot`` or ``SlicerLaunchDialog`` and should not mutate
 # this global in place.
 _DERIVATIVES_SEARCH = [
+    "rawdata",
+    "derivatives",
+    "derivatives-treg",
+    "derivatives-spineps",
     "derivatives-final-points",
     "derivatives-final",
-    "derivatives-treg",
-    "derivatives",
-    "derivatives-spineps",
-    "rawdata",
 ]
 
 
