@@ -1433,7 +1433,7 @@ class ReviewWindow(QMainWindow):
         upcoming = self.queue[start : start + self.prefetch_count]
         if upcoming:
             # Cap the per-tick disk burst so a big jump doesn't stall the UI.
-            self.image_cache.prefetch(upcoming, max_new=max(2, self.prefetch_count // 4))
+            self.image_cache.prefetch(upcoming, max_new=2)
 
     # ─────────────────────────────────────────────────────────────────────
     # Display
@@ -1691,7 +1691,7 @@ def main() -> None:
         default=None,
         help="Comma-separated list of derivatives folders to scan for BIDS files (overrides stored setting)",
     )
-    parser.add_argument("--prefetch", type=int, default=None, help="How many upcoming snapshots to prefetch")
+    parser.add_argument("-pr", "--prefetch", type=int, default=None, help="How many upcoming snapshots to prefetch")
     parser.add_argument("--cache-size", type=int, default=None, help="LRU image cache size (decoded pixmaps)")
     parser.add_argument("--buttons-per-row", type=int, default=None, help="Number of action buttons per row in the review panel")
     args = parser.parse_args()
