@@ -1588,11 +1588,6 @@ class ReviewWindow(QMainWindow):
                     for k1, k2, coord in p2.items():
                         p[k1, k2] = coord
                     p.save(f)
-                    for t in fam["msk_seg-treg"]:
-                        logger.on_debug(t)
-                        if t.parent == "derivatives-final-points":
-                            logger.on_debug("unlink", t.file["nii.gz"])
-                            t.file["nii.gz"].unlink(missing_ok=True)
 
         dlg = SlicerLaunchDialog(
             p,
