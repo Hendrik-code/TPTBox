@@ -169,6 +169,8 @@ def _run_inference_patches(input_nii: list[NII], nnunet, _cpu_chunks, logger=log
     Should only be used if there is not enough RAM on the system.
     """
     logger.on_debug("Run: _run_inference_patches, You should only run this if you have limited RAM.")
+    import gc
+
     from TPTBox.segmentation.nnUnet_utils.predictor import empty_cache
 
     empty_cache(nnunet.device)
@@ -198,6 +200,9 @@ def _run_inference_patches(input_nii: list[NII], nnunet, _cpu_chunks, logger=log
         sl[split_axis] = slice(crop_start, crop_end)
         seg_chunk = seg_chunk[tuple(sl)]
         seg_chunks.append(seg_chunk)
+        del chunk_inputs
+        gc.collect()
+        empty_cache(nnunet.device)
     seg_arr = np.concatenate([s.get_array() for s in seg_chunks], axis=split_axis)
     seg_nii = input_nii[0].copy()
     seg_nii.seg = True
