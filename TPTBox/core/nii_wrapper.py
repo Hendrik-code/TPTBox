@@ -286,8 +286,7 @@ class NII(NII_Math):
         Returns:
             A new NII wrapping the given array and affine.
         """
-        nii = nib.nifti1.Nifti1Image(arr,affine)
-        return NII(nii=nii, seg=seg, c_val=c_val, desc=desc, info=info)
+        return NII(nii=(arr,affine,None), seg=seg, c_val=c_val, desc=desc, info=info)
 
     @classmethod
     def load(cls, path: Image_Reference, seg: bool, c_val: float | None = None) -> Self:
@@ -1306,7 +1305,7 @@ class NII(NII_Math):
             import ants.utils.bias_correction as bc  # install antspyx not ants!
         from scipy.ndimage import binary_dilation, generate_binary_structure
 
-        from TPTBox.core.internal import ants_to_nifti, nifti_to_ants
+        from TPTBox.core.internal import ants_to_nifti
         dtype = self.dtype
         input_ants:ants.ANTsImage = self.to_ants()
         if threshold != 0:
@@ -1583,7 +1582,7 @@ class NII(NII_Math):
 
         arr = img_.data.squeeze().cpu().detach().numpy()
         arr = np.transpose(arr, axes=tuple(reversed(range(arr.ndim))))
-        return  NII((nib.Nifti1Image(arr,grid.affine)),seg=seg)
+        return  NII((arr,grid.affine,None),seg=seg)
 
     def to_deepali(self, align_corners: bool = True, dtype=None, device: device | str = "cpu") -> Any:
         """Converts this NII to a DeepALI ``Image`` tensor (requires the ``hf-deepali`` package).
