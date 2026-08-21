@@ -171,6 +171,7 @@ def split_touching_rib_ccs(
     vert_ids=None,
     verbose: bool = False,
     num_workers: int = 1,
+    short_cut=True,
 ) -> NII:
     """Split rib connected components that likely fuse the ribs of adjacent vertebrae.
 
@@ -235,7 +236,7 @@ def split_touching_rib_ccs(
 
                 if verbose:
                     logger.print(f"split CC {cc_label} via erosion -> {new_lbl} (voxels={int(m.sum())})")
-        if rib_cc.max() >= expected_number_of_ccs:
+        if short_cut and rib_cc.max() >= expected_number_of_ccs:
             break
 
     return rib_cc
@@ -254,6 +255,7 @@ def assign_ribs_to_vert_segmentation(
     right_id: int = Full_Body_Instance.rib_right.value,
     error_value=255,
     add_error=True,
+    short_cut=True,
 ) -> tuple[NII, NII]:
     """Assign rib connected components deterministically from top to bottom.
 
@@ -288,7 +290,9 @@ def assign_ribs_to_vert_segmentation(
     rib_cc = rib_seg.filter_connected_components(None, min_volume=min_volume, keep_label=False)
     cms_vert = calc_centroids(vert_seg)
     if split_touching:
-        rib_cc = split_touching_rib_ccs(rib_cc, erosion_pixels=erosion_pixels, min_volume=min_volume, vert_ids=vert_ids, verbose=verbose)
+        rib_cc = split_touching_rib_ccs(
+            rib_cc, erosion_pixels=erosion_pixels, min_volume=min_volume, vert_ids=vert_ids, short_cut=short_cut, verbose=verbose
+        )
     cms_cc = calc_centroids(rib_cc * vert_pred.calc_convex_hull(None).dilate_msk_euclid(5))
     cms_cc2 = calc_centroids(rib_cc)  # .dilate_msk_euclid(5)
 
