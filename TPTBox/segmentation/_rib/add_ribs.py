@@ -17,6 +17,7 @@ from typing import Any
 
 from TPTBox import BIDS_FILE, NII, Image_Reference, Location, No_Logger, to_nii
 from TPTBox.segmentation._rib._rib_assign import assign_ribs_to_vert_segmentation
+from TPTBox.segmentation.spineps import run_spineps
 
 logger = No_Logger(prefix="AddRibs")
 
@@ -48,9 +49,19 @@ def _resolve_rib_seg_path(
             "nii.gz",
             "msk",
             parent=derivatives_folder,
+            info={"seg": f"VIBESeg-{_VIBESEG_RIB_DATASET_ID}", "mod": ct.bids_format},
+            dataset_path=dataset,
+        )
+        # TODO remove
+        out_ = ct.get_changed_path(
+            "nii.gz",
+            "msk",
+            parent=derivatives_folder,
             info={"seg": f"VIBESeg-{_VIBESEG_RIB_DATASET_ID}"},
             dataset_path=dataset,
         )
+        if out_.exists():
+            out_.rename(out)
         return (out if out.exists() else None), out
 
     raise ValueError(
@@ -101,10 +112,10 @@ def _save_if_path(nii: NII, target: Image_Reference | str | Path | None) -> None
 
 
 def add_ribs_to_vert_spine(
-    vert: Image_Reference,
-    spine: Image_Reference,
+    vert: Image_Reference | None,
+    spine: Image_Reference | None,
     rib_seg: Image_Reference | None = None,
-    ct: Image_Reference | None = None,
+    ct: str | Path | BIDS_FILE | None = None,
     dataset: str | Path | None = None,
     *,
     rib_seg_out: str | Path | None = None,
@@ -145,6 +156,19 @@ def add_ribs_to_vert_spine(
     Returns:
         ``(vert_with_ribs, spine_with_ribs)`` — instance and subregion masks.
     """
+    if vert is None or spine is None:
+        assert ct is not None, "Provide vert/spine or a ct."
+        out = run_spineps(
+            ct,
+            dataset,
+            "ct",
+            "ct_instance",
+            "ct_labeling",
+            derivatives_folder,
+            ignore_compatibility_issues=True,
+        )
+        vert = out["out_vert"]
+        spine = out["out_spine"]
     vert_nii = to_nii(vert, seg=True)
     spine_nii = to_nii(spine, seg=True)
 
