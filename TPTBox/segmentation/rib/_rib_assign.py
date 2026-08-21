@@ -413,8 +413,12 @@ def assign_ribs_to_vert_segmentation(
     logger.print(f"Unmatched rib CCs: {undefined}")
     if add_error:  # or split_touching:
         vert_seg[rib_inst == error_value] = error_value
+
         if np.any(vert_seg.get_seg_array() == error_value):
             vert_seg2 = vert_seg.remove_labels(error_value).infect(vert_seg.extract_label(error_value), verbose=False)
             vert_seg[vert_seg != vert_seg2] = vert_seg2[vert_seg != vert_seg2]
             vert_seg[np.logical_and(rib_inst == error_value, vert_seg == 0)] = error_value
+        vert_seg[np.logical_and(vert_seg == 0, sem_seg.extract_label([Location.Rib_Left.value, Location.Rib_Right.value] == 1))] = (
+            error_value
+        )
     return vert_seg.reorient_(ori), sem_seg.reorient_(ori)
