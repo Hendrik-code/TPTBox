@@ -53,16 +53,6 @@ def _resolve_rib_seg_path(
             info={"seg": f"VIBESeg-{_VIBESEG_RIB_DATASET_ID}", "mod": ct.bids_format},
             dataset_path=dataset,
         )
-        # TODO remove
-        out_ = ct.get_changed_path(
-            "nii.gz",
-            "msk",
-            parent=derivatives_folder,
-            info={"seg": f"VIBESeg-{_VIBESEG_RIB_DATASET_ID}"},
-            dataset_path=dataset,
-        )
-        if out_.exists():
-            out_.rename(out)
         return (out if out.exists() else None), out
 
     raise ValueError(
