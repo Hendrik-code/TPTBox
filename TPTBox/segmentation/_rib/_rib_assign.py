@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from enum import Enum
+from functools import partial
 
 import numpy as np
+from tqdm import tqdm
 
 from TPTBox import NII, POI, Location, No_Logger, Vertebra_Instance, calc_centroids
 from TPTBox.core.vert_constants import Full_Body_Instance
@@ -30,32 +34,19 @@ def _thoracic_like_labels(labels: Iterable[int]) -> list[int]:
     return [*sorted(v for v in labels if 7 <= int(v) <= 20), 28]
 
 
-def _split_ccs_by_side(
-    rib_cc: NII,
-    cms_cc: POI,
-    cms_cc2: POI,
-    cms_vert: POI,  # , ref_vert: int
-) -> tuple[list[RibCandidate], list[RibCandidate]]:
+def _split_ccs_by_side(rib_cc: NII, cms_cc: POI, cms_cc2: POI, cms_vert: POI) -> tuple[list[RibCandidate], list[RibCandidate]]:
     right_axis = cms_vert.get_axis("R")
     inf_axis = cms_vert.get_axis("I")
     # ref_x = cms_vert[ref_vert, 50][right_axis]
-
     left: list[RibCandidate] = []
     right: list[RibCandidate] = []
     vols = rib_cc.volumes()
-
     for cc in cms_cc2.keys_region():
         if cc == 0 or (cc, 50) not in cms_cc:
             continue
         center = cms_cc[cc, 50]
-
         center2 = cms_cc2[cc, 50] if (cc, 50) in cms_cc2 else center  # noqa: SIM401
-        cand = RibCandidate(
-            cc_label=cc,
-            volume=vols.get(cc, 0),
-            z=center[inf_axis],
-            x=center2[right_axis],
-        )
+        cand = RibCandidate(cc_label=cc, volume=vols.get(cc, 0), z=center[inf_axis], x=center2[right_axis])
         distances = cms_vert.calculate_distances_cord(center2)
         min_key = min(distances, key=distances.get)  # type: ignore
         # x < vertebra center => patient right in RAS-like orientation
@@ -70,106 +61,183 @@ def _split_ccs_by_side(
     return left, right
 
 
-def _vert_z_spacing(cms_vert: POI) -> tuple[int, float, list[tuple[int, float]]]:
-    """Return (inferior axis index, median vertebra Z-spacing in voxels, sorted [(vert_id, z)])."""
-    inf_axis = cms_vert.get_axis("I")
-    vz = [(int(v), float(cms_vert[v, 50][inf_axis])) for v in cms_vert.keys_region() if (v, 50) in cms_vert]
-    vz.sort(key=lambda t: t[1])
-    if len(vz) < 2:
-        return inf_axis, 0.0, vz
-    spacings = [abs(vz[i + 1][1] - vz[i][1]) for i in range(len(vz) - 1)]
-    return inf_axis, float(np.median(spacings)) if spacings else 0.0, vz
+def _touching_surface(mask_a: np.ndarray, mask_b: np.ndarray, nii: NII, axis_weights=None) -> float:
+    """Return weighted number of voxel faces shared by two masks.
 
+    Touching along ``up_down_axis`` is weighted by ``up_down_weight``.
+    All other axes have weight 1.0.
+    """
+    if axis_weights is None:
+        axis_weights = {nii.get_axis("S"): 0.01, nii.get_axis("A"): 0.1, nii.get_axis("R"): 1}
+    surface = 0.0
 
-def _cc_extent_on_axis(arr: np.ndarray, cc_label: int, axis: int) -> float:
-    """Return the extent of a CC on a single axis."""
-    coords = np.where(arr == cc_label)[axis]
-    if coords.size == 0:
-        return 0.0
-    return float(coords.max() - coords.min())
+    for axis in range(mask_a.ndim):
+        sl1 = [slice(None)] * mask_a.ndim
+        sl2 = [slice(None)] * mask_a.ndim
+
+        sl1[axis] = slice(None, -1)
+        sl2[axis] = slice(1, None)
+
+        touching = (
+            np.logical_and(mask_a[tuple(sl1)], mask_b[tuple(sl2)]).sum() + np.logical_and(mask_b[tuple(sl1)], mask_a[tuple(sl2)]).sum()
+        )
+
+        weight = axis_weights.get(axis, 1)
+        surface += weight * touching
+
+    return surface
 
 
 def _try_erosion_split(
-    cc_mask_template: NII,
-    binary_cc: np.ndarray,
-    erosion_pixels: int,
-    min_volume: int,
-) -> list[np.ndarray] | None:
-    """Erode a single binary CC and re-run CC labelling. Return list of binary sub-CCs (infected back to the original mask) if the erode+CC produced 2+ components, else None."""
+    cc_label: int, binary_cc: NII, erosion_pixels: int, min_volume: int, _pass=0, verbose=True
+) -> tuple[int, list[np.ndarray]] | None:
+    """Try to split one CC by erosion.
+
+    Returns ``(cc_label, sub_masks)`` when successful, otherwise ``None``.
+    ``sub_masks`` are returned in the original image shape.
+    """
     if erosion_pixels <= 0:
         return None
-    cc_nii = cc_mask_template.copy().set_array_(binary_cc.astype(np.uint8), verbose=False)
+
+    # Crop to the CC's bounding box (+ padding for erosion/infection).
+    cc_nii = binary_cc
+
+    crop = cc_nii.compute_crop(0, 2)
+    cc_nii = cc_nii.apply_crop(crop)
     try:
-        eroded = cc_nii.erode_msk(n_pixel=erosion_pixels, verbose=False)
-    except Exception:
+        if _pass == 0:
+            eroded = cc_nii.erode_msk_euclid(n_pixel=erosion_pixels, verbose=False)
+        elif _pass == 1:
+            eroded = cc_nii.erode_msk(n_pixel=erosion_pixels, verbose=False)
+        elif _pass == 2:
+            eroded = cc_nii.erode_msk(n_pixel=erosion_pixels, verbose=False, ignore_direction="R")
+        elif _pass == 3:
+            eroded = cc_nii.erode_msk(n_pixel=erosion_pixels, verbose=False, ignore_direction="A")
+        else:
+            eroded = cc_nii.erode_msk(n_pixel=erosion_pixels, verbose=False)
+    except Exception as e:
+        if verbose:
+            logger.on_fail(f"Erosion failed for CC {cc_label}: {e}")
         return None
     eroded_cc = eroded.get_connected_components(connectivity=3)
     sub_labels = [int(x) for x in eroded_cc.unique() if x != 0]
+
     if len(sub_labels) < 2:
         return None
     infected = eroded_cc.infect(cc_nii, verbose=False)
     infected_arr = infected.get_seg_array()
-    sub_masks = []
+    full_size = cc_nii.sum()
+    # remerge if to small
+    for sub in sub_labels.copy():
+        count = int((infected_arr == sub).sum())
+
+        should_merge = count * cc_nii.voxel_volume() < min_volume or count / full_size < 0.2
+        if not should_merge:
+            continue
+        # print("merge", count, full_size, count / full_size)
+        remaining = [x for x in sub_labels if x != sub]
+        if not remaining:
+            break
+
+        sub_mask = infected_arr == sub
+        if len(remaining) == 1:
+            target = remaining[0]
+            # print("merge", target)
+        else:
+            target = max(remaining, key=lambda candidate: _touching_surface(sub_mask, infected_arr == candidate, infected))
+            # print("merge of many", target)
+        infected_arr[infected_arr == sub] = target
+        sub_labels.remove(sub)
+    if len(sub_labels) < 2:
+        return None
+    # Restore masks to the original shape here, so callers do not need to
+    # track either the crop or the original CC label separately.
+    full_masks = []
     for sub in sub_labels:
         m = infected_arr == sub
-        if int(m.sum()) >= min_volume:
-            sub_masks.append(m)
-    return sub_masks if len(sub_masks) >= 2 else None
+        full = np.zeros(binary_cc.shape, dtype=bool)
+        full[crop] = m
+        full_masks.append(full)
+    if len(full_masks) < 2:
+        return None
+    return cc_label, full_masks
 
 
 def split_touching_rib_ccs(
     rib_cc: NII,
-    cms_vert: POI,
-    max_span_factor: float = 1.4,
-    erosion_pixels: int = 2,
-    min_volume: int = 100,
-    max_passes: int = 3,
+    erosion_pixels: int = 4,
+    min_volume: int = 1000,
+    max_passes: int = 2,
+    vert_ids=None,
     verbose: bool = False,
+    num_workers: int = 1,
 ) -> NII:
     """Split rib connected components that likely fuse the ribs of adjacent vertebrae.
 
-    A CC whose extent on the inferior axis exceeds ``max_span_factor`` × the
-    median vertebra Z-spacing is treated as merged ribs and processed by
-    erosion: erode the CC, re-run CC labelling, infect the new labels back
-    onto the original CC voxels. Resolves ribs bridged by a thin strip of
-    voxels.
-
-    Runs up to ``max_passes`` sweeps so a newly split sub-CC that is still
-    oversized gets another chance.
+    ``_try_erosion_split`` can optionally be evaluated in parallel for all
+    connected components in a pass. Label assignment and writes to ``arr``
+    remain sequential to keep labels deterministic and avoid races.
     """
-    inf_axis, median_spacing, _vz_sorted = _vert_z_spacing(cms_vert)
-    if median_spacing <= 0:
-        return rib_cc
-    threshold = median_spacing * max_span_factor
+    # arr = rib_cc.get_seg_array()
 
-    arr = rib_cc.get_seg_array()
-    next_label = int(arr.max()) + 1 if arr.size and arr.max() > 0 else 1
+    if vert_ids is None:
+        vert_ids = []
+    next_label = int(rib_cc.max()) + 1 if rib_cc.shape and rib_cc.max() > 0 else 1
+    u = {int(x) for x in rib_cc.unique() if x != 0}
+    # ribs counte twice (left/right)
+    expected_number_of_ccs = len([a for a in Vertebra_Instance.thoracic() if a.value in vert_ids]) * 2
+    if expected_number_of_ccs == 0:
+        expected_number_of_ccs = 24
 
     for _pass in range(max_passes):
-        changed = False
-        for cc_label in sorted({int(x) for x in np.unique(arr) if x != 0}):
-            extent = _cc_extent_on_axis(arr, cc_label, inf_axis)
-            if extent <= threshold:
-                continue
+        print("Separate RIBs - Pass", _pass + 1, f"{expected_number_of_ccs=}")
 
-            binary_cc = arr == cc_label
-            sub_masks = _try_erosion_split(rib_cc, binary_cc, erosion_pixels, min_volume)
+        labels = sorted(u)
+
+        binary_ccs = [(cc_label, rib_cc.extract_label(cc_label)) for cc_label in labels]
+        if num_workers == 1:
+            results = []
+            for cc_label, binary_cc in tqdm(binary_ccs, total=len(binary_ccs), desc="Separate RIBs"):
+                result = _try_erosion_split(cc_label, binary_cc, erosion_pixels, min_volume, _pass)
+                if result is not None:
+                    results.append(result)
+        else:
+            results = []
+
+            with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                futures = [
+                    executor.submit(_try_erosion_split, cc_label, binary_cc, erosion_pixels, min_volume, _pass)
+                    for cc_label, binary_cc in binary_ccs
+                ]
+
+                # tqdm advances immediately whenever an individual future completes.
+                for future in tqdm(as_completed(futures), total=len(futures), desc="Separate RIBs"):
+                    result = future.result()
+                    if result is not None:
+                        results.append(result)
+
+        # Apply mutations sequentially so label assignment is deterministic.
+        for cc_label, sub_masks in results:
             if sub_masks is None:
                 continue
 
-            arr[binary_cc] = 0
+            binary_cc = rib_cc.extract_label(cc_label)
+            u.discard(cc_label)
+            rib_cc[binary_cc] = 0
+
             for i, m in enumerate(sub_masks):
                 new_lbl = cc_label if i == 0 else next_label
                 if i > 0:
                     next_label += 1
-                arr[m] = new_lbl
+
+                rib_cc[m] = new_lbl
+                u.add(new_lbl)
+
                 if verbose:
                     logger.print(f"split CC {cc_label} via erosion -> {new_lbl} (voxels={int(m.sum())})")
-            changed = True
-        if not changed:
+        if rib_cc.max() >= expected_number_of_ccs:
             break
 
-    rib_cc.set_array_(arr, verbose=False)
     return rib_cc
 
 
@@ -181,7 +249,6 @@ def assign_ribs_to_vert_segmentation(
     min_volume: int = 100,
     no_7=False,
     split_touching: bool = True,
-    max_span_factor: float = 1.4,
     erosion_pixels: int = 2,
     left_id: int = Full_Body_Instance.rib_left.value,
     right_id: int = Full_Body_Instance.rib_right.value,
@@ -208,6 +275,8 @@ def assign_ribs_to_vert_segmentation(
     rib_seg.assert_affine(other=sem_seg, verbose=verbose)
 
     ori = vert_seg.orientation
+    vert_ids = vert_seg.unique()
+
     vert_seg = vert_seg.reorient()
     sem_seg = sem_seg.reorient()
     rib_seg = rib_seg.reorient(verbose=verbose)
@@ -216,13 +285,10 @@ def assign_ribs_to_vert_segmentation(
     logger.on_debug(f"{rib_seg.unique()=}")
     # Remove rib voxels overlapping vertebrae
     rib_seg[vert_pred != 0] = 0
-
     rib_cc = rib_seg.filter_connected_components(None, min_volume=min_volume, keep_label=False)
     cms_vert = calc_centroids(vert_seg)
     if split_touching:
-        rib_cc = split_touching_rib_ccs(
-            rib_cc, cms_vert, max_span_factor=max_span_factor, erosion_pixels=erosion_pixels, min_volume=min_volume, verbose=verbose
-        )
+        rib_cc = split_touching_rib_ccs(rib_cc, erosion_pixels=erosion_pixels, min_volume=min_volume, vert_ids=vert_ids, verbose=verbose)
     cms_cc = calc_centroids(rib_cc * vert_pred.calc_convex_hull(None).dilate_msk_euclid(5))
     cms_cc2 = calc_centroids(rib_cc)  # .dilate_msk_euclid(5)
 
@@ -281,10 +347,14 @@ def assign_ribs_to_vert_segmentation(
     # without disturbing existing (non-rib) labels. Skip unmatched CCs (sentinel error_value=255).
     matched = (rib_inst != 0) & (rib_inst != error_value)
     vert_seg[matched] = rib_inst[matched]
-    if add_error:
-        vert_seg[rib_inst == 255] = 255
+
     sem_seg[rib_seg != 0] = rib_seg.map_labels({left_id: Location.Rib_Left.value, right_id: Location.Rib_Right.value})[rib_seg != 0]  # type: ignore
     undefined = sum(v == error_value for v in rib_vert_map.values())
     logger.print(f"Unmatched rib CCs: {undefined}")
-
+    if add_error:  # or split_touching:
+        vert_seg[rib_inst == error_value] = error_value
+        if np.any(vert_seg.get_seg_array() == error_value):
+            vert_seg2 = vert_seg.remove_labels(error_value).infect(vert_seg.extract_label(error_value), verbose=False)
+            vert_seg[vert_seg != vert_seg2] = vert_seg2[vert_seg != vert_seg2]
+            vert_seg[np.logical_and(rib_inst == error_value, vert_seg == 0)] = error_value
     return vert_seg.reorient_(ori), sem_seg.reorient_(ori)
