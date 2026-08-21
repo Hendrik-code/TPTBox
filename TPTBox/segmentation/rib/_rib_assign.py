@@ -1,3 +1,16 @@
+"""Rib-to-vertebra assignment on already-loaded segmentations (internal module).
+
+The functions here are implementation details of
+:func:`TPTBox.segmentation.rib.add_ribs.add_ribs_to_vert_spine`, which is the
+supported public entry point. They are not re-exported from the package.
+
+* ``assign_ribs_to_vert_segmentation`` — deterministic cranial→caudal mapping
+  of rib connected components to vertebrae T1..T12/L1, merging the result
+  back into the passed ``vert``/``spine`` NIIs.
+* ``split_touching_rib_ccs`` — erosion-based pre-processing pass that
+  separates rib CCs which fuse the ribs of neighbouring vertebrae.
+"""
+
 from __future__ import annotations
 
 import os
@@ -176,8 +189,28 @@ def split_touching_rib_ccs(
     """Split rib connected components that likely fuse the ribs of adjacent vertebrae.
 
     ``_try_erosion_split`` can optionally be evaluated in parallel for all
-    connected components in a pass. Label assignment and writes to ``arr``
+    connected components in a pass. Label assignment and writes to ``rib_cc``
     remain sequential to keep labels deterministic and avoid races.
+
+    Args:
+        rib_cc: Connected-component-labelled rib mask, modified in place.
+        erosion_pixels: Voxels to erode per pass when attempting to split a CC.
+        min_volume: Minimum voxel count for a split sub-component to survive
+            the merge-back heuristic (values below are re-merged into the
+            largest touching neighbour).
+        max_passes: Number of erosion passes tried before giving up. Each pass
+            uses a slightly different erosion strategy (Euclidean, standard,
+            direction-restricted).
+        vert_ids: Optional list of vertebra labels present in the case, used to
+            estimate the expected number of rib CCs (thoracic vertebrae × 2).
+        verbose: Emit per-split log messages.
+        num_workers: Threads used to evaluate ``_try_erosion_split`` in
+            parallel. ``1`` runs sequentially.
+        short_cut: If True (default), stop as soon as ``rib_cc.max()`` reaches
+            the expected CC count. Set to False to always run every pass.
+
+    Returns:
+        The (in-place-mutated) ``rib_cc`` NII.
     """
     # arr = rib_cc.get_seg_array()
 
@@ -259,19 +292,42 @@ def assign_ribs_to_vert_segmentation(
 ) -> tuple[NII, NII]:
     """Assign rib connected components deterministically from top to bottom.
 
-    Refactor goals:
-    - deterministic top->bottom assignment
+    Design:
+
+    - deterministic top→bottom assignment
     - no dominance / repeated while-loop logic
-    - robust left/right split using centroids
-    - preserve original output contract
+    - robust left/right split using vertebra + rib centroids
+    - merges the results back into the passed ``vert_seg`` / ``sem_seg`` so
+      non-rib labels are preserved
 
     Args:
-        split_touching: If True, run ``split_touching_rib_ccs`` on the rib CC
-            map before assignment so ribs that touch front/middle/back get
-            separated (erosion first, Z-band fallback).
-        max_span_factor: Threshold (× median vertebra spacing) above which a rib
-            CC is treated as merged and eligible for splitting.
+        vert_seg: Vertebra instance segmentation. Modified in place: matched
+            rib CCs are labelled with ``Vertebra_Instance(vid).RIB`` and
+            unmatched CCs get ``error_value`` (when ``add_error=True``).
+        sem_seg: Spine subregion segmentation. Modified in place: rib voxels
+            get ``Location.Rib_Left`` / ``Location.Rib_Right``.
+        rib_seg: Raw rib segmentation containing ``left_id`` / ``right_id``.
+        verbose: Verbose logging.
+        min_volume: Minimum voxel volume for a connected component to be kept
+            (both for the initial CC filter and inside the touching-split).
+        no_7: If True, skip vertebra 7 (C7) even if it appears rib-bearing.
+        split_touching: If True, run :func:`split_touching_rib_ccs` on the rib
+            CC map before assignment so ribs that touch front/middle/back get
+            separated via erosion.
         erosion_pixels: Voxels to erode by when attempting the erosion split.
+        left_id: Label value in ``rib_seg`` that marks the left rib mask.
+        right_id: Label value in ``rib_seg`` that marks the right rib mask.
+        error_value: Sentinel label written into ``vert_seg`` for rib CCs that
+            could not be matched to a vertebra (default 255).
+        add_error: If True, propagate ``error_value`` into ``vert_seg`` and
+            grow neighbouring labels into the unmatched region; if False, drop
+            the unmatched CCs silently.
+        short_cut: Forwarded to :func:`split_touching_rib_ccs` — stop the
+            erosion loop early once the expected number of CCs is reached.
+
+    Returns:
+        ``(vert_seg, sem_seg)`` — the mutated inputs, re-oriented back to the
+        original orientation of ``vert_seg``.
     """
     rib_seg.assert_affine(other=vert_seg, verbose=verbose)
     rib_seg.assert_affine(other=sem_seg, verbose=verbose)

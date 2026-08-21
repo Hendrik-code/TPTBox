@@ -5,9 +5,10 @@ Public entry point: :func:`add_ribs_to_vert_spine`.
 Given a vertebra instance segmentation (`vert`) and a spine subregion
 segmentation (`spine`), this module optionally runs VibeSeg (dataset 12) on
 the source CT to obtain a whole-body rib segmentation, then delegates label
-assignment to :func:`assign_ribs_to_vert_segmentation` in ``rib_chatgpt``,
-which handles left/right splitting, cranial-caudal matching, and the
-fallback that separates touching ribs.
+assignment to the internal ``assign_ribs_to_vert_segmentation`` in
+:mod:`TPTBox.segmentation.rib._rib_assign`, which handles left/right
+splitting, cranial-caudal matching, and the erosion-based fallback that
+separates touching ribs.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from TPTBox import BIDS_FILE, NII, Image_Reference, Location, No_Logger, to_nii
-from TPTBox.segmentation._rib._rib_assign import assign_ribs_to_vert_segmentation
+from TPTBox.segmentation.rib._rib_assign import assign_ribs_to_vert_segmentation
 from TPTBox.segmentation.spineps import run_spineps
 
 logger = No_Logger(prefix="AddRibs")
@@ -130,15 +131,23 @@ def add_ribs_to_vert_spine(
 ) -> tuple[NII, NII]:
     """Merge rib labels into a vertebra + spine segmentation.
 
-    If ``rib_seg`` is not given, VibeSeg (dataset 12) is run on ``ct`` and the
-    result is written to a path derived from a BIDS_FILE ct or given explicitly
-    via ``rib_seg_out``. Otherwise a ``dataset`` root must resolve a BIDS path.
+    If ``vert`` and ``spine`` are both ``None``, SPINEPS is run on ``ct`` first
+    to produce them. If ``rib_seg`` is not given, VibeSeg (dataset 12) is run on
+    ``ct`` and the result is written to a path derived from a BIDS_FILE ct or
+    given explicitly via ``rib_seg_out``. Otherwise a ``dataset`` root must
+    resolve a BIDS path.
+
+    If the input ``spine`` already contains ``Rib_Left``/``Rib_Right`` voxels,
+    the inputs are returned unchanged.
 
     Args:
-        vert: Vertebra instance segmentation (path, NII, or BIDS_FILE).
-        spine: Spine subregion segmentation (path, NII, or BIDS_FILE).
+        vert: Vertebra instance segmentation (path, NII, or BIDS_FILE). May be
+            ``None`` together with ``spine`` to trigger a SPINEPS run.
+        spine: Spine subregion segmentation (path, NII, or BIDS_FILE). May be
+            ``None`` together with ``vert``.
         rib_seg: Optional rib segmentation. If ``None``, VibeSeg is executed.
-        ct: Source CT, required when ``rib_seg`` is missing.
+        ct: Source CT, required when ``rib_seg`` is missing or when
+            ``vert``/``spine`` need to be generated.
         dataset: BIDS dataset root, used together with a ``BIDS_FILE`` ``ct`` to
             derive the VibeSeg output path.
         rib_seg_out: Explicit output path for the generated rib segmentation
@@ -149,9 +158,15 @@ def add_ribs_to_vert_spine(
             ``spine`` locations (only when they are paths or BIDS_FILEs).
         vibeseg_kwargs: Extra kwargs forwarded to :func:`run_vibeseg`.
         verbose: Verbose logging for the assignment step.
+        vert_path_out: Optional explicit output path for the merged
+            vertebra segmentation. Only used when ``save=True``; falls back to
+            the ``vert`` location when omitted.
+        spine_path_out: Optional explicit output path for the merged spine
+            segmentation. Only used when ``save=True``; falls back to the
+            ``spine`` location when omitted.
         **assign_kwargs: Extra kwargs forwarded to
             :func:`assign_ribs_to_vert_segmentation` (e.g. ``split_touching``,
-            ``max_span_factor``, ``erosion_pixels``).
+            ``erosion_pixels``, ``min_volume``, ``no_7``, ``short_cut``).
 
     Returns:
         ``(vert_with_ribs, spine_with_ribs)`` — instance and subregion masks.

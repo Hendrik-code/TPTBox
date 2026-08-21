@@ -1568,7 +1568,7 @@ class ReviewWindow(QMainWindow):
                 search.append(self._parent)
             self._slicer_bgi = BIDS_Global_info(self.dataset_path, search)
 
-        def _on_overwrite(jpg_path: Path, path_str: str, fam: dict[str, list[BIDS_FILE]], viewed: list[BIDS_FILE]):
+        def _on_overwrite(jpg_path: Path, path_str: str, _fam: dict[str, list[BIDS_FILE]], viewed: list[BIDS_FILE]):
             """Default back-hook: log and update status bar."""
             path = Path(path_str)
             fname = path.name

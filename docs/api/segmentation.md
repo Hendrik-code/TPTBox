@@ -23,3 +23,14 @@ VibeSeg / nnU-Net (general deep learning inference).
     options:
       show_source: true
       filters: ["!^_"]
+
+## Rib assignment
+
+Adds left/right rib labels to an existing vertebra + spine segmentation.
+When no raw rib mask is supplied, VibeSeg dataset 12 is invoked on the
+source CT.
+
+::: TPTBox.segmentation.rib.add_ribs
+    options:
+      show_source: true
+      filters: ["!^_"]
