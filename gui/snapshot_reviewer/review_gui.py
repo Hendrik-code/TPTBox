@@ -1568,7 +1568,7 @@ class ReviewWindow(QMainWindow):
                 search.append(self._parent)
             self._slicer_bgi = BIDS_Global_info(self.dataset_path, search)
 
-        def _on_overwrite(jpg_path: Path, path_str: str, fam: dict[str, list[BIDS_FILE]], viewed: list[BIDS_FILE]):
+        def _on_overwrite(jpg_path: Path, path_str: str, _fam: dict[str, list[BIDS_FILE]], viewed: list[BIDS_FILE]):
             """Default back-hook: log and update status bar."""
             path = Path(path_str)
             fname = path.name
@@ -1588,11 +1588,6 @@ class ReviewWindow(QMainWindow):
                     for k1, k2, coord in p2.items():
                         p[k1, k2] = coord
                     p.save(f)
-                    for t in fam["msk_seg-treg"]:
-                        logger.on_debug(t)
-                        if t.parent == "derivatives-final-points":
-                            logger.on_debug("unlink", t.file["nii.gz"])
-                            t.file["nii.gz"].unlink(missing_ok=True)
 
         dlg = SlicerLaunchDialog(
             p,

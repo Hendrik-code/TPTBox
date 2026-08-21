@@ -191,7 +191,16 @@ def run_inference_on_file(
         logger.on_fail(f"{shape=} has only {min(shape)} slice in a dimension.")
         return None, None
 
-    from TPTBox.segmentation.nnUnet_utils.inference_api import _run_inference_patches, load_inf_model, run_inference
+    from math import ceil
+
+    from TPTBox.segmentation.nnUnet_utils.inference_api import (
+        _get_total_ram_mb,
+        _run_inference_patches,
+        compute_cpu_chunks_for_ram,
+        estimate_peak_ram_mb,
+        load_inf_model,
+        run_inference,
+    )
 
     if isinstance(idx, int):
         if auto_download:
@@ -326,12 +335,33 @@ def run_inference_on_file(
         p = (padd, padd)
         input_nii = [i.apply_pad([p, p, p], mode="reflect") for i in input_nii]
     if _cpu_chunks is None or _cpu_chunks <= 1:
-        try:
-            seg_nii, _, softmax_logits = run_inference(input_nii, nnunet, logits=logits, logger=logger)
-        except MemoryError:
-            logger.print_error()
-            seg_nii = _run_inference_patches(input_nii, nnunet, None, logger=logger)
+        num_classes = int(nnunet.label_manager.num_segmentation_heads)
+        total_ram_mb = _get_total_ram_mb()
+        target_ram_mb = total_ram_mb * 0.5
+        est_full_mb = estimate_peak_ram_mb(input_nii[0].shape, num_classes, len(input_nii))
+        if est_full_mb > target_ram_mb:
+            shape = input_nii[0].shape
+            split_axis = int(np.argmax(shape))
+            patch_size = nnunet.configuration_manager.patch_size
+            overlap = ceil(patch_size[split_axis] * (1 - nnunet.tile_step_size))
+            auto_chunks = compute_cpu_chunks_for_ram(shape, split_axis, num_classes, len(input_nii), overlap, target_ram_mb)
+            logger.print(
+                f"Estimated peak RAM ~{est_full_mb:.0f} MB exceeds 50% of RAM ({target_ram_mb:.0f} MB of {total_ram_mb:.0f} MB); "
+                f"switching to _cpu_chunks={auto_chunks}.",
+                Log_Type.WARNING,
+            )
+            seg_nii = _run_inference_patches(input_nii, nnunet, auto_chunks, logger=logger)
             softmax_logits = None
+        else:
+            logger.print(
+                f"Estimated peak RAM ~{est_full_mb:.0f} MB fits within 50% of RAM ({target_ram_mb:.0f} MB of {total_ram_mb:.0f} MB)."
+            ) if verbose else None
+            try:
+                seg_nii, _, softmax_logits = run_inference(input_nii, nnunet, logits=logits, logger=logger)
+            except MemoryError:
+                logger.print_error()
+                seg_nii = _run_inference_patches(input_nii, nnunet, None, logger=logger)
+                softmax_logits = None
     else:
         seg_nii = _run_inference_patches(input_nii, nnunet, _cpu_chunks, logger=logger)
         softmax_logits = None

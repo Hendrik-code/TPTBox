@@ -13,6 +13,7 @@ from TPTBox.segmentation import (
     run_nnunet,
     run_inference_on_file,
     extract_vertebra_bodies_from_VibeSeg,
+    add_ribs_to_vert_spine,
 )
 ```
 
@@ -25,14 +26,16 @@ from TPTBox.segmentation import (
 | `run_totalvibeseg(img_nii, ...)` | `VibeSeg/vibeseg.py` | Run TotalVibeSeg — extended label set |
 | `run_nnunet(img_nii, model_dir, ...)` | `VibeSeg/vibeseg.py` | Generic nnU-Net inference on a single NIfTI |
 | `run_inference_on_file(path, ...)` | `nnUnet_utils/inference_api.py` | Low-level nnU-Net inference on a file path |
+| `add_ribs_to_vert_spine(vert, spine, ...)` | `rib/add_ribs.py` | Merge left/right rib labels into an existing vertebra + spine segmentation; optionally runs VibeSeg (dataset 12) on the source CT to obtain the raw rib mask |
 
 ## Dependencies
 
 | Pipeline | Requirement |
 |---|---|
 | SPINEPS | `pip install spineps` + model weights |
-| VibeSeg / TotalVibeSeg | `pip install nnunetv2` + model weights (auto-downloaded on first run) |
+| VibeSeg | `pip install nnunetv2` + model weights (auto-downloaded on first run) |
 | Generic nnU-Net | `pip install nnunetv2` + custom model directory |
+| Rib assignment (`add_ribs_to_vert_spine`) | calls into VibeSeg/SPINEPS if the segmentation is missing. |
 
 All external tools are imported lazily — the core TPTBox package installs and imports cleanly
 without them.
@@ -87,3 +90,29 @@ def main() -> None:
 if __name__ == "__main__":
     main()
 ```
+
+## Adding ribs to an existing spine segmentation
+
+```python
+from TPTBox import to_nii
+from TPTBox.segmentation import add_ribs_to_vert_spine
+
+# Case 1: raw rib mask already exists
+vert_out, spine_out = add_ribs_to_vert_spine(
+    vert="sub-01_seg-vert.nii.gz",
+    spine="sub-01_seg-spine.nii.gz",
+    rib_seg="sub-01_seg-VIBESeg-12.nii.gz",
+    save=True,  # writes back to vert / spine paths
+)
+
+# Case 2: no rib mask — VibeSeg dataset 12 is run on the CT
+vert_out, spine_out = add_ribs_to_vert_spine(
+    vert="sub-01_seg-vert.nii.gz",
+    spine="sub-01_seg-spine.nii.gz",
+    ct="sub-01_ct.nii.gz",
+    rib_seg_out="sub-01_seg-VIBESeg-12.nii.gz",
+)
+```
+
+Pass `split_touching=True` (default) so ribs of adjacent vertebrae that touch
+front / middle / back get separated via erosion before assignment.
