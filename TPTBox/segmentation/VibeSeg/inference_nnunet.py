@@ -291,20 +291,15 @@ def run_inference_on_file(
 
         zoom = ds_info.get("resolution_range", zoom)
         if zoom is None:
+            # nnUNet stores spacing in the transposed (internal) axis order used during
+            # training: internal_spacing[i] = original_spacing[transpose_forward[i]].
+            # Invert with transpose_backward to recover spacing in the training-time
+            # numpy axis order, then reverse: run_inference() will reverse it again via
+            # zoom[::-1] before handing it to nnUNet, so the double reversal restores the
+            # exact plans order and prevents nnUNet from triggering a second resample.
             zoom_ = plans_info["configurations"]["3d_fullres"]["spacing"]
-            if all(zoom[0] == z for z in zoom_):
-                zoom = zoom_
-        # order = plans_info["transpose_backward"]
-        ## order2 = plans_info["transpose_forward"]
-        # zoom = [zoom[order[0]], zoom[order[1]], zoom[order[2]]][::-1]
-        # orientation_ref = ("P", "I", "R")
-        # orientation_ref = [
-        #    orientation_ref[order[0]],
-        #    orientation_ref[order[1]],
-        #    orientation_ref[order[2]],
-        # ]  # [::-1]
-
-        # zoom_old = zoom_old[::-1]
+            transpose_backward = plans_info["transpose_backward"]
+            zoom = [zoom_[transpose_backward[i]] for i in range(len(zoom_))][::-1]
 
         zoom = [float(z) for z in zoom]
     except Exception:
