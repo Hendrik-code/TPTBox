@@ -86,6 +86,7 @@ VibeSeg_map = {
 
 defaults = {
     100: {"memory_base": 5500, "memory_factor": 25},
+    12: {"memory_base": 7000, "memory_factor": 200},
 }
 
 
@@ -121,7 +122,7 @@ def run_vibeseg(
     Returns:
         Segmentation ``NII`` saved at *out_seg*.
     """
-    if dataset_id in defaults:
+    if dataset_id in defaults and model_path is None:
         for k, v in defaults[dataset_id].items():
             if k not in args:
                 args[k] = v

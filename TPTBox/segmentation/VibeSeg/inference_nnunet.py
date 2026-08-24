@@ -23,6 +23,24 @@ _model_path_ = out_base / "nnUNet_results"
 _model_cache: dict = {}
 
 
+def _suggest_memory_estimation_script(idx, model_path: Path, reason: str, logger=logger) -> None:
+    """Point the user at ``estimate_nnunet_memory.py`` to fit ``memory_base``/``memory_factor``.
+
+    Invoked when the model's ``dataset.json`` does not carry memory parameters
+    (fallback defaults are used) and when inference dies with a GPU OOM.
+    """
+    script = Path(__file__).parent.parent / "nnUnet_utils/estimate_nnunet_memory.py"
+    dataset_arg = f"--dataset-id {idx} " if isinstance(idx, int) else ""
+    logger.on_warning(
+        f"{reason}\n"
+        f"To measure and set 'memory_base'/'memory_factor' for this model, run:\n"
+        f"    python {script} --gpu 0 {dataset_arg}--model-path {model_path}\n"
+        "If have GPU memory issues, run this code above; The inference can than split correctly to still fit in GPU memory. "
+        f"It probes several input shapes and patches the model's dataset.json in place."
+        "The GPU should not be occupied when running this code, that interferes with the measurements. "
+    )
+
+
 def get_ds_info(idx: int, _model_path: str | Path | None = None, exit_one_fail: bool = True, logger=logger) -> dict:
     """Load and return the ``dataset.json`` for the model with the given dataset index.
 
@@ -239,10 +257,22 @@ def run_inference_on_file(
             if "labels" in ds_info2:
                 ds_info["labels_mapping"] = ds_info2["labels"]
 
+    missing_mem_keys: list[str] = []
     if memory_base is None:
+        if "memory_base" not in ds_info:
+            missing_mem_keys.append("memory_base")
         memory_base = float(ds_info.get("memory_base", 5000))
     if memory_factor is None:
+        if "memory_factor" not in ds_info:
+            missing_mem_keys.append("memory_factor")
         memory_factor = float(ds_info.get("memory_factor", 160))
+    if missing_mem_keys:
+        _suggest_memory_estimation_script(
+            idx,
+            model_path,
+            f"Memory parameter(s) {missing_mem_keys} not set in the model's dataset.json; falling back to defaults. {memory_base=}, {memory_factor=}",
+            logger=logger,
+        )
 
     use_folds_arg = tuple(folds) if len(folds) != 5 else None
     # Include every setting that changes the loaded predictor so a cache hit is always equivalent
