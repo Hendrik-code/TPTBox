@@ -1,5 +1,5 @@
-"""estimate_vibeseg_memory.py
-==========================
+"""Fit the nnUNet memory guard parameters from GPU probes.
+
 Measures peak GPU RAM consumed by run_vibeseg across a grid of synthetic
 input shapes, then fits the three memory parameters used by TPTBox's
 check_mem guard:
@@ -9,15 +9,15 @@ check_mem guard:
             < clamp(0.80 * gpu_total, lo=memory_base, hi=memory_max)
 
     So the fitted curve must be a CONSERVATIVE UPPER BOUND of actual usage,
-    not a mean — otherwise ~50 % of runs would be incorrectly skipped.
+    not a mean, otherwise ~50 % of runs would be incorrectly skipped.
     This script fits via quantile regression (default q=0.95) so the curve
     sits above nearly all observations while remaining tight.
 
 Usage
 -----
-    python estimate_vibeseg_memory.py [--gpu 0] [--model-path /path/to/nnUNet]
-                                      [--dataset-id 12] [--out-dir /tmp/vibeseg_probe]
-                                      [--shapes-csv shapes.csv]
+    python estimate_nnunet_memory.py [--gpu 0] [--model-path /path/to/nnUNet]
+                                     [--dataset-id 12] [--out-dir /tmp/nnunet_probe]
+                                     [--shapes-csv shapes.csv]
 
 The script prints recommended values for memory_base, memory_factor, and
 memory_max at the end, saves a CSV + PNG summary plot, and patches the
@@ -44,7 +44,8 @@ try:
     from tqdm import tqdm
 except ImportError:
 
-    def tqdm(it, **kwargs):
+    def tqdm(it, **_kwargs):  # type: ignore[no-redef]  # noqa: ANN201
+        """Fallback no-op progress bar when tqdm is not installed."""
         return it
 
 
@@ -66,10 +67,12 @@ def _nvidia_smi_query(field: str, gpu: int) -> float:
 
 
 def gpu_used_mb(gpu: int) -> float:
+    """Return currently used GPU memory (MB) as reported by nvidia-smi."""
     return _nvidia_smi_query("memory.used", gpu)
 
 
 def gpu_total_mb(gpu: int) -> float:
+    """Return total GPU memory (MB) as reported by nvidia-smi."""
     return _nvidia_smi_query("memory.total", gpu)
 
 
@@ -123,6 +126,7 @@ class PeakPoller:
 
     @property
     def peak_mb(self) -> float:
+        """Peak GPU memory (MB) observed while the poller was active."""
         return self._peak
 
 
@@ -170,9 +174,9 @@ def probe_shape(
     out_dir: Path,
     voxel_size: float | tuple[float, float, float] = 0.8,
 ) -> dict:
-    """Run run_vibeseg on a synthetic volume, measure peak GPU RAM.
-    memory_max is set to 999 GB so the check_mem guard never fires here.
+    """Run run_vibeseg on a synthetic volume and measure peak GPU RAM.
 
+    memory_max is set to 999 GB so the check_mem guard never fires here.
     ``voxel_size`` accepts either an isotropic scalar or a 3-tuple. Passing the
     model's own zoom keeps run_vibeseg's internal rescale a no-op, so the shape
     that reaches nnUNet matches the shape we probed.
@@ -228,13 +232,12 @@ def probe_shape(
 
 
 # ---------------------------------------------------------------------------
-# Fitting  –  quantile regression (upper envelope, not mean)
+# Fitting - quantile regression (upper envelope, not mean)
 # ---------------------------------------------------------------------------
 
 
 def fit_parameters(records: list, quantile: float = 0.95) -> dict:
-    """Fit an upper-envelope line:
-        net_mb ≈ memory_base + n_voxels / 1e6 * memory_factor
+    """Fit an upper-envelope line ``net_mb ≈ memory_base + n_voxels / 1e6 * memory_factor``.
 
     Uses quantile regression at `quantile` (default 0.95) so the predicted
     curve lies above ~95 % of observations.  This is intentional: the
@@ -341,11 +344,9 @@ DEFAULT_SHAPES = [
 
 
 def load_shapes_csv(path: str) -> list:
-    shapes = []
+    """Load a shape grid from a CSV with columns ``d,h,w``."""
     with open(path) as f:
-        for row in csv.DictReader(f):
-            shapes.append((int(row["d"]), int(row["h"]), int(row["w"])))
-    return shapes
+        return [(int(row["d"]), int(row["h"]), int(row["w"])) for row in csv.DictReader(f)]
 
 
 # ---------------------------------------------------------------------------
@@ -353,11 +354,12 @@ def load_shapes_csv(path: str) -> list:
 # ---------------------------------------------------------------------------
 
 
-def make_plot(records: list, fit: dict, out_path: Path):
+def make_plot(records: list, fit: dict, out_path: Path) -> None:
+    """Render the measured/fitted memory curves and residuals to ``out_path``."""
     try:
         import matplotlib.pyplot as plt
     except ImportError:
-        print("[INFO] matplotlib not available – skipping plot.")
+        print("[INFO] matplotlib not available - skipping plot.")
         return
 
     ok = [r for r in records if r["ok"] and r["net_mb"] is not None]
@@ -418,7 +420,8 @@ def make_plot(records: list, fit: dict, out_path: Path):
 # ---------------------------------------------------------------------------
 
 
-def parse_args():
+def parse_args() -> argparse.Namespace:
+    """Parse CLI arguments for the memory-estimation script."""
     p = argparse.ArgumentParser(description="Estimate run_nnunet memory parameters from GPU measurements.")
     p.add_argument("--gpu", type=int, default=0)
     p.add_argument(
@@ -444,7 +447,8 @@ def parse_args():
     return p.parse_args()
 
 
-def main():
+def main() -> None:
+    """Entry point: probe shapes, fit memory parameters, patch dataset.json."""
     args = parse_args()
 
     # Resolve nnUNet model path (auto-download when using the default TPTBox path)
