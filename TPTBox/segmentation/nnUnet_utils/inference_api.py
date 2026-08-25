@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from math import ceil
 from pathlib import Path
 
@@ -14,6 +15,69 @@ logger = Print_Logger()
 logger.prefix = "API"
 
 _interop = False
+
+
+def _get_total_ram_mb() -> float:
+    """Return total system RAM in MB, or a conservative fallback if it cannot be determined."""
+    try:
+        import psutil
+
+        return psutil.virtual_memory().total / (1024 * 1024)
+    except ImportError:
+        pass
+    try:
+        import os
+
+        return (os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")) / (1024 * 1024)
+    except (AttributeError, ValueError, OSError):
+        return 8000.0
+
+
+def estimate_peak_ram_mb(shape: Sequence[int], num_classes: int, num_channels: int = 1) -> float:
+    """Estimate peak CPU RAM usage during a single-pass nnU-Net inference in MB.
+
+    Accounts for the dominant allocations held roughly simultaneously by
+    :func:`run_inference` and the underlying predictor:
+
+    * ``predicted_logits`` : ``num_classes * prod(shape) * 2 B`` (float16)
+    * ``n_predictions``    : ``prod(shape) * 2 B``               (float16)
+    * Model input tensor + a transposed / stacked copy :
+      ``2 * num_channels * prod(shape) * 2 B``                 (float16)
+    * Output segmentation  : ``prod(shape) * 1 B``               (uint8)
+
+    A 1.3x headroom multiplier is applied to cover temporary transpose
+    buffers, per-tile predictions, gaussian weights, and torch allocator
+    overhead.
+    """
+    n_voxels = int(np.prod(shape))
+    bytes_per_voxel = (num_classes * 2) + 2 + (num_channels * 2 * 2) + 1
+    return n_voxels * bytes_per_voxel * 1.3 / (1024 * 1024)
+
+
+def compute_cpu_chunks_for_ram(
+    shape: Sequence[int],
+    split_axis: int,
+    num_classes: int,
+    num_channels: int,
+    overlap: int,
+    target_mb: float,
+) -> int:
+    """Return the smallest ``n_chunks`` such that a single chunk's peak RAM stays under ``target_mb``.
+
+    Returns ``1`` when the whole volume already fits.
+    """
+    length = int(shape[split_axis])
+    if length <= 1 or target_mb <= 0:
+        return 1
+    for n_chunks in range(1, length + 1):
+        chunk_length = length // n_chunks
+        if chunk_length == 0:
+            return length
+        chunk_shape = list(shape)
+        chunk_shape[split_axis] = chunk_length + 2 * overlap
+        if estimate_peak_ram_mb(chunk_shape, num_classes, num_channels) <= target_mb:
+            return n_chunks
+    return length
 
 
 # Adapted from https://github.com/MIC-DKFZ/nnUNet
@@ -163,23 +227,37 @@ def _split_ranges(length: int, n_chunks: int, overlap: int):
     return ranges
 
 
-def _run_inference_patches(input_nii: list[NII], nnunet, _cpu_chunks, logger=logger):
+def _run_inference_patches(input_nii: list[NII], nnunet, _cpu_chunks, ram_fraction: float = 0.5, logger=logger):
     """Split image into k _cpu_chunks along the largest dimension.
 
-    Should only be used if there is not enough RAM on the system.
+    Should only be used if there is not enough RAM on the system. If
+    ``_cpu_chunks`` is ``None`` the chunk count is chosen so a single chunk's
+    estimated peak RAM stays under ``ram_fraction`` (default 50%) of total
+    system RAM.
     """
     logger.on_debug("Run: _run_inference_patches, You should only run this if you have limited RAM.")
+    import gc
+
     from TPTBox.segmentation.nnUnet_utils.predictor import empty_cache
 
     empty_cache(nnunet.device)
     shape = input_nii[0].shape
     split_axis = int(np.argmax(shape))
-
-    if _cpu_chunks is None:
-        _cpu_chunks = shape[split_axis] // 250
     patch_size = nnunet.configuration_manager.patch_size
     overlap = ceil(patch_size[split_axis] * (1 - nnunet.tile_step_size))
-    logger.print(f"{overlap=}")
+
+    if _cpu_chunks is None:
+        num_classes = int(nnunet.label_manager.num_segmentation_heads)
+        total_mb = _get_total_ram_mb()
+        target_mb = total_mb * ram_fraction
+        _cpu_chunks = compute_cpu_chunks_for_ram(shape, split_axis, num_classes, len(input_nii), overlap, target_mb)
+        est_full_mb = estimate_peak_ram_mb(shape, num_classes, len(input_nii))
+        logger.print(
+            f"Auto _cpu_chunks={_cpu_chunks} "
+            f"(full-run peak ~{est_full_mb:.0f} MB, target {target_mb:.0f} MB = {ram_fraction * 100:.0f}% of {total_mb:.0f} MB RAM)"
+        )
+    _cpu_chunks = max(2, int(_cpu_chunks))
+    logger.print(f"{overlap=}", f"chunks={_cpu_chunks}")
     ranges = _split_ranges(
         shape[split_axis],
         _cpu_chunks,
@@ -198,6 +276,9 @@ def _run_inference_patches(input_nii: list[NII], nnunet, _cpu_chunks, logger=log
         sl[split_axis] = slice(crop_start, crop_end)
         seg_chunk = seg_chunk[tuple(sl)]
         seg_chunks.append(seg_chunk)
+        del chunk_inputs
+        gc.collect()
+        empty_cache(nnunet.device)
     seg_arr = np.concatenate([s.get_array() for s in seg_chunks], axis=split_axis)
     seg_nii = input_nii[0].copy()
     seg_nii.seg = True

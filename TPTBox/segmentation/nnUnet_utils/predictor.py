@@ -756,6 +756,11 @@ class nnUNetPredictor:
                     device=results_device,
                 )
         except RuntimeError as e:
+            if self.fail_on_missing_memory:
+                # Probing / benchmarking mode: don't hide the OOM behind a slow CPU fallback,
+                # let the caller record the failure and move on to the next shape.
+                empty_cache(self.device)
+                raise
             try:
                 n_predictions = None
                 gaussian = 1

@@ -149,13 +149,13 @@ def _build_label_mapping(
             left_id = left.value if isinstance(left, Enum) else left
             right_id = right.value if isinstance(right, Enum) else right
 
-            if left_id not in mapping_forward:
+            if left_id not in mapping_forward and left_id not in labels_mapping.values():
                 raise ValueError(f"Mirror label {left_id} not present in raw_label_ids")
 
-            if right_id not in mapping_forward:
+            if right_id not in mapping_forward and right_id not in labels_mapping.values():
                 raise ValueError(f"Mirror label {right_id} not present in raw_label_ids")
 
-            mirror_out.append((mapping_forward[left_id], mapping_forward[right_id]))
+            mirror_out.append((mapping_forward.get(left_id, left_id), mapping_forward.get(right_id, right_id)))
 
     return (labels_mapping, mapping_forward, labels_mapping_return, mirror_out)
 
@@ -208,17 +208,8 @@ def build_dataset(cfg: DatasetConfig) -> None:
 
         expected_labels = set(labels_mapping.values())
         expected_labels.remove(0)
-        missing_mapping = labels_found - expected_labels
-        unused_mapping = expected_labels - labels_found
-
         logger.on_text(f"Sample segmentation: {seg}")
         logger.on_text(f"Labels found       : {sorted(labels_found)}")
-
-        if missing_mapping:
-            logger.on_fail(f"Labels present in segmentation but missing in mapping: {sorted(missing_mapping)}")
-
-        if unused_mapping:
-            logger.on_ok(f"Unmapped labels {sorted(unused_mapping)}")
 
         # Test remapping
         out = seg_nii.map_labels(mapping_forward)

@@ -663,7 +663,7 @@ def np_map_labels(arr: UINTARRAY, label_map: LABEL_MAP) -> np.ndarray:
     if len(k) == 0:
         return arr
 
-    max_value = max(arr.max(), *k, *v) + 1
+    max_value = int(max(arr.max(), *k, *v)) + 1
 
     # The lookup table must be able to hold every mapping target. Building it in the input
     # dtype silently wraps targets outside that range (uint8: 300 -> 44, -5 -> 251).
@@ -740,6 +740,8 @@ def np_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 
 
     n = img.ndim
     shp = img.shape
+    if isinstance(px_dist, float):
+        px_dist = ceil(px_dist)
     if isinstance(px_dist, int):
         px_dist = np.ones(n, dtype=int) * px_dist  # uint8 overflows for px_dist > 255
     assert len(px_dist) == n, f"dimension mismatch, got img shape {shp} and px_dist {px_dist}"
