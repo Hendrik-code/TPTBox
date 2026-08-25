@@ -12,8 +12,8 @@ from TPTBox.registration import (
     ridged_points_from_subreg_vert,
     Deformable_Registration,
     Template_Registration,
-    General_Registration,          # requires hf-deepali
-    Rigid_Elements_Registration,   # requires hf-deepali
+    General_Registration,  # requires hf-deepali
+    Rigid_Elements_Registration,  # requires hf-deepali
 )
 ```
 
@@ -49,5 +49,4 @@ reg_obj = Point_Registration(poi_fixed, poi_moving)
 nii_moving = NII.load("path/to/moving_img.nii.gz", False)
 nii_moved = reg_obj.transform_nii(nii_moving)
 poi_moved = reg_obj.transform_poi(poi_moving)
-
 ```

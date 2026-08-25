@@ -94,9 +94,12 @@ def save_poi(
     """Saves the POIs to a JSON file.
 
     Args:
+        poi (POI | POI_Global): The POI object to serialise.
         out_path (Path | str): The path where the JSON file will be saved.
         make_parents (bool, optional): If True, create any necessary parent directories for the output file.
             Defaults to False.
+        additional_info (dict | None, optional): Extra key/value pairs merged into the JSON's info block. Defaults to None.
+        resample_reference (Has_Grid | None, optional): If given, resample the POI to this grid before saving. Defaults to None.
         verbose (bool, optional): If True, print status messages to the console. Defaults to True.
         save_hint: 0 Default, 1 Gruber, 2 POI (readable), 10 ISO-POI (outdated)
 
@@ -279,7 +282,7 @@ def _open_file(ctd_path: Union[Path, str, bids_files.BIDS_FILE]) -> dict | list:
 
     # --- 1) try JSON ---
     try:
-        with path.open("r") as f:
+        with path.open("r", encoding="utf-8") as f:
             return json.load(f)
     except json.JSONDecodeError:
         pass  # not JSON → continue
@@ -305,6 +308,8 @@ def load_poi(ctd_path: POI_Reference, verbose=True) -> POI | POI_Global:  # noqa
             - vert: str, the name of the vertebra.
             - subreg: str, the name of the subregion.
             - ids: list[int | Location], a list of integers and/or Location objects used to filter the POIs.
+        verbose (bool, optional): Currently unused; kept for API compatibility with the surrounding save/load
+            helpers. Defaults to True.
 
     Returns:
         A Centroids object containing the loaded POIs.
@@ -778,7 +783,7 @@ def _load_landmark_txt(path: Path) -> list:
     label_name = {}
     label_group_id = 1
     current_group: str | None = None
-    with path.open("r") as f:
+    with path.open("r", encoding="utf-8") as f:
         for raw_line in f:
             line = raw_line.strip()
             if not line:

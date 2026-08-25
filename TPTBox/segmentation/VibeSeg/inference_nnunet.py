@@ -23,6 +23,24 @@ _model_path_ = out_base / "nnUNet_results"
 _model_cache: dict = {}
 
 
+def _suggest_memory_estimation_script(idx, model_path: Path, reason: str, logger=logger) -> None:
+    """Point the user at ``estimate_nnunet_memory.py`` to fit ``memory_base``/``memory_factor``.
+
+    Invoked when the model's ``dataset.json`` does not carry memory parameters
+    (fallback defaults are used) and when inference dies with a GPU OOM.
+    """
+    script = Path(__file__).parent.parent / "nnUnet_utils/estimate_nnunet_memory.py"
+    dataset_arg = f"--dataset-id {idx} " if isinstance(idx, int) else ""
+    logger.on_warning(
+        f"{reason}\n"
+        f"To measure and set 'memory_base'/'memory_factor' for this model, run:\n"
+        f"    python {script} --gpu 0 {dataset_arg}--model-path {model_path}\n"
+        "If have GPU memory issues, run this code above; The inference can than split correctly to still fit in GPU memory. "
+        f"It probes several input shapes and patches the model's dataset.json in place."
+        "The GPU should not be occupied when running this code, that interferes with the measurements. "
+    )
+
+
 def get_ds_info(idx: int, _model_path: str | Path | None = None, exit_one_fail: bool = True, logger=logger) -> dict:
     """Load and return the ``dataset.json`` for the model with the given dataset index.
 
@@ -32,6 +50,8 @@ def get_ds_info(idx: int, _model_path: str | Path | None = None, exit_one_fail: 
             ``None``, the bundled default path is used.
         exit_one_fail: If ``True``, call :func:`sys.exit` when the dataset is
             not found; otherwise return ``None``.
+        logger: Logger used for the "Please add Dataset ..." failure message.
+            Defaults to the module-level ``Reflection_Logger``.
 
     Returns:
         Parsed ``dataset.json`` dictionary for the requested dataset.
@@ -161,6 +181,11 @@ def run_inference_on_file(
             the cost of holding the model in GPU memory between calls. The GPU
             cache is also left warm (no ``empty_cache``) so the allocator can
             reuse buffers across images.
+        auto_download: If ``True``, download missing model weights on first use.
+            Forced to ``True`` when ``model_path`` is ``None``.
+        fail_on_missing_memory: If ``True``, raise an error when the estimated
+            GPU memory exceeds the available memory instead of waiting.
+        logger: Logger used for all progress and error output.
 
     Returns:
         A tuple ``(seg_nii, softmax_logits)`` where ``seg_nii`` is the
@@ -184,7 +209,16 @@ def run_inference_on_file(
         logger.on_fail(f"{shape=} has only {min(shape)} slice in a dimension.")
         return None, None
 
-    from TPTBox.segmentation.nnUnet_utils.inference_api import _run_inference_patches, load_inf_model, run_inference
+    from math import ceil
+
+    from TPTBox.segmentation.nnUnet_utils.inference_api import (
+        _get_total_ram_mb,
+        _run_inference_patches,
+        compute_cpu_chunks_for_ram,
+        estimate_peak_ram_mb,
+        load_inf_model,
+        run_inference,
+    )
 
     if isinstance(idx, int):
         if auto_download:
@@ -223,10 +257,22 @@ def run_inference_on_file(
             if "labels" in ds_info2:
                 ds_info["labels_mapping"] = ds_info2["labels"]
 
+    missing_mem_keys: list[str] = []
     if memory_base is None:
+        if "memory_base" not in ds_info:
+            missing_mem_keys.append("memory_base")
         memory_base = float(ds_info.get("memory_base", 5000))
     if memory_factor is None:
+        if "memory_factor" not in ds_info:
+            missing_mem_keys.append("memory_factor")
         memory_factor = float(ds_info.get("memory_factor", 160))
+    if missing_mem_keys:
+        _suggest_memory_estimation_script(
+            idx,
+            model_path,
+            f"Memory parameter(s) {missing_mem_keys} not set in the model's dataset.json; falling back to defaults. {memory_base=}, {memory_factor=}",
+            logger=logger,
+        )
 
     use_folds_arg = tuple(folds) if len(folds) != 5 else None
     # Include every setting that changes the loaded predictor so a cache hit is always equivalent
@@ -275,20 +321,15 @@ def run_inference_on_file(
 
         zoom = ds_info.get("resolution_range", zoom)
         if zoom is None:
+            # nnUNet stores spacing in the transposed (internal) axis order used during
+            # training: internal_spacing[i] = original_spacing[transpose_forward[i]].
+            # Invert with transpose_backward to recover spacing in the training-time
+            # numpy axis order, then reverse: run_inference() will reverse it again via
+            # zoom[::-1] before handing it to nnUNet, so the double reversal restores the
+            # exact plans order and prevents nnUNet from triggering a second resample.
             zoom_ = plans_info["configurations"]["3d_fullres"]["spacing"]
-            if all(zoom[0] == z for z in zoom_):
-                zoom = zoom_
-        # order = plans_info["transpose_backward"]
-        ## order2 = plans_info["transpose_forward"]
-        # zoom = [zoom[order[0]], zoom[order[1]], zoom[order[2]]][::-1]
-        # orientation_ref = ("P", "I", "R")
-        # orientation_ref = [
-        #    orientation_ref[order[0]],
-        #    orientation_ref[order[1]],
-        #    orientation_ref[order[2]],
-        # ]  # [::-1]
-
-        # zoom_old = zoom_old[::-1]
+            transpose_backward = plans_info["transpose_backward"]
+            zoom = [zoom_[transpose_backward[i]] for i in range(len(zoom_))][::-1]
 
         zoom = [float(z) for z in zoom]
     except Exception:
@@ -319,12 +360,33 @@ def run_inference_on_file(
         p = (padd, padd)
         input_nii = [i.apply_pad([p, p, p], mode="reflect") for i in input_nii]
     if _cpu_chunks is None or _cpu_chunks <= 1:
-        try:
-            seg_nii, _, softmax_logits = run_inference(input_nii, nnunet, logits=logits, logger=logger)
-        except MemoryError:
-            logger.print_error()
-            seg_nii = _run_inference_patches(input_nii, nnunet, None, logger=logger)
+        num_classes = int(nnunet.label_manager.num_segmentation_heads)
+        total_ram_mb = _get_total_ram_mb()
+        target_ram_mb = total_ram_mb * 0.5
+        est_full_mb = estimate_peak_ram_mb(input_nii[0].shape, num_classes, len(input_nii))
+        if est_full_mb > target_ram_mb:
+            shape = input_nii[0].shape
+            split_axis = int(np.argmax(shape))
+            patch_size = nnunet.configuration_manager.patch_size
+            overlap = ceil(patch_size[split_axis] * (1 - nnunet.tile_step_size))
+            auto_chunks = compute_cpu_chunks_for_ram(shape, split_axis, num_classes, len(input_nii), overlap, target_ram_mb)
+            logger.print(
+                f"Estimated peak RAM ~{est_full_mb:.0f} MB exceeds 50% of RAM ({target_ram_mb:.0f} MB of {total_ram_mb:.0f} MB); "
+                f"switching to _cpu_chunks={auto_chunks}.",
+                Log_Type.WARNING,
+            )
+            seg_nii = _run_inference_patches(input_nii, nnunet, auto_chunks, logger=logger)
             softmax_logits = None
+        else:
+            logger.print(
+                f"Estimated peak RAM ~{est_full_mb:.0f} MB fits within 50% of RAM ({target_ram_mb:.0f} MB of {total_ram_mb:.0f} MB)."
+            ) if verbose else None
+            try:
+                seg_nii, _, softmax_logits = run_inference(input_nii, nnunet, logits=logits, logger=logger)
+            except MemoryError:
+                logger.print_error()
+                seg_nii = _run_inference_patches(input_nii, nnunet, None, logger=logger)
+                softmax_logits = None
     else:
         seg_nii = _run_inference_patches(input_nii, nnunet, _cpu_chunks, logger=logger)
         softmax_logits = None
@@ -370,8 +432,8 @@ def run_inference_on_file(
         for k, v in mapping_.items():
             key = to_int(k)
             value = to_int(v, key)
-            if k != value:
-                mapping[k] = value
+            if key != value:  # `k` is the raw string: map_labels_ needs the int key
+                mapping[key] = value
             unknown_strings[v] = value
         logger.print(f"{unknown_strings}")
         logger.print(f"{mapping=}")
@@ -432,6 +494,7 @@ def run_VibeSeg(
         max_folds: Limit the number of folds used for ensemble averaging.
         _model_path: Override for the default model weights directory.
         step_size: Sliding-window step size fraction.
+        logger: Logger used for progress and error output.
         **_kargs: Additional keyword arguments forwarded to
             :func:`run_inference_on_file`.
 
@@ -481,7 +544,6 @@ def run_VibeSeg(
     if (in_niis[0].affine == np.eye(4)).all():
         logger.on_warning(
             "Your affine matrix is the identity. Make sure that the spacing and orientation is correct. For NAKO VIBE it should be 1.40625 mm for R/L and A/P and 3 mm S/I. For UKBB R/L and A/P should be around 2.2 mm",
-            stacklevel=3,
         )
     return run_inference_on_file(
         dataset_id,

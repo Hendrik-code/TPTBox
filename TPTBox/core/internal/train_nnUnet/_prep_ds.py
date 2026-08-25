@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import hashlib
 import json
 import random
@@ -179,20 +181,20 @@ def _add_file_async(
         return
         # except Exception:
         #    seg.unlink(missing_ok=True)
+
     if delete_brocken:
         if isinstance(img, Path):
             img = [img]
         for i in img:
             try:
-                to_nii(i, True).max()
+                to_nii(i).max()
             except Exception:
-                [Path(i).unlink(missing_ok=True) for i in img]
-                Path(seg).unlink(missing_ok=True)
+                Path(i).unlink(missing_ok=True)
                 return
         try:
             to_nii(seg, True).max()
         except Exception:
-            [Path(i).unlink(missing_ok=True) for i in img]
+            # [Path(i).unlink(missing_ok=True) for i in img]
             Path(seg).unlink(missing_ok=True)
             return
     # load image

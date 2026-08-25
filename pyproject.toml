@@ -25,6 +25,8 @@ joblib = "*"
 scikit-learn = "*"
 pynrrd = "*"
 requests = "*"
+trimesh = "*"
+numpy-stl = "*"
 
 # --- OLD STACK (Python < 3.11)
 numpy = [
@@ -44,7 +46,12 @@ scikit-image = [
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8.1.1"
-vtk = "*"
+# vtk 9.7.0 dropped cp39 wheels (and publishes no requires-python metadata,
+# so Poetry cannot exclude it automatically). Pin the last cp39 release there.
+vtk = [
+  { version = ">=9.0,<9.7", python = "<3.10" },
+  { version = "*", python = ">=3.10" },
+]
 pre-commit = "*"
 pyvista = "^0.43.2"
 coverage = ">=7.0.1"
@@ -164,7 +171,9 @@ ignore = [
     "PLR0912",
     "PLR0913",
     "PLR0915",
+    "PLR0917",
     "PLR2004",
+    "TRY301",
     "SIM105",
     "TRY003",
     "N999",

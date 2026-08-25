@@ -48,6 +48,8 @@ def stitching(
         dtype: NumPy dtype for the output array.
         match_histogram: If True, matches histograms between consecutive inputs.
         store_ramp: If True, also returns the per-volume blending weight array.
+        ramp_path: Optional explicit output path for the ramp NIfTI; forwarded to
+            :func:`stitching_raw`. Only used when ``store_ramp`` is True.
 
     Returns:
         A 2-tuple ``(stitched_nii, ramp_nii)`` as returned by
@@ -166,7 +168,7 @@ def n4_bias(
     mask[mask != 0] = 1
     mask_nii = nii.set_array(mask)
     mask_nii.seg = True
-    mask_nii.dilate_msk_(mm=3, verbose=False)
+    mask_nii.dilate_msk_(n_pixel=3, verbose=False)
     n4: NII = nii.n4_bias_field_correction(mask=from_nibabel(mask_nii.nii), spline_param=spline_param)
     if norm != -1:
         n4 *= norm / n4.max()

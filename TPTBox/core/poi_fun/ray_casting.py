@@ -102,7 +102,6 @@ def max_distance_ray_cast_convex_npfast(
         y = start_coord[1] + norm_vec[1] * mid
         z = start_coord[2] + norm_vec[2] * mid
         val = trilinear_interpolate(region_array, x, y, z)
-        print(f"Raycast check at distance {mid:.2f}: value={val:.4f}")
         if val > 0.5:
             min_v = mid
         else:
@@ -669,5 +668,7 @@ def set_label_above_3_point_plane(
     plane_z = (-a * x - b * y - d) / c
 
     # Create the 3D array and set values above the plane to 0
-    array[np.logical_and(mask, z * invert > plane_z)] = value
+    # Negating z is not the same as flipping the inequality; scale both sides so that
+    # invert=-1 really selects the opposite half-space.
+    array[np.logical_and(mask, invert * z > invert * plane_z)] = value
     return array

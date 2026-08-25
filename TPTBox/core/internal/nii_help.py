@@ -28,6 +28,8 @@ def secure_save(func, *, file_types=tuple(_supported_img_files)) -> Callable:
     Args:
         func (callable): The function to be wrapped. It should take a file path (`str`, `Path`, or `bids_files.BIDS_FILE`)
                          as one of its arguments.
+        file_types (tuple[str, ...], keyword-only): File-extension keys tried in order when a ``bids_files.BIDS_FILE`` is
+            passed in place of a path. Defaults to ``tuple(_supported_img_files)``.
 
     Returns:
         callable: The wrapped function with added safety mechanisms.
@@ -54,6 +56,9 @@ def secure_save(func, *, file_types=tuple(_supported_img_files)) -> Callable:
                 if file_type in file.file:
                     file = file.file[file_type]
                     break
+                else:
+                    raise ValueError(f"No supported file type found in BIDS_FILE. Expected one of: {file_types}")
+
         file = Path(file) if isinstance(file, str) else file  # Ensure the file is a Path object
         backup_file = file.with_suffix(file.suffix + ".backup")
         file_existed = file.exists()

@@ -34,6 +34,7 @@ class DatasetConfig:
 
     # ── Preprocessing / spacing ───────────────────────────────────────────────
     spacing: tuple[float, float, float] = (1, 1, 1)
+    orientation: tuple[str, str, str] = ("R", "A", "S")
     is_ct: bool = True
     num_input: int = 1
     axis: str = "S"
@@ -130,13 +131,11 @@ def _build_label_mapping(
     mapping_forward: dict[int, int] = {}
     labels_mapping_return: dict[str, str | int] = {}
 
-    for new_idx, (orig_idx, name) in enumerate(
-        sorted(dataset_mapping.items()),
-        start=1,
-    ):
+    for new_idx, (orig_idx, name) in enumerate(sorted(dataset_mapping.items()), start=1):
         labels_mapping[name] = new_idx
-        mapping_forward[orig_idx] = new_idx
-        labels_mapping_return[str(new_idx)] = enums.get(name, orig_idx)
+        if orig_idx != new_idx:
+            mapping_forward[orig_idx] = new_idx
+            labels_mapping_return[str(new_idx)] = enums.get(name, orig_idx)
 
     # ----------------------------------------------------------
     # remap mirror pairs
@@ -150,22 +149,30 @@ def _build_label_mapping(
             left_id = left.value if isinstance(left, Enum) else left
             right_id = right.value if isinstance(right, Enum) else right
 
-            if left_id not in mapping_forward:
+            if left_id not in mapping_forward and left_id not in labels_mapping.values():
                 raise ValueError(f"Mirror label {left_id} not present in raw_label_ids")
 
-            if right_id not in mapping_forward:
+            if right_id not in mapping_forward and right_id not in labels_mapping.values():
                 raise ValueError(f"Mirror label {right_id} not present in raw_label_ids")
 
-            mirror_out.append((mapping_forward[left_id], mapping_forward[right_id]))
+            mirror_out.append((mapping_forward.get(left_id, left_id), mapping_forward.get(right_id, right_id)))
 
     return (labels_mapping, mapping_forward, labels_mapping_return, mirror_out)
 
 
 def build_dataset(cfg: DatasetConfig) -> None:
-    """Build a nnUnet dataset.
+    """Build a nnUNet dataset on disk from the configured file list.
+
+    Sets the ``nnUNet_raw`` / ``nnUNet_preprocessed`` / ``nnUNet_results``
+    environment variables from ``cfg.nnunet_base`` before importing nnUNet
+    helpers, builds the label mapping (including mirror pairs), and then
+    delegates to ``set_up_dataset`` / ``add_file`` / ``finalize_ds`` from the
+    ``_prep_ds`` module.
 
     Args:
-        cfg (DatasetConfig): _description_
+        cfg (DatasetConfig): Fully populated dataset configuration (ID,
+            trainer, spacing, augmentation counts, file pairs, output paths,
+            ...). See :class:`DatasetConfig`.
     """
     # ── nnUNet env MUST be set before any nnunet import ───────────────────────────
     # These are module-level so they take effect the moment this file is imported.
@@ -179,7 +186,7 @@ def build_dataset(cfg: DatasetConfig) -> None:
     from _prep_ds import add_file, finalize_ds, run, set_up_dataset
 
     labels_mapping, mapping_forward, mapping_back, mirror = _build_label_mapping(cfg)
-    logger.on_text(f"Label count     : {len(mapping_forward)} classes")
+    logger.on_text(f"Label count     : {len(labels_mapping) - 1} classes")
     logger.on_text(f"Mirror pairs    : {len(mirror) if mirror else 0}")
     logger.on_text(f"Trainer         : {cfg.nn_trainer}")
     logger.on_text(f"Spacing         : {cfg.spacing}")
@@ -199,19 +206,10 @@ def build_dataset(cfg: DatasetConfig) -> None:
         labels_found = set(seg_nii.unique())
         labels_found.discard(0)  # ignore background
 
-        expected_labels = set(mapping_forward.keys())
-
-        missing_mapping = labels_found - expected_labels
-        unused_mapping = expected_labels - labels_found
-
+        expected_labels = set(labels_mapping.values())
+        expected_labels.remove(0)
         logger.on_text(f"Sample segmentation: {seg}")
         logger.on_text(f"Labels found       : {sorted(labels_found)}")
-
-        if missing_mapping:
-            logger.on_fail(f"Labels present in segmentation but missing in mapping: {sorted(missing_mapping)}")
-
-        if unused_mapping:
-            logger.on_warning(f"Labels defined in mapping but not found in sample: {sorted(unused_mapping)}")
 
         # Test remapping
         out = seg_nii.map_labels(mapping_forward)
@@ -219,8 +217,7 @@ def build_dataset(cfg: DatasetConfig) -> None:
 
         logger.on_text(f"Remapped labels    : {remapped_labels}")
 
-        expected_remapped = set(mapping_forward.values())
-        unexpected = set(remapped_labels) - expected_remapped - {0}
+        unexpected = set(remapped_labels) - expected_labels - {0}
 
         if unexpected:
             logger.on_fail(f"Unexpected labels after remapping: {sorted(unexpected)}")
@@ -238,6 +235,7 @@ def build_dataset(cfg: DatasetConfig) -> None:
         num_input=cfg.num_input,
         is_ct=cfg.is_ct,
         base=cfg.nnunet_base,
+        orientation=cfg.orientation,
     )
     dataset_settings["labels_mapping"] = mapping_back
 

@@ -3,12 +3,15 @@
 # method for deep learning-based biomedical image segmentation. Nature methods, 18(2), 203-211.
 from __future__ import annotations
 
+import itertools
 import os
 import time
 import traceback
 from collections.abc import Generator
 from dataclasses import dataclass, field
 from math import ceil, floor
+from queue import Queue
+from threading import Thread
 
 import numpy as np
 import torch
@@ -157,6 +160,7 @@ class nnUNetPredictor:
             cache_state_dicts: If ``True``, load all fold weights onto the
                 device up-front and cache the network instances. Reduces
                 per-sample latency at the cost of GPU memory.
+            logger: Logger used for progress and error output.
         """
         if isinstance(use_folds, str):
             use_folds = [use_folds]  # type: ignore
@@ -339,6 +343,7 @@ class nnUNetPredictor:
             save_or_return_probabilities: If ``True``, also return softmax
                 probabilities in addition to the label map. Currently raises
                 :class:`NotImplementedError` inside the conversion step.
+            logger: Logger used for progress and error output.
 
         Returns:
             The predicted segmentation array (or a tuple with probabilities if
@@ -399,6 +404,7 @@ class nnUNetPredictor:
         Args:
             data: Preprocessed image tensor with shape ``(C, X, Y, Z)``.
             attempts: Number of retry attempts on GPU OOM before raising.
+            logger: Logger used for progress and error output.
 
         Returns:
             Averaged raw logits tensor with shape
@@ -550,24 +556,14 @@ class nnUNetPredictor:
         if mirror_axes is not None:
             # check for invalid numbers in mirror_axes
             # x should be 5d for 3d images and 4d for 2d. so the max value of mirror_axes cannot exceed len(x.shape) - 3
-            assert max(mirror_axes) <= len(x.shape) - 3, "mirror_axes does not match the dimension of the input!"
+            assert max(mirror_axes) <= x.ndim - 3, "mirror_axes does not match the dimension of the input!"
 
-            num_predictons = 2 ** len(mirror_axes)
-            if 0 in mirror_axes:
-                prediction += torch.flip(network(torch.flip(x, (2,))), (2,))
-            if 1 in mirror_axes:
-                prediction += torch.flip(network(torch.flip(x, (3,))), (3,))
-            if 2 in mirror_axes:
-                prediction += torch.flip(network(torch.flip(x, (4,))), (4,))
-            if 0 in mirror_axes and 1 in mirror_axes:
-                prediction += torch.flip(network(torch.flip(x, (2, 3))), (2, 3))
-            if 0 in mirror_axes and 2 in mirror_axes:
-                prediction += torch.flip(network(torch.flip(x, (2, 4))), (2, 4))
-            if 1 in mirror_axes and 2 in mirror_axes:
-                prediction += torch.flip(network(torch.flip(x, (3, 4))), (3, 4))
-            if 0 in mirror_axes and 1 in mirror_axes and 2 in mirror_axes:
-                prediction += torch.flip(network(torch.flip(x, (2, 3, 4))), (2, 3, 4))
-            prediction /= num_predictons
+            mirror_axes = [m + 2 for m in mirror_axes]
+            axes_combinations = [c for i in range(len(mirror_axes)) for c in itertools.combinations(mirror_axes, i + 1)]
+            for axes in axes_combinations:
+                prediction += torch.flip(self.network(torch.flip(x, axes)), axes)
+            prediction /= len(axes_combinations) + 1
+
         return prediction
 
     def predict_sliding_window_return_logits(
@@ -579,6 +575,9 @@ class nnUNetPredictor:
             input_image: Image tensor with shape ``(C, X, Y, Z)``.
             network: Optional network instance to use. Defaults to
                 ``self.network``.
+            idx: Fold index used only for progress reporting; forwarded to the
+                logger so multi-fold runs can be traced.
+            logger: Logger used for progress and error output.
 
         Returns:
             Aggregated logit array with shape ``(num_classes, X, Y, Z)``
@@ -757,6 +756,11 @@ class nnUNetPredictor:
                     device=results_device,
                 )
         except RuntimeError as e:
+            if self.fail_on_missing_memory:
+                # Probing / benchmarking mode: don't hide the OOM behind a slow CPU fallback,
+                # let the caller record the failure and move on to the next shape.
+                empty_cache(self.device)
+                raise
             try:
                 n_predictions = None
                 gaussian = 1
@@ -787,30 +791,56 @@ class nnUNetPredictor:
         return predicted_logits, n_predictions, gaussian, results_device
 
     def _run_sub(self, data: torch.Tensor, network, results_device, slicers, pbar: tqdm, addendum: str = "", logger=logger):
-        """Iterate over slicers, run inference per tile (optionally batched), and accumulate results."""
+        """Iterate over slicers, run inference in batches while asynchronously preparing the next batch."""
         slicers = list(slicers)
-        try:
-            data = data.to(self.device)  # type: ignore
-            predicted_logits, n_predictions, gaussian, results_device = self._allocate(data, results_device, pbar, logger=logger)
-            pbar.desc = f"running prediction {addendum}"
-            prediction = None
-            work_on = None
-            batch_size = max(1, self.tile_batch_size)
+
+        def producer(d, slicers, batch_size, q):
             for batch_start in range(0, len(slicers), batch_size):
                 batch_slicers = slicers[batch_start : batch_start + batch_size]
-                # batch_size == 1 keeps the original view (no copy); larger batches stack tiles into a
-                # dense (B, C, *patch) tensor (valid because all tiles share the same patch_size).
-                work_on = data[batch_slicers[0]][None] if batch_size == 1 else torch.stack([data[sl] for sl in batch_slicers], dim=0)
-                work_on = work_on.to(self.device, non_blocking=False)
+
+                if batch_size == 1:
+                    work_on = torch.clone(d[batch_slicers[0]][None], memory_format=torch.contiguous_format)
+                else:
+                    work_on = torch.stack([torch.clone(d[sl], memory_format=torch.contiguous_format) for sl in batch_slicers], dim=0)
+                q.put((work_on.to(self.device, non_blocking=False), batch_slicers))
+            q.put("end")
+
+        try:
+            batch_size = max(1, self.tile_batch_size)
+            data = data.to(results_device)
+            predicted_logits, n_predictions, gaussian, results_device = self._allocate(data, results_device, pbar, logger=logger)
+
+            pbar.desc = f"running prediction {addendum}"
+            queue = Queue(maxsize=2)
+            t = Thread(target=producer, args=(data, slicers, batch_size, queue), daemon=True)
+            t.start()
+            prediction = None
+            work_on = None
+
+            while True:
+                item = queue.get()
+                if item == "end":
+                    queue.task_done()
+                    break
+                work_on, batch_slicers = item
                 prediction = self._internal_maybe_mirror_and_predict(work_on, network=network).to(results_device)
+
                 for b, sl in enumerate(batch_slicers):
-                    pbar.update(1)
                     pred = prediction[b]
                     if pred.shape[0] != predicted_logits.shape[0]:
                         pred = pred.squeeze(0)
-                    predicted_logits[sl] += pred * gaussian if self.use_gaussian else pred
-                    n_predictions[sl[1:]] += gaussian if self.use_gaussian else 1
+                    if self.use_gaussian:
+                        predicted_logits[sl] += pred * gaussian
+                        n_predictions[sl[1:]] += gaussian
+                    else:
+                        predicted_logits[sl] += pred
+                        n_predictions[sl[1:]] += 1
+                    pbar.update(1)
+                queue.task_done()
+            queue.join()
+
             return predicted_logits, n_predictions  # noqa: TRY300
+
         except RuntimeError:
             try:
                 del predicted_logits
@@ -820,6 +850,7 @@ class nnUNetPredictor:
                 del prediction
             except UnboundLocalError:
                 pass
+
             empty_cache(self.device)
             empty_cache(results_device)
             self.memory_base += 1000
@@ -866,7 +897,7 @@ class intermediate_slice:
         if self.max_s is None:
             self.max_s = [s.stop for s in s[1:]]
         else:
-            self.max_s = [max(s.stop, m) for s, m in zip(s[1:], self.min_s)]
+            self.max_s = [max(s.stop, m) for s, m in zip(s[1:], self.max_s)]  # was accumulating from min_s
 
         assert len(s) - 1 == len(self.meta_slice)
         self.slicers.append(s)

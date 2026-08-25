@@ -40,22 +40,29 @@ class Point_Registration:
         zooms=None,
         leave_worst_percent_out=0.0,
     ):
-        """Use two Centroids object to compute a ridged_points registration.
+        """Fit a rigid (versor) point-based registration between two POI sets.
+
+        Only keys that are present in both ``poi_fixed`` and ``poi_moving`` (and
+        not listed in ``exclusion``) are used for the fit. The empty NIfTI grids
+        of the two POIs are used as the SimpleITK reference images.
 
         Args:
-            ctd_fixed (Centroids): _description_
-            ctd_movig (Centroids): _description_
-            representative_fixed (Image_Reference, optional): _description_. Defaults to None.
-            representative_movig (Image_Reference, optional): _description_. Defaults to None.
-            exclusion (list, optional): _description_. Defaults to [].
-            log (_type_, optional): _description_. Defaults to No_Logger().
-            verbose (bool, optional): _description_. Defaults to True.
+            poi_fixed: Reference POI (target of the registration).
+            poi_moving: Moving POI whose coordinates are aligned to
+                ``poi_fixed``.
+            exclusion: Vertebra-level keys (first tuple element) to skip during
+                fitting. Defaults to no exclusion.
+            log: Logger used to emit progress and diagnostics.
+            verbose: If True, forwards verbose logging to ``log``.
+            ax_code: Optional target axis code (e.g. ``("R", "A", "S")``);
+                ``poi_fixed`` is reoriented to it before fitting.
+            zooms: Optional target voxel spacing; ``poi_fixed`` is rescaled to
+                it before fitting. ``(-1, -1, -1)`` disables rescaling.
+            leave_worst_percent_out: Fraction in ``[0, 1)`` of point pairs with
+                the largest post-fit residual to discard before re-fitting.
 
         Raises:
-            ValueError: Require at least two points
-
-        Returns:
-            Resample_Filter
+            ValueError: If fewer than two shared points remain after filtering.
         """
         assert leave_worst_percent_out < 1.0
         assert leave_worst_percent_out >= 0.0
@@ -377,8 +384,10 @@ class Point_Registration:
         ) = w
         a: Has_Grid
         b: Has_Grid
-        self._img_fixed = nii_to_sitk(a.make_nii())
-        self._img_moving = nii_to_sitk(b.make_nii())
+        # get_dump() writes (version, moving, fixed, ...); these were assigned the wrong way
+        # round, so every reloaded registration resampled into the wrong space.
+        self._img_moving = nii_to_sitk(a.make_nii())
+        self._img_fixed = nii_to_sitk(b.make_nii())
         assert version == 1, f"Version mismatch {version=}"
         return self
 

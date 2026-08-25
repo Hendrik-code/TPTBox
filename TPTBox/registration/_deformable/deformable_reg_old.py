@@ -112,11 +112,18 @@ class Deformable_Registration:
         Args:
             fixed_image (Image_Reference): The fixed image to which the moving image is registered.
             moving_image (Image_Reference): The moving image to be registered.
+            fixed_image_seg (Image_Reference | None): Optional segmentation of the fixed image, used as an auxiliary target.
+            moving_image_seg (Image_Reference | None): Optional segmentation of the moving image, resampled to ``reference_image``.
             normalize (Literal["MRI", "CT"] | None): Normalization type; supports "MRI" or "CT" or no normalization.
             quantile (float): Quantile for intensity normalization; recommended 0.95 for MRI.
             reference_image (Image_Reference | None): Optional reference image for resampling.
-            device (Device | None): The computational device for the process, default is CUDA.
             align_corners (bool): Whether to align the corners during grid resampling.
+            verbose (int): Verbosity level passed through to the deformable trainer.
+            config (Path | str | dict): Path to a JSON config file, or an already-loaded config dict.
+            spacing_type (int): Finest-spacing selection strategy: 1 → fixed spacing, 2 → moving spacing,
+                3 → per-axis max, 4 → per-axis min, other → let the trainer decide.
+            gpu (int): GPU index used when ``ddevice='cuda'``.
+            ddevice (DEVICES): The computational device family for the process, default is ``"cuda"``.
         """
         self.gpu = gpu
         self.ddevice: DEVICES = ddevice
@@ -176,6 +183,9 @@ class Deformable_Registration:
 
         Args:
             img (NII): The NII image to be transformed.
+            gpu (int | None, optional): GPU index override. Defaults to the device used during registration.
+            ddevice (DEVICES | None, optional): Device family override (e.g. ``"cuda"``). Defaults to the registration device.
+            target (Has_Grid | None, optional): Target grid to resample the output into. Defaults to ``self.target_grid``.
 
         Returns:
             NII: The transformed image as an NII object.

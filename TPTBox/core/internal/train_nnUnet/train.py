@@ -104,11 +104,9 @@ def _run_training_highjack(self: nnUNetTrainer) -> None:
             self.on_validation_epoch_end(val_outputs)
 
         self.on_epoch_end()
-        l = list(self.dataset_json["labels"].keys())
-        self.print_to_log_file(
-            "Dice",
-            ", ".join([f"{l[e]}:{i:.3f}" for e, i in enumerate(self.logger.my_fantastic_logging["dice_per_class_or_region"][-1], 1)]),
-        )
+        id_to_name = {v: k for k, v in self.dataset_json["labels"].items()}
+        dice = self.logger.get_value("dice_per_class_or_region", step=-1)
+        self.print_to_log_file("Dice", ", ".join([f"{id_to_name[e]}:{i:.3f}" for e, i in enumerate(dice, 0)]))
     self.on_train_end()
 
 

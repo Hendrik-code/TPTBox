@@ -396,8 +396,6 @@ def get_desc(self: POI_Global, region: int, subregion: int) -> tuple[str, str, s
     or the level-one-info enum name.
 
     Args:
-        self: The ``POI_Global`` instance providing ``info``,
-            ``level_one_info``, and ``level_two_info``.
         region: Region (vertebra) integer label.
         subregion: Subregion integer label.
 
@@ -533,7 +531,7 @@ def _save_mrk(
                     display=_get_display_dict(
                         display,
                         selectedColor=_get_markup_color(
-                            {"color": color}, region, subregion, split_by_region=split_by_subregion, split_by_subregion=split_by_subregion
+                            {"color": color}, region, subregion, split_by_region=split_by_region, split_by_subregion=split_by_subregion
                         ),
                         **addendum,
                     ),

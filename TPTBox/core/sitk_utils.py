@@ -123,7 +123,6 @@ def transform_centroid(ctd: POI, transform: sitk.Transform, img_fixed: sitk.Imag
         for key, key2, (x, y, z) in ctd.items():
             ctr_b = transform.TransformPoint((x, y, z))
             out[key, key2] = ctr_b
-            out[key, key2] = ctr_b
     else:
         for key, key2, (x, y, z) in ctd.items():
             ctr_b = img_moving.TransformContinuousIndexToPhysicalPoint((x, y, z))
@@ -131,7 +130,7 @@ def transform_centroid(ctd: POI, transform: sitk.Transform, img_fixed: sitk.Imag
             ctr_b = img_fixed.TransformPhysicalPointToContinuousIndex(ctr_b)
             out[key, key2] = ctr_b
     nii = sitk_to_nii(img_fixed, True)
-    return nii.get_empty_POI(out)
+    return nii.make_empty_POI(out)
 
 
 def get_sitk_metadata_from_ras_affine(affine: np.ndarray) -> tuple[tuple, tuple, tuple]:

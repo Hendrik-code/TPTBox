@@ -58,7 +58,11 @@ pip install TPTBox
 ```python
 from TPTBox.stitching import stitching
 
-list_of_files = ["File_A.nii.gz", "File_B.nii.gz", "File_C.nii.gz",]
+list_of_files = [
+    "File_A.nii.gz",
+    "File_B.nii.gz",
+    "File_C.nii.gz",
+]
 
 # Call the stitching function
 # This will combine your images into a single NIfTI file

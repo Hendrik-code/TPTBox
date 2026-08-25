@@ -142,7 +142,7 @@ def get_values_from_name(path: Path | str, verbose: bool) -> tuple[str, dict[str
           (e.g. ``"sub-001_ses-01_T1w"``),
         * ``file_type`` is the extension (e.g. ``"nii.gz"``).
     """
-    name = Path(path).name
+    name = path.rpartition("/")[2] if isinstance(path, str) else path.name
 
     bids_key, file_type = name.split(".", maxsplit=1)
 
@@ -179,7 +179,6 @@ def Buffered_BIDS_Global_info(
     parents: Sequence[str] | str = ["rawdata", "derivatives"],
     additional_key: Sequence[str] = ["sequ", "seg", "ovl"],
     verbose: bool = True,
-    file_name_manipulation: typing.Callable[[str], str] | None = None,
     sequence_splitting_keys: list[str] | None = None,
     filter_file: typing.Callable[[Path], bool] | None = None,
     max_age_days: int = 30,
@@ -200,8 +199,6 @@ def Buffered_BIDS_Global_info(
         additional_key: Extra BIDS entity keys beyond the official spec that
             should not trigger validation warnings.
         verbose: Print progress and cache-status messages.
-        file_name_manipulation: Optional callable applied to each filename
-            before BIDS parsing, e.g. to normalise non-conformant names.
         sequence_splitting_keys: Keys used to group files into sequences
             (families).  Defaults to the library-level constant when
             ``None``.
@@ -295,7 +292,6 @@ def Buffered_BIDS_Global_info(
         parents,
         additional_key,
         verbose=verbose,
-        file_name_manipulation=file_name_manipulation,
         sequence_splitting_keys=sequence_splitting_keys,
         filter_folder=lambda _x, _y: False,
         additional_file_list=files,
@@ -305,7 +301,7 @@ def Buffered_BIDS_Global_info(
 _cont = 0
 
 
-def _scan_tree(path, lvl=1, filter_folder=lambda _x, _y: True, verbose=False):
+def _scan_tree(path, lvl=1, filter_folder=None, verbose=False):
     """Recursively yield DirEntry objects for given directory."""
     global _cont  # noqa: PLW0603
     for entry in os.scandir(path):
@@ -330,7 +326,6 @@ class BIDS_Global_info:
         parents: Sequence[str] | str = ["rawdata", "derivatives"],
         additional_key: Sequence[str] = ["sequ", "seg", "ovl"],
         verbose: bool = True,
-        file_name_manipulation: typing.Callable[[str], str] | None = None,
         sequence_splitting_keys: list[str] | None = None,
         filter_folder: typing.Callable[[Path, int], bool] | None = None,
         additional_file_list: dict[str | Path, list[Path]] | None = None,
@@ -346,6 +341,7 @@ class BIDS_Global_info:
                         filter_folder = lambda p, lvl: True if (lvl != 2 or p.name in ["sub-123","sub-456"]) else False
         """
         self.count_file = 0
+        self._p_counter = 0
         if sequence_splitting_keys is None:
             from TPTBox.core.bids_constants import sequence_splitting_keys
 
@@ -360,7 +356,6 @@ class BIDS_Global_info:
         assert isinstance(parents, Sequence), "parents is not a list"
         self.__bids_list: dict = {}
 
-        self.file_name_manipulation = file_name_manipulation
         # Validate
         for ds in datasets:
             ds_path = Path(ds) if isinstance(ds, str) else ds
@@ -431,39 +426,28 @@ class BIDS_Global_info:
                 ds = bids.dataset
             else:
                 raise AssertionError("Dataset-path required")
-
         if isinstance(bids, (Path, str)):
-            try:
-                bids_key, file_type = str(bids).rsplit("/", maxsplit=1)[-1].split(".", maxsplit=1)
-                # print(bids_key)
-            except Exception:
+            name = bids.rpartition("/")[2] if isinstance(bids, str) else bids.name
+            bids_key, sep, file_type = name.partition(".")
+            if not sep:
                 print("[!] skip file with out a type declaration:", bids.name)
-                # raise e
                 return
 
             if bids_key in self._global_bids_list:
                 self._global_bids_list[bids_key].add_file(bids)
                 return
-            bids = BIDS_FILE(
-                bids,
-                ds,
-                verbose=self.verbose,
-                file_name_manipulation=self.file_name_manipulation,
-            )
-
+            bids = BIDS_FILE(bids, ds, verbose=self.verbose)
         subject = bids.info.get("sub", "unsorted")
         if subject not in self.subjects:
             self.subjects[subject] = Subject_Container(subject, self.sequence_splitting_keys)
         self.count_file += 1
-        (
-            print(
-                f"Found: {subject}, total file keys {(self.count_file)},  total subjects = {len(self.subjects)}    ",
-                end="\r",
-            )
-            if self.verbose
-            else None
-        )
+        self._p_counter -= 1
+        if self.verbose and self._p_counter < 0:
+            print(f"Found: {subject}, total file keys {(self.count_file)},  total subjects = {len(self.subjects)}", end="\r")
+            self._p_counter += random.randint(10, 250)
+
         self.subjects[subject].add(bids)
+        self._global_bids_list[bids.BIDS_key] = bids
 
     def enumerate_subjects(self, sort: bool = False, shuffle: bool = False) -> list[tuple[str, Subject_Container]]:
         """Return all subject identifiers together with their :class:`Subject_Container`.
@@ -492,6 +476,8 @@ class BIDS_Global_info:
         Args:
             sort: If ``True``, return subjects sorted alphabetically by
                 subject ID.
+            shuffle: If ``True``, return subjects in a random order. Ignored when
+                ``sort`` is also ``True``.
 
         Returns:
             A list of ``(subject_id, Subject_Container)`` pairs.
@@ -641,14 +627,7 @@ class Subject_Container:
 class BIDS_FILE:
     """Representation of a single BIDS-compliant file with parsed entities and dataset context."""
 
-    def __init__(
-        self,
-        file: Path | str,
-        dataset: Path | str,
-        verbose=True,
-        bids_ds: BIDS_Global_info | None = None,
-        file_name_manipulation: typing.Callable[[str], str] | None = None,
-    ):
+    def __init__(self, file: Path | str, dataset: Path | str, verbose=True, bids_ds: BIDS_Global_info | None = None):
         """Multi-file BIDS record sharing the same identifier (all extensions of one file stem).
 
         Holds references to `.nii.gz`, `.json`, etc. simultaneously.
@@ -671,24 +650,38 @@ class BIDS_FILE:
         file = Path(file) if not isinstance(file, Path) else file
         self.dataset = Path(dataset) if not isinstance(dataset, Path) else dataset
         self.verbose = verbose
-        if file_name_manipulation is not None:
-            if "WS_" in str(file):
-                file.rename(file.parent / Path(file_name_manipulation(file.name)))
-            name = file_name_manipulation(file.name)
-        else:
-            name = file.name
+        name = file.name
         self.format, self.info, self.BIDS_key, file_type = get_values_from_name(name, verbose)
 
         if bids_ds is not None:
             bids_ds.add_file_2_subject(bids=self, ds=self.dataset)
-        self.file = {file_type: file}
-        bids_key, _ = file.name.split(".", maxsplit=1)
-        for file_type in ["nii.gz", "json", "png"]:
-            if file_type in self.file:
-                continue
-            if os.path.exists(os.path.join(file.parent, bids_key + "." + file_type)):
-                self.file[file_type] = Path(file.parent, bids_key + "." + file_type)
-        self.file = dict(sorted(self.file.items()))
+        self._file = {file_type: file}
+        self._checked = False
+
+    @property
+    def file(self) -> dict[str, Path]:
+        """Return the dict of file-type → path for this BIDS entry.
+
+        On first access, sibling files with the same BIDS key and one of the
+        extensions ``nii.gz``, ``json``, ``png`` are auto-discovered next to
+        the primary file.
+
+        Returns:
+            Dict mapping file extension (e.g. ``"nii.gz"``, ``"json"``) to its
+            resolved :class:`~pathlib.Path`, sorted alphabetically by key.
+        """
+        if not self._checked:
+            files = {p.parent for p in self._file.values()}
+            for f in files:
+                bids_key = self.BIDS_key
+                for file_type in ["nii.gz", "json", "png"]:
+                    if file_type in self._file:
+                        continue
+                    if os.path.exists(os.path.join(f, bids_key + "." + file_type)):
+                        self._file[file_type] = Path(f, bids_key + "." + file_type)
+            self._file = dict(sorted(self._file.items()))
+            self._checked = True
+        return self._file
 
     def get_file(self, ending: str = "json", default: Path | None = None) -> Path | None:
         """Return the path for a given file extension, or *default* if absent.
@@ -811,11 +804,7 @@ class BIDS_FILE:
         assert key != "sub", "not allowed to remove subject name"
         return self.info.pop(key)
 
-    def add_file(
-        self,
-        path: Path,
-        bids_ds: BIDS_Global_info | None = None,
-    ) -> None:
+    def add_file(self, path: Path, bids_ds: BIDS_Global_info | None = None) -> None:
         """Associate an additional file extension with this BIDS entry.
 
         Used to register companion files (e.g. a ``.json`` sidecar alongside
@@ -834,12 +823,16 @@ class BIDS_FILE:
         bids_key, file_type = Path(path).name.split(".", maxsplit=1)
 
         assert bids_key == self.BIDS_key, f"only aligned data aka same name different file type: {bids_key} != {self.BIDS_key}"
-        bids_dic_file = self.file
-        if file_type not in self.file:
+        bids_dic_file = self._file
+        if file_type not in bids_dic_file:
             bids_dic_file[file_type] = path
             if bids_ds is not None:
-                bids_ds._global_bids_list[bids_key].file = dict(sorted(bids_dic_file.items()))
-        self.file = dict(sorted(bids_dic_file.items()))
+                bids_ds._global_bids_list[bids_key]._file = dict(sorted(bids_dic_file.items()))
+                self._file = bids_ds._global_bids_list[bids_key]._file
+            else:
+                self._file = dict(sorted(bids_dic_file.items()))
+        elif bids_dic_file[file_type] != path:
+            print("BIDS_Key conflict!", path, "<-->", bids_dic_file)
 
     def rename_files(self, path: Path | str, ending: str = ".nii.gz") -> None:
         """Rename all associated files on disk to a new base path.
@@ -863,36 +856,50 @@ class BIDS_FILE:
             p = Path(path + "." + key)
             value.rename(p)
 
-    def symlink_files(self, path: Path | str, ending: str = ".nii.gz", exist_ok: bool = False) -> None:
-        """Create symbolic links for all associated files at a new base path.
+    def symlink_files(self, path: Path | str, ending: str = ".nii.gz", exist_ok: bool = False, hard_link: bool = False) -> None:
+        """Create symbolic or hard links for all associated files at a new base path.
 
-        Equivalent to :meth:`rename_files` but creates symlinks rather than
-        moving files.  Existing correct symlinks are silently skipped.
+        Equivalent to :meth:`rename_files` but creates links rather than moving
+        files. Existing correct symlinks/hard links are silently skipped.
 
         Args:
             path: Target path including the primary extension (e.g.
                 ``/out/sub-001_T1w.nii.gz``).
             ending: Extension used to compute the base stem; a leading dot is
                 added automatically if absent.
+            exist_ok: If ``True``, skip existing files.
+            hard_link: If ``True``, create hard links using :func:`os.link`
+                instead of symbolic links.
 
         Raises:
             AssertionError: If *path* does not end with *ending*, or if an
-                existing symlink at the target points elsewhere.
+                existing link at the target points elsewhere.
         """
-        ending = ending if ending[0] == "." else "." + ending
+        ending = ending if ending.startswith(".") else "." + ending
         path = str(path)
-        assert path.endswith(ending), f"set 'ending' to the part after the '.'\n {path} does not end with {ending}"
+        assert path.endswith(ending), f"set 'ending' to the part after the '.'\n{path} does not end with {ending}"
         path = path.replace(ending, "")
+
         for key, value in self.file.items():
             p = Path(path + "." + key)
 
-            if os.path.islink(p):
-                assert Path(os.readlink(p)) == value, f"{p} exists"
-                continue
-            if exist_ok and p.exists():
-                continue
-
-            os.symlink(value, p)
+            if hard_link:
+                if p.exists():
+                    same = p.stat().st_ino == value.stat().st_ino and p.stat().st_dev == value.stat().st_dev
+                    if exist_ok:
+                        p.unlink(missing_ok=True)
+                    else:
+                        assert same, f"{p} exists"
+                        continue
+                os.link(value, p)
+            else:
+                if os.path.islink(p):
+                    if exist_ok and p.exists():
+                        p.unlink(missing_ok=True)
+                    else:
+                        assert Path(os.readlink(p)) == value, f"{p} exists"
+                        continue
+                os.symlink(value, p)
 
     def get_path_decomposed(self, file_type: str | None = None) -> tuple[Path, str, str, str]:
         """Decompose the file path relative to the dataset root.
@@ -917,7 +924,6 @@ class BIDS_FILE:
         parent = folder_list[0]
         subpath = folder_list[1:-1]
         filename = folder_list[-1]
-        # print(parent, subpath, filename)
         return self.dataset, parent, str.join("/", subpath), filename
 
     @property
@@ -1030,12 +1036,12 @@ class BIDS_FILE:
         """Changes part of the path to generate new flies. The new parent will be derivatives as a default.
 
         Examples:
-        subreg_path = ct_bids.get_changed_path(file_type="nii.gz",parent = "derivatives",info={"seg": "subreg"}, format="cdt")
+        subreg_path = ct_bids.get_changed_path(file_type="nii.gz",parent = "derivatives",info={"seg": "subreg"}, bids_format="cdt")
 
         Args:
             file_type (str | None, optional): Override the file type, like nii.gz to json Defaults to "nii.gz".
 
-            format (str | None, optional): Changes the "format key" like ct, msk, T1w. Defaults to None.
+            bids_format (str | None, optional): Changes the "format key" like ct, msk, T1w. Defaults to None.
 
             parent (str, optional): derivatives or rawdata or any parent folder. Defaults to "derivatives".
 
@@ -1052,9 +1058,11 @@ class BIDS_FILE:
             dataset_path (str | None, optional): Override the dataset_path. Defaults to None.
 
             no_sorting_mode (bool): If true, will keep the order of the origin nii. Defaults to False
+            make_parent (bool, optional): If true, create missing parent directories for the returned path. Defaults to False.
+            non_strict_mode (bool, optional): If true, downgrade unknown BIDS entity errors to warnings and allow non-``sub``-prefixed keys. Defaults to False.
 
         Returns:
-            _type_: _description_
+            Path: The newly constructed BIDS-conform file path (not yet written to disk).
         """
         if info is None:
             info = {}
@@ -1147,10 +1155,9 @@ class BIDS_FILE:
                 return out_path
             if not out_path.exists():
                 return out_path
-            if "run" in info:
-                info["run"] += 1
-            else:
-                info["run"] = 2
+            # "run" is a decimal entity and must stay a string: validate_entities() calls
+            # .isdecimal() on it, which an int does not support.
+            info["run"] = str(int(info["run"]) + 1) if "run" in info else "2"
 
     def save_changed_path(
         self,
@@ -1337,7 +1344,7 @@ class BIDS_FILE:
         Raises:
             KeyError: If no JSON file is registered in :attr:`file`.
         """
-        with open(self.file["json"]) as f:
+        with open(self.file["json"], encoding="utf-8") as f:
             return json.load(f)
 
     def open_poi(self, nii: TPTBox.Image_Reference | None = None) -> TPTBox.POI:
@@ -1951,13 +1958,16 @@ class Searchquery:
             return s
 
     def loop_list(self, sort=False) -> typing.Iterator[BIDS_FILE]:
-        """Returns an iterator. Flatten must be True.
+        """Iterate the flattened candidate list as individual BIDS_FILE objects.
+
+        Requires :meth:`flatten` to have been called first.
 
         Args:
-            sort (bool, optional): Sort alphabetically. Defaults to False.
+            sort (bool, optional): If True, iterate in alphabetical order.
+                Defaults to False.
 
         Returns:
-            typing.Iterator[BIDS_FILE]: _description_
+            Iterator over the matching :class:`BIDS_FILE` objects.
         """
         assert isinstance(self.candidates, list), "call flatten() before looping as a list"
         if sort:
@@ -1975,6 +1985,9 @@ class Searchquery:
         Args:
             sort (bool, optional): Sort alphabetically. Defaults to False.
             key_transform (typing.Callable[[BIDS_FILE], str | None]): provide alternative dict name for certain fils, if default should be used return None
+            key_addendum (list[str] | None, optional): Extra info-key names appended to each family's dict keys to
+                disambiguate otherwise-identical entries. Defaults to None.
+
         Returns:
             typing.Iterator[typing.Dict[str, BIDS_FILE | list[BIDS_FILE]]]
         """
@@ -1990,7 +2003,7 @@ class Searchquery:
             for sequ, values in self.candidates.items()
         )
         if sort:
-            l = sorted(l)  # type: ignore
+            l = sorted(l, key=lambda x: x.family_id)  # type: ignore
         return l
 
 

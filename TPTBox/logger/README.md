@@ -38,7 +38,7 @@ from TPTBox import Logger, Print_Logger, No_Logger, String_Logger, Log_Type
 ## Example
 
 ```python
-logger.print() # logs/prints empty line
+logger.print()  # logs/prints empty line
 
 logger.print("Started logging to path: ./logs/test.log", lt.LOG)
 logger.print()
@@ -69,6 +69,7 @@ log.print("Missing T2w for sub-007", Log_Type.WARNING)
 
 # Suppress all output (e.g. in a library function)
 from TPTBox import No_Logger
+
 log = No_Logger()
 log.print("This is silently discarded")
 ```

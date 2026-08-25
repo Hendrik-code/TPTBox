@@ -5,8 +5,6 @@ from numbers import Number
 from typing import TYPE_CHECKING, Union
 
 import numpy as np
-from skimage.metrics import peak_signal_noise_ratio as psnr
-from skimage.metrics import structural_similarity as ssim
 from typing_extensions import Self
 
 from TPTBox.core.np_utils import np_dice
@@ -286,12 +284,19 @@ class NII_Math(NII_Proxy, Has_Grid):
         """
         arr = self.get_array()
         max_v = np.quantile(arr[arr>0],q=quantile)
-        arr = self.clamp(clamp_lower,max_v,inplace=inplace)
-        arr -= arr.min() - min_out/max_out
-        arr /= arr.max() *max_out
-        assert arr.max() == max_out, f"{arr.max()} == {max_out}"
-        assert arr.min() == min_out
-        return self.set_array(arr.get_array(),inplace)
+        clamped = self.clamp(clamp_lower,max_v,inplace=inplace).get_array()
+        if not np.issubdtype(clamped.dtype, np.floating):
+            clamped = clamped.astype(np.float32)
+        mi = clamped.min()
+        ma = clamped.max()
+        if ma == mi:
+            # Degenerate (constant) image: nothing to spread out, map onto the lower bound.
+            clamped = np.full_like(clamped, min_out)
+        else:
+            clamped = (clamped - mi) / (ma - mi) * (max_out - min_out) + min_out
+            assert np.isclose(clamped.max(), max_out), f"{clamped.max()} == {max_out}"
+            assert np.isclose(clamped.min(), min_out), f"{clamped.min()} == {min_out}"
+        return self.set_array(clamped,inplace)
     def normalize_(self,min_out = 0, max_out = 1, quantile = 1., clamp_lower:float|None=None)->Self:
         """In-place variant of `normalize`."""
         return self.normalize(min_out = min_out, max_out = max_out, quantile = quantile, clamp_lower=clamp_lower,inplace=True)
@@ -413,10 +418,7 @@ class NII_Math(NII_Proxy, Has_Grid):
         Returns:
             Self: Binarised segmentation instance.
         """
-        arr = self.get_array()
-        arr2 = arr.copy()
-        arr[arr2>=threshold] = 1
-        arr[arr2<=threshold] = 0
+        arr = (self.get_array() >= threshold).astype(np.uint8)
         nii = self if inplace else self.copy()
         nii.seg = True
         nii:NII = nii.set_array(arr,inplace,verbose=False)
@@ -450,9 +452,12 @@ class NII_Math(NII_Proxy, Has_Grid):
         Returns:
             float: SSIM score in the range [-1, 1] (1 = identical).
         """
+        # imported here: skimage.metrics pulls in scipy.stats, ~35% of `import TPTBox`
+        from skimage.metrics import structural_similarity as ssim
+
         img_1 = nii.get_array() - min_v
         img_2 = self.get_array() - min_v
-        img_1/= img_1.max()
+        img_1 = img_1/ img_1.max()  # out-of-place: /= fails on integer arrays
         img_1[img_1<=0] = 0
         img_2= img_2/ img_2.max()
         img_2[img_2<=0] = 0
@@ -474,9 +479,12 @@ class NII_Math(NII_Proxy, Has_Grid):
         Returns:
             float: PSNR score in dB (higher is better; inf when images are identical).
         """
+        # imported here: skimage.metrics pulls in scipy.stats, ~35% of `import TPTBox`
+        from skimage.metrics import peak_signal_noise_ratio as psnr
+
         img_1 = nii.get_array() - min_v
         img_2 = self.get_array() - min_v
-        img_1/= img_1.max()
+        img_1 = img_1/ img_1.max()  # out-of-place: /= fails on integer arrays
         img_1[img_1<=0] = 0
         img_2= img_2/img_2.max()
         img_2[img_2<=0] = 0

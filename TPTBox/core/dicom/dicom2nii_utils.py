@@ -284,7 +284,7 @@ def test_name_conflict(json_ob: dict, file: str | Path) -> bool:
         ``False`` otherwise (file does not exist or content matches).
     """
     if Path(file).exists():
-        with open(file) as f:
+        with open(file, encoding="utf-8") as f:
             js = json.load(f)
             if "grid" in js:
                 del js["grid"]
@@ -328,7 +328,7 @@ def load_json(file: str | Path) -> dict:
     Returns:
         Parsed contents of the JSON file.
     """
-    with open(file) as file_handel:
+    with open(file, encoding="utf-8") as file_handel:
         return json.load(file_handel)
 
 

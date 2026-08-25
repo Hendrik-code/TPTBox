@@ -38,7 +38,7 @@ Numpy functionalities that a lot of NII functions above utilize under the hood. 
 ```python
 from TPTBox.core.np_utils import np_unique, np_center_of_mass
 
-a = np.array([0,1,2,3], [4,5,6,7], dtype=np.uint8)
+a = np.array([0, 1, 2, 3], [4, 5, 6, 7], dtype=np.uint8)
 
 label = np_unique(a)
 center_of_mass_of_label_four = np_center_of_mass(a)[4]
@@ -59,6 +59,7 @@ center_of_mass_of_label_four = np_center_of_mass(a)[4]
 
 ```python
 from TPTBox import NII, Location
+
 # Segmentation
 seg = NII.load("path/to/seg.nii.gz", seg=True)
 

@@ -92,32 +92,6 @@ def _crop(
     return i, verts_ids, vert, spine, poi, crop, next_id
 
 
-def _process_vertebra_A(idx: int, vert: NII, spine: NII, next_id: int, poi: POI) -> NII | None:
-    """Generate the IVD mask between vertebra ``idx`` and ``next_id`` using endplate extraction."""
-    from TPTBox.spine.spinestats import endplate_extraction
-
-    try:
-        a = endplate_extraction(idx, vert, spine, poi)
-        b = endplate_extraction(next_id, vert, spine, poi)
-        if a is None or b is None:
-            return None
-        a = a.extract_label(Location.Vertebral_Body_Endplate_Inferior)
-        b = b.extract_label(Location.Vertebral_Body_Endplate_Superior)
-    except ValueError:
-        return None
-    ivd: NII = (a + b).calc_convex_hull(None)
-    # ivd: NII = (
-    #    (a + b).dilate_msk(1, 1, verbose=False).erode_msk(3, 1, ignore_direction="S", verbose=False)
-    #    # .calc_convex_hull(None)
-    # )
-    # ivd[a != 0] = 2
-    # ivd[b != 0] = 3
-    # ivd[spine != 0] += 10
-    # ivd = ivd.filter_connected_components(1, max_count_component=1, connectivity=1)
-    ivd = ivd * (100 + idx)
-    return ivd
-
-
 def _process_vertebra_B(idx: int, vert: NII, spine: NII, next_id: Vertebra_Instance, dilate: int = 1) -> NII:
     """Generate the IVD mask between vertebra ``idx`` and ``next_id`` using convex-hull morphology."""
     spine = spine.extract_label([49, 50, 26])
@@ -312,7 +286,7 @@ def calculate_IVD_POI(
     poi: POI,
     ivd_location: set[Location] | None = None,
 ) -> POI:
-    """Compute IVD-related Points of Interest and add them to ``poi``.
+    """Compute IVD-related Points of Interest and add them to ``poi``. This function estimates these points if the IVD is not here.
 
     If the subregion image does not yet contain IVD labels (label 100),
     :func:`compute_fake_ivd` is called first to synthesise them.  Centroid

@@ -7,6 +7,7 @@ import tempfile
 import zipfile
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 from pathlib import Path
 
 import dicom2nifti
@@ -52,27 +53,39 @@ def _next_letter_suffix(s: str, inc: int = 1) -> str:
     return "".join(reversed(result))
 
 
-def _inc_key(keys: dict, inc: int = 1, k="sequ") -> None:
-    """Increment the sequence key inside *keys* by appending letter suffixes."""
-    if k not in keys:
-        keys[k] = "0"
-    value = str(keys[k])
-    try:
-        # Pure number: 100 -> 100-a
-        int(value)
-        keys[k] = f"{value}-a"
-        return  # noqa: TRY300
-    except ValueError:
-        pass
+def _inc_key(keys: dict, inc: int = 1, k: str = "sequ", path_exists: Callable[[dict], bool] | None = None) -> None:
+    """Increment the sequence key inside *keys* by appending letter suffixes.
 
-    try:
-        base, suffix = value.rsplit("-", maxsplit=1)
-        if suffix.isalpha():
-            keys[k] = f"{base}-{_next_letter_suffix(suffix, inc)}"
-        else:
-            keys[k] = f"{base}-a"
-    except ValueError:
-        keys[k] = f"{value}-a"
+    When ``path_exists`` is given, keep incrementing until it returns ``False`` — i.e.
+    until the filename generated from *keys* no longer collides with an existing file
+    on disk. This guarantees the caller never receives keys that would produce a
+    duplicate filename.
+    """
+
+    def _step() -> None:
+        if k not in keys:
+            keys[k] = "0"
+        value = str(keys[k])
+        try:
+            # Pure number: 100 -> 100-a
+            int(value)
+            keys[k] = f"{value}-a"
+            return  # noqa: TRY300
+        except ValueError:
+            pass
+
+        try:
+            base, suffix = value.rsplit("-", maxsplit=1)
+            if suffix.isalpha():
+                keys[k] = f"{base}-{_next_letter_suffix(suffix, inc)}"
+            else:
+                keys[k] = f"{base}-a"
+        except ValueError:
+            keys[k] = f"{value}-a"
+
+    _step()
+    while path_exists is not None and path_exists(keys):
+        _step()
 
 
 def _generate_bids_path(
@@ -81,7 +94,7 @@ def _generate_bids_path(
     """Generate a BIDS-compatible file path for NIfTI outputs based on extracted keys from DICOM headers.
 
     Args:
-        nifti_dir (str | Path): Directory where the NIfTI file will be stored.
+        dataset_nifti_dir (str | Path): Root dataset directory where the NIfTI file will be stored.
         keys (dict): Dictionary containing metadata keys extracted from DICOM headers.
         mri_format (str): The format or sequence type of the MRI (e.g., T1, T2).
         simp_json (dict): JSON dictionary with extracted DICOM information to avoid file naming conflicts.
@@ -105,10 +118,17 @@ def _generate_bids_path(
         ses,  # Session, if exist
     )
     args = {"file_type": "json", "parent": parent, "make_parent": True, "additional_folder": mri_format, "bids_format": mri_format}
-    fname = BIDS_FILE(Path(p, "sub-000_ct.nii.gz"), dataset_nifti_dir).get_changed_bids(**args, info=keys, non_strict_mode=True)
-    while test_name_conflict(simp_json, fname.file["json"]):
-        _inc_key(keys)
-        fname = BIDS_FILE(Path(p, "sub-000_ct.nii.gz"), dataset_nifti_dir).get_changed_bids(**args, info=keys, non_strict_mode=True)
+
+    def _make_fname(k: dict):
+        return BIDS_FILE(Path(p, "sub-000_ct.nii.gz"), dataset_nifti_dir).get_changed_bids(**args, info=k, non_strict_mode=True)
+
+    fname = _make_fname(keys)
+    # If a file already sits at this path, check whether its content matches ours
+    # (ignoring the "grid" key). Same content → reuse the existing filename.
+    # Different content → let _inc_key find a fresh, non-colliding filename.
+    if test_name_conflict(simp_json, fname.file["json"]):
+        _inc_key(keys, path_exists=lambda k: Path(_make_fname(k).file["json"]).exists())
+        fname = _make_fname(keys)
     return fname.file["json"], fname
 
 
@@ -547,10 +567,21 @@ def _add_grid_info_to_json(nii_path: Path | str, simp_json: Path | str, force_up
     Returns:
         The updated JSON dictionary including the ``"grid"`` key.
     """
-    json_dict = load_json(simp_json) if Path(simp_json).exists() else {}
-    if "grid" in json_dict and not force_update:
+    nii_path = Path(nii_path)
+    simp_json = Path(simp_json)
+
+    # Always preserve the existing JSON contents (DICOM metadata written by save_json).
+    # The mtime comparison is only used to short-circuit re-computing the grid when the
+    # sidecar is already up to date; it must NOT decide whether to keep the DICOM keys.
+    json_dict = load_json(simp_json) if simp_json.exists() else {}
+    json_up_to_date = (
+        simp_json.exists()
+        and nii_path.exists()
+        and datetime.fromtimestamp(simp_json.stat().st_mtime) > datetime.fromtimestamp(nii_path.stat().st_mtime)
+    )
+    if "grid" in json_dict and not force_update and json_up_to_date:
         return json_dict
-    print("Read Grid info", Path(simp_json).exists(), "grid" in json_dict)
+    print("Read Grid info")
     nii = NII.load(nii_path, False)
     gird = {
         "shape": nii.shape,
@@ -791,7 +822,19 @@ def extract_dicom_folder(
         verbose (bool, optional): Whether to print detailed log information. Defaults to True.
         parts_mapping (dict, optional): A dictionary mapping DICOM part identifiers to specific descriptions (e.g., "f" -> "fat").
                                         Used for categorizing DICOM series. Defaults to a predefined mapping. The parts tag is only generated if the ImageType causes an image split.
+        map_series_description_to_file_format (dict | Callable | None, optional): Overrides the default mapping from
+            SeriesDescription to output ``mri_format``. Defaults to the built-in mapping.
+        validate_slicecount (bool, optional): Enable ``dicom2nifti`` slice-count validation. Defaults to True.
+        validate_orientation (bool, optional): Enable ``dicom2nifti`` orientation validation. Defaults to True.
+        validate_orthogonal (bool, optional): Enable ``dicom2nifti`` orthogonality validation. Defaults to False.
+        validate_slice_increment (bool, optional): Enable ``dicom2nifti`` slice-increment validation. Defaults to True.
         n_cpu (int, optional): Number of CPU cores to use for parallel processing. Defaults to 1 (sequential).
+        override_subject_name (Callable[[dict, Path], str] | None, optional): Callable receiving the parsed DICOM
+            header dict and file path; returns the subject id to use in the BIDS output. Defaults to None.
+        skip_localizer (bool, optional): If True, skip series identified as scanner localisers. Defaults to True.
+        parent (str, optional): Parent folder inside ``dataset_path_out`` under which subjects are written
+            (typically ``"rawdata"``). Defaults to ``"rawdata"``.
+        censor_list (list | None, optional): List of series keys to skip entirely. Defaults to an empty list.
 
     Returns:
         dict: A dictionary with keys representing DICOM series and values as paths to the generated NIfTI files.

@@ -55,13 +55,19 @@ def main_vert_test():
 
 
 def get_femurs(img: Image_Reference, seg_id=13):
-    """Returns left (2) and right (1).
+    """Split the ``seg_id`` mask in ``img`` into its left and right femur components.
+
+    Uses the two largest connected components of the extracted label, computes
+    their centroids, and relabels so left becomes ``2`` and right becomes ``1``
+    in RAS orientation.
 
     Args:
-        img (Image_Reference): _description_
+        img (Image_Reference): Segmentation image (or reference) containing the femur label.
+        seg_id (int, optional): Label id of the femur in ``img``. Defaults to 13.
 
     Returns:
-        _type_: _description_
+        tuple[NII, POI]: The relabeled connected-component mask and a POI object with
+        the femur centroids plus one auxiliary superior point per side.
     """
     nii = to_nii(img, True)
     # Extract Femurs
