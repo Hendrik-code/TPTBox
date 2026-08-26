@@ -58,6 +58,15 @@ coverage = ">=7.0.1"
 pytest-mock = "^3.6.0"
 exceptiongroup = { version = "^1.2", python = "<3.11" }
 tomli = {version = "*", python = "<3.11" }
+# Extra optional deps used by TPTBox.mesh3D (3D snapshots and HTML previews).
+# Kept in the dev group so CPU-only mesh tests can run in CI without pulling
+# them into every install.
+# fury 2.x is a full pygfx-based rewrite that removed `window.record` and
+# changed `ShowManager` / `Scene` signatures used by TPTBox.mesh3D.snapshot3D.
+# Pin to the last VTK-backed line until snapshot3D is ported.
+fury = ">=0.9,<2.0"
+Pillow = "*"
+xvfbwrapper = { version = "*", markers = "sys_platform == 'linux'" }
 
 [tool.poetry.group.docs.dependencies]
 mkdocs = ">=1.6"
