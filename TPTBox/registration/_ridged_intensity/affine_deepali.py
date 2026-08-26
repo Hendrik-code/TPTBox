@@ -82,7 +82,7 @@ def center_of_mass_cc(tensor: torch.Tensor) -> torch.Tensor:
 
 
 class Tether_Seg(PairwiseSegImageLoss):
-    def __init__(self, delta=1, *args, **kwargs):
+    def __init__(self, delta=1.0, *args, **kwargs):
         self.delta = delta
         super().__init__(*args, **kwargs)
 
