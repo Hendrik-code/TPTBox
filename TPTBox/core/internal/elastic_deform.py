@@ -1,11 +1,41 @@
 import time
 
-# pip install elasticdeform
-import elasticdeform  # See https://github.com/gvtulder/elasticdeform/issues/24 to install this for >2.x
 import numpy as np
 from numpy.typing import NDArray
 
 from TPTBox import NII
+
+
+def _elasticdeform_install_hint() -> str:
+    """Build an install hint tailored to the currently active NumPy version.
+
+    The PyPI ``elasticdeform`` wheel is compiled against NumPy 1.x and fails
+    to import under NumPy 2.x. The fix is to install from source so the C
+    extension is rebuilt against whatever NumPy is available in the current
+    environment. Reporting the detected NumPy version makes it obvious to the
+    reader why the wheel broke and lets us suggest an install line that
+    references the concrete environment they are on.
+
+    See https://github.com/gvtulder/elasticdeform/issues/24 for context.
+    """
+    numpy_version = np.__version__
+    numpy_major = int(numpy_version.split(".", 1)[0]) if numpy_version[:1].isdigit() else 0
+    tarball = "https://github.com/gvtulder/elasticdeform/archive/refs/tags/v0.5.1.tar.gz"
+    if numpy_major >= 2:
+        return (
+            f"elasticdeform could not be imported (NumPy {numpy_version} detected). "
+            "The published wheel is built against NumPy 1.x and cannot load under "
+            "NumPy 2.x. Rebuild from source against your current NumPy with:\n"
+            f"    pip install --no-binary :all: --no-build-isolation --force-reinstall --no-deps {tarball}\n"
+            "See https://github.com/gvtulder/elasticdeform/issues/24 for details."
+        )
+    return f"elasticdeform could not be imported (NumPy {numpy_version} detected). Install it with:\n    pip install elasticdeform\n"
+
+
+try:
+    import elasticdeform  # noqa: E402 - kept after the helper so the message can be built
+except ImportError as _exc:
+    raise ImportError(_elasticdeform_install_hint()) from _exc
 
 
 def deformed_nii(

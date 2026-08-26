@@ -52,6 +52,14 @@ def _synthetic_deformed_atlas(nii, sigma: float = 1.0, points: int = 3, seed: in
     against the input – enough for the deformable stage to have real work to do
     but far from destroying the anatomy, so the test stays stable across runs.
     Falls back to ``nii.copy()`` when ``elasticdeform`` is missing.
+
+    NumPy-2 install note: the PyPI wheel of ``elasticdeform`` is built against
+    NumPy 1.x and crashes at import time under NumPy 2.x. Install the source
+    tarball instead so it recompiles against the current environment::
+
+        pip install https://github.com/gvtulder/elasticdeform/archive/refs/tags/v0.5.1.tar.gz
+
+    (Confirmed working with NumPy 2.4.1 / SciPy 1.17.0.)
     """
     if not _HAS_ELASTIC:
         return nii.copy()
