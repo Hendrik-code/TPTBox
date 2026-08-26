@@ -221,9 +221,7 @@ class TestDeepaliPointRegistration(unittest.TestCase):
         np.testing.assert_allclose(aff[:3, 3], shift, atol=1e-4)
         # And the fitted transform must actually take the moving point back to the fixed one.
         back = reg.transform_poi(poi_mov_single)
-        np.testing.assert_allclose(
-            np.array(back[one_key]), np.array(poi_fix_single[one_key]), atol=1e-3
-        )
+        np.testing.assert_allclose(np.array(back[one_key]), np.array(poi_fix_single[one_key]), atol=1e-3)
 
     def test_helper_returns_same_type(self):
         from TPTBox.registration import (  # noqa: PLC0415
@@ -304,9 +302,7 @@ class TestGeneralRegistrationFlags(unittest.TestCase):
         from TPTBox import Location, calc_poi_from_subreg_vert, to_nii  # noqa: PLC0415
         from TPTBox.registration import General_Registration  # noqa: PLC0415
 
-        ct = to_nii(
-            "/media/data/robert/code/TPTBox/TPTBox/tests/sample_ct/sub-ct_label-22_ct.nii.gz", False
-        )
+        ct = to_nii("/media/data/robert/code/TPTBox/TPTBox/tests/sample_ct/sub-ct_label-22_ct.nii.gz", False)
         vert = to_nii(
             "/media/data/robert/code/TPTBox/TPTBox/tests/sample_ct/sub-ct_seg-vert_label-22_msk.nii.gz",
             True,
@@ -372,9 +368,7 @@ class TestGeneralRegistrationFlags(unittest.TestCase):
         from TPTBox.tests.test_utils import get_test_ct  # noqa: PLC0415
 
         ct, subreg, vert, _ = get_test_ct()
-        poi = calc_poi_from_subreg_vert(vert, subreg, subreg_id=[Location.Vertebra_Corpus]).extract_subregion(
-            Location.Vertebra_Corpus
-        )
+        poi = calc_poi_from_subreg_vert(vert, subreg, subreg_id=[Location.Vertebra_Corpus]).extract_subregion(Location.Vertebra_Corpus)
         poi_g = POI_Global(poi, itk_coords=False)
         reg = General_Registration(
             fixed_image=ct,
@@ -469,11 +463,7 @@ class TestTemplateRegistration2(unittest.TestCase):
         poi_target = calc_poi_from_subreg_vert(vert, subreg, subreg_id=[Location.Vertebra_Corpus]).extract_subregion(
             Location.Vertebra_Corpus
         )
-        pre = (
-            Deepali_Point_Registration(poi_target, poi_target.copy(), verbose=False, ddevice="cpu")
-            if with_pre
-            else None
-        )
+        pre = Deepali_Point_Registration(poi_target, poi_target.copy(), verbose=False, ddevice="cpu") if with_pre else None
         reg = Template_Registration2(
             target_seg=vert,
             atlas_seg=atlas_vert,
@@ -580,9 +570,7 @@ class TestFlipHelper(unittest.TestCase):
         from TPTBox.tests.test_utils import get_test_ct  # noqa: PLC0415
 
         _, subreg, vert, _ = get_test_ct()
-        poi = calc_poi_from_subreg_vert(vert, subreg, subreg_id=[Location.Vertebra_Corpus]).extract_subregion(
-            Location.Vertebra_Corpus
-        )
+        poi = calc_poi_from_subreg_vert(vert, subreg, subreg_id=[Location.Vertebra_Corpus]).extract_subregion(Location.Vertebra_Corpus)
         axis = poi.get_axis("R")
         flipped = _flip_r_axis(poi.copy())
         back = _flip_r_axis(flipped)
@@ -603,9 +591,7 @@ class TestFlipHelper(unittest.TestCase):
         from TPTBox.tests.test_utils import get_test_ct  # noqa: PLC0415
 
         _, subreg, vert, _ = get_test_ct()
-        poi = calc_poi_from_subreg_vert(vert, subreg, subreg_id=[Location.Vertebra_Corpus]).extract_subregion(
-            Location.Vertebra_Corpus
-        )
+        poi = calc_poi_from_subreg_vert(vert, subreg, subreg_id=[Location.Vertebra_Corpus]).extract_subregion(Location.Vertebra_Corpus)
         with self.assertRaises(TypeError):
             _flip_r_axis(POI_Global(poi))
 
