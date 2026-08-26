@@ -18,6 +18,38 @@ if TYPE_CHECKING:
 
 from TPTBox.core.vert_constants import AFFINE, MODES, SHAPE, ZOOMS, Sentinel, _supported_img_files
 
+# NIfTI-1 headers can encode most numpy dtypes, but a couple of common ones
+# don't have a NIfTI datatype code (notably float16 and bool). The NII wrapper
+# still wants to *carry* an array in one of those dtypes without crashing -
+# e.g. an nnU-Net pre-processing step producing a float16 volume, or a
+# boolean mask. We only upcast when the array actually has to enter a
+# Nifti1Image (i.e. writing to disk or handing the underlying nibabel object
+# out), so the caller-visible ``_arr.dtype`` stays whatever they set.
+_NIFTI_UNSUPPORTED_DTYPE_UPCAST: dict[np.dtype, np.dtype] = {
+    np.dtype(np.float16): np.dtype(np.float32),
+    np.dtype(np.bool_): np.dtype(np.uint8),
+}
+
+
+def _nifti_safe_dtype(dtype: np.dtype | type) -> np.dtype:
+    """Return the closest nibabel-supported dtype for storing in a Nifti1 header.
+
+    For a dtype that NIfTI-1 already accepts, this is the identity. For the
+    unsupported cases we upcast conservatively (``float16 → float32``,
+    ``bool → uint8``). The array itself is *not* touched – see
+    :func:`_arr_for_nifti1`.
+    """
+    d = np.dtype(dtype)
+    return _NIFTI_UNSUPPORTED_DTYPE_UPCAST.get(d, d)
+
+
+def _arr_for_nifti1(arr: np.ndarray) -> np.ndarray:
+    """Return *arr* (or a copy in a safe dtype) fit to be passed to Nifti1Image."""
+    safe = _nifti_safe_dtype(arr.dtype)
+    if safe == arr.dtype:
+        return arr
+    return arr.astype(safe, copy=False)
+
 
 def secure_save(func, *, file_types=tuple(_supported_img_files)) -> Callable:
     """Decorator that writes to a `.backup` file first and restores it if saving fails.
@@ -172,6 +204,7 @@ def _resample_from_to(
     order: int = 3,
     mode: MODES = "nearest",
     align_corners: bool | Sentinel = Sentinel(),  # noqa: B008
+    out_dtype: np.dtype | type | str | None = None,
 ) -> tuple[np.ndarray, np.ndarray, object]:
     """Resample *from_img* into the voxel space defined by *to_img*.
 
@@ -191,6 +224,19 @@ def _resample_from_to(
             ``order == 0``), voxel corners are aligned between source and target
             grids.  When ``False``, voxel centres are aligned (standard
             nibabel/scipy behaviour).
+        out_dtype: Optional NumPy dtype (or dtype-like) requested for the
+            resampled array. When set, this is forwarded to ``scipy.ndimage``
+            as its ``output=`` argument, so the cast happens in-place during
+            interpolation without an extra full-volume copy afterwards.
+            ``None`` (default) keeps the source dtype.
+            With ``order > 0`` and an integer target dtype the float→int cast
+            is a plain truncation (matches NumPy's cast rules); pass ``order=0``
+            for label maps. ``scipy.ndimage.affine_transform`` only accepts
+            ``uint8/uint16/int16/int32/float32/float64`` for its ``output=``
+            argument. Requesting an unsupported dtype (notably ``float16``)
+            transparently falls back to resampling into ``float32`` and casting
+            to the requested dtype in a single extra pass - still much cheaper
+            than staying in the source dtype (e.g. float64) throughout.
 
     Returns:
         A 3-tuple ``(data, affine, header)`` where *data* is the resampled
@@ -254,5 +300,32 @@ def _resample_from_to(
     to_vox2from_vox = npl.inv(a_from_affine).dot(a_to_affine)
     rzs, trans = to_matvec(to_vox2from_vox)
 
-    data = scipy_img.affine_transform(from_img.get_array(), rzs, trans, to_shape, order=order, mode=mode, cval=from_img.get_c_val())  # type: ignore
+    # scipy.ndimage.affine_transform can only write into a small set of dtypes
+    # (u8/u16/i16/i32/f32/f64). For anything else - notably float16, which the
+    # nnU-Net inference path wants for memory - we resample into float32 first
+    # and cast in one pass at the end.
+    _scipy_supported = (np.uint8, np.uint16, np.int16, np.int32, np.float32, np.float64)
+    if out_dtype is None:
+        scipy_out = None
+        post_cast: np.dtype | None = None
+    else:
+        req = np.dtype(out_dtype)
+        if req.type in _scipy_supported:
+            scipy_out = req
+            post_cast = None
+        else:
+            scipy_out = np.dtype(np.float32)
+            post_cast = req
+    data = scipy_img.affine_transform(  # type: ignore
+        from_img.get_array(),
+        rzs,
+        trans,
+        to_shape,
+        order=order,
+        mode=mode,
+        cval=from_img.get_c_val(),
+        output=scipy_out,
+    )
+    if post_cast is not None:
+        data = data.astype(post_cast, copy=False)
     return data, to_affine, from_img.header
