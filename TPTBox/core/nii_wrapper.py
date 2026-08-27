@@ -2932,6 +2932,49 @@ class NII(NII_Math):
         """Returns a dict stating the center of mass for each present label (not including zero!)."""
         return np_center_of_mass(self.get_seg_array())
 
+    def relabel_by_position(
+        self,
+        axis: DIRECTIONS = "I",
+        offset: int = 0,
+        inplace: bool = False,
+        verbose: logging = False,
+    ) -> Self:
+        """Relabels instances consecutively by their position along an anatomical axis.
+
+        Labels are renumbered ``1 + offset``, ``2 + offset``, ... in the order their centers of
+        mass appear when travelling along ``axis``. With the default ``axis="I"`` the most
+        superior instance becomes label ``1 + offset`` and numbering runs downwards.
+
+        This works in whatever orientation the image already has -- the direction is resolved
+        against :attr:`orientation`, so no reorientation round-trip is needed.
+
+        Args:
+            axis (DIRECTIONS, optional): Anatomical direction the numbering advances along.
+                Defaults to ``"I"`` (superior to inferior).
+            offset (int, optional): Added to every new label, so numbering starts at
+                ``1 + offset``. Defaults to 0.
+            inplace (bool, optional): If True, modifies this NII in place. Defaults to False.
+            verbose (logging, optional): Passed through to :meth:`map_labels`. Defaults to False.
+
+        Returns:
+            NII: The relabeled segmentation.
+
+        Examples:
+            >>> vert.relabel_by_position("I")  # doctest: +SKIP
+            # topmost vertebra -> 1, next one down -> 2, ...
+        """
+        ax = self.get_axis(axis)
+        # get_axis falls back to the opposite letter, so recover which way the axis actually runs.
+        forward = axis in self.orientation
+        coms = np_center_of_mass(self.get_seg_array())
+        ordered = sorted(coms.items(), key=lambda kv: kv[1][ax], reverse=not forward)
+        label_map = {int(label): idx + 1 + offset for idx, (label, _) in enumerate(ordered)}
+        return self.map_labels(label_map, verbose=verbose, inplace=inplace)
+
+    def relabel_by_position_(self, axis: DIRECTIONS = "I", offset: int = 0, verbose: logging = False) -> Self:
+        """In-place version of :meth:`relabel_by_position`."""
+        return self.relabel_by_position(axis=axis, offset=offset, inplace=True, verbose=verbose)
+
 
 
 

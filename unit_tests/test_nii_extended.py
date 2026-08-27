@@ -465,5 +465,56 @@ class Test_NII_GetSegArray(unittest.TestCase):
         self.assertEqual(result.shape, arr.shape)
 
 
+class Test_relabel_by_position(unittest.TestCase):
+    def _stacked(self, labels=(7, 3, 5)):
+        """Three blobs stacked along axis 2, listed from low index to high index."""
+        arr = np.zeros((10, 10, 24), dtype=np.uint16)
+        for i, label in enumerate(labels):
+            arr[4:6, 4:6, 2 + 8 * i : 5 + 8 * i] = label
+        return _make_nii(arr)
+
+    def test_numbering_runs_along_the_requested_direction(self):
+        nii = self._stacked()
+        self.assertNotIn("I", nii.orientation)  # axis 2 is 'S', so the direction is flipped
+        coms = nii.relabel_by_position("I").center_of_masses()
+        self.assertGreater(coms[1][2], coms[2][2])
+        self.assertGreater(coms[2][2], coms[3][2])
+
+    def test_opposite_direction_reverses_numbering(self):
+        nii = self._stacked()
+        coms = nii.relabel_by_position("S").center_of_masses()
+        self.assertLess(coms[1][2], coms[2][2])
+        self.assertLess(coms[2][2], coms[3][2])
+
+    def test_offset_shifts_the_label_range(self):
+        nii = self._stacked()
+        self.assertEqual(sorted(nii.relabel_by_position("I", offset=100).unique()), [101, 102, 103])
+
+    def test_result_does_not_depend_on_input_orientation(self):
+        nii = self._stacked()
+        expected = nii.relabel_by_position("I")
+        for ori in (("P", "I", "R"), ("L", "A", "S"), ("A", "S", "L")):
+            rotated = nii.reorient(ori).relabel_by_position("I").reorient(nii.orientation)
+            self.assertTrue(np.array_equal(rotated.get_seg_array(), expected.get_seg_array()), f"differs for {ori}")
+
+    def test_inplace_variant_matches(self):
+        nii = self._stacked()
+        expected = nii.relabel_by_position("I")
+        clone = nii.copy()
+        clone.relabel_by_position_("I")
+        self.assertTrue(np.array_equal(clone.get_seg_array(), expected.get_seg_array()))
+
+    def test_single_label_is_renumbered_to_one(self):
+        arr = np.zeros((8, 8, 8), dtype=np.uint16)
+        arr[2:5, 2:5, 2:5] = 42
+        self.assertEqual(sorted(_make_nii(arr).relabel_by_position("I").unique()), [1])
+
+    def test_labels_are_preserved_in_count(self):
+        nii = self._stacked(labels=(11, 4, 9))
+        out = nii.relabel_by_position("I")
+        self.assertEqual(len(out.unique()), len(nii.unique()))
+        self.assertEqual(np.count_nonzero(out.get_seg_array()), np.count_nonzero(nii.get_seg_array()))
+
+
 if __name__ == "__main__":
     unittest.main()
