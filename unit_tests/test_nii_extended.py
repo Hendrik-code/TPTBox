@@ -465,5 +465,25 @@ class Test_NII_GetSegArray(unittest.TestCase):
         self.assertEqual(result.shape, arr.shape)
 
 
+class Test_label_interface_thickness_nii(unittest.TestCase):
+    def _two_slabs(self, zoom=(1.0, 1.0, 1.0)):
+        seg = np.zeros((40, 20, 20), dtype=np.uint8)
+        seg[10:18] = 1
+        seg[18:22] = 2
+        return _make_nii(seg, zoom=zoom)
+
+    def test_returns_millimetres_using_zoom(self):
+        one = self._two_slabs().label_interface_thickness(1, 2)
+        two = self._two_slabs(zoom=(2.0, 1.0, 1.0)).label_interface_thickness(1, 2)
+        self.assertAlmostEqual(float(np.nanmean(two)) / float(np.nanmean(one)), 2.0, places=5)
+
+    def test_matches_the_array_level_function(self):
+        from TPTBox.core.np_utils import np_label_interface_thickness
+
+        nii = self._two_slabs(zoom=(1.5, 1.0, 1.0))
+        expected = np_label_interface_thickness(nii.get_seg_array(), 1, 2, zoom=nii.zoom)
+        self.assertTrue(np.allclose(nii.label_interface_thickness(1, 2), expected, equal_nan=True))
+
+
 if __name__ == "__main__":
     unittest.main()

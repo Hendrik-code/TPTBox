@@ -550,6 +550,92 @@ class Test_vector_helpers(unittest.TestCase):
         self.assertAlmostEqual(np_utils.np_angle_between((1, 0, 0), (0, 1, 0), degrees=True), 90.0)
 
 
+class Test_raymarch_until_background(unittest.TestCase):
+    def test_exit_point_on_a_slab(self):
+        arr = np.zeros((40, 10, 10))
+        arr[10:25] = 1
+        end = np_utils.np_raymarch_until_background(arr, [10, 5, 5], [1, 0, 0])
+        self.assertIsNotNone(end)
+        # the 0.5 crossing sits at the slab's far edge, within one step
+        self.assertAlmostEqual(float(end[0]), 24.5, delta=0.1)
+
+    def test_stops_at_an_interior_gap(self):
+        """The whole point of the non-convex marcher: a bisection search skips this gap."""
+        arr = np.zeros((40, 10, 10))
+        arr[5:35] = 1
+        arr[15:20] = 0
+        end = np_utils.np_raymarch_until_background(arr, [6, 5, 5], [1, 0, 0])
+        self.assertAlmostEqual(float(end[0]), 14.5, delta=0.1)
+
+    def test_convex_bisection_disagrees_on_the_same_mask(self):
+        import nibabel as nib
+
+        from TPTBox import NII
+        from TPTBox.core.poi_fun.ray_casting import max_distance_ray_cast_convex
+
+        arr = np.zeros((40, 10, 10), dtype=np.uint8)
+        arr[5:35] = 1
+        arr[15:20] = 0
+        nii = NII(nib.Nifti1Image(arr, np.eye(4)), seg=True)
+        convex = max_distance_ray_cast_convex(nii, np.array([6, 5, 5]), np.array([1.0, 0.0, 0.0]))
+        self.assertGreater(float(convex[0]), 30.0)  # skipped the gap entirely
+
+    def test_returns_none_when_it_never_leaves(self):
+        arr = np.ones((40, 10, 10))
+        self.assertIsNone(np_utils.np_raymarch_until_background(arr, [1, 5, 5], [1, 0, 0], max_steps=5))
+
+    def test_max_distance_limit(self):
+        arr = np.ones((40, 10, 10))
+        self.assertIsNone(np_utils.np_raymarch_until_background(arr, [1, 5, 5], [1, 0, 0], max_steps=None, max_distance=2.0))
+
+    def test_requires_a_limit(self):
+        with self.assertRaises(AssertionError):
+            np_utils.np_raymarch_until_background(np.ones((5, 5, 5)), [1, 1, 1], [1, 0, 0], max_steps=None)
+
+    def test_leaving_the_volume_returns_a_position(self):
+        arr = np.ones((10, 10, 10))
+        end = np_utils.np_raymarch_until_background(arr, [8, 5, 5], [1, 0, 0])
+        self.assertIsNotNone(end)
+        self.assertGreaterEqual(float(end[0]), 9.0)
+
+
+class Test_label_interface_thickness(unittest.TestCase):
+    def _two_slabs(self):
+        seg = np.zeros((40, 20, 20), dtype=np.uint8)
+        seg[10:18] = 1  # measured structure
+        seg[18:22] = 2  # reference structure
+        return seg
+
+    def test_thickness_of_a_known_slab(self):
+        t = np_utils.np_label_interface_thickness(self._two_slabs(), label=1, other_label=2)
+        self.assertEqual(len(t), 20 * 20)
+        # measured from the interface voxel center to the 0.5 isosurface
+        self.assertAlmostEqual(float(np.nanmean(t)), 8.5, delta=0.15)
+        self.assertAlmostEqual(float(np.nanstd(t)), 0.0, delta=1e-6)
+
+    def test_zoom_scales_the_result(self):
+        seg = self._two_slabs()
+        voxels = np_utils.np_label_interface_thickness(seg, 1, 2)
+        mm = np_utils.np_label_interface_thickness(seg, 1, 2, zoom=(2.0, 1.0, 1.0))
+        self.assertAlmostEqual(float(np.nanmean(mm)) / float(np.nanmean(voxels)), 2.0, places=5)
+
+    def test_no_contact_returns_empty(self):
+        seg = np.zeros((20, 20, 20), dtype=np.uint8)
+        seg[2:5] = 1
+        seg[15:18] = 2
+        self.assertEqual(np_utils.np_label_interface_thickness(seg, 1, 2).shape, (0,))
+
+    def test_max_count_component_drops_smaller_components(self):
+        seg = np.zeros((40, 20, 20), dtype=np.uint8)
+        seg[10:18, 0:12, :] = 1  # large component
+        seg[10:18, 15:18, :] = 1  # smaller, separate component
+        seg[18:22] = 2
+        every = np_utils.np_label_interface_thickness(seg, 1, 2)
+        largest = np_utils.np_label_interface_thickness(seg, 1, 2, max_count_component=1)
+        self.assertLess(len(largest), len(every))
+        self.assertEqual(len(np_utils.np_label_interface_thickness(seg, 1, 2, max_count_component=2)), len(every))
+
+
 if __name__ == "__main__":
     unittest.main()
 
