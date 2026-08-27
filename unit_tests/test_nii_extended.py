@@ -465,5 +465,75 @@ class Test_NII_GetSegArray(unittest.TestCase):
         self.assertEqual(result.shape, arr.shape)
 
 
+class Test_bbox_chain_filter(unittest.TestCase):
+    def _spine_with_outlier(self, zoom=(1.0, 1.0, 1.0)):
+        """Three blobs stacked along axis 2 with 6-voxel gaps, plus one unrelated blob far away."""
+        arr = np.zeros((40, 40, 60), dtype=np.uint16)
+        arr[18:22, 18:22, 5:12] = 1
+        arr[18:22, 18:22, 18:25] = 2
+        arr[18:22, 18:22, 31:45] = 3  # largest -> the chain anchor
+        arr[2:6, 2:6, 50:56] = 4  # unrelated
+        return _make_nii(arr, zoom=zoom)
+
+    def test_zero_margin_keeps_only_the_largest_component(self):
+        nii = self._spine_with_outlier()
+        self.assertEqual(sorted(nii.filter_connected_components_by_bbox_chain(margin_mm=0.0).unique()), [3])
+
+    def test_margin_chains_across_gaps_but_excludes_the_outlier(self):
+        nii = self._spine_with_outlier()
+        self.assertEqual(sorted(nii.filter_connected_components_by_bbox_chain(margin_mm=4.0).unique()), [1, 2, 3])
+
+    def test_extra_margin_applies_only_to_its_axis(self):
+        nii = self._spine_with_outlier()
+        out = nii.filter_connected_components_by_bbox_chain(margin_mm=0.0, extra_margin_mm=8.0, extra_margin_axis="S")
+        self.assertEqual(sorted(out.unique()), [1, 2, 3])
+
+    def test_large_margin_reaches_everything(self):
+        nii = self._spine_with_outlier()
+        self.assertEqual(sorted(nii.filter_connected_components_by_bbox_chain(margin_mm=40.0).unique()), [1, 2, 3, 4])
+
+    def test_margin_is_physical_not_voxel(self):
+        """At 4 mm spacing a 4 mm margin is one voxel, so the 6-voxel gap must not close."""
+        nii = self._spine_with_outlier(zoom=(1.0, 1.0, 4.0))
+        self.assertEqual(sorted(nii.filter_connected_components_by_bbox_chain(margin_mm=4.0).unique()), [3])
+
+    def test_original_labels_are_preserved(self):
+        nii = self._spine_with_outlier()
+        out = nii.filter_connected_components_by_bbox_chain(margin_mm=4.0)
+        kept = out.get_seg_array()
+        original = nii.get_seg_array()
+        self.assertTrue(np.array_equal(kept[kept != 0], original[kept != 0]))
+
+    def test_single_component_is_untouched(self):
+        arr = np.zeros((10, 10, 10), dtype=np.uint16)
+        arr[2:6, 2:6, 2:6] = 9
+        nii = _make_nii(arr)
+        out = nii.filter_connected_components_by_bbox_chain(margin_mm=1.0)
+        self.assertTrue(np.array_equal(out.get_seg_array(), arr))
+
+    def test_extra_margin_without_axis_is_rejected(self):
+        nii = self._spine_with_outlier()
+        with self.assertRaises(AssertionError):
+            nii.filter_connected_components_by_bbox_chain(extra_margin_mm=5.0)
+
+
+class Test_slices_overlap(unittest.TestCase):
+    def test_overlap_cases(self):
+        from TPTBox.core.np_utils import np_slices_overlap
+
+        self.assertTrue(np_slices_overlap(slice(0, 5), slice(5, 9)))  # touching borders count
+        self.assertTrue(np_slices_overlap(slice(2, 4), slice(0, 9)))  # nested
+        self.assertTrue(np_slices_overlap(slice(0, 9), slice(2, 4)))  # nested, other way
+        self.assertTrue(np_slices_overlap(slice(0, 6), slice(4, 9)))  # partial
+        self.assertFalse(np_slices_overlap(slice(0, 5), slice(7, 9)))
+        self.assertFalse(np_slices_overlap(slice(7, 9), slice(0, 5)))
+
+    def test_is_symmetric(self):
+        from TPTBox.core.np_utils import np_slices_overlap
+
+        for a, b in [(slice(0, 5), slice(5, 9)), (slice(0, 5), slice(7, 9)), (slice(1, 8), slice(3, 4))]:
+            self.assertEqual(np_slices_overlap(a, b), np_slices_overlap(b, a))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -40,6 +40,7 @@ from TPTBox.core.np_utils import (
     np_fill_holes,
     np_fill_holes_global_with_majority_voting,
     np_filter_connected_components,
+    np_filter_connected_components_by_bbox_chain,
     np_get_connected_components_center_of_mass,
     np_is_empty,
     np_isin,
@@ -2931,6 +2932,55 @@ class NII(NII_Math):
     def center_of_masses(self) -> dict[int, COORDINATE]:
         """Returns a dict stating the center of mass for each present label (not including zero!)."""
         return np_center_of_mass(self.get_seg_array())
+
+    def filter_connected_components_by_bbox_chain(
+        self,
+        margin_mm: float = 0.0,
+        extra_margin_mm: float = 0.0,
+        extra_margin_axis: DIRECTIONS | None = None,
+        connectivity: int = 3,
+        inplace: bool = False,
+    ) -> Self:
+        """Keeps only components whose bounding boxes chain onto the largest component.
+
+        The mask is binarized and split into connected components. Starting from the largest one,
+        any component whose bounding box (grown by ``margin_mm``) overlaps the growing region on
+        every axis is kept, repeating until nothing new is added; everything else is removed.
+        Labels of the kept voxels are preserved.
+
+        This is the "keep the spine, drop the unrelated blobs" filter: a structure broken into
+        several pieces along its length stays, while a component sitting off to the side goes.
+
+        Margins are given in millimetres and converted per axis using :attr:`zoom`, so the region
+        grows by the same physical distance regardless of anisotropy.
+
+        Args:
+            margin_mm (float, optional): Bounding-box margin in mm applied on every axis.
+                Defaults to 0.0.
+            extra_margin_mm (float, optional): Additional margin in mm along ``extra_margin_axis``
+                only, to tolerate gaps along the structure's main direction. Defaults to 0.0.
+            extra_margin_axis (DIRECTIONS | None, optional): Anatomical direction the extra margin
+                applies to (e.g. ``"I"`` for a spine). Required when ``extra_margin_mm`` is set.
+                Defaults to None.
+            connectivity (int, optional): Connectivity used to find the components. Defaults to 3.
+            inplace (bool, optional): If True, modifies this NII in place. Defaults to False.
+
+        Returns:
+            NII: The filtered segmentation.
+        """
+        assert extra_margin_mm == 0 or extra_margin_axis is not None, "extra_margin_mm needs extra_margin_axis"
+        zoom = self.zoom
+        margin = [margin_mm / z for z in zoom]
+        axis = self.get_axis(extra_margin_axis) if extra_margin_axis is not None else None
+        extra = extra_margin_mm / zoom[axis] if axis is not None else 0.0
+        arr = np_filter_connected_components_by_bbox_chain(
+            self.get_seg_array(),
+            margin=margin,
+            extra_margin=extra,
+            extra_margin_axis=axis,
+            connectivity=connectivity,
+        )
+        return self.set_array(arr, inplace=inplace)
 
 
 

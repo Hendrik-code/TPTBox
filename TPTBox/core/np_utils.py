@@ -312,6 +312,94 @@ def np_bounding_boxes(arr: UINTARRAY) -> dict[int, tuple[slice, slice, slice]]:
     return {idx: v for idx, v in enumerate(stats["bounding_boxes"]) if idx != 0 and vc[idx] > 0}
 
 
+def np_slices_overlap(slice1: slice, slice2: slice) -> bool:
+    """Checks whether two ranges given as slices overlap or touch.
+
+    Borders count as overlapping, so ``slice(0, 5)`` and ``slice(5, 9)`` overlap.
+
+    Args:
+        slice1 (slice): First range; only ``start`` and ``stop`` are used.
+        slice2 (slice): Second range; only ``start`` and ``stop`` are used.
+
+    Returns:
+        bool: True if the two ranges intersect or touch at a border.
+    """
+    return slice1.start <= slice2.stop and slice2.start <= slice1.stop
+
+
+def np_filter_connected_components_by_bbox_chain(
+    arr: np.ndarray,
+    margin: Sequence[float] | float = 0.0,
+    extra_margin: float = 0.0,
+    extra_margin_axis: int | None = None,
+    connectivity: int = 3,
+) -> np.ndarray:
+    """Keeps only connected components whose bounding boxes chain onto the largest component.
+
+    Starting from the largest connected component, any other component whose (margin-grown)
+    bounding box overlaps the growing region on *every* axis is incorporated, and the process
+    repeats until nothing new is added. Everything else is dropped. This keeps a structure that
+    is fragmented into several pieces along its length while discarding unrelated blobs
+    elsewhere in the volume.
+
+    Args:
+        arr (np.ndarray): Input array. Treated as binary -- every non-zero voxel is foreground.
+        margin (Sequence[float] | float, optional): Bounding-box margin in voxels, either one
+            value for all axes or one per axis. Defaults to 0.0.
+        extra_margin (float, optional): Additional margin in voxels applied only along
+            ``extra_margin_axis``, to tolerate gaps along the structure's main direction.
+            Defaults to 0.0.
+        extra_margin_axis (int | None, optional): Axis that ``extra_margin`` applies to.
+            Required when ``extra_margin`` is non-zero. Defaults to None.
+        connectivity (int, optional): Connectivity used to find the components. Defaults to 3.
+
+    Returns:
+        np.ndarray: A copy of ``arr`` with every non-incorporated component zeroed out.
+    """
+    assert extra_margin == 0 or extra_margin_axis is not None, "extra_margin needs extra_margin_axis"
+    ndim = arr.ndim
+    margins = np.broadcast_to(np.asarray(margin, dtype=float), (ndim,))
+
+    cc, n = np_connected_components(arr != 0, connectivity=connectivity)
+    if n <= 1:
+        return arr.copy()
+
+    boxes = np_bounding_boxes(cc)
+    # Largest component first, so the chain starts from the anchor the caller expects.
+    volumes = np_volume(cc)
+    order = sorted(volumes, key=lambda k: volumes[k], reverse=True)
+
+    def grow(box):
+        return tuple(slice(floor(sl.start - margins[ax]), ceil(sl.stop + margins[ax])) for ax, sl in enumerate(box))
+
+    def widen(box):
+        if extra_margin_axis is None or extra_margin == 0:
+            return box
+        return tuple(
+            slice(floor(sl.start - extra_margin), ceil(sl.stop + extra_margin)) if ax == extra_margin_axis else sl
+            for ax, sl in enumerate(box)
+        )
+
+    anchor_label = order[0]
+    incorporated = [anchor_label]
+    region = [grow(boxes[anchor_label])]
+    changed = True
+    while changed:
+        changed = False
+        for k in [l for l in order if l not in incorporated]:
+            candidate = grow(boxes[k])
+            # The already-incorporated box gets the extra axial margin, so a gap along the
+            # structure's main direction does not break the chain.
+            if any(all(np_slices_overlap(w, c) for w, c in zip(widen(box), candidate)) for box in region):
+                region.append(candidate)
+                incorporated.append(k)
+                changed = True
+
+    out = arr.copy()
+    out[~np_isin(cc, incorporated)] = 0
+    return out
+
+
 def np_contacts(arr: UINTARRAY, connectivity: int) -> dict[tuple[int, int], int]:
     """Calculates the contacting labels and the amount of touching voxels based on connectivity.
 
