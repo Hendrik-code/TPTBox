@@ -20,10 +20,13 @@ from numpy.typing import NDArray
 from scipy.ndimage import (
     binary_erosion,
     center_of_mass,
+    convolve,
     distance_transform_edt,
     gaussian_filter,
     generate_binary_structure,
+    sobel,
 )
+from scipy.spatial.distance import cdist
 from skimage.measure import euler_number as _euler_number
 from skimage.measure import label as _label
 
@@ -891,6 +894,131 @@ def np_point_coordinates(
     x, y, z = np.where(arr)
     surface_points = [(x[i], y[i], z[i]) for i in range(len(x))]
     return surface_points
+
+
+def np_unit_vector(vector: np.ndarray) -> np.ndarray:
+    """Returns the unit vector of the input vector.
+
+    Args:
+        vector (np.ndarray): Any non-zero numeric array.
+
+    Returns:
+        np.ndarray: Array with the same direction as ``vector`` but unit length.
+    """
+    return vector / np.linalg.norm(vector)
+
+
+def np_angle_between(v1, v2, degrees: bool = False) -> float:
+    """Calculates the angle between two vectors.
+
+    Args:
+        v1: The first vector.
+        v2: The second vector.
+        degrees (bool, optional): Return the angle in degrees instead of radians. Defaults to False.
+
+    Returns:
+        float: The angle between ``v1`` and ``v2``.
+
+    Examples:
+        >>> np_angle_between((1, 0, 0), (0, 1, 0))
+        1.5707963267948966
+        >>> np_angle_between((1, 0, 0), (0, 1, 0), degrees=True)
+        90.0
+        >>> np_angle_between((1, 0, 0), (-1, 0, 0))
+        3.141592653589793
+    """
+    rad = np.arccos(np.clip(np.dot(np_unit_vector(v1), np_unit_vector(v2)), -1.0, 1.0))
+    return float(np.degrees(rad)) if degrees else float(rad)
+
+
+def np_index(arr: np.ndarray, entry) -> np.ndarray:
+    """Finds the rows of a point array that exactly equal a given point.
+
+    Args:
+        arr (np.ndarray): Array of shape ``(N, D)`` holding ``N`` points.
+        entry: The point to look for, broadcastable to shape ``(D,)``.
+
+    Returns:
+        np.ndarray: 1-D integer array with the indices of every matching row.
+        Empty if the point is not present.
+    """
+    arr = np.asarray(arr)
+    assert arr.ndim == 2, f"expected a (N, D) point array, got shape {arr.shape}"
+    return np.flatnonzero((arr == np.asarray(entry)).all(axis=1))
+
+
+def np_find_closest_point_index(point_arr: np.ndarray, point) -> int:
+    """Finds the index of the point in ``point_arr`` closest to ``point``.
+
+    For integer point arrays (i.e. voxel coordinates) an exact match is tried first, which is
+    the common case when the query already sits on the grid; only if that fails is the full
+    distance search run. ``scipy``'s compiled ``cdist`` is used for the search -- a hand-rolled
+    ``einsum`` over ``point_arr - point`` is roughly 2-6x slower because it materialises the
+    difference array.
+
+    Args:
+        point_arr (np.ndarray): Array of shape ``(N, D)`` holding the candidate points.
+        point: The query point, broadcastable to shape ``(D,)``.
+
+    Returns:
+        int: Index into ``point_arr`` of the nearest point. When several points are equally
+        close, the lowest index is returned.
+    """
+    arr = np.asarray(point_arr)
+    assert arr.ndim == 2, f"expected a (N, D) point array, got shape {arr.shape}"
+    assert len(arr) != 0, "cannot search an empty point array"
+    p = np.asarray(point)
+    if np.issubdtype(arr.dtype, np.integer):
+        # Only meaningful for grids; rounding a float query would silently snap it to integers.
+        matches = np_index(arr, np.round(p).astype(arr.dtype))
+        if len(matches) != 0:
+            return int(matches[0])
+    return int(np.argmin(cdist([p], arr)[0]))
+
+
+def np_compute_boundary_normals(
+    arr: UINTARRAY,
+    label: int | Sequence[int],
+    other_label: int | Sequence[int],
+    sigma: float = 1.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Computes per-voxel surface normals where one label touches another.
+
+    Voxels of ``label`` that share a face with ``other_label`` form the interface. The normal at
+    each of them is the gradient of a Gaussian-smoothed ``label`` mask, so it points *into*
+    ``label`` (the direction of increasing mask density); negate it to point outwards.
+
+    Unlike :func:`TPTBox.core.poi_fun.ray_casting.calculate_pca_normal_np`, which returns a single
+    principal axis for a whole segmentation, this returns a normal per interface voxel.
+
+    Args:
+        arr (UINTARRAY): 3-dimensional label array.
+        label (int | Sequence[int]): Label(s) whose interface voxels are returned.
+        other_label (int | Sequence[int]): Label(s) that ``label`` must touch to count as interface.
+        sigma (float, optional): Standard deviation of the Gaussian applied before the gradient.
+            Larger values give smoother, less noisy normals. Defaults to 1.0.
+
+    Returns:
+        tuple[np.ndarray, np.ndarray]: ``(coords, normals)``, both of shape ``(N, 3)``. ``coords``
+        are the integer voxel coordinates of the interface, ``normals`` the matching unit vectors.
+        Both are empty when the two labels do not touch.
+    """
+    assert arr.ndim == 3, arr.ndim
+    mask = np_isin(arr, label)
+    other = np_isin(arr, other_label)
+    # 6-connectivity kernel: the six face neighbours, so a purely diagonal contact does not count.
+    kernel = np.zeros((3, 3, 3), dtype=np.uint8)
+    kernel[1, 1, 0] = kernel[1, 1, 2] = 1
+    kernel[1, 0, 1] = kernel[1, 2, 1] = 1
+    kernel[0, 1, 1] = kernel[2, 1, 1] = 1
+    touching = mask & (convolve(other.astype(np.uint8), kernel, mode="constant") > 0)
+    coords = np.argwhere(touching)
+    if len(coords) == 0:
+        return coords, np.zeros((0, 3), dtype=float)
+    smoothed = gaussian_filter(mask.astype(float), sigma=sigma)
+    gradient = np.stack([sobel(smoothed, axis=a) for a in range(3)], axis=-1)
+    gradient /= np.linalg.norm(gradient, axis=-1, keepdims=True) + 1e-8
+    return coords, gradient[touching]
 
 
 def np_connected_components(

@@ -8,6 +8,7 @@ from scipy.interpolate import RegularGridInterpolator
 from sklearn.decomposition import PCA
 
 from TPTBox import NII, POI, Print_Logger, Vertebra_Instance
+from TPTBox.core.np_utils import np_unit_vector
 from TPTBox.core.poi_fun._help import sacrum_w_o_arcus, to_local_np
 from TPTBox.core.poi_fun.pixel_based_point_finder import get_direction
 from TPTBox.core.vert_constants import COORDINATE, DIRECTIONS, Location
@@ -16,9 +17,7 @@ from TPTBox.logger.log_file import Logger_Interface
 _log = Print_Logger()
 
 
-def unit_vector(vector: np.ndarray) -> np.ndarray:
-    """Returns the unit vector of the vector."""
-    return vector / np.linalg.norm(vector)
+unit_vector = np_unit_vector
 
 
 # @njit(fastmath=True)
