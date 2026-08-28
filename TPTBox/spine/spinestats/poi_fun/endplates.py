@@ -8,6 +8,7 @@ import trimesh
 from stl.mesh import Mesh
 
 from TPTBox import NII, POI, Location, Logger_Interface, Print_Logger
+from TPTBox.core.poi_fun.pixel_based_point_finder import cdist_to_point
 from TPTBox.core.vert_constants import Vertebra_Instance
 
 _log = Print_Logger()
@@ -67,9 +68,7 @@ def _ray_cast_to_mesh(mesh: Mesh | trimesh.Trimesh, origin: np.ndarray, directio
         if len(locations) == 0:
             return None
         # closest hit
-        # d = np.linalg.norm(locations - origin, axis=1)
-        # return locations[np.argmin(d)]
-        d = np.linalg.norm(locations - origin, axis=1)
+        d = cdist_to_point(origin, locations)
         return origin + d.mean() * direction
     # numpy-stl fallback
     ts = []
@@ -133,7 +132,7 @@ def _local_curvature_grid(
     """
     world_pts = poi.local_to_global_arr(voxel_pts_full)
     casted_world = np.asarray(poi.local_to_global(tuple(casted_full)), dtype=float)
-    dists = np.linalg.norm(world_pts - casted_world, axis=1)
+    dists = cdist_to_point(casted_world, world_pts)
     neighborhood = world_pts[dists <= radius]
     if len(neighborhood) < 3:
         return 0.0
