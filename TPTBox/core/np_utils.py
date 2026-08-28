@@ -315,6 +315,94 @@ def np_bounding_boxes(arr: UINTARRAY) -> dict[int, tuple[slice, slice, slice]]:
     return {idx: v for idx, v in enumerate(stats["bounding_boxes"]) if idx != 0 and vc[idx] > 0}
 
 
+def np_slices_overlap(slice1: slice, slice2: slice) -> bool:
+    """Checks whether two ranges given as slices overlap or touch.
+
+    Borders count as overlapping, so ``slice(0, 5)`` and ``slice(5, 9)`` overlap.
+
+    Args:
+        slice1 (slice): First range; only ``start`` and ``stop`` are used.
+        slice2 (slice): Second range; only ``start`` and ``stop`` are used.
+
+    Returns:
+        bool: True if the two ranges intersect or touch at a border.
+    """
+    return slice1.start <= slice2.stop and slice2.start <= slice1.stop
+
+
+def np_filter_connected_components_by_bbox_chain(
+    arr: np.ndarray,
+    margin: Sequence[float] | float = 0.0,
+    extra_margin: float = 0.0,
+    extra_margin_axis: int | None = None,
+    connectivity: int = 3,
+) -> np.ndarray:
+    """Keeps only connected components whose bounding boxes chain onto the largest component.
+
+    Starting from the largest connected component, any other component whose (margin-grown)
+    bounding box overlaps the growing region on *every* axis is incorporated, and the process
+    repeats until nothing new is added. Everything else is dropped. This keeps a structure that
+    is fragmented into several pieces along its length while discarding unrelated blobs
+    elsewhere in the volume.
+
+    Args:
+        arr (np.ndarray): Input array. Treated as binary -- every non-zero voxel is foreground.
+        margin (Sequence[float] | float, optional): Bounding-box margin in voxels, either one
+            value for all axes or one per axis. Defaults to 0.0.
+        extra_margin (float, optional): Additional margin in voxels applied only along
+            ``extra_margin_axis``, to tolerate gaps along the structure's main direction.
+            Defaults to 0.0.
+        extra_margin_axis (int | None, optional): Axis that ``extra_margin`` applies to.
+            Required when ``extra_margin`` is non-zero. Defaults to None.
+        connectivity (int, optional): Connectivity used to find the components. Defaults to 3.
+
+    Returns:
+        np.ndarray: A copy of ``arr`` with every non-incorporated component zeroed out.
+    """
+    assert extra_margin == 0 or extra_margin_axis is not None, "extra_margin needs extra_margin_axis"
+    ndim = arr.ndim
+    margins = np.broadcast_to(np.asarray(margin, dtype=float), (ndim,))
+
+    cc, n = np_connected_components(arr != 0, connectivity=connectivity)
+    if n <= 1:
+        return arr.copy()
+
+    boxes = np_bounding_boxes(cc)
+    # Largest component first, so the chain starts from the anchor the caller expects.
+    volumes = np_volume(cc)
+    order = sorted(volumes, key=lambda k: volumes[k], reverse=True)
+
+    def grow(box):
+        return tuple(slice(floor(sl.start - margins[ax]), ceil(sl.stop + margins[ax])) for ax, sl in enumerate(box))
+
+    def widen(box):
+        if extra_margin_axis is None or extra_margin == 0:
+            return box
+        return tuple(
+            slice(floor(sl.start - extra_margin), ceil(sl.stop + extra_margin)) if ax == extra_margin_axis else sl
+            for ax, sl in enumerate(box)
+        )
+
+    anchor_label = order[0]
+    incorporated = [anchor_label]
+    region = [grow(boxes[anchor_label])]
+    changed = True
+    while changed:
+        changed = False
+        for k in [l for l in order if l not in incorporated]:
+            candidate = grow(boxes[k])
+            # The already-incorporated box gets the extra axial margin, so a gap along the
+            # structure's main direction does not break the chain.
+            if any(all(np_slices_overlap(w, c) for w, c in zip(widen(box), candidate)) for box in region):
+                region.append(candidate)
+                incorporated.append(k)
+                changed = True
+
+    out = arr.copy()
+    out[~np_isin(cc, incorporated)] = 0
+    return out
+
+
 def np_contacts(arr: UINTARRAY, connectivity: int) -> dict[tuple[int, int], int]:
     """Calculates the contacting labels and the amount of touching voxels based on connectivity.
 
@@ -1321,6 +1409,299 @@ def np_filter_connected_components(
         arr[np.logical_and(labels_out != 0, arr == 0)] = removed_to_label
 
     return cc_out
+
+
+def np_connected_component_contact_map(part_a: np.ndarray, part_b: np.ndarray, connectivity: int = 3) -> UINTARRAY:
+    """Dilates two disjoint components until they touch and returns their contact map.
+
+    Both parts are grown one voxel at a time, alternating, until their dilations overlap.
+
+    Args:
+        part_a (np.ndarray): Binary mask of the first component.
+        part_b (np.ndarray): Binary mask of the second component.
+        connectivity (int, optional): Connectivity used for the dilation. Defaults to 3.
+
+    Returns:
+        UINTARRAY: Map with 0 = background, 1 = only ``part_a``'s dilation, 2 = only ``part_b``'s
+        dilation, 3 = the contact zone where the two dilations overlap.
+    """
+    # Dilate copies: np_dilate_msk works in place and returns its input, so dilating the
+    # caller's arrays would grow them too and the "two separated components" would smear.
+    a_dil = np_dilate_msk(part_a.copy().astype(np.uint8), n_pixel=1, connectivity=connectivity)
+    b_dil = np_dilate_msk(part_b.copy().astype(np.uint8), n_pixel=1, connectivity=connectivity)
+    contact = (a_dil + (b_dil * 2)).astype(np.uint8)
+    while 3 not in np_volume(contact):
+        a_dil = np_dilate_msk(a_dil, n_pixel=1, connectivity=connectivity)
+        contact = (a_dil + (b_dil * 2)).astype(np.uint8)
+        if 3 in np_volume(contact):
+            break
+        b_dil = np_dilate_msk(b_dil, n_pixel=1, connectivity=connectivity)
+        contact = (a_dil + (b_dil * 2)).astype(np.uint8)
+    return contact
+
+
+def _expand_seeds_to_mask(seeds: UINTARRAY, mask: np.ndarray) -> UINTARRAY:
+    """Assigns every voxel of ``mask`` the label of its nearest non-zero seed."""
+    unassigned = (mask != 0) & (seeds == 0)
+    if not unassigned.any():
+        return seeds
+    _, indices = distance_transform_edt(seeds == 0, return_indices=True)
+    out = seeds.copy()
+    out[unassigned] = seeds[tuple(indices[:, unassigned])]
+    return out
+
+
+def _split_cc_erosion(arr: np.ndarray, connectivity: int, max_iter: int, full_partition: bool) -> UINTARRAY:
+    """Erosion backend of :func:`np_split_connected_component`."""
+    check_connectivity = 3
+    vol = arr.copy().astype(np.uint8)
+    vol_old = vol.copy()
+    iterations = 0
+    while True:
+        # np_erode_msk mutates its input and returns the same object, so erode a copy. Without it
+        # `vol`, `vol_old` and `vol_erode` all alias one array after the first iteration and the
+        # "iteration before" needed by the wiped-out branch below is lost.
+        vol_erode = np_erode_msk(vol.copy(), n_pixel=1, connectivity=connectivity)
+        subreg_cc, subreg_cc_n = np_connected_components(vol_erode, connectivity=check_connectivity)
+        if subreg_cc_n > 1:
+            vol = subreg_cc
+            break
+        if subreg_cc_n == 0:
+            # Erosion wiped everything out; step back and grow the previous state into two parts.
+            vol_dilated = np_dilate_msk(vol.copy(), n_pixel=1, connectivity=connectivity, mask=vol.copy())
+            vol[vol_old != 0] = 2
+            vol[vol_dilated == 1] = 1
+            volume = np_volume(vol)
+            if 1 not in volume or 2 not in volume:
+                raise ValueError(f"cannot split volume into two parts after {iterations} iterations, got regions {volume}.")
+            while volume[1] / (volume[1] + volume[2]) < 0.5:
+                vol_dilated = np_dilate_msk(vol_dilated, n_pixel=1, connectivity=connectivity, mask=vol.copy())
+                vol[vol_dilated == 1] = 1
+                volume = np_volume(vol)
+                if 1 not in volume or 2 not in volume:
+                    raise ValueError("could not divide into two parts while re-growing the eroded volume.")
+            vol_1 = np_filter_connected_components(vol == 1, largest_k_components=1, connectivity=check_connectivity).astype(np.uint8)
+            vol_2 = np_filter_connected_components(vol == 2, largest_k_components=1, connectivity=check_connectivity).astype(np.uint8)
+            vol_2 *= 2
+            vol[vol == 1] = vol_1[vol == 1]
+            vol[vol == 2] = vol_2[vol == 2]
+            break
+        vol_old = vol
+        vol = vol_erode
+        iterations += 1
+        if iterations > max_iter:
+            raise ValueError(f"could not divide into two parts after max_iter={max_iter} erosions.")
+
+    if len(np_volume(vol)) != 2:
+        vol = np_filter_connected_components(vol, largest_k_components=2, connectivity=check_connectivity, return_original_labels=False)
+    part_a = vol == 1
+    part_b = vol == 2
+    if part_a.sum() == 0 or part_b.sum() == 0:
+        raise ValueError("one of the two split parts is empty.")
+    out = (part_a.astype(np.uint8) + part_b.astype(np.uint8) * 2).astype(np.uint8)
+    # Erosion only ever recovers the two cores; grow them back over the voxels the erosion ate so
+    # the result partitions the input, matching what the mincut backend returns.
+    return _expand_seeds_to_mask(out, arr) if full_partition else out
+
+
+def _split_cc_mincut(  # noqa: C901
+    arr: np.ndarray,
+    connectivity: int,
+    separator: np.ndarray | None,
+    structure,
+    min_volume: int | None,
+    max_cut: float | None,
+    max_ignore: int | None,
+    zoom: Sequence[float] | None,
+    add_diagonal_edges: bool,
+) -> UINTARRAY:
+    """Min-cut/max-flow backend of :func:`np_split_connected_component`."""
+    try:
+        import networkx as nx
+    except ImportError as e:  # pragma: no cover - depends on the environment
+        raise ImportError("the 'mincut' method needs networkx; install it with `pip install networkx`.") from e
+
+    cc_connectivity = 6 if connectivity == 1 else (18 if connectivity == 2 else 26)
+    vol = arr != 0
+    _, n = _connected_components(vol, connectivity=cc_connectivity, return_N=True)
+    if n != 1:
+        raise ValueError(f"volume separates into {n} parts at connectivity={connectivity}; it must be a single component.")
+
+    structures = [structure] if isinstance(structure, np.ndarray) else structure
+    vol_erode = vol
+    iterations = 0
+    max_errors = 0
+    cc_erode = None
+    while True:
+        struct_now = structures[iterations % len(structures)] if structures is not None else None
+        if separator is not None:
+            separator = _binary_dilation(separator, struct_now)
+            vol_erode = np.where(separator, 0, vol)
+        else:
+            vol_erode = _binary_erosion(vol_erode, struct_now)
+        cc_erode, n = _connected_components(vol_erode, connectivity=cc_connectivity, return_N=True)
+        iterations += 1
+        if n > 1:
+            if max_ignore is not None:
+                values, counts = np.unique(cc_erode, return_counts=True)
+                max_errors = sum(c for v, c in zip(values, counts) if v > 0 and c <= max_ignore)
+                keep = [v for v, c in zip(values, counts) if v > 0 and c > max_ignore]
+                n = len(keep)
+                if n > 2:
+                    break
+                if n == 2:
+                    relabeled = np.zeros(cc_erode.shape, dtype=cc_erode.dtype)
+                    relabeled[cc_erode == keep[0]] = 1
+                    relabeled[cc_erode == keep[1]] = 2
+                    cc_erode = relabeled
+                    break
+            else:
+                break
+        if n == 0:
+            raise ValueError(f"cannot split volume into two parts after {iterations} iterations, erosion emptied it.")
+        if iterations > 100:
+            raise ValueError("could not split the volume into two parts within 100 erosions.")
+    if n > 2:
+        raise ValueError(f"erosion produced {n} components after {iterations} iterations, expected 2.")
+
+    source_mask = cc_erode == 1
+    sink_mask = cc_erode == 2
+    boundary = vol ^ vol_erode
+
+    for name, mask in (("source", source_mask), ("sink", sink_mask)):
+        if min_volume is not None and mask.sum() < min_volume:
+            raise ValueError(f"after erosion the {name} part has volume {mask.sum()}, below min_volume={min_volume}.")
+
+    if zoom is None:
+        voxel_dim = np.ones(3)
+        capacity_end = 1000.0
+    else:
+        voxel_dim = np.asarray(zoom, dtype=float)
+        capacity_end = float(np.prod(voxel_dim) / np.min(voxel_dim) * 1000)
+
+    source_dil = _binary_dilation(source_mask, struct_now)
+    sink_dil = _binary_dilation(sink_mask, struct_now)
+    to_source = np.argwhere(source_dil & boundary)
+    to_sink = np.argwhere(sink_dil & boundary)
+    if len(to_source) == 0 or len(to_sink) == 0:
+        raise ValueError("no connection between the separated parts and the remaining voxels.")
+
+    graph = nx.Graph()
+
+    def add_edges(points, diff1, diff2, capacity):
+        graph.add_edges_from(zip(map(tuple, points + diff1), map(tuple, points + diff2)), capacity=capacity)
+
+    for x, y, z in itertools.product([0, 1], repeat=3):
+        vec = np.array([x, y, z])
+        xe, ye, ze = np.array(boundary.shape) - vec
+        overlap = boundary[x:, y:, z:] & boundary[:xe, :ye, :ze]
+        if x + y + z == 1:
+            add_edges(np.argwhere(overlap), [0, 0, 0], [x, y, z], float(np.prod(voxel_dim[vec == 0])))
+        elif x + y + z == 2 and add_diagonal_edges:
+            # Diagonal in two dimensions, extruded along the third.
+            capacity = float(voxel_dim[vec == 0][0] * np.linalg.norm(voxel_dim[vec == 1]))
+            add_edges(np.argwhere(overlap), [0, 0, 0], [x, y, z], capacity)
+            if x == 1:
+                add_edges(np.argwhere(boundary[:xe, y:, z:] & boundary[x:, :ye, :ze]), [x, 0, 0], [0, y, z], capacity)
+            else:
+                add_edges(np.argwhere(boundary[x:, :ye, z:] & boundary[:xe, y:, :ze]), [0, y, 0], [x, 0, z], capacity)
+
+    graph.add_edges_from([((x, y, z), "t") for x, y, z in to_sink], capacity=capacity_end)
+    graph.add_edges_from([("s", (x, y, z)) for x, y, z in to_source], capacity=capacity_end)
+    if not nx.has_path(graph, "s", "t"):
+        raise ValueError("no path exists between the two parts in the adjacency graph.")
+
+    cut_value, (source_side, sink_side) = nx.minimum_cut(graph, "s", "t")
+    if max_cut is not None and cut_value > max_cut:
+        raise ValueError(f"cut size is {cut_value}, above the allowed max_cut={max_cut}.")
+    source_side = set(source_side) - {"s"}
+    sink_side = set(sink_side) - {"t"}
+    if len(source_side) == 0 or len(sink_side) == 0:
+        raise ValueError("one side of the cut is empty.")
+
+    out = cc_erode.astype(np.uint8)
+    out[tuple(np.asarray(list(source_side)).reshape([-1, 3]).transpose())] = 1
+    out[tuple(np.asarray(list(sink_side)).reshape([-1, 3]).transpose())] = 2
+    lost = int(abs((out > 0).sum() - vol.sum()))
+    if lost > max_errors:
+        raise ValueError(f"lost {lost} voxels while splitting, but only {max_errors} are allowed.")
+    return out
+
+
+def np_split_connected_component(
+    arr: np.ndarray,
+    method: str = "erosion",
+    connectivity: int = 3,
+    max_iter: int = 10,
+    full_partition: bool = True,
+    separator: np.ndarray | None = None,
+    structure: np.ndarray | Sequence[np.ndarray] | None = None,
+    min_volume: int | None = None,
+    max_cut: float | None = None,
+    max_ignore: int | None = 6,
+    zoom: Sequence[float] | None = None,
+    add_diagonal_edges: bool = False,
+) -> UINTARRAY:
+    """Splits one connected component into two spatially separate parts.
+
+    For a mask that is a single connected component but should be two things -- two merged
+    vertebral bodies, say -- this finds the separation. Two backends are available:
+
+    * ``"erosion"``: erode until the component breaks apart, then re-grow both halves. Fast and
+      dependency-free, but the cut follows the erosion front rather than any optimality criterion.
+    * ``"mincut"``: erode only until two seeds appear, then find the minimal separating surface
+      between them by min-cut/max-flow over the voxel adjacency graph, with edge capacities taken
+      from ``zoom`` so anisotropic voxels are weighted correctly. Needs ``networkx`` and is
+      considerably slower, but the cut is minimal-area rather than incidental.
+
+    Args:
+        arr (np.ndarray): Binary (or labeled) array holding exactly one connected component.
+        method (str, optional): ``"erosion"`` or ``"mincut"``. Defaults to ``"erosion"``.
+        connectivity (int, optional): Connectivity for the morphology and component labelling
+            (1 = faces, 2 = +edges, 3 = +corners). Defaults to 3.
+        max_iter (int, optional): Erosion backend only -- maximum erosion iterations. Defaults to 10.
+        full_partition (bool, optional): Erosion backend only -- grow the two eroded cores back over
+            the voxels the erosion removed, so the result covers all of ``arr``. Set False to get
+            just the eroded seeds, which is what you want when fitting a separating plane to them.
+            Defaults to True.
+        separator (np.ndarray | None, optional): Min-cut backend only -- if given, this mask is
+            dilated into the volume instead of eroding the volume itself. Defaults to None.
+        structure (np.ndarray | Sequence[np.ndarray] | None, optional): Min-cut backend only --
+            structuring element(s) to erode with; a sequence is cycled through. Defaults to None.
+        min_volume (int | None, optional): Min-cut backend only -- reject the split if either seed
+            is smaller than this. Defaults to None.
+        max_cut (float | None, optional): Min-cut backend only -- reject the split if the cut
+            exceeds this cost. Defaults to None.
+        max_ignore (int | None, optional): Min-cut backend only -- components at or below this
+            size are treated as noise and their voxels are allowed to be lost. Defaults to 6.
+        zoom (Sequence[float] | None, optional): Min-cut backend only -- voxel spacing used to
+            weight the graph edges. Defaults to None (isotropic).
+        add_diagonal_edges (bool, optional): Min-cut backend only -- also connect diagonal
+            neighbours in the adjacency graph. Defaults to False.
+
+    Returns:
+        UINTARRAY: Array with 0 = background, 1 = first part, 2 = second part.
+
+    Raises:
+        ValueError: If the volume cannot be split into exactly two non-empty parts, or if a
+            sanity limit (``min_volume``, ``max_cut``, ``max_ignore``) is exceeded.
+        ImportError: If ``method="mincut"`` and ``networkx`` is not installed.
+    """
+    if method == "erosion":
+        return _split_cc_erosion(arr, connectivity=connectivity, max_iter=max_iter, full_partition=full_partition)
+    if method == "mincut":
+        return _split_cc_mincut(
+            arr,
+            connectivity=connectivity,
+            separator=separator,
+            structure=structure,
+            min_volume=min_volume,
+            max_cut=max_cut,
+            max_ignore=max_ignore,
+            zoom=zoom,
+            add_diagonal_edges=add_diagonal_edges,
+        )
+    raise ValueError(f"unknown method {method!r}, expected 'erosion' or 'mincut'.")
 
 
 def np_get_connected_components_center_of_mass(
