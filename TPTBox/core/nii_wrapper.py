@@ -19,7 +19,12 @@ from typing_extensions import Self
 
 from TPTBox.core import bids_files
 from TPTBox.core.compat import zip_strict
-from TPTBox.core.internal.nii_help import _resample_from_to, secure_save
+from TPTBox.core.internal.nii_help import (
+    _arr_for_nifti1,
+    _nifti_safe_dtype,
+    _resample_from_to,
+    secure_save,
+)
 from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.nii_wrapper_math import NII_Math
 from TPTBox.core.np_utils import (
@@ -159,13 +164,14 @@ def _check_if_nifty_is_lying_about_its_dtype(self: NII):
             stacklevel=3,
         )
 
-    out_dtype = dtype
-    if dtype == np.float16:
+    # Delegate the "which dtypes are unsupported on disk?" question to the
+    # canonical mapping in nii_help so we only ever maintain it in one place.
+    out_dtype = _nifti_safe_dtype(dtype)
+    if out_dtype != dtype:
         warnings.warn(
             f"Loaded NIfTY: incorrect dtype detected: {dtype} is not supported",
             stacklevel=3,
         )
-        out_dtype = np.float32
     if "float" in dtype_s and not change_dtype:
         pass
     elif positive and change_dtype:
@@ -201,6 +207,7 @@ Interpolateable_Image_Reference = Union[
 
 Proxy = tuple[tuple[int, int, int], np.ndarray]
 suppress_dtype_change_printout_in_set_array = False
+
 # fmt: off
 
 class NII(NII_Math):
@@ -432,15 +439,20 @@ class NII(NII_Math):
         current array. Use ``nii_abstract`` if you want to avoid this reconstruction overhead.
         """
         if self.__divergent:
-            self._nii = Nifti1Image(self._arr,self.affine,self.header)
-            if self.dtype == self._arr.dtype: #type: ignore
-                nii = Nifti1Image(self._arr,self.affine,self.header)
+            # NIfTI-1 cannot encode a handful of dtypes (float16, bool). Upcast
+            # only the *materialised* array/header; leave `self._arr` alone so
+            # callers who kept a reference still see the native dtype.
+            arr_for_nib = _arr_for_nifti1(self._arr)  # type: ignore
+            safe_dtype = _nifti_safe_dtype(self._arr.dtype)  # type: ignore
+            self._nii = Nifti1Image(arr_for_nib, self.affine, self.header)
+            if self.dtype == self._arr.dtype:  # type: ignore
+                nii = Nifti1Image(arr_for_nib, self.affine, self.header)
             else:
                 if not suppress_dtype_change_printout_in_set_array:
                     log.print(f"'set_array' with different dtype: from {self.dtype} to {self._arr.dtype}",verbose=True) #type: ignore
-                nii2 = Nifti1Image(self._arr,self.affine,self.header)
-                nii2.set_data_dtype(self._arr.dtype)
-                nii = Nifti1Image(self._arr,nii2.affine,nii2.header) # type: ignore
+                nii2 = Nifti1Image(arr_for_nib, self.affine, self.header)
+                nii2.set_data_dtype(safe_dtype)
+                nii = Nifti1Image(arr_for_nib, nii2.affine, nii2.header)  # type: ignore
             if all(a is None for a in self.header.get_slope_inter()):
                 nii.header.set_slope_inter(1,self.get_c_val()) # type: ignore
             #if self.header is not None:
@@ -474,7 +486,7 @@ class NII(NII_Math):
                 header = header.copy()
                 header.set_sform(aff, code='aligned')
                 header.set_qform(aff, code='unknown')
-                header.set_data_dtype(arr.dtype)
+                header.set_data_dtype(_nifti_safe_dtype(arr.dtype))
                 rotation_zoom = aff[:n, :n]
                 zoom = np.sqrt(np.sum(rotation_zoom * rotation_zoom, axis=0))
                 #print(aff.shape,arr.shape,zoom)
@@ -482,7 +494,7 @@ class NII(NII_Math):
                 self._header = header
                 return
             else:
-                nii = Nifti1Image(arr,aff)
+                nii = Nifti1Image(_arr_for_nifti1(arr), aff)
         self.__unpacked = False
         self.__divergent = False
         self._nii = nii
@@ -695,15 +707,13 @@ class NII(NII_Math):
         """
         if hasattr(arr,"get_array"):
             arr = arr.get_array() # type: ignore
-        if arr.dtype == bool:
-            arr = arr.astype(np.uint8)
-        if arr.dtype == np.float16:
-            arr = arr.astype(np.float32)
+        # Segmentations must not be floats; force an integer dtype.
+        # bool/float16 are kept in memory here - only upcast for storage when
+        # we hand a Nifti1Image out (see `_nifti_safe_dtype`).
         if self.seg and np.issubdtype(arr.dtype, np.floating):
             arr = arr.astype(np.int32)
-        #if self.dtype == arr.dtype: #type: ignore
         nii:_unpacked_nii = (arr,self.affine,self.header.copy())
-        self.header.set_data_dtype(arr.dtype)
+        self.header.set_data_dtype(_nifti_safe_dtype(arr.dtype))
         #else:
         #    if not suppress_dtype_change_printout_in_set_array:
         #        log.print(f"'set_array' with different dtype: from {self.nii.dataobj.dtype} to {arr.dtype}",verbose=verbose) #type: ignore
@@ -746,13 +756,16 @@ class NII(NII_Math):
         if self.__unpacked:
             self._unpack()
             sel._arr = sel._arr.astype(dtype)
-            sel.header.set_data_dtype(dtype)
+            # header may only encode nibabel-safe dtypes; the array itself
+            # keeps whatever the caller asked for.
+            sel.header.set_data_dtype(_nifti_safe_dtype(dtype))
         else:
-            sel.nii.set_data_dtype(dtype)
+            sel.nii.set_data_dtype(_nifti_safe_dtype(dtype))
             if sel.nii.get_data_dtype() != self.dtype: #type: ignore
                 if arr is None:
                     arr = self.get_array()
-                sel.nii = Nifti1Image(arr.astype(dtype,casting=casting,order=order),self.affine,self.header)
+                new_arr = arr.astype(dtype, casting=casting, order=order)
+                sel.nii = Nifti1Image(_arr_for_nifti1(new_arr), self.affine, self.header)
 
         return sel
     def set_dtype_(self, dtype: type | Literal['smallest_uint', 'smallest_int'] = np.float32, order: Literal["C", "F", "A", "K"] = 'K', casting: Literal["no", "equiv", "safe", "same_kind", "unsafe"] = "unsafe") -> Self:
@@ -1078,7 +1091,7 @@ class NII(NII_Math):
 
         return self.copy(nii)
 
-    def rescale_and_reorient(self, axcodes_to=None, voxel_spacing=(-1, -1, -1), verbose: logging = True, inplace=False, c_val: float | None = None, mode: MODES = 'nearest') -> Self:
+    def rescale_and_reorient(self, axcodes_to=None, voxel_spacing=(-1, -1, -1), verbose: logging = True, inplace=False, c_val: float | None = None, mode: MODES = 'nearest', out_dtype: np.dtype | type | str | None = None) -> Self:
         """Reorients and then rescales the image in a single step.
 
         Args:
@@ -1090,6 +1103,9 @@ class NII(NII_Math):
             inplace: If True, modifies this NII in place. Defaults to False.
             c_val: Background fill value for resampling. Defaults to None.
             mode: Interpolation / boundary mode. Defaults to ``"nearest"``.
+            out_dtype: Forwarded to :meth:`rescale` – see there for semantics
+                and caveats. Only affects the rescale step; the preceding
+                reorient keeps the source dtype.
 
         Returns:
             The reoriented and rescaled NII.
@@ -1101,11 +1117,11 @@ class NII(NII_Math):
             axcodes_to = nio.ornt2axcodes(ornt_img)
         else:
             curr = self.reorient(axcodes_to=axcodes_to, verbose=verbose, inplace=inplace)
-        return curr.rescale(voxel_spacing=voxel_spacing, verbose=verbose, inplace=inplace,c_val=c_val,mode=mode)
+        return curr.rescale(voxel_spacing=voxel_spacing, verbose=verbose, inplace=inplace,c_val=c_val,mode=mode, out_dtype=out_dtype)
 
-    def rescale_and_reorient_(self, axcodes_to=None, voxel_spacing=(-1, -1, -1), c_val: float | None = None, mode: MODES = 'nearest', verbose: logging = True) -> Self:
+    def rescale_and_reorient_(self, axcodes_to=None, voxel_spacing=(-1, -1, -1), c_val: float | None = None, mode: MODES = 'nearest', verbose: logging = True, out_dtype: np.dtype | type | str | None = None) -> Self:
         """In-place variant of `rescale_and_reorient`."""
-        return self.rescale_and_reorient(axcodes_to=axcodes_to,voxel_spacing=voxel_spacing,c_val=c_val,mode=mode,verbose=verbose,inplace=True)
+        return self.rescale_and_reorient(axcodes_to=axcodes_to,voxel_spacing=voxel_spacing,c_val=c_val,mode=mode,verbose=verbose,inplace=True, out_dtype=out_dtype)
 
     def reorient_same_as(self, img_as: Nifti1Image | Self, verbose: logging = False, inplace=False) -> Self:
         """Reorients this image to match the orientation of another image.
@@ -1124,7 +1140,7 @@ class NII(NII_Math):
     def reorient_same_as_(self, img_as: Nifti1Image | Self, verbose: logging = False) -> Self:
         """In-place variant of `reorient_same_as`."""
         return self.reorient_same_as(img_as=img_as,verbose=verbose,inplace=True)
-    def rescale(self, voxel_spacing:float|tuple[float,...]=(1, 1, 1), c_val:float|None=None, verbose:logging=False, inplace=False,mode:MODES='nearest',order: int |None = None,align_corners:bool=False,atol=0.001) -> Self:
+    def rescale(self, voxel_spacing:float|tuple[float,...]=(1, 1, 1), c_val:float|None=None, verbose:logging=False, inplace=False,mode:MODES='nearest',order: int |None = None,align_corners:bool=False,atol=0.001, out_dtype: np.dtype | type | str | None = None) -> Self:
         """Rescales the NIfTI image to a new voxel spacing.
 
         Args:
@@ -1141,6 +1157,11 @@ class NII(NII_Math):
                 None, which selects 0 for segmentations and 3 otherwise.
             align_corners (bool|default): If True or not set and seg==True. Aline corners for scaling. This prevents segmentation mask to shift in a direction.
             atol: absolute tolerance for skipping if already close in voxel_spacing
+            out_dtype (dtype-like | None, optional): Requested dtype of the resampled array.
+                Forwarded to scipy as ``output=``, so the cast happens in-place during interpolation
+                (no extra full-volume copy). ``None`` keeps the source dtype. With integer targets and
+                ``order > 0`` the float→int cast is a plain truncation - pass ``order=0`` for label maps.
+
         Returns:
             NII: A new NII object with the resampled image data.
         """
@@ -1172,18 +1193,18 @@ class NII(NII_Math):
             new_shp = new_shp + shp[len(new_shp):]
         new_aff = _rescale_affine(aff, shp, voxel_spacing, new_shp)  # type: ignore
         new_aff[:n, n] = nib.affines.apply_affine(aff, [0 for _ in range(n)])# type: ignore
-        new_img = _resample_from_to(self, (new_shp, new_aff,voxel_spacing), order=order, mode=mode,align_corners=align_corners)
+        new_img = _resample_from_to(self, (new_shp, new_aff,voxel_spacing), order=order, mode=mode,align_corners=align_corners, out_dtype=out_dtype)
         log.print(f"Image resampled from {zms} to voxel size {voxel_spacing}",verbose=verbose)
         if inplace:
             self.nii = new_img
             return self
         return self.copy(new_img)
 
-    def rescale_(self, voxel_spacing=(1, 1, 1), c_val: float | None = None, verbose: logging = False, mode: MODES = 'nearest') -> Self:
+    def rescale_(self, voxel_spacing=(1, 1, 1), c_val: float | None = None, verbose: logging = False, mode: MODES = 'nearest', out_dtype: np.dtype | type | str | None = None) -> Self:
         """In-place variant of `rescale`."""
-        return self.rescale( voxel_spacing=voxel_spacing, c_val=c_val, verbose=verbose,mode=mode, inplace=True)
+        return self.rescale( voxel_spacing=voxel_spacing, c_val=c_val, verbose=verbose,mode=mode, inplace=True, out_dtype=out_dtype)
 
-    def resample_from_to(self, to_vox_map:Image_Reference|Has_Grid|tuple[SHAPE,AFFINE,ZOOMS], mode:MODES='nearest', order: int |None=None, c_val=None, inplace = False,verbose:logging=True,align_corners:bool=False) -> Self:
+    def resample_from_to(self, to_vox_map:Image_Reference|Has_Grid|tuple[SHAPE,AFFINE,ZOOMS], mode:MODES='nearest', order: int |None=None, c_val=None, inplace = False,verbose:logging=True,align_corners:bool=False, out_dtype: np.dtype | type | str | None = None) -> Self:
         """Self will be resampled in coordinate of given other image. Adheres to global space not to local pixel space.
 
         Args:
@@ -1195,6 +1216,12 @@ class NII(NII_Math):
             align_corners (bool|default): If True or not set and seg==True. Aline corners for scaling. This prevents segmentation mask to shift in a direction.
             inplace (bool, optional): Defaults to False.
             verbose (logging, optional): If True, log resampling shortcuts (skip / reorient-only). Defaults to True.
+            out_dtype (dtype-like | None, optional): Requested dtype of the resampled array.
+                Forwarded to scipy as ``output=``, so the cast happens in-place during interpolation
+                (no extra full-volume copy). ``None`` keeps the source dtype. With integer targets and
+                ``order > 0`` the float→int cast is a plain truncation - pass ``order=0`` for label maps.
+                Only applies when the actual resample is executed (the skip / reorient-only /
+                pad-only shortcuts return the source dtype).
 
         Returns:
             NII:
@@ -1246,7 +1273,7 @@ class NII(NII_Math):
         log.print(f"resample_from_to: {self} to {mapping}",verbose=verbose)
         if order is None:
             order = 0 if self.seg else 3
-        nii = _resample_from_to(self, mapping,order=order, mode=mode,align_corners=align_corners)
+        nii = _resample_from_to(self, mapping,order=order, mode=mode,align_corners=align_corners, out_dtype=out_dtype)
 
 
         if inplace:
@@ -1254,9 +1281,9 @@ class NII(NII_Math):
             return self
         else:
             return self.copy(nii)
-    def resample_from_to_(self, to_vox_map: Image_Reference | Has_Grid | tuple[SHAPE, AFFINE, ZOOMS], mode: MODES = 'nearest', c_val: float | None = None, verbose: logging = True, aline_corners=False) -> Self:
+    def resample_from_to_(self, to_vox_map: Image_Reference | Has_Grid | tuple[SHAPE, AFFINE, ZOOMS], mode: MODES = 'nearest', c_val: float | None = None, verbose: logging = True, aline_corners=False, out_dtype: np.dtype | type | str | None = None) -> Self:
         """In-place variant of `resample_from_to`."""
-        return self.resample_from_to(to_vox_map,mode=mode,c_val=c_val,inplace=True,verbose=verbose,align_corners=aline_corners)
+        return self.resample_from_to(to_vox_map,mode=mode,c_val=c_val,inplace=True,verbose=verbose,align_corners=aline_corners, out_dtype=out_dtype)
 
     @property
     def is_empty(self) -> bool:
@@ -2436,10 +2463,13 @@ class NII(NII_Math):
             # `save` is a query and must not mutate `self`.
             arr = arr.astype(_smallest_int_dtype(arr, unsigned=True))
 
-        self.header.set_data_dtype(arr.dtype)
-        out = Nifti1Image(arr, self.affine,self.header)#,dtype=arr.dtype)
+        # NIfTI-1 has no float16 (or bool) datatype. Upcast just the on-disk
+        # copy; the caller-owned ``self._arr`` keeps its native dtype.
+        safe_arr = _arr_for_nifti1(arr)
+        self.header.set_data_dtype(_nifti_safe_dtype(safe_arr.dtype))
+        out = Nifti1Image(safe_arr, self.affine, self.header)  # ,dtype=arr.dtype)
         if dtype is not None:
-            out.set_data_dtype(dtype)
+            out.set_data_dtype(_nifti_safe_dtype(dtype))
         if out.header["qform_code"] == 0: #NIFTI_XFORM_UNKNOWN Will cause an error for some rounding of the affine in ITKSnap ...
             # 1 means Scanner coordinate system
             # 2 means align (to something) coordinate system
