@@ -463,6 +463,93 @@ class Test_np_utils(unittest.TestCase):
         self.assertTrue(np.array_equal(filled, expected))
 
 
+class Test_point_helpers(unittest.TestCase):
+    def test_np_index_single_and_multiple_hits(self):
+        arr = np.array([[1, 2, 3], [4, 5, 6], [1, 2, 3]])
+        self.assertTrue(np.array_equal(np_utils.np_index(arr, [4, 5, 6]), [1]))
+        self.assertTrue(np.array_equal(np_utils.np_index(arr, [1, 2, 3]), [0, 2]))
+
+    def test_np_index_no_hit_is_empty(self):
+        arr = np.array([[1, 2, 3], [4, 5, 6]])
+        idx = np_utils.np_index(arr, [7, 8, 9])
+        self.assertEqual(len(idx), 0)
+
+    def test_np_find_closest_point_index_exact_match_returns_first(self):
+        arr = np.array([[0, 0, 0], [5, 5, 5], [0, 0, 0]])
+        # both row 0 and row 2 match exactly; the lowest index wins
+        self.assertEqual(np_utils.np_find_closest_point_index(arr, [0, 0, 0]), 0)
+
+    def test_np_find_closest_point_index_matches_bruteforce(self):
+        rng = np.random.default_rng(42)
+        for dtype in (np.int32, np.float64):
+            for _ in range(repeats):
+                arr = (rng.random((200, 3)) * 50).astype(dtype)
+                point = (rng.random(3) * 50).astype(dtype)
+                expected = int(np.argmin(np.linalg.norm(arr - point, axis=1)))
+                got = np_utils.np_find_closest_point_index(arr, point)
+                # ties may resolve to a different index, so compare distances not indices
+                self.assertAlmostEqual(
+                    float(np.linalg.norm(arr[got] - point)),
+                    float(np.linalg.norm(arr[expected] - point)),
+                    places=6,
+                )
+
+    def test_np_find_closest_point_index_rejects_empty(self):
+        with self.assertRaises(AssertionError):
+            np_utils.np_find_closest_point_index(np.zeros((0, 3), dtype=int), [0, 0, 0])
+
+
+class Test_boundary_normals(unittest.TestCase):
+    def make_two_slabs(self):
+        """Label 1 fills x < 6, label 2 fills x >= 6, so the interface is the plane x == 5/6."""
+        arr = np.zeros((12, 12, 12), dtype=np.uint8)
+        arr[:6] = 1
+        arr[6:] = 2
+        return arr
+
+    def test_interface_voxels_are_on_the_boundary_of_the_first_label(self):
+        arr = self.make_two_slabs()
+        coords, normals = np_utils.np_compute_boundary_normals(arr, 1, 2)
+        self.assertEqual(len(coords), 12 * 12)
+        self.assertTrue((coords[:, 0] == 5).all())
+        self.assertTrue((arr[tuple(coords.T)] == 1).all())
+        self.assertEqual(len(normals), len(coords))
+
+    def test_normals_are_unit_length_and_point_into_the_label(self):
+        arr = self.make_two_slabs()
+        _, normals = np_utils.np_compute_boundary_normals(arr, 1, 2)
+        self.assertTrue(np.allclose(np.linalg.norm(normals, axis=1), 1.0, atol=1e-3))
+        # label 1 lies towards -x, and the normal follows increasing mask density
+        self.assertTrue(np.allclose(normals[:, 0], -1.0, atol=1e-3))
+        self.assertTrue(np.allclose(normals[:, 1:], 0.0, atol=1e-3))
+
+    def test_labels_that_do_not_touch_give_empty_result(self):
+        arr = np.zeros((10, 10, 10), dtype=np.uint8)
+        arr[1:3] = 1
+        arr[7:9] = 2
+        coords, normals = np_utils.np_compute_boundary_normals(arr, 1, 2)
+        self.assertEqual(coords.shape, (0, 3))
+        self.assertEqual(normals.shape, (0, 3))
+
+    def test_diagonal_only_contact_does_not_count(self):
+        arr = np.zeros((6, 6, 6), dtype=np.uint8)
+        arr[2, 2, 2] = 1
+        arr[3, 3, 3] = 2  # shares only a corner, not a face
+        coords, _ = np_utils.np_compute_boundary_normals(arr, 1, 2)
+        self.assertEqual(len(coords), 0)
+
+
+class Test_vector_helpers(unittest.TestCase):
+    def test_np_unit_vector(self):
+        self.assertTrue(np.allclose(np_utils.np_unit_vector(np.array([3.0, 4.0, 0.0])), [0.6, 0.8, 0.0]))
+
+    def test_np_angle_between(self):
+        self.assertAlmostEqual(np_utils.np_angle_between((1, 0, 0), (0, 1, 0)), np.pi / 2)
+        self.assertAlmostEqual(np_utils.np_angle_between((1, 0, 0), (1, 0, 0)), 0.0)
+        self.assertAlmostEqual(np_utils.np_angle_between((1, 0, 0), (-1, 0, 0)), np.pi)
+        self.assertAlmostEqual(np_utils.np_angle_between((1, 0, 0), (0, 1, 0), degrees=True), 90.0)
+
+
 def _dumbbell(neck: int = 2) -> np.ndarray:
     """Two cubes joined by a thin neck, forming a single connected component."""
     arr = np.zeros((40, 24, 24), dtype=np.uint8)
