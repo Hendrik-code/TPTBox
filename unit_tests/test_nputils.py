@@ -550,6 +550,117 @@ class Test_vector_helpers(unittest.TestCase):
         self.assertAlmostEqual(np_utils.np_angle_between((1, 0, 0), (0, 1, 0), degrees=True), 90.0)
 
 
+def _dumbbell(neck: int = 2) -> np.ndarray:
+    """Two cubes joined by a thin neck, forming a single connected component."""
+    arr = np.zeros((40, 24, 24), dtype=np.uint8)
+    arr[4:16, 6:18, 6:18] = 1
+    arr[24:36, 6:18, 6:18] = 1
+    c = 12
+    arr[16:24, c - neck : c + neck, c - neck : c + neck] = 1
+    return arr
+
+
+class Test_split_connected_component(unittest.TestCase):
+    def test_input_really_is_one_component(self):
+        _, n = np_utils.np_connected_components(_dumbbell(), connectivity=3)
+        self.assertEqual(n, 1)
+
+    def test_erosion_splits_into_two_parts(self):
+        out = np_utils.np_split_connected_component(_dumbbell(), method="erosion")
+        self.assertEqual(sorted(int(v) for v in np.unique(out)), [0, 1, 2])
+        self.assertGreater((out == 1).sum(), 0)
+        self.assertGreater((out == 2).sum(), 0)
+
+    def test_erosion_full_partition_keeps_every_voxel(self):
+        arr = _dumbbell()
+        out = np_utils.np_split_connected_component(arr, method="erosion", full_partition=True)
+        self.assertEqual((out != 0).sum(), (arr != 0).sum())
+        # and never paints outside the input
+        self.assertEqual(((out != 0) & (arr == 0)).sum(), 0)
+
+    def test_erosion_without_full_partition_returns_only_the_cores(self):
+        arr = _dumbbell()
+        out = np_utils.np_split_connected_component(arr, method="erosion", full_partition=False)
+        self.assertLess((out != 0).sum(), (arr != 0).sum())
+
+    def test_the_two_parts_land_on_opposite_cubes(self):
+        arr = _dumbbell()
+        out = np_utils.np_split_connected_component(arr, method="erosion")
+        low = out[4:16][out[4:16] != 0]
+        high = out[24:36][out[24:36] != 0]
+        # each cube must be dominated by a single, and different, label
+        self.assertNotEqual(np.bincount(low).argmax(), np.bincount(high).argmax())
+
+    def test_unknown_method_is_rejected(self):
+        with self.assertRaises(ValueError):
+            np_utils.np_split_connected_component(_dumbbell(), method="bogus")
+
+    def test_solid_block_that_cannot_split_raises(self):
+        arr = np.zeros((20, 20, 20), dtype=np.uint8)
+        arr[5:15, 5:15, 5:15] = 1
+        with self.assertRaises(ValueError):
+            np_utils.np_split_connected_component(arr, method="erosion", max_iter=2)
+
+
+class Test_split_connected_component_mincut(unittest.TestCase):
+    def setUp(self):
+        try:
+            import networkx as nx  # noqa: F401
+        except ImportError:
+            self.skipTest("networkx not installed")
+
+    def test_mincut_partitions_the_whole_volume(self):
+        arr = _dumbbell()
+        out = np_utils.np_split_connected_component(arr, method="mincut", connectivity=1)
+        self.assertEqual(sorted(int(v) for v in np.unique(out)), [0, 1, 2])
+        self.assertEqual((out != 0).sum(), (arr != 0).sum())
+
+    def test_rejects_input_that_is_already_two_components(self):
+        arr = np.zeros((20, 20, 20), dtype=np.uint8)
+        arr[2:6, 2:6, 2:6] = 1
+        arr[14:18, 14:18, 14:18] = 1
+        with self.assertRaises(ValueError):
+            np_utils.np_split_connected_component(arr, method="mincut", connectivity=1)
+
+    def test_min_volume_guard(self):
+        with self.assertRaises(ValueError):
+            np_utils.np_split_connected_component(_dumbbell(), method="mincut", connectivity=1, min_volume=10**6)
+
+    def test_max_cut_guard(self):
+        with self.assertRaises(ValueError):
+            np_utils.np_split_connected_component(_dumbbell(), method="mincut", connectivity=1, max_cut=0.5)
+
+    def test_anisotropic_zoom_is_accepted(self):
+        out = np_utils.np_split_connected_component(_dumbbell(), method="mincut", connectivity=1, zoom=(1.0, 1.0, 3.0))
+        self.assertEqual(sorted(int(v) for v in np.unique(out)), [0, 1, 2])
+
+    def test_diagonal_edges_branch_runs(self):
+        """The upstream version raised NameError here (undefined ``geom.norm``)."""
+        out = np_utils.np_split_connected_component(_dumbbell(), method="mincut", connectivity=1, add_diagonal_edges=True)
+        self.assertEqual(sorted(int(v) for v in np.unique(out)), [0, 1, 2])
+
+    def test_max_ignore_none_runs(self):
+        """The upstream version raised NameError here (``max_errors`` never assigned)."""
+        out = np_utils.np_split_connected_component(_dumbbell(), method="mincut", connectivity=1, max_ignore=None)
+        self.assertEqual(sorted(int(v) for v in np.unique(out)), [0, 1, 2])
+
+
+class Test_connected_component_contact_map(unittest.TestCase):
+    def test_contact_map_labels_and_contact_zone(self):
+        out = np_utils.np_split_connected_component(_dumbbell(), method="erosion", full_partition=False)
+        contact = np_utils.np_connected_component_contact_map(out == 1, out == 2)
+        self.assertTrue({int(v) for v in np.unique(contact)} <= {0, 1, 2, 3})
+        self.assertGreater((contact == 3).sum(), 0)
+
+    def test_inputs_are_not_mutated(self):
+        out = np_utils.np_split_connected_component(_dumbbell(), method="erosion", full_partition=False)
+        a, b = out == 1, out == 2
+        a_before, b_before = a.copy(), b.copy()
+        np_utils.np_connected_component_contact_map(a, b)
+        self.assertTrue(np.array_equal(a, a_before))
+        self.assertTrue(np.array_equal(b, b_before))
+
+
 if __name__ == "__main__":
     unittest.main()
 
