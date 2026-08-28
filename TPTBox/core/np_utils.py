@@ -1064,6 +1064,145 @@ def np_find_closest_point_index(point_arr: np.ndarray, point) -> int:
     return int(np.argmin(cdist([p], arr)[0]))
 
 
+def np_raymarch_until_background(
+    arr: np.ndarray,
+    start_coord: Sequence[float] | np.ndarray,
+    direction_vector: np.ndarray,
+    step_size: float = 0.0625,
+    max_steps: int | None = 1000,
+    max_distance: float | None = None,
+    threshold: float = 0.5,
+    interpolator=None,
+) -> np.ndarray | None:
+    """Marches a ray from a point until it leaves a mask.
+
+    Takes fixed-size steps, sampling the mask with trilinear interpolation at each one, and stops
+    as soon as the interpolated value drops below ``threshold`` or the ray leaves the volume.
+
+    Unlike :func:`TPTBox.core.poi_fun.ray_casting.max_distance_ray_cast_convex`, which bisects and
+    therefore assumes the region is convex, this walks the ray step by step and so handles
+    concave and multi-lobed structures correctly -- at the cost of being slower.
+
+    Args:
+        arr (np.ndarray): The mask to march through. Non-zero is inside.
+        start_coord (Sequence[float] | np.ndarray): Voxel coordinate the ray starts at.
+        direction_vector (np.ndarray): Direction of the ray; normalised internally.
+        step_size (float, optional): Step length in voxels. Defaults to 0.0625 (1/16 of a voxel).
+        max_steps (int | None, optional): Give up after this many steps. Defaults to 1000.
+        max_distance (float | None, optional): Give up once this distance in voxels is covered.
+            Defaults to None. At least one of ``max_steps``/``max_distance`` must be set.
+        threshold (float, optional): Interpolated value below which the ray is considered to have
+            left the mask. Defaults to 0.5.
+        interpolator (RegularGridInterpolator | None, optional): Prebuilt interpolator over
+            ``arr``. Pass one when marching many rays through the same mask -- building it is
+            far more expensive than the march itself. Defaults to None (built internally).
+
+    Returns:
+        np.ndarray | None: The coordinate where the ray left the mask, or None if it was still
+        inside when the step/distance limit was reached.
+    """
+    assert max_steps is not None or max_distance is not None, "at least one of max_steps or max_distance must be set"
+    from scipy.interpolate import RegularGridInterpolator
+
+    start = np.asarray(start_coord, dtype=np.float64)
+    direction = np.asarray(direction_vector, dtype=np.float64)
+    direction = direction / (np.linalg.norm(direction) + 1e-10)
+    step_vector = direction * step_size
+
+    if interpolator is None:
+        interpolator = RegularGridInterpolator(
+            [np.arange(s, dtype=np.float64) for s in arr.shape], arr.astype(np.float64), bounds_error=False, fill_value=0.0
+        )
+
+    pos = start.copy()
+    steps = int(max_steps) if max_steps is not None else int(1e8)
+    for _ in range(steps):
+        if max_distance is not None and np.linalg.norm(pos - start) >= max_distance:
+            return None
+        if np.any(pos < 0) or np.any(pos >= arr.shape):
+            return pos
+        if interpolator(pos) < threshold:
+            return pos
+        pos = pos + step_vector
+    return None
+
+
+def np_label_interface_thickness(
+    arr: UINTARRAY,
+    label: int | Sequence[int],
+    other_label: int | Sequence[int],
+    zoom: Sequence[float] | None = None,
+    max_count_component: int | None = None,
+    sigma: float = 1.0,
+    step_size: float | None = None,
+    max_steps: int | None = 1000,
+    max_distance: float | None = None,
+) -> np.ndarray:
+    """Measures how thick a structure is where it meets another structure.
+
+    At every voxel of ``other_label`` that touches ``label``, a ray is marched from that voxel
+    along the inward surface normal until it exits ``label``. The distance travelled is the local
+    thickness of ``label`` at that point on the interface.
+
+    Args:
+        arr (UINTARRAY): 3-dimensional label array.
+        label (int | Sequence[int]): The structure whose thickness is measured.
+        other_label (int | Sequence[int]): The structure the measurement starts from.
+        zoom (Sequence[float] | None, optional): Voxel spacing in mm. When given, distances are
+            returned in millimetres and the default step size is derived from it; otherwise
+            distances are in voxels. Defaults to None.
+        max_count_component (int | None, optional): Keep only this many largest connected
+            components of ``label`` before measuring. Defaults to None (keep all).
+        sigma (float, optional): Smoothing applied before computing the normals. Defaults to 1.0.
+        step_size (float | None, optional): March step in voxels. Defaults to ``min(zoom)/16``
+            when ``zoom`` is given, else 1/16 of a voxel.
+        max_steps (int | None, optional): Step limit per ray. Defaults to 1000.
+        max_distance (float | None, optional): Distance limit per ray, in voxels. Defaults to None.
+
+    Returns:
+        np.ndarray: 1-D array with one thickness per interface voxel. Rays that hit a limit
+        without leaving ``label`` contribute ``np.nan``. Empty when the labels do not touch.
+    """
+    from scipy.interpolate import RegularGridInterpolator
+
+    assert arr.ndim == 3, arr.ndim
+    if step_size is None:
+        step_size = (min(zoom) / 16) if zoom is not None else 1 / 16
+
+    work = np.where(np_isin(arr, label) | np_isin(arr, other_label), arr, 0)
+    if max_count_component is not None:
+        kept = np_filter_connected_components(np_isin(work, label), largest_k_components=max_count_component, connectivity=1)
+        work = np.where(np_isin(work, other_label) | (kept != 0), work, 0)
+
+    coords, normals = np_compute_boundary_normals(work, other_label, label, sigma=sigma)
+    if len(coords) == 0:
+        return np.zeros(0, dtype=float)
+
+    # March through the measured structure plus the interface voxels themselves, so a ray starting
+    # on the interface begins inside the mask rather than immediately outside it.
+    march_mask = np_isin(work, label).astype(np.float64)
+    march_mask[tuple(coords.T)] = 1.0
+    interpolator = RegularGridInterpolator(
+        [np.arange(s, dtype=np.float64) for s in march_mask.shape], march_mask, bounds_error=False, fill_value=0.0
+    )
+
+    spacing = np.asarray(zoom, dtype=float) if zoom is not None else np.ones(3)
+    out = np.empty(len(coords), dtype=float)
+    for i, (coord, normal) in enumerate(zip(coords, normals)):
+        # np_compute_boundary_normals points into `other_label`; flip it to march into `label`.
+        end = np_raymarch_until_background(
+            march_mask,
+            coord,
+            -normal,
+            step_size=step_size,
+            max_steps=max_steps,
+            max_distance=max_distance,
+            interpolator=interpolator,
+        )
+        out[i] = np.nan if end is None else float(np.linalg.norm((end - coord) * spacing))
+    return out
+
+
 def np_compute_boundary_normals(
     arr: UINTARRAY,
     label: int | Sequence[int],

@@ -49,6 +49,7 @@ from TPTBox.core.np_utils import (
     np_get_connected_components_center_of_mass,
     np_is_empty,
     np_isin,
+    np_label_interface_thickness,
     np_map_labels,
     np_map_labels_based_on_majority_label_mask_overlap,
     np_point_coordinates,
@@ -3054,6 +3055,45 @@ class NII(NII_Math):
             connectivity=connectivity,
         )
         return self.set_array(arr, inplace=inplace)
+
+    def label_interface_thickness(
+        self,
+        label: int | Sequence[int],
+        other_label: int | Sequence[int],
+        max_count_component: int | None = None,
+        sigma: float = 1.0,
+        max_steps: int | None = 1000,
+        max_distance: float | None = None,
+    ) -> np.ndarray:
+        """Measures how thick a structure is where it meets another structure.
+
+        At every voxel of ``other_label`` touching ``label``, a ray is marched along the inward
+        surface normal until it exits ``label``; the distance travelled is the local thickness.
+        Distances are returned in **millimetres**, using :attr:`zoom`.
+
+        Args:
+            label (int | Sequence[int]): The structure whose thickness is measured.
+            other_label (int | Sequence[int]): The structure the measurement starts from.
+            max_count_component (int | None, optional): Keep only this many largest connected
+                components of ``label`` before measuring. Defaults to None (keep all).
+            sigma (float, optional): Smoothing applied before computing the normals. Defaults to 1.0.
+            max_steps (int | None, optional): Step limit per ray. Defaults to 1000.
+            max_distance (float | None, optional): Distance limit per ray, in voxels. Defaults to None.
+
+        Returns:
+            np.ndarray: One thickness in mm per interface voxel; ``np.nan`` where a ray hit a
+            limit without leaving ``label``. Empty when the two labels do not touch.
+        """
+        return np_label_interface_thickness(
+            self.get_seg_array(),
+            label,
+            other_label,
+            zoom=self.zoom,
+            max_count_component=max_count_component,
+            sigma=sigma,
+            max_steps=max_steps,
+            max_distance=max_distance,
+        )
 
 
 
