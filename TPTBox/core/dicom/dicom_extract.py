@@ -31,7 +31,7 @@ sys.path.append(str(Path(__file__).parent))
 
 import string
 
-from TPTBox.core.dicom.dicom2nii_utils import get_json_from_dicom, load_json, save_json, test_name_conflict
+from TPTBox.core.dicom.dicom2nii_utils import get_json_from_dicom, load_json, save_json, secure_save_json, test_name_conflict
 
 logger = Print_Logger()
 
@@ -552,7 +552,106 @@ def _from_dicom_to_nii(
 
     if add_grid:
         _add_grid_info_to_json(nii_path, json_file_name)
+        # Multi-echo Philips DIXON (magnitude/phase) arrives as a 4-D NIfTI.
+        # Split it into per-echo 3-D files with `-eco<i>` appended to `part`.
+        if json_bids.get("part") in ("magnitude", "phase"):
+            _split_multi_echo_dixon(Path(nii_path), Path(json_file_name), dcm_data_l)
     return nii_path if add_grid else None
+
+
+def _split_multi_echo_dixon(nii_path: Path, json_path: Path, dcm_data_l) -> list[Path] | None:
+    """Split a 4-D multi-echo DIXON (magnitude/phase) NIfTI into per-echo 3-D files.
+
+    A no-op unless the NIfTI on disk is 4-D. Per-echo outputs are named
+    ``..._part-<part>-eco<i>_<mod>.nii.gz`` for ``i = 0..N-1`` (ascending
+    echo). Per-echo TEs are taken from the source DICOM headers (grouped by
+    ``EchoNumbers`` in ascending order) and written into each per-echo
+    sidecar JSON as ``EchoTime`` (with ``EchoNumbers`` set to the 1-based
+    echo index). The 4-D file and its sidecar are removed on success.
+
+    Args:
+        nii_path: Path to the just-written 4-D NIfTI.
+        json_path: Path to its sidecar JSON.
+        dcm_data_l: The source DICOM datasets that produced *nii_path*.
+
+    Returns:
+        List of per-echo NIfTI paths on success, or ``None`` when the input
+        was not 4-D / the split could not be performed.
+    """
+    if not Path(nii_path).exists():
+        return None
+    nii = NII.load(nii_path, False)
+    if nii.get_num_dims() != 4:
+        return None
+    n_echo = nii.shape[-1]
+
+    # Ascending (EchoNumbers -> EchoTime) from the source DICOMs. Classic
+    # Philips single-frame series carry both tags on every file.
+    te_by_echo: dict[int, float] = {}
+    if isinstance(dcm_data_l, list):
+        for d in dcm_data_l:
+            try:
+                en = int(getattr(d, "EchoNumbers", 0) or 0)
+                te = float(getattr(d, "EchoTime", 0.0) or 0.0)
+            except Exception:  # noqa: BLE001
+                continue
+            if en > 0:
+                te_by_echo.setdefault(en, te)
+    tes: list[float | None] = [te_by_echo[k] for k in sorted(te_by_echo)] if te_by_echo else []
+    if len(tes) != n_echo:
+        if len(tes) != 0:
+            logger.on_warning(
+                f"Multi-echo DIXON split: {n_echo} volumes but {len(tes)} unique EchoNumbers "
+                f"in DICOM; falling back to axis order without per-echo TE."
+            )
+        tes = [None] * n_echo  # type: ignore[list-item]
+
+    parent_json = load_json(json_path) if Path(json_path).exists() else {}
+    frames = nii.split_4D_image_to_3D()
+    out_paths: list[Path] = []
+    for i, (frame, te) in enumerate(zip(frames, tes)):
+        new_nii = _with_echo_suffix(nii_path, i)
+        new_json = _with_echo_suffix(json_path, i)
+        frame.save(new_nii)
+        j = dict(parent_json)
+        j.pop("grid", None)
+        if te is not None:
+            j["EchoTime"] = te
+        j["EchoNumbers"] = i + 1
+        secure_save_json(new_json, j, indent=4)
+        _add_grid_info_to_json(new_nii, new_json)
+        out_paths.append(new_nii)
+
+    # Only delete the 4-D originals once every per-echo file is on disk.
+    if all(p.exists() for p in out_paths):
+        for p in (Path(nii_path), Path(json_path)):
+            try:
+                p.unlink()
+            except FileNotFoundError:
+                pass
+    return out_paths
+
+
+def _with_echo_suffix(p: Path, eco_index: int) -> Path:
+    """Insert ``-eco<i>`` into the ``part`` BIDS entity of a NIfTI/JSON filename.
+
+    ``sub-X_..._part-magnitude_dixon.nii.gz`` → ``..._part-magnitude-eco0_dixon.nii.gz``.
+    Falls back to appending before the extension when no ``_part-`` entity is present.
+    """
+    name = p.name
+    import re
+
+    m = re.search(r"_part-([^_]+)_", name)
+    if m:
+        old = m.group(0)
+        new = f"_part-{m.group(1)}-eco{eco_index}_"
+        name = name.replace(old, new, 1)
+    else:
+        for ext in (".nii.gz", ".json"):
+            if name.endswith(ext):
+                name = f"{name[: -len(ext)]}-eco{eco_index}{ext}"
+                break
+    return p.with_name(name)
 
 
 def _add_grid_info_to_json(nii_path: Path | str, simp_json: Path | str, force_update: bool = False, add: bool = True) -> dict:
