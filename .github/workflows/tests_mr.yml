@@ -27,9 +27,13 @@ jobs:
         python -m pip install --upgrade pip
         python -m pip install poetry
         python -m pip install flake8 pytest
+    - name: Install system deps for CPU-only mesh3D tests
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y xvfb libgl1
     - name: Install dependencies
       run: |
-        python -m poetry install
+        python -m poetry install --with dev
     - name: Lint with flake8
       run: |
         # stop the build if there are Python syntax errors or undefined names
