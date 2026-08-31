@@ -3007,6 +3007,126 @@ class NII(NII_Math):
         """In-place version of :meth:`relabel_by_position`."""
         return self.relabel_by_position(axis=axis, offset=offset, inplace=True, verbose=verbose)
 
+    def _split_axis(self, axis: DIRECTIONS | int) -> tuple[int, bool]:
+        """Resolves ``axis`` to an array axis and whether that direction runs with increasing index."""
+        if isinstance(axis, int):
+            return axis, True
+        # get_axis falls back to the opposite letter, so recover which way the axis actually runs.
+        return self.get_axis(axis), axis in self.orientation
+
+    def _split_label_profile(self, labels: LABEL_REFERENCE, ax: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Returns the seg array, the mask of ``labels`` and its per-slice voxel count along ``ax``."""
+        arr = self.get_seg_array()
+        selected = arr > 0 if labels is None else np_isin(arr, labels)
+        counts = selected.sum(axis=tuple(i for i in range(arr.ndim) if i != ax))
+        return arr, selected, counts
+
+    def _split_label_at_index(self, arr: np.ndarray, selected: np.ndarray, ax: int, region: slice, offset: int, inplace: bool) -> Self:
+        """Adds ``offset`` to the selected voxels that lie inside ``region`` along axis ``ax``."""
+        part = np.zeros_like(selected)
+        part[(slice(None),) * ax + (region,)] = True
+        part &= selected
+        if offset != 0 and part.any():
+            arr = arr.astype(np.promote_types(arr.dtype, np.min_scalar_type(int(arr.max()) + offset)), copy=False)
+            arr[part] += offset
+        return self.set_array(arr, inplace=inplace)
+
+    def split_label_at_cumulative_volume_fraction(
+        self,
+        labels: LABEL_REFERENCE = None,
+        axis: DIRECTIONS | int = "P",
+        fraction: float = 0.5,
+        offset: int = 100,
+        inplace: bool = False,
+    ) -> Self:
+        """Splits labels along an axis at the plane that cuts off a given fraction of their volume.
+
+        Slices are walked inwards from the ``axis``-most end of the mask, summing voxels until
+        ``fraction`` of the total volume is covered; that leading slab gets ``offset`` added to its
+        label values, the rest is left untouched. With the default ``axis="P"`` and
+        ``fraction=1/3`` the posterior third (by volume, not by extent) is split off.
+
+        The direction is resolved against :attr:`orientation`, so no reorientation round-trip is
+        needed. Passing an ``int`` instead selects that array axis, pointing at high indices.
+
+        Args:
+            labels (LABEL_REFERENCE, optional): Label(s) to split. Defaults to None (every label).
+            axis (DIRECTIONS | int, optional): Anatomical direction the split-off part lies in,
+                or a raw array axis. Defaults to ``"P"``.
+            fraction (float, optional): Volume fraction that ends up in the split-off part, in
+                ``[0, 1]``. Defaults to 0.5.
+            offset (int, optional): Added to the labels of the split-off part. Defaults to 100.
+            inplace (bool, optional): If True, modifies this NII in place. Defaults to False.
+
+        Returns:
+            NII: The segmentation with the split-off part relabeled to ``label + offset``.
+
+        Examples:
+            >>> ethmoid.split_label_at_cumulative_volume_fraction([7, 8], "P", 1 / 3)  # doctest: +SKIP
+            # posterior third of labels 7 and 8 becomes 107 and 108
+        """
+        assert 0 <= fraction <= 1, f"fraction has to be in [0,1], got {fraction}"
+        ax, forward = self._split_axis(axis)
+        arr, selected, counts = self._split_label_profile(labels, ax)
+        total = int(counts.sum())
+        if total == 0:
+            return self if inplace else self.copy()
+        n = len(counts)
+        # walk inwards from the axis-most end until the slab holds fraction of the volume
+        order = counts[::-1] if forward else counts
+        target = fraction * total
+        taken = 0 if target <= 0 else min(int(np.searchsorted(np.cumsum(order), target)) + 1, n)
+        region = slice(n - taken, None) if forward else slice(None, taken)
+        return self._split_label_at_index(arr, selected, ax, region, offset, inplace)
+
+    def split_label_at_center_of_mass(
+        self,
+        labels: LABEL_REFERENCE = None,
+        axis: DIRECTIONS | int = "L",
+        offset: int = 100,
+        inplace: bool = False,
+    ) -> Self:
+        """Splits labels along an axis at their center of mass.
+
+        The center of mass of ``labels`` is projected onto ``axis`` and rounded to the nearest
+        slice; everything from there towards ``axis`` gets ``offset`` added to its label values.
+        With the default ``axis="L"`` this separates the left half of a structure from its right
+        half, and flipping the letter to ``"R"`` splits off the other side. The slice the plane
+        lands on always goes to the ``axis`` side, so the two halves overlap in that one slice
+        when the center of mass sits exactly on a voxel center.
+
+        The direction is resolved against :attr:`orientation` and the rounding is done in the
+        anatomical frame, so the split is the same no matter which orientation the image is
+        stored in and no reorientation round-trip is needed. Passing an ``int`` instead selects
+        that array axis, pointing at high indices.
+
+        Args:
+            labels (LABEL_REFERENCE, optional): Label(s) to split. Defaults to None (every label).
+            axis (DIRECTIONS | int, optional): Anatomical direction the split-off part lies in,
+                or a raw array axis. Defaults to ``"L"``.
+            offset (int, optional): Added to the labels of the split-off part. Defaults to 100.
+            inplace (bool, optional): If True, modifies this NII in place. Defaults to False.
+
+        Returns:
+            NII: The segmentation with the split-off part relabeled to ``label + offset``.
+
+        Examples:
+            >>> ethmoid.split_label_at_center_of_mass([7, 15], "L")  # doctest: +SKIP
+            # left half of labels 7 and 15 becomes 107 and 115
+        """
+        ax, forward = self._split_axis(axis)
+        arr, selected, counts = self._split_label_profile(labels, ax)
+        total = int(counts.sum())
+        if total == 0:
+            return self if inplace else self.copy()
+        n = len(counts)
+        com = float((counts * np.arange(n)).sum()) / total
+        # round in the anatomical frame, not the array frame, so the result does not depend on
+        # whether the axis happens to be stored forwards or backwards
+        c = int(np.clip(np.rint(com if forward else n - 1 - com), 0, n))
+        region = slice(c, None) if forward else slice(None, n - c)
+        return self._split_label_at_index(arr, selected, ax, region, offset, inplace)
+
     def filter_connected_components_by_bbox_chain(
         self,
         margin_mm: float = 0.0,
