@@ -747,6 +747,144 @@ class Test_label_interface_thickness(unittest.TestCase):
         self.assertEqual(len(np_utils.np_label_interface_thickness(seg, 1, 2, max_count_component=2)), len(every))
 
 
+def _brute_voronoi(arr: np.ndarray, zoom=None) -> np.ndarray:
+    """Reference partition: for every voxel, scan every region and keep the closest, ties to zero."""
+    labels = sorted(int(x) for x in np.unique(arr) if x != 0)
+    sampling = np.ones(arr.ndim) if zoom is None else np.asarray(zoom, dtype=float)
+    positions = {label: np.argwhere(arr == label) for label in labels}
+    out = np.zeros(arr.shape, dtype=np.int32)
+    for coord in np.argwhere(np.ones(arr.shape, dtype=bool)):
+        dists = {label: float((((pos - coord) * sampling) ** 2).sum(1).min()) for label, pos in positions.items()}
+        best = min(dists.values())
+        closest = [label for label, d in dists.items() if abs(d - best) <= 1e-9]
+        value = 0 if len(closest) > 1 else closest[0]
+        out[tuple(coord)] = -value if arr[tuple(coord)] == 0 else value
+    return out
+
+
+class Test_voronoi_labels(unittest.TestCase):
+    def test_signed_background_and_tie(self):
+        arr = np.zeros((5, 1, 1), dtype=np.uint8)
+        arr[0] = 1
+        arr[4] = 2
+        # the middle voxel is equidistant to both regions
+        self.assertEqual(np_utils.np_voronoi_labels(arr).ravel().tolist(), [1, -1, 0, -2, 2])
+
+    def test_matches_a_brute_force_partition(self):
+        rng = np.random.default_rng(0)
+        for shape in [(9, 9), (7, 7, 7)]:
+            for _ in range(4):
+                arr = np.zeros(shape, dtype=np.uint8)
+                for label in range(1, 5):
+                    arr[tuple(rng.integers(0, s) for s in shape)] = label
+                with self.subTest(shape=shape, arr=arr):
+                    got = np_utils.np_voronoi_labels(arr).astype(np.int32)
+                    self.assertTrue(np.array_equal(got, _brute_voronoi(arr)))
+
+    def test_matches_a_brute_force_partition_anisotropic(self):
+        rng = np.random.default_rng(1)
+        zoom = (2.0, 1.0, 0.5)
+        for _ in range(4):
+            arr = np.zeros((7, 7, 7), dtype=np.uint8)
+            for label in range(1, 4):
+                arr[tuple(rng.integers(0, 7, 3))] = label
+            with self.subTest(arr=arr):
+                got = np_utils.np_voronoi_labels(arr, zoom=zoom).astype(np.int32)
+                self.assertTrue(np.array_equal(got, _brute_voronoi(arr, zoom=zoom)))
+
+    def test_unsigned_keeps_the_labels_positive(self):
+        arr = np.zeros((5, 1, 1), dtype=np.uint8)
+        arr[0] = 1
+        arr[4] = 2
+        out = np_utils.np_voronoi_labels(arr, signed_background=False)
+        self.assertEqual(out.ravel().tolist(), [1, 1, 0, 2, 2])
+
+    def test_without_tie_to_zero_nothing_stays_unassigned(self):
+        arr = np.zeros((5, 1, 1), dtype=np.uint8)
+        arr[0] = 1
+        arr[4] = 2
+        out = np_utils.np_voronoi_labels(arr, signed_background=False, tie_to_zero=False)
+        self.assertNotIn(0, out.ravel().tolist())
+
+    def test_max_distance_leaves_far_voxels_empty(self):
+        arr = np.zeros((11, 1, 1), dtype=np.uint8)
+        arr[0] = 1
+        out = np_utils.np_voronoi_labels(arr, max_distance=3, signed_background=False)
+        self.assertEqual(out.ravel().tolist(), [1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0])
+
+    def test_zoom_scales_max_distance(self):
+        arr = np.zeros((11, 1, 1), dtype=np.uint8)
+        arr[0] = 1
+        out = np_utils.np_voronoi_labels(arr, max_distance=3, zoom=(2.0, 1.0, 1.0), signed_background=False)
+        self.assertEqual(int(np.count_nonzero(out)), 2)
+
+    def test_label_ref_treats_the_rest_as_background(self):
+        arr = np.zeros((5, 1, 1), dtype=np.uint8)
+        arr[0] = 1
+        arr[4] = 2
+        out = np_utils.np_voronoi_labels(arr, label_ref=1)
+        self.assertEqual(out.ravel().tolist(), [1, -1, -1, -1, -1])
+
+    def test_empty_input(self):
+        arr = np.zeros((4, 4, 4), dtype=np.uint8)
+        self.assertEqual(int(np.count_nonzero(np_utils.np_voronoi_labels(arr))), 0)
+
+    def test_single_label_fills_everything(self):
+        arr = np.zeros((4, 4, 4), dtype=np.uint8)
+        arr[0, 0, 0] = 7
+        out = np_utils.np_voronoi_labels(arr)
+        self.assertEqual(sorted(set(out.ravel().tolist())), [-7, 7])
+
+    def test_dtype_holds_the_negated_labels(self):
+        arr = np.zeros((4, 4), dtype=np.uint8)
+        arr[0, 0] = 200
+        out = np_utils.np_voronoi_labels(arr)
+        self.assertTrue(np.issubdtype(out.dtype, np.signedinteger))
+        self.assertEqual(int(out.min()), -200)
+
+    def test_cost_does_not_grow_with_the_label_count(self):
+        """One feature transform for the whole volume, not one per label."""
+        rng = np.random.default_rng(2)
+        arr = np.zeros((40, 40, 40), dtype=np.uint16)
+        for label in range(1, 201):
+            arr[tuple(rng.integers(0, 40, 3))] = label
+        out = np_utils.np_voronoi_labels(arr, signed_background=False, tie_to_zero=False)
+        self.assertEqual(set(np_utils.np_unique_withoutzero(out)), set(np_utils.np_unique_withoutzero(arr)))
+
+
+class Test_expand_labels(unittest.TestCase):
+    def test_grows_by_the_given_distance(self):
+        arr = np.zeros((11, 1, 1), dtype=np.uint8)
+        arr[5] = 3
+        out = np_utils.np_expand_labels(arr, distance=2)
+        self.assertEqual(out.ravel().tolist(), [0, 0, 0, 3, 3, 3, 3, 3, 0, 0, 0])
+
+    def test_labels_do_not_eat_into_each_other(self):
+        arr = np.zeros((10, 1, 1), dtype=np.uint8)
+        arr[0] = 1
+        arr[9] = 2
+        out = np_utils.np_expand_labels(arr)
+        self.assertEqual(out.ravel().tolist(), [1, 1, 1, 1, 1, 2, 2, 2, 2, 2])
+
+    def test_unbounded_fills_the_volume(self):
+        arr = np.zeros((6, 6), dtype=np.uint8)
+        arr[0, 0] = 4
+        self.assertTrue((np_utils.np_expand_labels(arr) == 4).all())
+
+    def test_agrees_with_dilate_msk_euclid(self):
+        rng = np.random.default_rng(3)
+        arr = np.zeros((20, 20, 20), dtype=np.uint8)
+        for label in (1, 2, 3):
+            p = rng.integers(2, 17, 3)
+            arr[p[0] : p[0] + 2, p[1] : p[1] + 2, p[2] : p[2] + 2] = label
+        expected = np_utils.np_dilate_msk_euclid(arr.copy(), n_pixel=3, use_crop=False)
+        got = np_utils.np_expand_labels(arr, distance=3)
+        # the two disagree only where a voxel is equidistant to two regions and the tie-break differs
+        differing = got != expected
+        self.assertLess(int(differing.sum()), 0.02 * differing.size)
+        self.assertTrue(np.array_equal(got != 0, expected != 0))
+
+
 if __name__ == "__main__":
     unittest.main()
 
