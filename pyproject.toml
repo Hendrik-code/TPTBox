@@ -56,6 +56,7 @@ pre-commit = "*"
 pyvista = "^0.43.2"
 coverage = ">=7.0.1"
 pytest-mock = "^3.6.0"
+networkx = "*"  # optional: np_split_connected_component(method="mincut")
 exceptiongroup = { version = "^1.2", python = "<3.11" }
 tomli = {version = "*", python = "<3.11" }
 # Extra optional deps used by TPTBox.mesh3D (3D snapshots and HTML previews).

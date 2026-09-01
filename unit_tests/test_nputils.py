@@ -463,6 +463,290 @@ class Test_np_utils(unittest.TestCase):
         self.assertTrue(np.array_equal(filled, expected))
 
 
+class Test_point_helpers(unittest.TestCase):
+    def test_np_index_single_and_multiple_hits(self):
+        arr = np.array([[1, 2, 3], [4, 5, 6], [1, 2, 3]])
+        self.assertTrue(np.array_equal(np_utils.np_index(arr, [4, 5, 6]), [1]))
+        self.assertTrue(np.array_equal(np_utils.np_index(arr, [1, 2, 3]), [0, 2]))
+
+    def test_np_index_no_hit_is_empty(self):
+        arr = np.array([[1, 2, 3], [4, 5, 6]])
+        idx = np_utils.np_index(arr, [7, 8, 9])
+        self.assertEqual(len(idx), 0)
+
+    def test_np_find_closest_point_index_exact_match_returns_first(self):
+        arr = np.array([[0, 0, 0], [5, 5, 5], [0, 0, 0]])
+        # both row 0 and row 2 match exactly; the lowest index wins
+        self.assertEqual(np_utils.np_find_closest_point_index(arr, [0, 0, 0]), 0)
+
+    def test_np_find_closest_point_index_matches_bruteforce(self):
+        rng = np.random.default_rng(42)
+        for dtype in (np.int32, np.float64):
+            for _ in range(repeats):
+                arr = (rng.random((200, 3)) * 50).astype(dtype)
+                point = (rng.random(3) * 50).astype(dtype)
+                expected = int(np.argmin(np.linalg.norm(arr - point, axis=1)))
+                got = np_utils.np_find_closest_point_index(arr, point)
+                # ties may resolve to a different index, so compare distances not indices
+                self.assertAlmostEqual(
+                    float(np.linalg.norm(arr[got] - point)),
+                    float(np.linalg.norm(arr[expected] - point)),
+                    places=6,
+                )
+
+    def test_np_find_closest_point_index_rejects_empty(self):
+        with self.assertRaises(AssertionError):
+            np_utils.np_find_closest_point_index(np.zeros((0, 3), dtype=int), [0, 0, 0])
+
+
+class Test_boundary_normals(unittest.TestCase):
+    def make_two_slabs(self):
+        """Label 1 fills x < 6, label 2 fills x >= 6, so the interface is the plane x == 5/6."""
+        arr = np.zeros((12, 12, 12), dtype=np.uint8)
+        arr[:6] = 1
+        arr[6:] = 2
+        return arr
+
+    def test_interface_voxels_are_on_the_boundary_of_the_first_label(self):
+        arr = self.make_two_slabs()
+        coords, normals = np_utils.np_compute_boundary_normals(arr, 1, 2)
+        self.assertEqual(len(coords), 12 * 12)
+        self.assertTrue((coords[:, 0] == 5).all())
+        self.assertTrue((arr[tuple(coords.T)] == 1).all())
+        self.assertEqual(len(normals), len(coords))
+
+    def test_normals_are_unit_length_and_point_into_the_label(self):
+        arr = self.make_two_slabs()
+        _, normals = np_utils.np_compute_boundary_normals(arr, 1, 2)
+        self.assertTrue(np.allclose(np.linalg.norm(normals, axis=1), 1.0, atol=1e-3))
+        # label 1 lies towards -x, and the normal follows increasing mask density
+        self.assertTrue(np.allclose(normals[:, 0], -1.0, atol=1e-3))
+        self.assertTrue(np.allclose(normals[:, 1:], 0.0, atol=1e-3))
+
+    def test_labels_that_do_not_touch_give_empty_result(self):
+        arr = np.zeros((10, 10, 10), dtype=np.uint8)
+        arr[1:3] = 1
+        arr[7:9] = 2
+        coords, normals = np_utils.np_compute_boundary_normals(arr, 1, 2)
+        self.assertEqual(coords.shape, (0, 3))
+        self.assertEqual(normals.shape, (0, 3))
+
+    def test_diagonal_only_contact_does_not_count(self):
+        arr = np.zeros((6, 6, 6), dtype=np.uint8)
+        arr[2, 2, 2] = 1
+        arr[3, 3, 3] = 2  # shares only a corner, not a face
+        coords, _ = np_utils.np_compute_boundary_normals(arr, 1, 2)
+        self.assertEqual(len(coords), 0)
+
+
+class Test_vector_helpers(unittest.TestCase):
+    def test_np_unit_vector(self):
+        self.assertTrue(np.allclose(np_utils.np_unit_vector(np.array([3.0, 4.0, 0.0])), [0.6, 0.8, 0.0]))
+
+    def test_np_angle_between(self):
+        self.assertAlmostEqual(np_utils.np_angle_between((1, 0, 0), (0, 1, 0)), np.pi / 2)
+        self.assertAlmostEqual(np_utils.np_angle_between((1, 0, 0), (1, 0, 0)), 0.0)
+        self.assertAlmostEqual(np_utils.np_angle_between((1, 0, 0), (-1, 0, 0)), np.pi)
+        self.assertAlmostEqual(np_utils.np_angle_between((1, 0, 0), (0, 1, 0), degrees=True), 90.0)
+
+
+def _dumbbell(neck: int = 2) -> np.ndarray:
+    """Two cubes joined by a thin neck, forming a single connected component."""
+    arr = np.zeros((40, 24, 24), dtype=np.uint8)
+    arr[4:16, 6:18, 6:18] = 1
+    arr[24:36, 6:18, 6:18] = 1
+    c = 12
+    arr[16:24, c - neck : c + neck, c - neck : c + neck] = 1
+    return arr
+
+
+class Test_split_connected_component(unittest.TestCase):
+    def test_input_really_is_one_component(self):
+        _, n = np_utils.np_connected_components(_dumbbell(), connectivity=3)
+        self.assertEqual(n, 1)
+
+    def test_erosion_splits_into_two_parts(self):
+        out = np_utils.np_split_connected_component(_dumbbell(), method="erosion")
+        self.assertEqual(sorted(int(v) for v in np.unique(out)), [0, 1, 2])
+        self.assertGreater((out == 1).sum(), 0)
+        self.assertGreater((out == 2).sum(), 0)
+
+    def test_erosion_full_partition_keeps_every_voxel(self):
+        arr = _dumbbell()
+        out = np_utils.np_split_connected_component(arr, method="erosion", full_partition=True)
+        self.assertEqual((out != 0).sum(), (arr != 0).sum())
+        # and never paints outside the input
+        self.assertEqual(((out != 0) & (arr == 0)).sum(), 0)
+
+    def test_erosion_without_full_partition_returns_only_the_cores(self):
+        arr = _dumbbell()
+        out = np_utils.np_split_connected_component(arr, method="erosion", full_partition=False)
+        self.assertLess((out != 0).sum(), (arr != 0).sum())
+
+    def test_the_two_parts_land_on_opposite_cubes(self):
+        arr = _dumbbell()
+        out = np_utils.np_split_connected_component(arr, method="erosion")
+        low = out[4:16][out[4:16] != 0]
+        high = out[24:36][out[24:36] != 0]
+        # each cube must be dominated by a single, and different, label
+        self.assertNotEqual(np.bincount(low).argmax(), np.bincount(high).argmax())
+
+    def test_unknown_method_is_rejected(self):
+        with self.assertRaises(ValueError):
+            np_utils.np_split_connected_component(_dumbbell(), method="bogus")
+
+    def test_solid_block_that_cannot_split_raises(self):
+        arr = np.zeros((20, 20, 20), dtype=np.uint8)
+        arr[5:15, 5:15, 5:15] = 1
+        with self.assertRaises(ValueError):
+            np_utils.np_split_connected_component(arr, method="erosion", max_iter=2)
+
+
+class Test_split_connected_component_mincut(unittest.TestCase):
+    def setUp(self):
+        try:
+            import networkx as nx  # noqa: F401
+        except ImportError:
+            self.skipTest("networkx not installed")
+
+    def test_mincut_partitions_the_whole_volume(self):
+        arr = _dumbbell()
+        out = np_utils.np_split_connected_component(arr, method="mincut", connectivity=1)
+        self.assertEqual(sorted(int(v) for v in np.unique(out)), [0, 1, 2])
+        self.assertEqual((out != 0).sum(), (arr != 0).sum())
+
+    def test_rejects_input_that_is_already_two_components(self):
+        arr = np.zeros((20, 20, 20), dtype=np.uint8)
+        arr[2:6, 2:6, 2:6] = 1
+        arr[14:18, 14:18, 14:18] = 1
+        with self.assertRaises(ValueError):
+            np_utils.np_split_connected_component(arr, method="mincut", connectivity=1)
+
+    def test_min_volume_guard(self):
+        with self.assertRaises(ValueError):
+            np_utils.np_split_connected_component(_dumbbell(), method="mincut", connectivity=1, min_volume=10**6)
+
+    def test_max_cut_guard(self):
+        with self.assertRaises(ValueError):
+            np_utils.np_split_connected_component(_dumbbell(), method="mincut", connectivity=1, max_cut=0.5)
+
+    def test_anisotropic_zoom_is_accepted(self):
+        out = np_utils.np_split_connected_component(_dumbbell(), method="mincut", connectivity=1, zoom=(1.0, 1.0, 3.0))
+        self.assertEqual(sorted(int(v) for v in np.unique(out)), [0, 1, 2])
+
+    def test_diagonal_edges_branch_runs(self):
+        """The upstream version raised NameError here (undefined ``geom.norm``)."""
+        out = np_utils.np_split_connected_component(_dumbbell(), method="mincut", connectivity=1, add_diagonal_edges=True)
+        self.assertEqual(sorted(int(v) for v in np.unique(out)), [0, 1, 2])
+
+    def test_max_ignore_none_runs(self):
+        """The upstream version raised NameError here (``max_errors`` never assigned)."""
+        out = np_utils.np_split_connected_component(_dumbbell(), method="mincut", connectivity=1, max_ignore=None)
+        self.assertEqual(sorted(int(v) for v in np.unique(out)), [0, 1, 2])
+
+
+class Test_connected_component_contact_map(unittest.TestCase):
+    def test_contact_map_labels_and_contact_zone(self):
+        out = np_utils.np_split_connected_component(_dumbbell(), method="erosion", full_partition=False)
+        contact = np_utils.np_connected_component_contact_map(out == 1, out == 2)
+        self.assertTrue({int(v) for v in np.unique(contact)} <= {0, 1, 2, 3})
+        self.assertGreater((contact == 3).sum(), 0)
+
+    def test_inputs_are_not_mutated(self):
+        out = np_utils.np_split_connected_component(_dumbbell(), method="erosion", full_partition=False)
+        a, b = out == 1, out == 2
+        a_before, b_before = a.copy(), b.copy()
+        np_utils.np_connected_component_contact_map(a, b)
+        self.assertTrue(np.array_equal(a, a_before))
+        self.assertTrue(np.array_equal(b, b_before))
+
+
+class Test_raymarch_until_background(unittest.TestCase):
+    def test_exit_point_on_a_slab(self):
+        arr = np.zeros((40, 10, 10))
+        arr[10:25] = 1
+        end = np_utils.np_raymarch_until_background(arr, [10, 5, 5], [1, 0, 0])
+        self.assertIsNotNone(end)
+        # the 0.5 crossing sits at the slab's far edge, within one step
+        self.assertAlmostEqual(float(end[0]), 24.5, delta=0.1)
+
+    def test_stops_at_an_interior_gap(self):
+        """The whole point of the non-convex marcher: a bisection search skips this gap."""
+        arr = np.zeros((40, 10, 10))
+        arr[5:35] = 1
+        arr[15:20] = 0
+        end = np_utils.np_raymarch_until_background(arr, [6, 5, 5], [1, 0, 0])
+        self.assertAlmostEqual(float(end[0]), 14.5, delta=0.1)
+
+    def test_convex_bisection_disagrees_on_the_same_mask(self):
+        import nibabel as nib
+
+        from TPTBox import NII
+        from TPTBox.core.poi_fun.ray_casting import max_distance_ray_cast_convex
+
+        arr = np.zeros((40, 10, 10), dtype=np.uint8)
+        arr[5:35] = 1
+        arr[15:20] = 0
+        nii = NII(nib.Nifti1Image(arr, np.eye(4)), seg=True)
+        convex = max_distance_ray_cast_convex(nii, np.array([6, 5, 5]), np.array([1.0, 0.0, 0.0]))
+        self.assertGreater(float(convex[0]), 30.0)  # skipped the gap entirely
+
+    def test_returns_none_when_it_never_leaves(self):
+        arr = np.ones((40, 10, 10))
+        self.assertIsNone(np_utils.np_raymarch_until_background(arr, [1, 5, 5], [1, 0, 0], max_steps=5))
+
+    def test_max_distance_limit(self):
+        arr = np.ones((40, 10, 10))
+        self.assertIsNone(np_utils.np_raymarch_until_background(arr, [1, 5, 5], [1, 0, 0], max_steps=None, max_distance=2.0))
+
+    def test_requires_a_limit(self):
+        with self.assertRaises(AssertionError):
+            np_utils.np_raymarch_until_background(np.ones((5, 5, 5)), [1, 1, 1], [1, 0, 0], max_steps=None)
+
+    def test_leaving_the_volume_returns_a_position(self):
+        arr = np.ones((10, 10, 10))
+        end = np_utils.np_raymarch_until_background(arr, [8, 5, 5], [1, 0, 0])
+        self.assertIsNotNone(end)
+        self.assertGreaterEqual(float(end[0]), 9.0)
+
+
+class Test_label_interface_thickness(unittest.TestCase):
+    def _two_slabs(self):
+        seg = np.zeros((40, 20, 20), dtype=np.uint8)
+        seg[10:18] = 1  # measured structure
+        seg[18:22] = 2  # reference structure
+        return seg
+
+    def test_thickness_of_a_known_slab(self):
+        t = np_utils.np_label_interface_thickness(self._two_slabs(), label=1, other_label=2)
+        self.assertEqual(len(t), 20 * 20)
+        # measured from the interface voxel center to the 0.5 isosurface
+        self.assertAlmostEqual(float(np.nanmean(t)), 8.5, delta=0.15)
+        self.assertAlmostEqual(float(np.nanstd(t)), 0.0, delta=1e-6)
+
+    def test_zoom_scales_the_result(self):
+        seg = self._two_slabs()
+        voxels = np_utils.np_label_interface_thickness(seg, 1, 2)
+        mm = np_utils.np_label_interface_thickness(seg, 1, 2, zoom=(2.0, 1.0, 1.0))
+        self.assertAlmostEqual(float(np.nanmean(mm)) / float(np.nanmean(voxels)), 2.0, places=5)
+
+    def test_no_contact_returns_empty(self):
+        seg = np.zeros((20, 20, 20), dtype=np.uint8)
+        seg[2:5] = 1
+        seg[15:18] = 2
+        self.assertEqual(np_utils.np_label_interface_thickness(seg, 1, 2).shape, (0,))
+
+    def test_max_count_component_drops_smaller_components(self):
+        seg = np.zeros((40, 20, 20), dtype=np.uint8)
+        seg[10:18, 0:12, :] = 1  # large component
+        seg[10:18, 15:18, :] = 1  # smaller, separate component
+        seg[18:22] = 2
+        every = np_utils.np_label_interface_thickness(seg, 1, 2)
+        largest = np_utils.np_label_interface_thickness(seg, 1, 2, max_count_component=1)
+        self.assertLess(len(largest), len(every))
+        self.assertEqual(len(np_utils.np_label_interface_thickness(seg, 1, 2, max_count_component=2)), len(every))
+
+
 if __name__ == "__main__":
     unittest.main()
 
