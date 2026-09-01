@@ -452,7 +452,8 @@ class NII(NII_Math):
                 nii2 = Nifti1Image(arr_for_nib, self.affine, self.header)
                 nii2.set_data_dtype(safe_dtype)
                 nii = Nifti1Image(arr_for_nib, nii2.affine, nii2.header)  # type: ignore
-            if all(a is None for a in self.header.get_slope_inter()):
+            c = self.get_c_val()
+            if all(a is None for a in self.header.get_slope_inter()) and not np.isnan(c):
                 nii.header.set_slope_inter(1,self.get_c_val()) # type: ignore
             #if self.header is not None:
             #    self.header.set_sform(self.affine, code=1)
