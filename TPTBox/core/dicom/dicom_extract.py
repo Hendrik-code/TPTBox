@@ -695,6 +695,80 @@ def _add_grid_info_to_json(nii_path: Path | str, simp_json: Path | str, force_up
     return json_dict
 
 
+_EXTRACT_CACHE_DIR = ".extract_cache"
+
+
+def _folder_fingerprint(folder: Path) -> tuple[int, str] | None:
+    """Cheap folder identity: (file count, sha1 of sorted (relpath, size) list).
+
+    No DICOM headers are read — only ``os.stat`` on each file. Returns
+    ``None`` if the folder can't be scanned. Used by
+    :func:`extract_dicom_folder`'s fast-skip path.
+    """
+    import hashlib
+    import json as _json
+
+    try:
+        entries: list[tuple[str, int]] = []
+        for p in sorted(folder.rglob("*")):
+            if p.is_file():
+                try:
+                    size = p.stat().st_size
+                except OSError:
+                    continue
+                entries.append((str(p.relative_to(folder)), size))
+        payload = _json.dumps(entries, separators=(",", ":")).encode()
+        return len(entries), hashlib.sha1(payload).hexdigest()  # noqa: S324
+    except OSError:
+        return None
+
+
+def _extract_marker_path(source_folder: Path, dataset_path_out: Path) -> Path:
+    """Path of the fast-skip marker for a source folder, kept under the OUTPUT dataset.
+
+    Using the dataset root instead of the source tree means we never write
+    into the input DICOMs (which may be read-only or on removable media).
+    """
+    import hashlib
+
+    key = hashlib.sha1(str(source_folder.resolve()).encode()).hexdigest()  # noqa: S324
+    return dataset_path_out / _EXTRACT_CACHE_DIR / f"{key}.json"
+
+
+def _is_already_extracted(source_folder: Path, dataset_path_out: Path) -> bool:
+    """True when the source folder was extracted before and its file list is unchanged."""
+    import json as _json
+
+    marker = _extract_marker_path(source_folder, dataset_path_out)
+    if not marker.is_file():
+        return False
+    try:
+        prev = _json.loads(marker.read_text())
+    except (OSError, ValueError):
+        return False
+    fp = _folder_fingerprint(source_folder)
+    if fp is None:
+        return False
+    count, h = fp
+    return prev.get("count") == count and prev.get("hash") == h
+
+
+def _write_extract_marker(source_folder: Path, dataset_path_out: Path) -> None:
+    """Record the current file-list fingerprint for the source folder."""
+    import json as _json
+
+    fp = _folder_fingerprint(source_folder)
+    if fp is None:
+        return
+    count, h = fp
+    marker = _extract_marker_path(source_folder, dataset_path_out)
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(_json.dumps({"source": str(source_folder), "count": count, "hash": h}))
+    except OSError:
+        pass  # writing the marker is best-effort; missing it just disables the fast-path
+
+
 def _find_all_files(dcm_dirs: Path | list[Path], verbose=False):
     """Recursively find all DICOM directories or files in the given paths.
 
@@ -910,6 +984,8 @@ def extract_dicom_folder(
     skip_localizer=True,
     parent: str = "rawdata",
     censor_list: list | None = None,
+    skip_already_extracted: bool = True,
+    force_rescan: bool = False,
 ) -> dict:
     """Extract DICOM files from a directory or list of directories, convert them to NIfTI format, and store the output.
 
@@ -934,6 +1010,13 @@ def extract_dicom_folder(
         parent (str, optional): Parent folder inside ``dataset_path_out`` under which subjects are written
             (typically ``"rawdata"``). Defaults to ``"rawdata"``.
         censor_list (list | None, optional): List of series keys to skip entirely. Defaults to an empty list.
+        skip_already_extracted (bool, optional): If True, use a per-source-folder marker under
+            ``dataset_path_out/.extract_cache/`` to skip folders whose file listing (relative
+            paths + sizes) is unchanged since the last successful extraction. No DICOM headers
+            are read for a skipped folder — great for re-runs that only need to pick up newly
+            added subjects. Defaults to True.
+        force_rescan (bool, optional): If True, bypass the fast-skip marker and re-read every
+            DICOM. Defaults to False.
 
     Returns:
         dict: A dictionary with keys representing DICOM series and values as paths to the generated NIfTI files.
@@ -954,6 +1037,18 @@ def extract_dicom_folder(
         dicom_path = p
 
         if str(dicom_path).endswith(".pkl"):
+            continue
+        # Fast-skip: identical file listing since last successful extraction
+        # → no DICOM headers read for this folder. Zips are excluded because
+        # their inner file list isn't visible without unpacking.
+        if (
+            skip_already_extracted
+            and not force_rescan
+            and not str(dicom_path).endswith(".zip")
+            and Path(dicom_path).is_dir()
+            and _is_already_extracted(Path(dicom_path), Path(dataset_path_out))
+        ):
+            logger.print(f"Skip {dicom_path} (already extracted; fingerprint matches)", verbose=verbose)
             continue
         temp_dir = None
         try:
@@ -1002,6 +1097,15 @@ def extract_dicom_folder(
                         logger.on_warning("NotImplementedError:", e)
                     except Exception:
                         logger.print_error()
+
+            # Record the fingerprint only when the whole folder went through
+            # without an exception AND the source is a real directory (not a
+            # zip mount that's about to disappear). Errors above are caught
+            # per-series so this fires even if individual series were skipped
+            # (e.g. localizers) — but not if `_read_dicom_files` itself raised
+            # (that path lands in the outer `finally` without reaching here).
+            if skip_already_extracted and temp_dir is None and Path(dicom_path).is_dir():
+                _write_extract_marker(Path(dicom_path), Path(dataset_path_out))
 
         finally:
             if temp_dir is not None:
