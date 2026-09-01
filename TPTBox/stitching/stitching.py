@@ -631,8 +631,10 @@ def main(  # noqa: C901
         print(f"{i:2}/{len(niis):2} resampled", end="\r") if verbose else None
         nii_new = nip.resample_from_to(nii, nii_out, 0 if is_segmentation else 3, mode="constant", cval=min_value)
         arr_new = get_array(nii_new)
+        if not is_segmentation and np.issubdtype(arr_new.dtype, np.floating):
+            np.nan_to_num(arr_new, copy=False, nan=min_value, posinf=min_value, neginf=min_value)
         target_list.append(arr_new)
-        b = nib.Nifti1Image(get_array(nii) * 0 + 1, affine=nii.affine)  # type: ignore
+        b = nib.Nifti1Image(np.ones(nii.shape, dtype=np.float32), affine=nii.affine)  # type: ignore
         b = nip.resample_from_to(b, nii_new, 0, cval=0, mode="constant")
         if is_segmentation:
             x = arr_new > 0
