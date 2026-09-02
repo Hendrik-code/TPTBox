@@ -299,18 +299,14 @@ class TestGeneralRegistrationFlags(unittest.TestCase):
         """
         import torch  # noqa: PLC0415
 
-        from TPTBox import Location, calc_poi_from_subreg_vert, to_nii  # noqa: PLC0415
+        from TPTBox import Location, calc_poi_from_subreg_vert  # noqa: PLC0415
         from TPTBox.registration import General_Registration  # noqa: PLC0415
+        from TPTBox.tests.test_utils import get_test_ct  # noqa: PLC0415
 
-        ct = to_nii("/media/data/robert/code/TPTBox/TPTBox/tests/sample_ct/sub-ct_label-22_ct.nii.gz", False)
-        vert = to_nii(
-            "/media/data/robert/code/TPTBox/TPTBox/tests/sample_ct/sub-ct_seg-vert_label-22_msk.nii.gz",
-            True,
-        )
-        sub = to_nii(
-            "/media/data/robert/code/TPTBox/TPTBox/tests/sample_ct/sub-ct_seg-subreg_label-22_msk.nii.gz",
-            True,
-        )
+        # Use the packaged sample CT, like every other test in this file. This used
+        # to hardcode an absolute path on one developer's machine, so it failed for
+        # everyone else and in CI.
+        ct, sub, vert, _ = get_test_ct()
         poi_fix = calc_poi_from_subreg_vert(
             vert,
             sub,
@@ -666,8 +662,8 @@ class TestSpeedAndMemory(unittest.TestCase):
 class TestOptionalDeepaliStubs(unittest.TestCase):
     """When ``hf-deepali`` isn't installed the deepali-backed entry points
     must still *import* – they should raise a helpful ``ImportError`` only
-    when actually used, and the error message must mention that PyTorch is a
-    prerequisite too.
+    when actually used, and the message must give an install command that
+    covers torch as well, plus the ``reg`` extra that provides both.
     """
 
     def test_stub_factory_message(self):
@@ -679,14 +675,17 @@ class TestOptionalDeepaliStubs(unittest.TestCase):
         msg = str(ctx.exception)
         self.assertIn("Foo", msg)
         self.assertIn("hf-deepali", msg)
-        self.assertIn("PyTorch", msg)
+        # torch is a prerequisite, so the suggested command must install it too.
         self.assertIn("pip install torch hf-deepali", msg)
+        self.assertIn("TPTBox[reg]", msg)
+        self.assertIn("no module named 'deepali'", msg)
 
         stub_fn = _reg_init._make_missing_deepali_func("bar", ImportError("boom"))
         with self.assertRaises(ImportError) as ctx:
             stub_fn(1, 2)
         self.assertIn("bar()", str(ctx.exception))
         self.assertIn("pip install torch hf-deepali", str(ctx.exception))
+        self.assertIn("TPTBox[reg]", str(ctx.exception))
 
 
 if __name__ == "__main__":
