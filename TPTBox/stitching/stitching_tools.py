@@ -110,7 +110,7 @@ def GNC_stitch_T2w(
     chunks["LWS"]["nii"] = NII.load(LWS, seg=False).reorient_()
     # for k in chunks.keys():
     #    # chunks[k]["n4"] = _crop_borders(n4_bias(chunks[k]["nii"], spline_param=200)[0], k, cut)
-    #    # chunks[k]["n4"].apply_crop_slice_(cut[k])
+    #    # chunks[k]["n4"].apply_crop_(cut[k])
     # chunks_m = {k: chunks[k]["n4"] for k in chunks.keys()}
     # chunks_a = list([l.nii for l in chunks_m.values()])
     chunks_a = [a["nii"].nii for a in chunks.values()]

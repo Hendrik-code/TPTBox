@@ -951,24 +951,6 @@ class NII(NII_Math):
         return self.set_array(arr_cropped, inplace=inplace)
         #return self.apply_crop(crop_slices, inplace=inplace)
 
-    def compute_crop_slice(self, *args, **qargs) -> tuple[slice, slice, slice]:
-        """Deprecated alias for `compute_crop`."""
-        import warnings
-        warnings.warn("compute_crop_slice is deprecated use compute_crop instead",stacklevel=5) #TODO remove in version 1.0
-        return self.compute_crop(*args,**qargs)
-
-    def apply_crop_slice(self, *args, **qargs) -> Self:
-        """Deprecated alias for `apply_crop`."""
-        import warnings
-        warnings.warn("apply_crop_slice id deprecated use apply_crop instead",stacklevel=5) #TODO remove in version 1.0
-        return self.apply_crop(*args,**qargs)
-
-    def apply_crop_slice_(self, *args, **qargs) -> Self:
-        """Deprecated alias for `apply_crop_`."""
-        import warnings
-        warnings.warn("apply_crop_slice_ id deprecated use apply_crop_ instead",stacklevel=5) #TODO remove in version 1.0
-        return self.apply_crop_(*args,**qargs)
-
     def apply_crop(self,ex_slice:tuple[slice,slice,slice]|Sequence[slice]|None , inplace=False) -> Self:
         """Crop the NIfTI volume by a per-axis slice tuple (thin wrapper around ``nibabel``'s ``.slicer``).
 
