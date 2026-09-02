@@ -63,6 +63,10 @@ OPTIONAL_THIRD_PARTY = {
     "monai",
     "nnunet",
     "totalsegmentator",
+    # transitive deps of the nnU-Net stack (nnunetv2 >= 2.6 pulls these in)
+    "blosc2",
+    "batchgeneratorsv2",
+    "dynamic_network_architectures",
     # dev-group extras: present in CI, absent for a plain `pip install TPTBox`
     "pyvista",
     "vtk",
@@ -150,27 +154,85 @@ def _symbol_exists(module: str, symbol: str) -> bool:
     return _module_exists(f"{module}.{symbol}")
 
 
-class TestPackageImports(unittest.TestCase):
-    """Every TPTBox sub-package must import on a bare install."""
+# The public entry points a user imports. Each of these MUST import on a bare
+# install - that is the guarantee the optional-dependency stubs exist to provide,
+# and `import TPTBox.segmentation` failing on a clean install was a real bug.
+REQUIRED_IMPORTS = [
+    "TPTBox",
+    "TPTBox.core",
+    "TPTBox.core.bids_files",
+    "TPTBox.core.dicom",
+    "TPTBox.core.nii_wrapper",
+    "TPTBox.core.np_utils",
+    "TPTBox.core.poi",
+    "TPTBox.logger",
+    "TPTBox.mesh3D",
+    "TPTBox.registration",
+    "TPTBox.segmentation",
+    "TPTBox.spine",
+    "TPTBox.spine.snapshot2D",
+    "TPTBox.spine.spinestats",
+    "TPTBox.stitching",
+]
 
-    def test_all_subpackages_import(self):
+
+def _missing_module_name(exc: BaseException) -> str:
+    """Best-effort name of the module an ImportError is complaining about."""
+    name = getattr(exc, "name", None)
+    if name:
+        return name
+    m = re.search(r"No module named '([^']+)'", str(exc))
+    return m.group(1) if m else ""
+
+
+class TestPackageImports(unittest.TestCase):
+    """TPTBox must import without any optional backend installed."""
+
+    def test_required_entry_points_import(self):
+        """The public sub-packages must import even with no optional backend.
+
+        This is the regression guard: these are the modules whose entry points are
+        replaced by stubs when a backend is missing, so a missing backend must never
+        stop the *import* itself.
+        """
+        failures = []
+        for name in REQUIRED_IMPORTS:
+            try:
+                importlib.import_module(name)
+            except Exception as e:  # noqa: BLE001 - report, do not mask
+                failures.append(f"{name}: {type(e).__name__}: {e}")
+        self.assertEqual(failures, [], "public entry points failed to import:\n" + "\n".join(failures))
+
+    def test_no_subpackage_has_broken_internal_imports(self):
+        """Walk every module and fail only on breakage *inside* TPTBox.
+
+        A leaf module may legitimately require an optional third-party backend
+        (fastProcessor needs blosc2, vibeseg needs torch, snapshot3D needs
+        xvfbwrapper), and which of those happen to be installed varies by machine
+        and by CI job. Enumerating them was brittle - this asserts the thing we
+        actually care about instead: that no TPTBox module fails to import because
+        of a *TPTBox* problem, such as a stale path after a rename.
+        """
         failures = []
         for info in pkgutil.walk_packages(TPTBox.__path__, prefix="TPTBox."):
             name = info.name
-            # Scripts and vendored backends are allowed to need their optional stack.
-            if any(part.startswith("_") for part in name.split(".")[1:]):
-                continue
-            if ".tests" in name or ".nnUnet_utils" in name or name.endswith(("__main__", "script_ax2sag")):
+            if ".tests" in name or name.endswith(("__main__", "script_ax2sag")):
                 continue
             try:
                 importlib.import_module(name)
             except ImportError as e:
-                if any(dep in str(e) for dep in OPTIONAL_THIRD_PARTY):
+                # Only fail when the failure is positively identified as a TPTBox
+                # module. Both real drift modes set it: a stale path gives
+                # name="TPTBox.gone", and a removed symbol gives
+                # name="TPTBox.mod" with "cannot import name ...". Anything else -
+                # a missing backend, or a hand-raised hint like
+                # elastic_deform's NumPy-2 message - is an environment fact.
+                if not _missing_module_name(e).startswith("TPTBox"):
                     continue
                 failures.append(f"{name}: {e}")
             except Exception as e:  # noqa: BLE001 - report, do not mask
                 failures.append(f"{name}: {type(e).__name__}: {e}")
-        self.assertEqual(failures, [], "sub-packages failed to import:\n" + "\n".join(failures))
+        self.assertEqual(failures, [], "modules broken inside TPTBox:\n" + "\n".join(failures))
 
     def test_public_api_names_resolve(self):
         missing = [n for n in TPTBox.__all__ if not hasattr(TPTBox, n)]
