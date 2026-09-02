@@ -19,7 +19,7 @@ def stitching(
     bias_field: bool = False,
     kick_out_fully_integrated_images: bool = True,
     verbose: bool = True,
-    dtype: type = float,
+    dtype: type | str = float,
     match_histogram: bool = False,
     store_ramp: bool = False,
     ramp_path=None,
@@ -45,7 +45,9 @@ def stitching(
         kick_out_fully_integrated_images: If True, removes volumes that are
             fully contained within another volume before stitching.
         verbose: If True, logs the output path before stitching.
-        dtype: NumPy dtype for the output array.
+        dtype: NumPy dtype for the output array, or the string ``"auto"`` to
+            pick the smallest lossless dtype from the inputs' on-disk dtypes
+            (uint16/int16 for MR magnitude sources, float32 otherwise).
         match_histogram: If True, matches histograms between consecutive inputs.
         store_ramp: If True, also returns the per-volume blending weight array.
         ramp_path: Optional explicit output path for the ramp NIfTI; forwarded to

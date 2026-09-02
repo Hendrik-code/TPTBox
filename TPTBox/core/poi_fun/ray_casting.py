@@ -8,6 +8,7 @@ from scipy.interpolate import RegularGridInterpolator
 from sklearn.decomposition import PCA
 
 from TPTBox import NII, POI, Print_Logger, Vertebra_Instance
+from TPTBox.core.np_utils import np_raymarch_until_background, np_unit_vector
 from TPTBox.core.poi_fun._help import sacrum_w_o_arcus, to_local_np
 from TPTBox.core.poi_fun.pixel_based_point_finder import get_direction
 from TPTBox.core.vert_constants import COORDINATE, DIRECTIONS, Location
@@ -16,9 +17,7 @@ from TPTBox.logger.log_file import Logger_Interface
 _log = Print_Logger()
 
 
-def unit_vector(vector: np.ndarray) -> np.ndarray:
-    """Returns the unit vector of the vector."""
-    return vector / np.linalg.norm(vector)
+unit_vector = np_unit_vector
 
 
 # @njit(fastmath=True)
@@ -182,6 +181,49 @@ def max_distance_ray_cast_convex_np(
         delta = max_v - min_v
         count += 1
     return start_point_np + normal_vector * ((min_v + max_v) / 2)
+
+
+def max_distance_ray_cast_non_convex(
+    region: NII,
+    start_coord: COORDINATE | np.ndarray,
+    direction_vector: np.ndarray,
+    step_size: float | None = None,
+    max_steps: int | None = 1000,
+    max_distance: float | None = None,
+    threshold: float = 0.5,
+) -> np.ndarray | None:
+    """Find the exit point of a ray inside an arbitrary NII region.
+
+    The non-convex counterpart to :func:`max_distance_ray_cast_convex`. That one bisects, which
+    silently skips interior gaps -- on a mask with a hole it reports the far outer wall rather
+    than the near edge of the hole. This walks the ray in fixed steps instead, so concave and
+    multi-lobed regions are handled correctly, at the cost of being slower.
+
+    Args:
+        region: ``NII`` object whose nonzero voxels define the region.
+        start_coord: Starting coordinate ``(x, y, z)`` of the ray in voxel space.
+        direction_vector: Direction of the ray; normalised internally.
+        step_size: Step length in voxels. Defaults to ``min(region.zoom) / 16``.
+        max_steps: Give up after this many steps. Defaults to 1000.
+        max_distance: Give up once this distance in voxels is covered. Defaults to None.
+        threshold: Interpolated mask value below which the ray has left the region.
+            Defaults to 0.5.
+
+    Returns:
+        3-element numpy array with the exit coordinate, or ``None`` if the ray was still inside
+        the region when the step or distance limit was reached.
+    """
+    if step_size is None:
+        step_size = min(region.zoom) / 16
+    return np_raymarch_until_background(
+        region.get_array(),
+        start_coord,
+        direction_vector,
+        step_size=step_size,
+        max_steps=max_steps,
+        max_distance=max_distance,
+        threshold=threshold,
+    )
 
 
 def max_distance_ray_cast_convex(

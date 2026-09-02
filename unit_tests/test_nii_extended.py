@@ -465,5 +465,146 @@ class Test_NII_GetSegArray(unittest.TestCase):
         self.assertEqual(result.shape, arr.shape)
 
 
+class Test_relabel_by_position(unittest.TestCase):
+    def _stacked(self, labels=(7, 3, 5)):
+        """Three blobs stacked along axis 2, listed from low index to high index."""
+        arr = np.zeros((10, 10, 24), dtype=np.uint16)
+        for i, label in enumerate(labels):
+            arr[4:6, 4:6, 2 + 8 * i : 5 + 8 * i] = label
+        return _make_nii(arr)
+
+    def test_numbering_runs_along_the_requested_direction(self):
+        nii = self._stacked()
+        self.assertNotIn("I", nii.orientation)  # axis 2 is 'S', so the direction is flipped
+        coms = nii.relabel_by_position("I").center_of_masses()
+        self.assertGreater(coms[1][2], coms[2][2])
+        self.assertGreater(coms[2][2], coms[3][2])
+
+    def test_opposite_direction_reverses_numbering(self):
+        nii = self._stacked()
+        coms = nii.relabel_by_position("S").center_of_masses()
+        self.assertLess(coms[1][2], coms[2][2])
+        self.assertLess(coms[2][2], coms[3][2])
+
+    def test_offset_shifts_the_label_range(self):
+        nii = self._stacked()
+        self.assertEqual(sorted(nii.relabel_by_position("I", offset=100).unique()), [101, 102, 103])
+
+    def test_result_does_not_depend_on_input_orientation(self):
+        nii = self._stacked()
+        expected = nii.relabel_by_position("I")
+        for ori in (("P", "I", "R"), ("L", "A", "S"), ("A", "S", "L")):
+            rotated = nii.reorient(ori).relabel_by_position("I").reorient(nii.orientation)
+            self.assertTrue(np.array_equal(rotated.get_seg_array(), expected.get_seg_array()), f"differs for {ori}")
+
+    def test_inplace_variant_matches(self):
+        nii = self._stacked()
+        expected = nii.relabel_by_position("I")
+        clone = nii.copy()
+        clone.relabel_by_position_("I")
+        self.assertTrue(np.array_equal(clone.get_seg_array(), expected.get_seg_array()))
+
+    def test_single_label_is_renumbered_to_one(self):
+        arr = np.zeros((8, 8, 8), dtype=np.uint16)
+        arr[2:5, 2:5, 2:5] = 42
+        self.assertEqual(sorted(_make_nii(arr).relabel_by_position("I").unique()), [1])
+
+    def test_labels_are_preserved_in_count(self):
+        nii = self._stacked(labels=(11, 4, 9))
+        out = nii.relabel_by_position("I")
+        self.assertEqual(len(out.unique()), len(nii.unique()))
+        self.assertEqual(np.count_nonzero(out.get_seg_array()), np.count_nonzero(nii.get_seg_array()))
+
+
+class Test_bbox_chain_filter(unittest.TestCase):
+    def _spine_with_outlier(self, zoom=(1.0, 1.0, 1.0)):
+        """Three blobs stacked along axis 2 with 6-voxel gaps, plus one unrelated blob far away."""
+        arr = np.zeros((40, 40, 60), dtype=np.uint16)
+        arr[18:22, 18:22, 5:12] = 1
+        arr[18:22, 18:22, 18:25] = 2
+        arr[18:22, 18:22, 31:45] = 3  # largest -> the chain anchor
+        arr[2:6, 2:6, 50:56] = 4  # unrelated
+        return _make_nii(arr, zoom=zoom)
+
+    def test_zero_margin_keeps_only_the_largest_component(self):
+        nii = self._spine_with_outlier()
+        self.assertEqual(sorted(nii.filter_connected_components_by_bbox_chain(margin_mm=0.0).unique()), [3])
+
+    def test_margin_chains_across_gaps_but_excludes_the_outlier(self):
+        nii = self._spine_with_outlier()
+        self.assertEqual(sorted(nii.filter_connected_components_by_bbox_chain(margin_mm=4.0).unique()), [1, 2, 3])
+
+    def test_extra_margin_applies_only_to_its_axis(self):
+        nii = self._spine_with_outlier()
+        out = nii.filter_connected_components_by_bbox_chain(margin_mm=0.0, extra_margin_mm=8.0, extra_margin_axis="S")
+        self.assertEqual(sorted(out.unique()), [1, 2, 3])
+
+    def test_large_margin_reaches_everything(self):
+        nii = self._spine_with_outlier()
+        self.assertEqual(sorted(nii.filter_connected_components_by_bbox_chain(margin_mm=40.0).unique()), [1, 2, 3, 4])
+
+    def test_margin_is_physical_not_voxel(self):
+        """At 4 mm spacing a 4 mm margin is one voxel, so the 6-voxel gap must not close."""
+        nii = self._spine_with_outlier(zoom=(1.0, 1.0, 4.0))
+        self.assertEqual(sorted(nii.filter_connected_components_by_bbox_chain(margin_mm=4.0).unique()), [3])
+
+    def test_original_labels_are_preserved(self):
+        nii = self._spine_with_outlier()
+        out = nii.filter_connected_components_by_bbox_chain(margin_mm=4.0)
+        kept = out.get_seg_array()
+        original = nii.get_seg_array()
+        self.assertTrue(np.array_equal(kept[kept != 0], original[kept != 0]))
+
+    def test_single_component_is_untouched(self):
+        arr = np.zeros((10, 10, 10), dtype=np.uint16)
+        arr[2:6, 2:6, 2:6] = 9
+        nii = _make_nii(arr)
+        out = nii.filter_connected_components_by_bbox_chain(margin_mm=1.0)
+        self.assertTrue(np.array_equal(out.get_seg_array(), arr))
+
+    def test_extra_margin_without_axis_is_rejected(self):
+        nii = self._spine_with_outlier()
+        with self.assertRaises(AssertionError):
+            nii.filter_connected_components_by_bbox_chain(extra_margin_mm=5.0)
+
+
+class Test_slices_overlap(unittest.TestCase):
+    def test_overlap_cases(self):
+        from TPTBox.core.np_utils import np_slices_overlap
+
+        self.assertTrue(np_slices_overlap(slice(0, 5), slice(5, 9)))  # touching borders count
+        self.assertTrue(np_slices_overlap(slice(2, 4), slice(0, 9)))  # nested
+        self.assertTrue(np_slices_overlap(slice(0, 9), slice(2, 4)))  # nested, other way
+        self.assertTrue(np_slices_overlap(slice(0, 6), slice(4, 9)))  # partial
+        self.assertFalse(np_slices_overlap(slice(0, 5), slice(7, 9)))
+        self.assertFalse(np_slices_overlap(slice(7, 9), slice(0, 5)))
+
+    def test_is_symmetric(self):
+        from TPTBox.core.np_utils import np_slices_overlap
+
+        for a, b in [(slice(0, 5), slice(5, 9)), (slice(0, 5), slice(7, 9)), (slice(1, 8), slice(3, 4))]:
+            self.assertEqual(np_slices_overlap(a, b), np_slices_overlap(b, a))
+
+
+class Test_label_interface_thickness_nii(unittest.TestCase):
+    def _two_slabs(self, zoom=(1.0, 1.0, 1.0)):
+        seg = np.zeros((40, 20, 20), dtype=np.uint8)
+        seg[10:18] = 1
+        seg[18:22] = 2
+        return _make_nii(seg, zoom=zoom)
+
+    def test_returns_millimetres_using_zoom(self):
+        one = self._two_slabs().label_interface_thickness(1, 2)
+        two = self._two_slabs(zoom=(2.0, 1.0, 1.0)).label_interface_thickness(1, 2)
+        self.assertAlmostEqual(float(np.nanmean(two)) / float(np.nanmean(one)), 2.0, places=5)
+
+    def test_matches_the_array_level_function(self):
+        from TPTBox.core.np_utils import np_label_interface_thickness
+
+        nii = self._two_slabs(zoom=(1.5, 1.0, 1.0))
+        expected = np_label_interface_thickness(nii.get_seg_array(), 1, 2, zoom=nii.zoom)
+        self.assertTrue(np.allclose(nii.label_interface_thickness(1, 2), expected, equal_nan=True))
+
+
 if __name__ == "__main__":
     unittest.main()

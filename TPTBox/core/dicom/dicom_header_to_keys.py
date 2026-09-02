@@ -39,6 +39,9 @@ dixon_mapping = {
     "phase": "phase",
     "mag": "mag",
     "sub": "subtraction",
+    "m_ffe": "magnitude",
+    "p_ffe": "phase",
+    "magnitude": "magnitude",
 }
 dixon_mapping = {**dixon_mapping, **{v: v for v in dixon_mapping.values()}}
 map_series_description_to_file_format_default = {
