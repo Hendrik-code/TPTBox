@@ -79,9 +79,7 @@ def _argmax_with_gpu_fallback(
     # take the CPU path (torch.cuda.mem_get_info would reject the argument).
     if isinstance(device, str):
         device = torch.device(device)
-    _accel = device is not None and (
-        (device.type == "cuda" and torch.cuda.is_available()) or device.type == "mps"
-    )
+    _accel = device is not None and ((device.type == "cuda" and torch.cuda.is_available()) or device.type == "mps")
     if not _accel:
         return _chunked_argmax_cpu(t)
 
