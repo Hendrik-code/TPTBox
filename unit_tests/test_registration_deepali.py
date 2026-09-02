@@ -299,18 +299,14 @@ class TestGeneralRegistrationFlags(unittest.TestCase):
         """
         import torch  # noqa: PLC0415
 
-        from TPTBox import Location, calc_poi_from_subreg_vert, to_nii  # noqa: PLC0415
+        from TPTBox import Location, calc_poi_from_subreg_vert  # noqa: PLC0415
         from TPTBox.registration import General_Registration  # noqa: PLC0415
+        from TPTBox.tests.test_utils import get_test_ct  # noqa: PLC0415
 
-        ct = to_nii("/media/data/robert/code/TPTBox/TPTBox/tests/sample_ct/sub-ct_label-22_ct.nii.gz", False)
-        vert = to_nii(
-            "/media/data/robert/code/TPTBox/TPTBox/tests/sample_ct/sub-ct_seg-vert_label-22_msk.nii.gz",
-            True,
-        )
-        sub = to_nii(
-            "/media/data/robert/code/TPTBox/TPTBox/tests/sample_ct/sub-ct_seg-subreg_label-22_msk.nii.gz",
-            True,
-        )
+        # Use the packaged sample CT, like every other test in this file. This used
+        # to hardcode an absolute path on one developer's machine, so it failed for
+        # everyone else and in CI.
+        ct, sub, vert, _ = get_test_ct()
         poi_fix = calc_poi_from_subreg_vert(
             vert,
             sub,
