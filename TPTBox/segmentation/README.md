@@ -38,8 +38,12 @@ from TPTBox.segmentation import (
 All external tools are optional: `import TPTBox.segmentation` succeeds without them, and each
 entry point only raises (naming the extra to install) when it is actually called.
 
-Note the nnU-Net pin. `TPTBox.segmentation.nnUnet_utils` mirrors the nnU-Net v2.4 plans/trainer
-layout; the `seg` extra therefore requires `nnunetv2>=2.4,<2.5`.
+About the nnU-Net version. `TPTBox.segmentation.nnUnet_utils` is a self-contained fork: it reads
+the checkpoint's own `plans.json` and builds its own `PlansManager`, so it is not tied to the
+plans layout of whichever nnU-Net you have installed. The `seg` extra therefore mirrors SPINEPS'
+own constraint rather than imposing one of its own — `nnunetv2>=2.8,<3.0` on Python 3.10+, and
+`nnunetv2==2.4.2` on Python 3.9 (the last release that still supports it). That way
+`TPTBox[seg]` and `spineps` can be installed side by side.
 
 ## Example
 

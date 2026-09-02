@@ -1561,7 +1561,7 @@ class NII(NII_Math):
             import ants
         except Exception:
             log.print_error()
-            log.on_fail("run 'pip install antspyx' to install hf-deepali")
+            log.on_fail("this function needs antspyx: run 'pip install antspyx'")
             raise
         try:
             from ants.utils.convert_nibabel import from_nibabel

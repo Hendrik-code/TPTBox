@@ -18,12 +18,16 @@ try:
 except ImportError as _e_rib:
     add_ribs_to_vert_spine = missing_dependency_func("add_ribs_to_vert_spine", _e_rib, "seg", _SEG_PACKAGES)  # type: ignore[assignment]
 
+# `spineps` has no TPTBox extra on purpose: it declares a dependency on TPTBox
+# itself, so `TPTBox[spineps]` would be circular and Poetry would refuse to solve
+# it. Pass extra=None so the hint says `pip install spineps` rather than pointing
+# at an extra that does not contain it.
 try:
     from TPTBox.segmentation.spineps import _run_spineps_all, get_outpaths_spineps, run_spineps
 except ImportError as _e_spineps:
-    _run_spineps_all = missing_dependency_func("_run_spineps_all", _e_spineps, "seg", "spineps")  # type: ignore[assignment]
-    get_outpaths_spineps = missing_dependency_func("get_outpaths_spineps", _e_spineps, "seg", "spineps")  # type: ignore[assignment]
-    run_spineps = missing_dependency_func("run_spineps", _e_spineps, "seg", "spineps")  # type: ignore[assignment]
+    _run_spineps_all = missing_dependency_func("_run_spineps_all", _e_spineps, None, "spineps")  # type: ignore[assignment]
+    get_outpaths_spineps = missing_dependency_func("get_outpaths_spineps", _e_spineps, None, "spineps")  # type: ignore[assignment]
+    run_spineps = missing_dependency_func("run_spineps", _e_spineps, None, "spineps")  # type: ignore[assignment]
 
 try:
     from TPTBox.segmentation.VibeSeg.vibeseg import (

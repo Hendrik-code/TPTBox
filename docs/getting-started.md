@@ -19,9 +19,10 @@ poetry install --with dev
 
 ### Optional dependencies
 
-The core install stays light. Every optional backend is guarded: importing a sub-package always
-succeeds, and only *calling* an entry point that needs a missing backend raises an `ImportError`
-naming what to install.
+The core install stays light. The DICOM, segmentation and registration backends are guarded:
+importing `TPTBox.core.dicom`, `TPTBox.segmentation` or `TPTBox.registration` always succeeds, and
+only *calling* an entry point whose backend is missing raises an `ImportError` naming what to
+install. (`antspyx` is the exception — its call sites still surface a plain `ModuleNotFoundError`.)
 
 ```bash
 # DICOM -> NIfTI conversion (TPTBox.core.dicom)
@@ -30,13 +31,13 @@ pip install "TPTBox[dicom]"          # pydicom, dicom2nifti
 # nnU-Net / VibeSeg inference (TPTBox.segmentation)
 pip install "TPTBox[seg]"            # torch, nnunetv2, acvl_utils, batchgenerators
 
-# Both at once
-pip install "TPTBox[dicom,seg]"
+# Intensity-based and deformable registration (DeepALI)
+pip install "TPTBox[reg]"            # torch, hf-deepali
 
-# Deep learning registration (DeepALI)
-pip install torch hf-deepali
+# Several at once
+pip install "TPTBox[dicom,seg,reg]"
 
-# SPINEPS spine segmentation
+# SPINEPS spine segmentation - no extra, see the note below
 pip install spineps
 
 # 3D mesh visualisation
@@ -47,9 +48,20 @@ pip install antspyx
 ```
 
 !!! note "nnU-Net version"
-    `TPTBox.segmentation.nnUnet_utils` mirrors the nnU-Net v2.4 plans/trainer layout, so the
-    `seg` extra pins `nnunetv2>=2.4,<2.5`. Installing a newer nnU-Net alongside SPINEPS is the
-    usual cause of "SPINEPS and nnU-Net do not work together" errors.
+    `TPTBox.segmentation.nnUnet_utils` is a self-contained fork of nnU-Net's inference code: it
+    reads the checkpoint's own `plans.json` and builds its own `PlansManager`, so it is not tied
+    to the plans layout of the installed nnU-Net. TPTBox therefore does not impose a version of
+    its own — the `seg` extra mirrors what SPINEPS asks for: `nnunetv2>=2.8,<3.0` on Python 3.10+,
+    and `nnunetv2==2.4.2` on Python 3.9, which is the last release supporting it. `TPTBox[seg]`
+    and `spineps` can be installed side by side.
+
+    If you also use `totalspineseg`, note that it requires `nnunetv2<=2.4.2`, which cannot be
+    satisfied together with SPINEPS on Python 3.10+. That constraint comes from `totalspineseg`,
+    not from TPTBox.
+
+!!! note "SPINEPS has no extra"
+    `spineps` depends on TPTBox itself, so a `TPTBox[spineps]` extra would be a circular
+    dependency. Install it directly with `pip install spineps`.
 
 ## Core Concepts
 

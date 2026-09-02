@@ -42,6 +42,8 @@ from TPTBox.registration import (
 ## Installation of optional dependency
 
 ```bash
+pip install "TPTBox[reg]"      # torch + hf-deepali
+# or directly:
 pip install torch hf-deepali   # needed by every entry point except Point_Registration
 ```
 

@@ -10,7 +10,7 @@ You can verify alignment by opening the images in ITKSnap with "open additional 
 |---|---|
 | `stitching(nii_list, out, ...)` | Stitch a list of `NII` objects; returns `(result_nii, ramp_nii)` |
 | `stitching_raw(paths, out, ...)` | Stitch from file paths directly |
-| `GNC_stitch_T2w(HWS, BWS, LWS, n4_after_stitch=False)` | Stitch the three German National Cohort sagittal T2w spine stations (cervical, thoracic, lumbar) into one volume |
+| `NAKO_stitch_T2w(HWS, BWS, LWS, n4_after_stitch=False)` | Stitch the three NAKO sagittal T2w spine stations (HWS cervical, BWS thoracic, LWS lumbar) into one volume |
 
 ![Example of a stitching](https://raw.githubusercontent.com/Hendrik-code/TPTBox/main/TPTBox/stitching/stitching.jpg "Example of a stitching")
 

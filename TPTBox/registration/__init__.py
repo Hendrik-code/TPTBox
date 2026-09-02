@@ -1,73 +1,28 @@
 from __future__ import annotations
 
-from typing import Any
+from TPTBox.core.internal.optional_deps import missing_dependency_class, missing_dependency_func
 
 # ---------------------------------------------------------------------------
-# Some of the registration entry points require ``hf-deepali`` (and therefore
-# also PyTorch). ``hf-deepali`` is an *optional* dependency: importing this
-# package must succeed even when it is missing, and only *using* one of the
-# deepali-backed classes should surface an error.
-#
-# For each optional class we try to import it. On failure we replace it with a
-# stub that raises a clear ``ImportError`` the first time the caller touches it
-# (instantiation *or* attribute access). Users then get "install hf-deepali
-# (also needs PyTorch)" instead of a vague ``NameError`` from Python.
+# Most registration entry points require ``hf-deepali`` (and therefore PyTorch),
+# which is the optional ``reg`` extra. Importing this package must succeed even
+# when it is missing; only *using* a deepali-backed entry point should fail, and
+# it should say what to install. The stub factories live in
+# TPTBox.core.internal.optional_deps and are shared with TPTBox.segmentation and
+# TPTBox.core.dicom.
 # ---------------------------------------------------------------------------
+
+_REG_EXTRA = "reg"
+_REG_PACKAGES = "torch hf-deepali"
 
 
 def _make_missing_deepali_stub(name: str, exc: BaseException):
-    """Return a class placeholder for a deepali-backed entry point.
-
-    Any instantiation or attribute access raises an ``ImportError`` explaining
-    that ``hf-deepali`` (and PyTorch) must be installed. ``isinstance``/subclass
-    checks are safe – the stub is a plain class.
-    """
-    original_error = str(exc) or exc.__class__.__name__
-
-    class _MissingDeepali:
-        __name__ = name
-        __qualname__ = name
-        _tptbox_optional_dep = "hf-deepali"
-        _tptbox_import_error = original_error
-
-        def __init__(self, *_args: Any, **_kwargs: Any) -> None:  # noqa: D401
-            raise ImportError(
-                f"`{name}` requires the optional dependency `hf-deepali` "
-                f"(which in turn requires PyTorch). Install both with:\n"
-                f"    pip install torch hf-deepali\n"
-                f"Original import error was: {original_error}"
-            )
-
-        def __class_getitem__(cls, item):  # keep type-annotations happy
-            return cls
-
-        def __getattr__(self, item):
-            raise ImportError(
-                f"`{name}.{item}` requires `hf-deepali` (and PyTorch). "
-                f"Install with:  pip install torch hf-deepali\n"
-                f"Original import error was: {original_error}"
-            )
-
-    _MissingDeepali.__name__ = name
-    _MissingDeepali.__qualname__ = name
-    return _MissingDeepali
+    """Class placeholder for a deepali-backed entry point."""
+    return missing_dependency_class(name, exc, _REG_EXTRA, _REG_PACKAGES)
 
 
 def _make_missing_deepali_func(name: str, exc: BaseException):
-    """Return a callable stub for a deepali-backed helper function."""
-    original_error = str(exc) or exc.__class__.__name__
-
-    def _stub(*_args: Any, **_kwargs: Any) -> Any:
-        raise ImportError(
-            f"`{name}()` requires the optional dependency `hf-deepali` "
-            f"(which in turn requires PyTorch). Install both with:\n"
-            f"    pip install torch hf-deepali\n"
-            f"Original import error was: {original_error}"
-        )
-
-    _stub.__name__ = name
-    _stub.__qualname__ = name
-    return _stub
+    """Callable stub for a deepali-backed helper function."""
+    return missing_dependency_func(name, exc, _REG_EXTRA, _REG_PACKAGES)
 
 
 # --- SITK point registration (no deepali needed) ---------------------------
@@ -77,10 +32,12 @@ try:
         ridged_points_from_poi,
         ridged_points_from_subreg_vert,
     )
-except ImportError as _e_sitk:  # SimpleITK missing - very unlikely, still guard.
-    Point_Registration = _make_missing_deepali_stub("Point_Registration", _e_sitk)  # type: ignore[misc,assignment]
-    ridged_points_from_poi = _make_missing_deepali_func("ridged_points_from_poi", _e_sitk)  # type: ignore[assignment]
-    ridged_points_from_subreg_vert = _make_missing_deepali_func("ridged_points_from_subreg_vert", _e_sitk)  # type: ignore[assignment]
+except ImportError as _e_sitk:  # SimpleITK is a hard dependency - very unlikely, still guard.
+    Point_Registration = missing_dependency_class("Point_Registration", _e_sitk, None, "SimpleITK")  # type: ignore[misc,assignment]
+    ridged_points_from_poi = missing_dependency_func("ridged_points_from_poi", _e_sitk, None, "SimpleITK")  # type: ignore[assignment]
+    ridged_points_from_subreg_vert = missing_dependency_func(  # type: ignore[assignment]
+        "ridged_points_from_subreg_vert", _e_sitk, None, "SimpleITK"
+    )
 
 # --- Deepali closed-form point registration --------------------------------
 try:

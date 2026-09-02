@@ -18,23 +18,29 @@ from typing import Any
 __all__ = ["missing_dependency_class", "missing_dependency_func"]
 
 
-def _message(name: str, extra: str, packages: str, original_error: str, call: str) -> str:
-    return (
-        f"`{name}{call}` requires optional dependencies that are not installed.\n"
-        f"    pip install 'TPTBox[{extra}]'\n"
-        f"or install them directly:\n"
-        f"    pip install {packages}\n"
-        f"Original import error was: {original_error}"
-    )
+def _message(name: str, extra: str | None, packages: str, original_error: str, call: str) -> str:
+    """Build the install hint.
+
+    ``extra`` is ``None`` for backends that have no TPTBox extra - notably
+    ``spineps``, which depends on TPTBox itself and so cannot be declared as one.
+    Naming an extra that does not contain the package would send the user to an
+    install command that cannot fix their error.
+    """
+    lines = [f"`{name}{call}` requires optional dependencies that are not installed."]
+    if extra is not None:
+        lines += [f"    pip install 'TPTBox[{extra}]'", "or install them directly:"]
+    lines += [f"    pip install {packages}", f"Original import error was: {original_error}"]
+    return "\n".join(lines)
 
 
-def missing_dependency_func(name: str, exc: BaseException, extra: str, packages: str) -> Callable[..., Any]:
+def missing_dependency_func(name: str, exc: BaseException, extra: str | None, packages: str) -> Callable[..., Any]:
     """Return a callable stub that raises a helpful ``ImportError`` when called.
 
     Args:
         name: Name of the entry point being replaced.
         exc: The original ``ImportError``, quoted in the message.
-        extra: The ``pip install 'TPTBox[...]'`` extra that provides the backend.
+        extra: The ``pip install 'TPTBox[...]'`` extra that provides the backend,
+            or ``None`` when no extra provides it (install the packages directly).
         packages: Space-separated package names, for a direct pip install.
     """
     original_error = str(exc) or exc.__class__.__name__
@@ -49,7 +55,7 @@ def missing_dependency_func(name: str, exc: BaseException, extra: str, packages:
     return _stub
 
 
-def missing_dependency_class(name: str, exc: BaseException, extra: str, packages: str) -> type:
+def missing_dependency_class(name: str, exc: BaseException, extra: str | None, packages: str) -> type:
     """Return a class placeholder that raises on instantiation or attribute access.
 
     ``isinstance``/``issubclass`` checks stay safe - the stub is a plain class.
