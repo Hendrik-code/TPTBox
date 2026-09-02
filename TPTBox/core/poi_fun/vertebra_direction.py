@@ -8,6 +8,7 @@ import numpy as np
 from numpy.linalg import norm
 
 from TPTBox import NII, POI, Print_Logger, calc_poi_from_subreg_vert
+from TPTBox.core.np_utils import np_angle_between
 from TPTBox.core.poi_fun._help import make_spine_plot, sacrum_w_o_direction
 from TPTBox.core.vert_constants import DIRECTIONS, Location, Vertebra_Instance, _plane_dict, never_called
 
@@ -407,6 +408,32 @@ def get_vert_direction_matrix(poi: POI, vert_id: int, to_pir: bool = False) -> t
     from_vert_orient = np.stack([P, I, R], axis=1)
     to_vert_orient = np.linalg.inv(from_vert_orient)
     return to_vert_orient, from_vert_orient
+
+
+def get_vert_direction_angles(poi: POI, vert_id: int, to_pir: bool = False, degrees: bool = True) -> tuple[float, float, float]:
+    """Return how far a vertebra's local frame is tilted from the global PIR axes.
+
+    Each of the vertebra's Posterior/Inferior/Right direction vectors is compared with the
+    corresponding global axis, giving one angle per axis. Useful as a quality check: a healthy
+    frame stays within a few degrees of orthogonal to its neighbours, whereas an implausibly
+    large angle (e.g. a "posterior" direction more than 90 degrees from global posterior)
+    indicates that the direction landmarks are wrong.
+
+    Args:
+        poi: ``POI`` object with pre-computed vertebra direction landmarks.
+        vert_id: Vertebra identifier (integer label).
+        to_pir: Whether to convert the POI to isotropic PIR space before computing.
+            Defaults to ``False``.
+        degrees: Return the angles in degrees rather than radians. Defaults to ``True``.
+
+    Returns:
+        Tuple of three angles ``(posterior, inferior, right)`` between the vertebra's direction
+        vectors and the global PIR axes.
+    """
+    directions = get_vert_direction_PIR(poi, vert_id=vert_id, to_pir=to_pir)
+    global_pir = (np.array([1, 0, 0]), np.array([0, 1, 0]), np.array([0, 0, 1]))
+    a, b, c = (np_angle_between(v, g, degrees=degrees) for v, g in zip(directions, global_pir))
+    return a, b, c
 
 
 def calc_center_spinal_cord(

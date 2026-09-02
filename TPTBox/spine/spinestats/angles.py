@@ -10,6 +10,7 @@ import numpy as np
 from TPTBox import POI, Image_Reference
 from TPTBox.core.compat import zip_strict
 from TPTBox.core.nii_wrapper import to_nii
+from TPTBox.core.np_utils import np_angle_between, np_unit_vector
 from TPTBox.core.vert_constants import DIRECTIONS, Location, Vertebra_Instance
 from TPTBox.spine.snapshot2D.snapshot_modular import Snapshot_Frame, create_snapshot
 
@@ -158,39 +159,9 @@ curvature_definition = {
 }
 
 
-def unit_vector(vector: np.ndarray) -> np.ndarray:
-    """Return the unit vector of the input vector.
-
-    Args:
-        vector: Any non-zero numeric array.
-
-    Returns:
-        Array with the same direction as ``vector`` but unit length.
-    """
-    return vector / np.linalg.norm(vector)
-
-
-def angle_between(v1, v2) -> float:
-    """Calculates the angle in radians between two vectors.
-
-    Args:
-        v1 (tuple): The first vector.
-        v2 (tuple): The second vector.
-
-    Returns:
-        float: The angle in radians between vectors 'v1' and 'v2'.
-
-    Examples:
-        >>> angle_between((1, 0, 0), (0, 1, 0))
-        1.5707963267948966
-        >>> angle_between((1, 0, 0), (1, 0, 0))
-        0.0
-        >>> angle_between((1, 0, 0), (-1, 0, 0))
-        3.141592653589793
-    """
-    v1_u = unit_vector(v1)
-    v2_u = unit_vector(v2)
-    return np.arccos(np.clip(np.dot(v1_u, v2_u), -1.0, 1.0))
+# Canonical implementations live in np_utils; re-exported here under their historic names.
+unit_vector = np_unit_vector
+angle_between = np_angle_between
 
 
 def get_to_space(a, b, c) -> tuple[np.ndarray, np.ndarray]:
