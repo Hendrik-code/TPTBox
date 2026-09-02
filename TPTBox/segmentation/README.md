@@ -9,7 +9,6 @@ over SPINEPS, VibeSeg/TotalVibeSeg, and nnU-Net.
 from TPTBox.segmentation import (
     run_spineps,
     run_vibeseg,
-    run_totalvibeseg,
     run_nnunet,
     run_inference_on_file,
     extract_vertebra_bodies_from_VibeSeg,
@@ -21,9 +20,8 @@ from TPTBox.segmentation import (
 
 | Function | Module | Description |
 |---|---|---|
-| `run_spineps(img_nii, model, ...)` | `spineps.py` | Run SPINEPS spine segmentation on a NIfTI; returns vertebra + subregion masks |
+| `run_spineps(file_path, dataset=None, ...)` | `spineps.py` | Run SPINEPS spine segmentation on a file path / `BIDS_FILE`; returns a `dict` of output paths |
 | `run_vibeseg(img_nii, ...)` | `VibeSeg/vibeseg.py` | Run VibeSeg body composition segmentation |
-| `run_totalvibeseg(img_nii, ...)` | `VibeSeg/vibeseg.py` | Run TotalVibeSeg — extended label set |
 | `run_nnunet(img_nii, model_dir, ...)` | `VibeSeg/vibeseg.py` | Generic nnU-Net inference on a single NIfTI |
 | `run_inference_on_file(path, ...)` | `nnUnet_utils/inference_api.py` | Low-level nnU-Net inference on a file path |
 | `add_ribs_to_vert_spine(vert, spine, ...)` | `rib/add_ribs.py` | Merge left/right rib labels into an existing vertebra + spine segmentation; optionally runs VibeSeg (dataset 12) on the source CT to obtain the raw rib mask |
@@ -33,22 +31,29 @@ from TPTBox.segmentation import (
 | Pipeline | Requirement |
 |---|---|
 | SPINEPS | `pip install spineps` + model weights |
-| VibeSeg | `pip install nnunetv2` + model weights (auto-downloaded on first run) |
-| Generic nnU-Net | `pip install nnunetv2` + custom model directory |
+| VibeSeg | `pip install "TPTBox[seg]"` + model weights (auto-downloaded on first run) |
+| Generic nnU-Net | `pip install "TPTBox[seg]"` + custom model directory |
 | Rib assignment (`add_ribs_to_vert_spine`) | calls into VibeSeg/SPINEPS if the segmentation is missing. |
 
-All external tools are imported lazily — the core TPTBox package installs and imports cleanly
-without them.
+All external tools are optional: `import TPTBox.segmentation` succeeds without them, and each
+entry point only raises (naming the extra to install) when it is actually called.
+
+Note the nnU-Net pin. `TPTBox.segmentation.nnUnet_utils` mirrors the nnU-Net v2.4 plans/trainer
+layout; the `seg` extra therefore requires `nnunetv2>=2.4,<2.5`.
 
 ## Example
 
 ```python
-from TPTBox import NII
+from TPTBox import to_nii
 from TPTBox.segmentation import run_spineps
 
-ct = NII.load("ct.nii.gz", seg=False)
-vert_seg, subreg_seg = run_spineps(ct, model="small")
-vert_seg.save("vertebrae.nii.gz")
+# run_spineps takes a *path* (or BIDS_FILE), not an NII, and writes its results
+# into the dataset's derivatives folder. It returns the output paths it produced.
+output_paths = run_spineps("sub-001_T2w.nii.gz", model_semantic="t2w")
+
+vert_seg = to_nii(output_paths["out_vert"], seg=True)
+subreg_seg = to_nii(output_paths["out_spine"], seg=True)
+print(vert_seg.unique())
 ```
 
 

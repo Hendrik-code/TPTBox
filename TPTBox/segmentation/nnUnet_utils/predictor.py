@@ -32,15 +32,41 @@ from TPTBox.segmentation.nnUnet_utils.sliding_window_prediction import compute_g
 logger = Print_Logger()
 
 
+def _is_cuda(device) -> bool:
+    """Return ``True`` only for CUDA devices.
+
+    ``torch.cuda.mem_get_info`` rejects its *argument* rather than probing the
+    environment, so it raises ``ValueError: Expected a cuda device, but got: cpu``
+    even on a machine that has a GPU. Every caller of the two helpers below must
+    therefore dispatch on the device type, exactly like :func:`empty_cache`.
+    """
+    if isinstance(device, str):
+        device = torch.device(device)
+    return isinstance(device, torch.device) and device.type == "cuda"
+
+
 def get_gpu_memory_MB(device) -> float:
-    """Return the amount of free GPU memory in megabytes for the given device."""
+    """Return the amount of free GPU memory in megabytes for the given device.
+
+    Non-CUDA devices (CPU, MPS) have no VRAM to report and return ``inf``, which
+    makes the ``check_mem`` sizing heuristic fall back to the caller's
+    ``memory_max`` cap instead of chunking against a meaningless number.
+    """
+    if not _is_cuda(device):
+        return float("inf")
     free, total = torch.cuda.mem_get_info(device)
     # print(f"{free=}", f"{total=}")
     return free / 1024**2
 
 
 def get_gpu_util(device) -> float:
-    """Return the fraction of GPU memory currently in use (0.0 = idle, 1.0 = full)."""
+    """Return the fraction of GPU memory currently in use (0.0 = idle, 1.0 = full).
+
+    Non-CUDA devices report ``0.0`` so the "wait until the GPU frees up" loop is
+    skipped entirely on CPU/MPS.
+    """
+    if not _is_cuda(device):
+        return 0.0
     free, total = torch.cuda.mem_get_info(device)
     # print(f"{free=}", f"{total=}")
     return 1 - free / total

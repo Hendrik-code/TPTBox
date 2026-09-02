@@ -44,6 +44,24 @@ scikit-image = [
   { version = ">=0.24", python = ">=3.11" }
 ]
 
+# --- OPTIONAL EXTRAS -------------------------------------------------------
+# Declared here so `pip install "TPTBox[dicom]"` resolves them, but marked
+# optional so a plain install stays light. The matching sub-packages
+# (TPTBox.core.dicom, TPTBox.segmentation) import successfully without these
+# and only raise - naming the extra - when an entry point is actually called.
+pydicom = { version = "*", optional = true }
+dicom2nifti = { version = "*", optional = true }
+torch = { version = "*", optional = true }
+# nnU-Net 2.5 changed the plans/trainer layout that TPTBox.segmentation.nnUnet_utils
+# mirrors; 2.4.2 is the version the tutorials are written against.
+nnunetv2 = { version = ">=2.4,<2.5", optional = true }
+acvl-utils = { version = "*", optional = true }
+batchgenerators = { version = "*", optional = true }
+
+[tool.poetry.extras]
+dicom = ["pydicom", "dicom2nifti"]
+seg = ["torch", "nnunetv2", "acvl-utils", "batchgenerators"]
+
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8.1.1"
 # vtk 9.7.0 dropped cp39 wheels (and publishes no requires-python metadata,

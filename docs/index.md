@@ -16,7 +16,7 @@ TPTBox provides a unified interface for the most common tasks in medical image p
 - **Points of Interest (POI)** — compute and manipulate anatomical landmarks on vertebrae
 - **2D snapshots** — modular, multi-view MIP and overlay image generation
 - **3D mesh generation** — surface meshes from segmentations with configurable rendering
-- **Registration** — rigid (point- and intensity-based) and deformable registration via ANTs and DeepALI
+- **Registration** — rigid point registration via SimpleITK, plus intensity-based and deformable registration via DeepALI (optional `hf-deepali`)
 - **Segmentation** — integration with SPINEPS and nnU-Net inference pipelines
 - **Image stitching** — multi-station field-of-view stitching
 - **Logging** — structured, consistent logging across long-running pipelines
@@ -34,8 +34,10 @@ nii_1mm = nii_ras.rescale((1.0, 1.0, 1.0))
 # Iterate over a BIDS dataset
 bids = BIDS_Global_info(["path/to/dataset"], parents=["rawdata"])
 for subject, container in bids.enumerate_subjects():
-    t2w = container.new_query().filter("format", "T2w").first()
-    if t2w is not None:
+    query = container.new_query(flatten=True)
+    query.filter_format("T2w")
+    query.filter_filetype("nii.gz")
+    for t2w in query.loop_list():
         nii = t2w.open_nii()
 ```
 

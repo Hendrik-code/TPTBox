@@ -19,13 +19,37 @@ poetry install --with dev
 
 ### Optional dependencies
 
+The core install stays light. Every optional backend is guarded: importing a sub-package always
+succeeds, and only *calling* an entry point that needs a missing backend raises an `ImportError`
+naming what to install.
+
 ```bash
+# DICOM -> NIfTI conversion (TPTBox.core.dicom)
+pip install "TPTBox[dicom]"          # pydicom, dicom2nifti
+
+# nnU-Net / VibeSeg inference (TPTBox.segmentation)
+pip install "TPTBox[seg]"            # torch, nnunetv2, acvl_utils, batchgenerators
+
+# Both at once
+pip install "TPTBox[dicom,seg]"
+
 # Deep learning registration (DeepALI)
-pip install hf-deepali
+pip install torch hf-deepali
+
+# SPINEPS spine segmentation
+pip install spineps
 
 # 3D mesh visualisation
 pip install pyvista vtk
+
+# N4 bias-field correction and some NII resampling helpers
+pip install antspyx
 ```
+
+!!! note "nnU-Net version"
+    `TPTBox.segmentation.nnUnet_utils` mirrors the nnU-Net v2.4 plans/trainer layout, so the
+    `seg` extra pins `nnunetv2>=2.4,<2.5`. Installing a newer nnU-Net alongside SPINEPS is the
+    usual cause of "SPINEPS and nnU-Net do not work together" errors.
 
 ## Core Concepts
 
