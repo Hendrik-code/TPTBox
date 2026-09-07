@@ -124,6 +124,7 @@ def run_inference_on_file(
     _key_ResEnc: str = "__nnUNet*ResEnc",
     fail_on_missing_memory=False,
     _cpu_chunks: int | None = None,
+    no_squash=False,
     logger=logger,
 ) -> tuple[Image_Reference, np.ndarray | None]:
     """Load a VibeSeg model and run inference on the supplied NIfTI images.
@@ -344,9 +345,9 @@ def run_inference_on_file(
     if orientation is not None:
         logger.print("orientation", orientation, f"from {input_nii[0].orientation}") if verbose else None
         input_nii = [i.reorient(orientation) for i in input_nii]
-
-    logger.print("squash to fit float16") if verbose else None
-    input_nii = [squash_so_it_fits_in_float16(i) for i in input_nii]
+    if not no_squash:
+        logger.print("squash to fit float16") if verbose else None
+        input_nii = [squash_so_it_fits_in_float16(i) for i in input_nii]
 
     if zoom is not None:
         logger.print("rescale", f"{zoom=} from {input_nii[0].zoom}") if verbose else None
