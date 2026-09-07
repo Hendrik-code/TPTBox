@@ -24,6 +24,8 @@ from scipy.ndimage import (
     distance_transform_edt,
     gaussian_filter,
     generate_binary_structure,
+    maximum_filter,
+    minimum_filter,
     sobel,
 )
 from scipy.spatial.distance import cdist
@@ -590,6 +592,145 @@ def np_dilate_msk_euclid(arr: np.ndarray, n_pixel: int = 3, use_crop=True, label
         return arr
     arr[out != 0] = out[out != 0]
     return arr
+
+
+def _np_voronoi_ties(arr: UINTARRAY, indices: np.ndarray, nearest: np.ndarray, zoom: Sequence[float] | None) -> np.ndarray:
+    """Finds the voxels that are equidistant to two differently labelled regions.
+
+    ``distance_transform_edt`` picks one nearest source per voxel and never reports that the choice
+    was arbitrary, so the ties have to be recovered afterwards. Only voxels next to a change in the
+    nearest-label assignment can sit on a boundary between two regions, so the search is restricted
+    to those and then each of their neighbours' nearest sources is tested for being at exactly the
+    same distance. Any neighbour's source is a real foreground voxel, so a hit is always a genuine
+    tie -- the test can miss one, but never invent one.
+
+    Args:
+        arr (UINTARRAY): The labelled input array.
+        indices (np.ndarray): Feature transform of ``arr``, shape ``(ndim, *arr.shape)``.
+        nearest (np.ndarray): ``arr`` gathered at ``indices``.
+        zoom (Sequence[float] | None): Voxel spacing used for the distances.
+
+    Returns:
+        np.ndarray: Boolean mask of the tied voxels.
+    """
+    ties = np.zeros(arr.shape, dtype=bool)
+    boundary = maximum_filter(nearest, size=3) != minimum_filter(nearest, size=3)
+    pts = np.argwhere(boundary)
+    if len(pts) == 0:
+        return ties
+    sampling = np.ones(arr.ndim) if zoom is None else np.asarray(zoom, dtype=float)
+    limit = np.asarray(arr.shape) - 1
+    key = (slice(None), *pts.T)
+    dist2 = (((indices[key].T - pts) * sampling) ** 2).sum(1)
+    label = nearest[tuple(pts.T)]
+    tied = np.zeros(len(pts), dtype=bool)
+    for offset in itertools.product((-1, 0, 1), repeat=arr.ndim):
+        if not any(offset):
+            continue
+        neighbour = np.clip(pts + offset, 0, limit)
+        source = indices[(slice(None), *neighbour.T)]
+        cand2 = (((source.T - pts) * sampling) ** 2).sum(1)
+        tied |= (arr[tuple(source)] != label) & (np.abs(cand2 - dist2) <= 1e-9 * np.maximum(dist2, 1.0))
+    ties[tuple(pts[tied].T)] = True
+    return ties
+
+
+def np_voronoi_labels(
+    arr: UINTARRAY,
+    label_ref: LABEL_REFERENCE = None,
+    max_distance: float | None = None,
+    zoom: Sequence[float] | None = None,
+    signed_background: bool = True,
+    tie_to_zero: bool = True,
+) -> INTARRAY:
+    """Assigns every voxel the label of the nearest labelled region (a Voronoi partition).
+
+    Computed with a single Euclidean feature transform of the background: the nearest background
+    voxel of ``arr == 0`` is exactly the nearest labelled voxel of ``arr``, so one pass yields the
+    assignment for the whole volume, independent of how many labels there are.
+
+    By default the partition is signed: voxels that were already labelled keep their positive
+    label, voxels filled in from the background carry the *negative* label of the region they were
+    assigned to, so the original mask can still be recovered from the result. Voxels that are
+    exactly equidistant to two different regions are set to 0 rather than being broken arbitrarily.
+
+    For a bounded expansion that overwrites the input in place and crops to the mask first, see
+    :func:`np_dilate_msk_euclid`; this function is the unbounded, spacing-aware variant.
+
+    Args:
+        arr (UINTARRAY): Labelled input array with background 0.
+        label_ref (int | list[int] | None, optional): Labels to partition by. Everything else is
+            treated as background. Defaults to None (all labels found in ``arr``).
+        max_distance (float | None, optional): Leave background voxels further than this from any
+            region at 0. In the units of ``zoom``, i.e. voxels when ``zoom`` is None.
+            Defaults to None (no limit).
+        zoom (Sequence[float] | None, optional): Voxel spacing, so distances are measured in mm on
+            anisotropic images. Defaults to None (isotropic voxels).
+        signed_background (bool, optional): If True, background voxels get the negated label of
+            their region. Defaults to True.
+        tie_to_zero (bool, optional): If True, voxels equidistant to two different regions are set
+            to 0 instead of being assigned to one of them. Defaults to True.
+
+    Returns:
+        INTARRAY: The partition, signed when ``signed_background`` is set.
+
+    Examples:
+        >>> arr = np.zeros((5, 1, 1), dtype=np.uint8)
+        >>> arr[0] = 1
+        >>> arr[4] = 2
+        >>> np_voronoi_labels(arr).ravel().tolist()
+        [1, -1, 0, -2, 2]
+    """
+    assert 2 <= arr.ndim <= 3, f"expected 2D or 3D, but got {arr.ndim}"
+    assert np.min(arr) >= 0, f"expected non-negative labels, got {np.min(arr)}"
+    assert zoom is None or len(zoom) == arr.ndim, f"zoom has to have {arr.ndim} entries, got {zoom}"
+    if label_ref is not None:
+        arr = np.where(np_isin(arr, label_ref), arr, 0)
+    background = arr == 0
+    if background.all():
+        return np.zeros(arr.shape, dtype=np.int8 if signed_background else arr.dtype)
+
+    want_distance = max_distance is not None
+    result = distance_transform_edt(background, sampling=zoom, return_distances=want_distance, return_indices=True)
+    distances, indices = result if want_distance else (None, result)
+    nearest = arr[tuple(indices)]
+
+    out = nearest.astype(np.min_scalar_type(-int(arr.max()) - 1) if signed_background else arr.dtype, copy=True)
+    if signed_background:
+        out[background] = -out[background]
+    if want_distance:
+        out[background & (distances > max_distance)] = 0
+    if tie_to_zero:
+        out[_np_voronoi_ties(arr, indices, nearest, zoom)] = 0
+    return out
+
+
+def np_expand_labels(
+    arr: UINTARRAY,
+    distance: float | None = None,
+    label_ref: LABEL_REFERENCE = None,
+    zoom: Sequence[float] | None = None,
+) -> UINTARRAY:
+    """Grows every label into the surrounding background, up to ``distance``.
+
+    Each background voxel within reach takes the label of the nearest region; labelled voxels are
+    left alone, so labels never eat into each other. This is :func:`np_voronoi_labels` with the
+    plain, unsigned semantics -- see there for the signed partition and the handling of voxels that
+    are equidistant to two regions.
+
+    Args:
+        arr (UINTARRAY): Labelled input array with background 0.
+        distance (float | None, optional): How far to grow, in the units of ``zoom``, i.e. voxels
+            when ``zoom`` is None. Defaults to None (fill the whole volume).
+        label_ref (int | list[int] | None, optional): Labels to grow. Everything else is treated as
+            background. Defaults to None (all labels found in ``arr``).
+        zoom (Sequence[float] | None, optional): Voxel spacing, so ``distance`` is in mm on
+            anisotropic images. Defaults to None (isotropic voxels).
+
+    Returns:
+        UINTARRAY: A copy of ``arr`` with the labels grown.
+    """
+    return np_voronoi_labels(arr, label_ref=label_ref, max_distance=distance, zoom=zoom, signed_background=False, tie_to_zero=False)
 
 
 def np_dilate_msk(
