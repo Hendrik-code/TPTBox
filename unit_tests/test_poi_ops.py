@@ -352,5 +352,55 @@ class Test_POI_Random(unittest.TestCase):
         self.assertEqual(len(result), len(p1))
 
 
+class Test_vert_direction_angles(unittest.TestCase):
+    def make_poi(self, frame: np.ndarray, corpus=(30.0, 30.0, 30.0)):
+        from TPTBox import POI, Location
+
+        corpus = np.asarray(corpus, dtype=float)
+        poi = POI({}, orientation=("P", "I", "R"), zoom=(1, 1, 1), shape=(80, 80, 80))
+        poi[23, Location.Vertebra_Corpus] = tuple(corpus)
+        poi[23, Location.Vertebra_Direction_Posterior] = tuple(corpus + 10 * frame[:, 0])
+        poi[23, Location.Vertebra_Direction_Inferior] = tuple(corpus + 10 * frame[:, 1])
+        poi[23, Location.Vertebra_Direction_Right] = tuple(corpus + 10 * frame[:, 2])
+        return poi
+
+    def test_frame_aligned_to_global_axes_has_zero_angles(self):
+        from TPTBox.core.poi_fun.vertebra_direction import get_vert_direction_angles
+
+        poi = self.make_poi(np.eye(3))
+        angles = get_vert_direction_angles(poi, vert_id=23, to_pir=False, degrees=True)
+        self.assertEqual(len(angles), 3)
+        for a in angles:
+            self.assertAlmostEqual(a, 0.0, places=5)
+
+    def test_radians_and_degrees_agree(self):
+        from TPTBox.core.poi_fun.vertebra_direction import get_vert_direction_angles
+
+        frame = np.array([[0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+        poi = self.make_poi(frame)
+        deg = get_vert_direction_angles(poi, vert_id=23, to_pir=False, degrees=True)
+        rad = get_vert_direction_angles(poi, vert_id=23, to_pir=False, degrees=False)
+        for d, r in zip(deg, rad):
+            self.assertAlmostEqual(d, float(np.degrees(r)), places=6)
+
+    def test_angles_are_consistent_with_the_direction_matrix(self):
+        """The angle triple must match the columns of ``from_vert_orient`` it is derived from."""
+        from TPTBox.core.np_utils import np_angle_between
+        from TPTBox.core.poi_fun.vertebra_direction import get_vert_direction_angles, get_vert_direction_matrix
+
+        rng = np.random.default_rng(7)
+        for _ in range(repeats):
+            frame, _ = np.linalg.qr(rng.random((3, 3)))
+            if np.linalg.det(frame) < 0:
+                frame[:, 0] *= -1
+            poi = self.make_poi(frame)
+            _, from_vert_orient = get_vert_direction_matrix(poi, vert_id=23, to_pir=False)
+            angles = get_vert_direction_angles(poi, vert_id=23, to_pir=False, degrees=True)
+            for axis, angle in enumerate(angles):
+                global_axis = np.eye(3)[axis]
+                expected = np_angle_between(from_vert_orient[:, axis], global_axis, degrees=True)
+                self.assertAlmostEqual(angle, expected, places=6)
+
+
 if __name__ == "__main__":
     unittest.main()

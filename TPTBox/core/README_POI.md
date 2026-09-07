@@ -44,10 +44,10 @@ poi_full.to_global().save_mrk("poi_as_markup.mrk.json", split_by_region=True, po
 ```python
 from TPTBox import NII, POI, Location, POI_Global, calc_poi_from_subreg_vert
 from TPTBox.core.vert_constants import v_name2idx
-from TPTBox.segmentation.spineps import run_spineps_single
+from TPTBox.segmentation import run_spineps
 
 # This requires that spineps is installed
-output_paths = run_spineps_single(
+output_paths = run_spineps(
     "file-path-of_T2w.nii.gz",
     model_semantic="t2w",
     ignore_compatibility_issues=True,

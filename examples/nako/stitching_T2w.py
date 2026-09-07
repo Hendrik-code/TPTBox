@@ -60,7 +60,7 @@ for name, subj in bgi.enumerate_subjects(sort=True):
             already_stitched += 1
             continue
         print("Stich", out)
-        nii = st.GNC_stitch_T2w(files["HWS"], files["BWS"], files["LWS"])
+        nii = st.NAKO_stitch_T2w(files["HWS"], files["BWS"], files["LWS"])
         crop = nii.compute_crop()
         nii.apply_crop_(crop)
         nii.save(out)
