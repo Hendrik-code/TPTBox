@@ -161,7 +161,13 @@ def np_volume(arr: UINTARRAY, include_zero: bool = False) -> dict[int, int]:
     """
     # np.bincount wins decisively when there are many labels (e.g. connected-component maps);
     # cc3d statistics is faster for the few-label case typical of anatomical segmentations.
-    counts = np.bincount(arr.ravel()) if int(arr.max()) > 256 else cc3dstatistics(arr, use_crop=not include_zero)["voxel_counts"]
+    if int(arr.max()) > 256:
+        counts = np.bincount(arr.ravel())
+    else:
+        try:
+            counts = cc3dstatistics(arr, use_crop=not include_zero)["voxel_counts"]
+        except ValueError:
+            counts = np.bincount(arr.ravel())
     if include_zero:
         return {idx: i for idx, i in enumerate(counts) if i > 0}
     return {idx: i for idx, i in enumerate(counts) if i > 0 and idx != 0}
