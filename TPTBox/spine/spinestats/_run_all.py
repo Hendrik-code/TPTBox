@@ -145,9 +145,9 @@ def run_all(
     file_dict,
     override: bool = False,
     do_not_update=False,
-    need_cobb=False,
-    need_ivd=False,
-    need_vert=False,
+    need_cobb=True,
+    need_ivd=True,
+    need_vert=True,
     need_vbq=True,
     need_bcs=True,
     need_mfi=True,
@@ -281,24 +281,35 @@ def run_all(
             save_buffer_file=True,
         )
     if need_cobb:
-        project_2D = False
-        threshold_deg = 10
-        logger.on_debug("cobb")
-        cobb_val, curv, _ = plot_cobb_and_lordosis_and_kyphosis(
-            cobb_jpg_out, poi, file_dict["t2w"], file_dict["vert"], project_2D=project_2D, threshold_deg=threshold_deg
-        )
-        out["cobb"] = cobb_val
-        out["curv"] = curv
-        out["project_2D"] = project_2D
-        out["min_coop_angle"] = threshold_deg
+        try:
+            project_2D = False
+            threshold_deg = 10
+            logger.on_debug("cobb")
+            cobb_val, curv, _ = plot_cobb_and_lordosis_and_kyphosis(
+                cobb_jpg_out, poi, file_dict["t2w"], file_dict["vert"], project_2D=project_2D, threshold_deg=threshold_deg
+            )
+            out["cobb"] = cobb_val
+            out["curv"] = curv
+            out["project_2D"] = project_2D
+            out["min_coop_angle"] = threshold_deg
+        except Exception:
+            logger.on_fail("error catchted")
+            logger.print_error()
 
     if need_ivd:
-        logger.on_debug("measure_ivd_and_vertebra_geometry (ivd)")
-        out["ivd_geometry"] = measure_ivd_and_vertebra_geometry(t2w, vert, spine, buffer_poi=poi_out, structure_label=100)
+        try:
+            logger.on_debug("measure_ivd_and_vertebra_geometry (ivd)")
+            out["ivd_geometry"] = measure_ivd_and_vertebra_geometry(t2w, vert, spine, buffer_poi=poi_out, structure_label=100)
+        except Exception:
+            logger.on_fail("error catchted")
+            logger.print_error()
     if need_vert:
-        logger.on_debug("measure_ivd_and_vertebra_geometry (vert)")
-        out["vert_geometry"] = measure_ivd_and_vertebra_geometry(t2w, vert, spine, buffer_poi=poi_out, structure_label=0)
-
+        try:
+            logger.on_debug("measure_ivd_and_vertebra_geometry (vert)")
+            out["vert_geometry"] = measure_ivd_and_vertebra_geometry(t2w, vert, spine, buffer_poi=poi_out, structure_label=0)
+        except Exception:
+            logger.on_fail("error catchted")
+            logger.print_error()
     if need_vbq:
         logger.on_debug("VBQ_score")
         out["VBQ_score"] = VBQ_score(t2w, vert, spine, full_cord=True)
@@ -582,7 +593,7 @@ if __name__ == "__main__":
 
     OUT_FOLDER = Path("/DATA/NAS/ongoing_projects/robert/test/NAKO-stats")
     OUT_FOLDER.mkdir(parents=True, exist_ok=True)
-    N_CPUS = 40  # set >1 to parallelize
+    N_CPUS = 10  # set >1 to parallelize
     OVERRIDE = False
     aggregate = True
     do_not_update = False
@@ -595,7 +606,7 @@ if __name__ == "__main__":
     try:
         if test:
             subjects = loop_over_repaired_nako(test=True)
-            total = 10
+            total = 15
             aggregate = False
         elif aggregate:
             subjects = loop_over_repaired_nako(test=False, sort=aggregate)
