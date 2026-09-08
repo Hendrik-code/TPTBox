@@ -17,6 +17,29 @@ if TYPE_CHECKING:
     from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
 
 
+# Trainers shipped by SmaugLab (https://github.com/neuropoly/SmaugLab). The value is
+# the module filename that smauglab.add_trainer copies into nnU-Net (a single file
+# may host several trainer classes).
+_SMAUGLAB_TRAINERS: dict[str, str] = {
+    "nnUNetTrainerDAExt": "nnUNetTrainerDAExt",
+    "nnUNetTrainerDAExtGPU": "nnUNetTrainerDAExt",
+    "nnUNetTrainerDAExtHybrid": "nnUNetTrainerDAExt",
+    "nnUNetTrainerTest": "nnUNetTrainerTest",
+    "nnUNetTrainerTestGPU": "nnUNetTrainerTest",
+}
+
+# Env var each SmaugLab trainer reads for its augmentation parameters JSON.
+_SMAUGLAB_PARAM_ENV: dict[str, str] = {
+    "nnUNetTrainerDAExt": "SMAUGLAB_PARAMS_CPU_JSON",
+    "nnUNetTrainerDAExtGPU": "SMAUGLAB_PARAMS_GPU_JSON",
+    "nnUNetTrainerDAExtHybrid": "SMAUGLAB_PARAMS_HYBRID_JSON",
+}
+
+# Filename that prepere_dataset.py writes into the dataset folder. Kept in sync
+# with prepere_dataset.DATASET_SMAUGLAB_PARAMS_FILENAME.
+DATASET_SMAUGLAB_PARAMS_FILENAME = "smauglab_params.json"
+
+
 # nnunetv2-2.5.2 or higher
 @dataclass(slots=True)
 class Config:
@@ -111,6 +134,101 @@ def _run_training_highjack(self: nnUNetTrainer) -> None:
     self.on_train_end()
 
 
+def _ensure_smauglab_trainer_installed(trainer_class_name: str) -> None:
+    """Install a SmaugLab trainer into nnU-Net.
+
+    Always overwrites any existing file at that path so a stale trainer (e.g. from
+    an older, unrelated package that shipped identically-named classes but reads
+    different env vars) is replaced with SmaugLab's current version.
+
+    We bypass ``smauglab.add_trainer.add_trainer`` because it uses ``shutil.copy``
+    which preserves mode bits and thus calls ``chmod`` on the destination — that
+    fails with ``PermissionError`` when the pre-existing file is owned by another
+    user (e.g. installed earlier under ``sudo``). Copying bytes only, after
+    unlinking the old file, works as long as the parent directory is writable.
+    """
+    if trainer_class_name not in _SMAUGLAB_TRAINERS:
+        return
+
+    import shutil
+
+    try:
+        import nnunetv2
+    except ImportError as e:
+        raise ImportError(
+            f"Trainer {trainer_class_name!r} is a SmaugLab trainer but nnunetv2 is not installed. "
+            "Install it with e.g. `pip install nnunetv2==2.6.2` (SmaugLab is tested against 2.6.2)."
+        ) from e
+
+    try:
+        import importlib.resources
+
+        import smauglab.trainers as smauglab_trainers
+    except ImportError as e:
+        raise ImportError(
+            f"Trainer {trainer_class_name!r} needs the SmaugLab package but it is not importable. "
+            "Install it from https://github.com/neuropoly/SmaugLab "
+            "(e.g. `pip install -e /DATA/NAS/tools/SmaugLab`)."
+        ) from e
+
+    module_name = _SMAUGLAB_TRAINERS[trainer_class_name]
+    src = Path(str(importlib.resources.files(smauglab_trainers))) / f"{module_name}.py"
+    dst = Path(nnunetv2.__file__).parent / "training" / "nnUNetTrainer" / f"{module_name}.py"
+
+    if not src.is_file():
+        raise RuntimeError(f"SmaugLab trainer source missing: {src}")
+
+    try:
+        if dst.exists() or dst.is_symlink():
+            # Unlink first so we don't inherit the old file's owner/mode. Needs write on the parent.
+            dst.unlink()
+        shutil.copyfile(src, dst)  # copyfile does NOT preserve mode → no chmod attempt.
+    except PermissionError as e:
+        raise RuntimeError(
+            f"Cannot write {dst}: {e}. The target file or its parent directory is not writable "
+            f"by the current user. Fix ownership (e.g. `sudo chown $USER {dst}`) or run "
+            f"`sudo smauglab_add_nnunettrainer --trainer {module_name} --overwrite` once."
+        ) from e
+    except OSError as e:
+        raise RuntimeError(
+            f"Failed to install SmaugLab trainer module {module_name!r} into nnunetv2 at {dst}: {e}"
+        ) from e
+
+
+def _apply_smauglab_params_env(trainer_class_name: str, dataset_folder: Path) -> None:
+    """Point the SmaugLab trainer at the params JSON that ``prepere_dataset.py`` wrote.
+
+    The trainer is picked up from ``dataset.json`` (written by ``_prep_ds.set_up_dataset``),
+    so nothing here is user-facing configuration. If a dataset-folder SmaugLab config
+    exists but the selected trainer is not a SmaugLab one, we warn — otherwise the
+    file would be silently ignored.
+    """
+    dataset_params = dataset_folder / DATASET_SMAUGLAB_PARAMS_FILENAME
+    has_dataset_params = dataset_params.is_file()
+
+    if trainer_class_name not in _SMAUGLAB_PARAM_ENV:
+        if has_dataset_params:
+            print(
+                f"WARNING: SmaugLab params found at {dataset_params} but trainer "
+                f"{trainer_class_name!r} is not a SmaugLab trainer — the config will be ignored. "
+                "Regenerate the dataset with nn_trainer='nnUNetTrainerDAExtGPU' (or another SmaugLab "
+                "trainer) to enable it."
+            )
+        return
+
+    if not has_dataset_params:
+        print(
+            f"SmaugLab: no {DATASET_SMAUGLAB_PARAMS_FILENAME} in dataset folder — "
+            f"trainer {trainer_class_name!r} will use its bundled default."
+        )
+        return
+
+    chosen = dataset_params.resolve()
+    env_var = _SMAUGLAB_PARAM_ENV[trainer_class_name]
+    os.environ[env_var] = str(chosen)
+    print(f"SmaugLab: {env_var}={chosen}  (source: dataset folder)")
+
+
 def _run_training(
     dataset_name_or_id: Union[str, int],
     configuration: str,
@@ -133,7 +251,13 @@ def _run_training(
     save_every=1,  # 50
 ):
 
-    from nnunetv2.run.run_training import get_trainer_from_args, join, maybe_load_checkpoint
+    try:
+        from nnunetv2.run.run_training import get_trainer_from_args, join, maybe_load_checkpoint
+    except ImportError as e:
+        raise ImportError(
+            "nnunetv2 is not installed but is required to train. Install it with "
+            "`pip install nnunetv2` (SmaugLab trainers are tested against nnunetv2==2.6.2)."
+        ) from e
 
     if plans_identifier == "nnUNetPlans":
         print(
@@ -153,9 +277,25 @@ def _run_training(
     if val_with_best:
         assert not disable_checkpointing, "--val_best is not compatible with --disable_checkpointing"
 
-    nnunet_trainer = get_trainer_from_args(dataset_name_or_id, configuration, fold, trainer_class_name, plans_identifier, device=device)
-
-    nnunet_trainer = get_trainer_from_args(dataset_name_or_id, configuration, fold, trainer_class_name, plans_identifier, device=device)
+    try:
+        nnunet_trainer = get_trainer_from_args(
+            dataset_name_or_id, configuration, fold, trainer_class_name, plans_identifier, device=device
+        )
+    except RuntimeError as e:
+        hint = ""
+        if trainer_class_name in _SMAUGLAB_TRAINERS:
+            module_name = _SMAUGLAB_TRAINERS[trainer_class_name]
+            hint = (
+                f"\nHint: {trainer_class_name!r} is a SmaugLab trainer. Ensure SmaugLab is installed and run "
+                f"`smauglab_add_nnunettrainer --trainer {module_name} --overwrite` (or re-run this script)."
+            )
+        elif trainer_class_name != "nnUNetTrainer":
+            hint = (
+                f"\nHint: trainer {trainer_class_name!r} (from dataset.json) is not shipped with nnU-Net. "
+                "If it comes from an extension package, make sure that package is installed and that its "
+                "trainer file has been copied into `<nnunetv2>/training/nnUNetTrainer/`."
+            )
+        raise RuntimeError(f"nnU-Net could not locate trainer {trainer_class_name!r}.{hint}") from e
     nnunet_trainer.oversample_foreground_percent = oversample_foreground_percent
     nnunet_trainer.num_val_iterations_per_epoch = num_val_iterations_per_epoch
     nnunet_trainer.num_epochs = num_epochs
@@ -278,6 +418,12 @@ class NNUNetRunner:
 
         print(f"Training fold {fold}")
 
+        _ensure_smauglab_trainer_installed(self.cfg.nnUNetTrainer)
+        _apply_smauglab_params_env(
+            self.cfg.nnUNetTrainer,
+            dataset_folder=self.cfg.out_base / "nnUNet_raw" / self.cfg.dataset_folder,
+        )
+
         best_checkpoints = list(
             Path(self.cfg.out_base / "nnUNet_results").glob(f"Dataset{self.cfg.dataset_id:03}*/*_3d_full*/fold_{fold}/checkpoint_best.pth")
         )
@@ -339,6 +485,7 @@ class NNUNetRunner:
         ds = self._load_dataset_json()
 
         self.cfg.overwrite_target_spacing = ds.get("spacing", self.cfg.overwrite_target_spacing)
+        # dataset.json (written by _prep_ds.set_up_dataset) is the source of truth for the trainer.
         self.cfg.nnUNetTrainer = ds.get("nnUNetTrainer", self.cfg.nnUNetTrainer)
 
         self._preprocess()
