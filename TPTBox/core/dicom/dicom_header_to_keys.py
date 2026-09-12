@@ -42,7 +42,11 @@ dixon_mapping = {
 }
 dixon_mapping = {**dixon_mapping, **{v: v for v in dixon_mapping.values()}}
 map_series_description_to_file_format_default = {
-    ".*t2w?_tse.*": "T2w",
+    ".*h2d.*": "T2haste",
+    ".*tse2d1-4.*": "T1w",
+    ".*tser2d.*": "T2w",
+    # ".*tse2d1_4.*": "T1w",
+    # ".*_tse.*": "T2w",
     "t2w?_fse.*": "T2w",
     ".*t1w?_tse.*": "T1w",
     ".*t1w?_vibe_tra.*": "vibe",
@@ -99,7 +103,9 @@ map_series_description_to_file_format_default = {
 }
 
 
-def get_plane_dicom(dicoms: list[pydicom.FileDataset] | NII, hires_threshold=0.8) -> str | None:
+def get_plane_dicom(
+    dicoms: list[pydicom.FileDataset] | NII, hires_threshold=0.8
+) -> str | None:
     """Determines the orientation plane of the NIfTI image along the x, y, or z-axis.
 
     Returns:
@@ -118,7 +124,14 @@ def get_plane_dicom(dicoms: list[pydicom.FileDataset] | NII, hires_threshold=0.8
     try:
         sorted_dicoms = common.sort_dicoms(dicoms)
         affine, _ = common.create_affine(sorted_dicoms)
-        plane_dict = {"S": "ax", "I": "ax", "L": "sag", "R": "sag", "A": "cor", "P": "cor"}
+        plane_dict = {
+            "S": "ax",
+            "I": "ax",
+            "L": "sag",
+            "R": "sag",
+            "A": "cor",
+            "P": "cor",
+        }
         axc = np.array(nio.aff2axcodes(affine))
         affine = np.asarray(affine)
         q, p = affine.shape[0] - 1, affine.shape[1] - 1
@@ -128,7 +141,11 @@ def get_plane_dicom(dicoms: list[pydicom.FileDataset] | NII, hires_threshold=0.8
         # Zooms can be zero, in which case all elements in the column are zero, and
         # we can leave them as they are
         zooms[zooms == 0] = 1
-        zooms = zooms if hires_threshold is None else tuple(max(i, hires_threshold) for i in zooms)
+        zooms = (
+            zooms
+            if hires_threshold is None
+            else tuple(max(i, hires_threshold) for i in zooms)
+        )
         zms = np.around(zooms, 1)
         ix_max = np.array(zms == np.amax(zms))
         num_max = np.count_nonzero(ix_max)
@@ -167,12 +184,20 @@ def extract_keys_from_json(  # noqa: C901
 
     """Extract keys from JSON based on study and series descriptions."""
     #### NAKO FIXED ####
-    if "StudyDescription" in simp_json and "nako" in _get("StudyDescription", "").lower():
+    if (
+        "StudyDescription" in simp_json
+        and "nako" in _get("StudyDescription", "").lower()
+    ):
         keys["sub"] = _get("PatientID", "unnamed").split("_")[0]
         series_description = _get("SeriesDescription", "unnamed")
         """Determine the MRI format based on the series description."""
         if "T2_TSE" in series_description:
-            return "T2w", {"acq": "sag", "chunk": series_description.split("_")[-1], "sequ": simp_json["SeriesNumber"], **keys}
+            return "T2w", {
+                "acq": "sag",
+                "chunk": series_description.split("_")[-1],
+                "sequ": simp_json["SeriesNumber"],
+                **keys,
+            }
         elif "3D_GRE_TRA" in series_description:
             return "vibe", {
                 "acq": "ax",
@@ -198,7 +223,9 @@ def extract_keys_from_json(  # noqa: C901
         if override_subject_name is not None:
             keys["sub"] = override_subject_name(
                 simp_json,
-                Path(str(dcm_data_l[0].filename)) if not isinstance(dcm_data_l, (str, Path, NII)) else dcm_data_l,  # type: ignore
+                Path(str(dcm_data_l[0].filename))
+                if not isinstance(dcm_data_l, (str, Path, NII))
+                else dcm_data_l,  # type: ignore
             )
         else:
             keys["sub"] = _get("PatientID")
@@ -222,11 +249,15 @@ def extract_keys_from_json(  # noqa: C901
             keys["acq"] = to_nii(dcm_data_l).get_plane(1)
         else:
             keys["acq"] = get_plane_dicom(dcm_data_l, 1)
-        keys["part"] = dixon_mapping.get(_get("ProtocolName", "NO-PART").split("_")[-1], None)
+        keys["part"] = dixon_mapping.get(
+            _get("ProtocolName", "NO-PART").split("_")[-1], None
+        )
 
         sequ = _get("SeriesNumber", None)
         if sequ is None:
-            sequ = str(re.sub(r"[^0-9a-zA-Z]", "", str(simp_json.get("SeriesDescription", "")))).lower()
+            sequ = str(
+                re.sub(r"[^0-9a-zA-Z]", "", str(simp_json.get("SeriesDescription", "")))
+            ).lower()
         if sequ != "":
             keys["sequ"] = sequ
         if len(parts) != 0:
@@ -234,7 +265,9 @@ def extract_keys_from_json(  # noqa: C901
         if chunk is not None:
             keys["chunk"] = str(chunk)
         image_type = simp_json.get("ImageType", [])
-        dx = [dixon_mapping[k.lower()] for k in image_type if k.lower() in dixon_mapping]
+        dx = [
+            dixon_mapping[k.lower()] for k in image_type if k.lower() in dixon_mapping
+        ]
         if len(dx) != 0:
             keys["part"] = dx[0]
         # contrast agent
@@ -242,10 +275,18 @@ def extract_keys_from_json(  # noqa: C901
         ce = _get("ContrastAgent", _get("ContrastBolusIngredient"))
         if ce is not None:
             keys["ce"] = ce
-        elif _get("ContrastBolusTotalDose") is not None or _get("ContrastBolusVolume") is not None:
+        elif (
+            _get("ContrastBolusTotalDose") is not None
+            or _get("ContrastBolusVolume") is not None
+        ):
             keys["ce"] = "ContrastAgent"
         # GET MRI FORMAT
         series_description = _get("SeriesDescription", "mr").lower()
+        if series_description == "mr":
+            series_description = _get("SequenceName", "mr").lower()
+        print(
+            f"SeriesDescription: '{series_description}', ImageType: {image_type}, ProtocolName: '{_get('ProtocolName', '')}'"
+        )
         modality = _get("Modality", "mr").lower()
 
         mri_format = None
@@ -277,10 +318,21 @@ def extract_keys_from_json(  # noqa: C901
             tag = _get("DerivationDescription", " ").lower()
             # ftv is not None
             if tag == "subtraction":
-                mri_format = "DSA" if monitor == "static" and "VOLUME" not in image_type and "RECON" not in image_type else "subtraction"
+                mri_format = (
+                    "DSA"
+                    if monitor == "static"
+                    and "VOLUME" not in image_type
+                    and "RECON" not in image_type
+                    else "subtraction"
+                )
             elif "3DRA_PROP" in image_type:
                 mri_format = "3DRA"
-            elif monitor == "dynamic" or "VOLUME" in image_type or "RECON" in image_type or "3DRA_PROP" in image_type:
+            elif (
+                monitor == "dynamic"
+                or "VOLUME" in image_type
+                or "RECON" in image_type
+                or "3DRA_PROP" in image_type
+            ):
                 mri_format = "DSA3D"
             else:
                 mri_format = "XA"
@@ -291,7 +343,10 @@ def extract_keys_from_json(  # noqa: C901
                     mri_format = mri_format_new
                     break
             if not found:
-                for key, mri_format_new in map_series_description_to_file_format_default.items():
+                for (
+                    key,
+                    mri_format_new,
+                ) in map_series_description_to_file_format_default.items():
                     regex = re.compile(key)
                     if re.match(regex, series_description):
                         mri_format = mri_format_new
@@ -302,11 +357,15 @@ def extract_keys_from_json(  # noqa: C901
                 if "sub" in series_description.lower() and keys.get("part") is None:
                     keys["part"] = "subtraction"
                 if (
-                    " km " in series_description.lower() or series_description.startswith("km") or series_description.endswith("km")
+                    " km " in series_description.lower()
+                    or series_description.startswith("km")
+                    or series_description.endswith("km")
                 ) and keys.get("ce") is None:
                     keys["ce"] = "ContrastAgent"
         else:
-            raise NotImplementedError(f"modality='{modality.upper()}', ({modalities.get(modality.upper())})")
+            raise NotImplementedError(
+                f"modality='{modality.upper()}', ({modalities.get(modality.upper())})"
+            )
 
             # ".*sub.*t1.*": "subtraktion",
         # "subtraktion.*t1.*": "subtraktion",
