@@ -234,8 +234,12 @@ def loop_over_repaired_nako(
                     if "PatientSize" in js:
                         subj_dict["height_m"] = js["PatientSize"]
                         break
-                except json.decoder.JSONDecodeError:
-                    log.on_fail(f, "json.decoder.JSONDecodeError")
+                except json.decoder.JSONDecodeError as e:
+                    json_path = f.file.get("json", f)
+                    log.on_fail(
+                        f"json.decoder.JSONDecodeError while reading {json_path}: {e} "
+                        f"(subject={sub}, dataset={dataset}); continuing with next sidecar"
+                    )
         if verbose:
             log.on_log(sub)
         mapping = {"T2w": "t2w"}

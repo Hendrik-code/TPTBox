@@ -248,15 +248,21 @@ Implementation notes:
 
 ## Excel collector
 
-`ExcelCollector` in `all.py` runs a background process that turns each
-finished json into two rolling Excel files in a configurable folder:
+`ExcelCollector` in `_run_all.py` runs a background process that turns
+each finished json into three rolling Excel files in a configurable
+folder:
 
 - `per_subject.xlsx` — one row per subject with every scalar top-level
   metric flattened to dotted keys
   (e.g. `VBQ_score.VBQ_L1-L4`, `torso_vat_sat_muscle_mass.VAT`).
-- `per_vertebra.xlsx` — one row per (subject, label), populated from
-  `vert_geometry` and `ivd_geometry`. The `source` column indicates
-  which of the two sections the row came from.
+  `ivd_geometry` and `vert_geometry` are excluded here.
+- `per_vertebra.xlsx` — one row per (subject, label) from
+  `vert_geometry` (vertebra bodies).
+- `per_ivd.xlsx` — one row per (subject, label) from `ivd_geometry`
+  (intervertebral discs).
+
+The vertebra and IVD tables are split so that the full NAKO cohort stays
+under Excel's per-sheet row limit (1 048 576 rows).
 
 Usage:
 
