@@ -260,7 +260,7 @@ def run_all(
             save_json(final_out, out)
         return out
 
-    logger.on_debug("load nii")
+    logger.on_debug("load nii", t2w_bf.get("sub"))
     t2w = to_nii(file_dict["t2w"]) if need_t2w or need_cobb else None
     vibe_water = to_nii(file_dict["vibe_part-water"], False) if need_vibe_wf else None
     vibe_fat = to_nii(file_dict["vibe_part-fat"], False) if need_vibe_wf else None
@@ -317,7 +317,8 @@ def run_all(
     if need_bcs:
         logger.on_debug("body_composition_score")
         out["body_composition_score"] = body_composition_score(vibe_seg, vert, spine, dataset_id=100, height_m=height_m)
-        assert len(out["body_composition_score"]) != 0
+        if len(out["body_composition_score"]) == 0:
+            logger.on_warning("body_composition_score returned empty (no vertebrae from configured regions present)")
     if need_mfi:
         logger.on_debug("muscle_fat_infiltration")
         out["muscle_fat_infiltration"] = muscle_fat_infiltration(vibe_water, vibe_fat, vibe_seg, vert, spine, roi=roi, dataset_id=100)
@@ -410,30 +411,33 @@ def _flatten(prefix: str, obj: Any, out: dict[str, Any]) -> None:
         out[prefix] = obj
 
 
-def _rows_from_json(subject_id: str, data: dict) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """Split one subject's json into (per-subject row, per-vertebra rows).
+def _rows_from_json(subject_id: str, data: dict) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split one subject's json into (per-subject row, per-vertebra rows, per-ivd rows).
 
     Per-subject row: everything except the per-label geometry dicts,
     flattened to dotted keys.
-    Per-vertebra rows: one row per label in ``ivd_geometry`` and
-    ``vert_geometry`` (source column indicates which).
+    Per-vertebra rows: one row per label in ``vert_geometry``.
+    Per-ivd rows: one row per label in ``ivd_geometry``.
+    Split by source so each output stays well below Excel's per-sheet
+    row limit (1_048_576).
     """
     per_subject: dict[str, Any] = {"subject": subject_id}
     subject_view = {k: v for k, v in data.items() if k not in ("ivd_geometry", "vert_geometry")}
     _flatten("", subject_view, per_subject)
 
     per_vert: list[dict[str, Any]] = []
-    for source_key in ("vert_geometry", "ivd_geometry"):
+    per_ivd: list[dict[str, Any]] = []
+    for source_key, sink in (("vert_geometry", per_vert), ("ivd_geometry", per_ivd)):
         section = data.get(source_key) or {}
         if not isinstance(section, dict):
             continue
         for label, metrics in section.items():
             if not isinstance(metrics, dict):
                 continue
-            row: dict[str, Any] = {"subject": subject_id, "source": source_key, "label": label}
+            row: dict[str, Any] = {"subject": subject_id, "label": label}
             row.update(metrics)
-            per_vert.append(row)
-    return per_subject, per_vert
+            sink.append(row)
+    return per_subject, per_vert, per_ivd
 
 
 def _collector_worker(
@@ -441,6 +445,7 @@ def _collector_worker(
     out_folder: Path,
     per_subject_name: str,
     per_vertebra_name: str,
+    per_ivd_name: str,
     flush_every: int,
 ) -> None:
     import pandas as pd  # local import so the main process starts fast
@@ -449,6 +454,7 @@ def _collector_worker(
     out_folder.mkdir(parents=True, exist_ok=True)
     subject_rows: list[dict[str, Any]] = []
     vertebra_rows: list[dict[str, Any]] = []
+    ivd_rows: list[dict[str, Any]] = []
     seen: set[str] = set()
 
     def _flush() -> None:
@@ -456,6 +462,8 @@ def _collector_worker(
             pd.DataFrame(subject_rows).to_excel(out_folder / per_subject_name, index=False)
         if vertebra_rows:
             pd.DataFrame(vertebra_rows).to_excel(out_folder / per_vertebra_name, index=False)
+        if ivd_rows:
+            pd.DataFrame(ivd_rows).to_excel(out_folder / per_ivd_name, index=False)
 
     while True:
         try:
@@ -472,9 +480,10 @@ def _collector_worker(
             data = load_json(Path(json_path))
         except Exception:
             continue
-        per_subj, per_vert = _rows_from_json(str(subject_id), data)
+        per_subj, per_vert, per_ivd = _rows_from_json(str(subject_id), data)
         subject_rows.append(per_subj)
         vertebra_rows.extend(per_vert)
+        ivd_rows.extend(per_ivd)
         seen.add(subject_id)
         if flush_every and len(seen) % flush_every == 0:
             _flush()
@@ -499,11 +508,13 @@ class ExcelCollector:
         out_folder: str | Path,
         per_subject_name: str = "per_subject.xlsx",
         per_vertebra_name: str = "per_vertebra.xlsx",
+        per_ivd_name: str = "per_ivd.xlsx",
         flush_every: int = 200,
     ) -> None:
         self.out_folder = Path(out_folder)
         self.per_subject_name = per_subject_name
         self.per_vertebra_name = per_vertebra_name
+        self.per_ivd_name = per_ivd_name
         self.flush_every = flush_every
         self._queue: mp.Queue = mp.Queue()
         self._proc: mp.Process | None = None
@@ -513,7 +524,14 @@ class ExcelCollector:
             return
         self._proc = mp.Process(
             target=_collector_worker,
-            args=(self._queue, self.out_folder, self.per_subject_name, self.per_vertebra_name, self.flush_every),
+            args=(
+                self._queue,
+                self.out_folder,
+                self.per_subject_name,
+                self.per_vertebra_name,
+                self.per_ivd_name,
+                self.flush_every,
+            ),
             daemon=True,
         )
         self._proc.start()
@@ -583,6 +601,7 @@ def _run_one(args: tuple[dict, bool, bool]) -> tuple[str, str | None, dict]:
 
 
 if __name__ == "__main__":
+    import os
     from concurrent.futures import ProcessPoolExecutor, as_completed
 
     import pandas as pd
@@ -590,10 +609,10 @@ if __name__ == "__main__":
     from TPTBox import No_Logger
 
     log = No_Logger()
-
+    os.nice(20)
     OUT_FOLDER = Path("/DATA/NAS/ongoing_projects/robert/test/NAKO-stats")
     OUT_FOLDER.mkdir(parents=True, exist_ok=True)
-    N_CPUS = 10  # set >1 to parallelize
+    N_CPUS = 1  # set >1 to parallelize
     OVERRIDE = False
     aggregate = True
     do_not_update = False
@@ -613,11 +632,13 @@ if __name__ == "__main__":
         else:
             # subjects = tqdm(loop_over_repaired_nako(test=False, sort=aggregate), total=30645)
             l = loop_over_repaired_nako(test=False, sort=aggregate)
-            total = 1000
-            subjects = iter([next(l) for _ in range(total)])
+            # total = 1000
+            # subjects = iter([next(l) for _ in range(total)])
+            subjects = l
 
+            # print(f"Run on {total=} random subset")
         if N_CPUS <= 1:
-            for f in subjects:
+            for f in tqdm(subjects, total=total):
                 sub_id, missing, _ = _run_one((f, OVERRIDE, do_not_update))
                 if missing is not None:
                     logger.on_fail("missing", list(f.keys()), missing)
@@ -628,8 +649,8 @@ if __name__ == "__main__":
         else:
             from itertools import islice
 
-            with ProcessPoolExecutor(max_workers=N_CPUS) as ex:
-                batch_size = 1000
+            with ProcessPoolExecutor(max_workers=N_CPUS, max_tasks_per_child=100) as ex:
+                batch_size = 100
                 l = tqdm(total=total)
                 while True:
                     gc.collect()
