@@ -686,6 +686,32 @@ def _folder_fingerprint(folder: Path) -> tuple[int, str] | None:
         return None
 
 
+def _zip_fingerprint(zip_path: Path) -> tuple[int, str] | None:
+    """Cheap zip identity: (1, sha1(size + mtime_ns)).
+
+    We deliberately do NOT open the archive — for typical NAKO zips that
+    would take seconds per file. Size + mtime is enough to detect a fresh
+    re-download or a re-packed archive.
+    """
+    import hashlib
+
+    try:
+        st = zip_path.stat()
+    except OSError:
+        return None
+    payload = f"{st.st_size}:{st.st_mtime_ns}".encode()
+    return 1, hashlib.sha1(payload).hexdigest()  # noqa: S324
+
+
+def _source_fingerprint(source: Path) -> tuple[int, str] | None:
+    """Dispatch to the folder- or zip-fingerprint based on the source kind."""
+    if source.is_file() and source.suffix.lower() == ".zip":
+        return _zip_fingerprint(source)
+    if source.is_dir():
+        return _folder_fingerprint(source)
+    return None
+
+
 def _extract_marker_path(source_folder: Path, dataset_path_out: Path) -> Path:
     """Path of the fast-skip marker for a source folder, kept under the OUTPUT dataset.
 
@@ -698,36 +724,36 @@ def _extract_marker_path(source_folder: Path, dataset_path_out: Path) -> Path:
     return dataset_path_out / _EXTRACT_CACHE_DIR / f"{key}.json"
 
 
-def _is_already_extracted(source_folder: Path, dataset_path_out: Path) -> bool:
-    """True when the source folder was extracted before and its file list is unchanged."""
+def _is_already_extracted(source: Path, dataset_path_out: Path) -> bool:
+    """True when the source (folder or zip) was extracted before and its fingerprint is unchanged."""
     import json as _json
 
-    marker = _extract_marker_path(source_folder, dataset_path_out)
+    marker = _extract_marker_path(source, dataset_path_out)
     if not marker.is_file():
         return False
     try:
         prev = _json.loads(marker.read_text())
     except (OSError, ValueError):
         return False
-    fp = _folder_fingerprint(source_folder)
+    fp = _source_fingerprint(source)
     if fp is None:
         return False
     count, h = fp
     return prev.get("count") == count and prev.get("hash") == h
 
 
-def _write_extract_marker(source_folder: Path, dataset_path_out: Path) -> None:
-    """Record the current file-list fingerprint for the source folder."""
+def _write_extract_marker(source: Path, dataset_path_out: Path) -> None:
+    """Record the current fingerprint for the source folder or zip."""
     import json as _json
 
-    fp = _folder_fingerprint(source_folder)
+    fp = _source_fingerprint(source)
     if fp is None:
         return
     count, h = fp
-    marker = _extract_marker_path(source_folder, dataset_path_out)
+    marker = _extract_marker_path(source, dataset_path_out)
     try:
         marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text(_json.dumps({"source": str(source_folder), "count": count, "hash": h}))
+        marker.write_text(_json.dumps({"source": str(source), "count": count, "hash": h}))
     except OSError:
         pass  # writing the marker is best-effort; missing it just disables the fast-path
 
@@ -1001,18 +1027,20 @@ def extract_dicom_folder(
 
         if str(dicom_path).endswith(".pkl"):
             continue
-        # Fast-skip: identical file listing since last successful extraction
-        # → no DICOM headers read for this folder. Zips are excluded because
-        # their inner file list isn't visible without unpacking.
+        # Fast-skip: identical fingerprint since the last successful extraction
+        # → no DICOM headers read for this source. Folders fingerprint their
+        # rglob'd file list; zips fingerprint (size, mtime_ns) of the archive
+        # itself (see `_source_fingerprint`).
         if (
             skip_already_extracted
             and not force_rescan
-            and not str(dicom_path).endswith(".zip")
-            and Path(dicom_path).is_dir()
             and _is_already_extracted(Path(dicom_path), Path(dataset_path_out))
         ):
             logger.print(f"Skip {dicom_path} (already extracted; fingerprint matches)", verbose=verbose)
             continue
+        # Track the original source path so the marker below is keyed to the
+        # zip itself, not the ephemeral unpack directory.
+        source_for_marker = Path(dicom_path)
         temp_dir = None
         try:
             if str(dicom_path).endswith(".zip"):
@@ -1061,14 +1089,15 @@ def extract_dicom_folder(
                     except Exception:
                         logger.print_error()
 
-            # Record the fingerprint only when the whole folder went through
-            # without an exception AND the source is a real directory (not a
-            # zip mount that's about to disappear). Errors above are caught
-            # per-series so this fires even if individual series were skipped
-            # (e.g. localizers) — but not if `_read_dicom_files` itself raised
-            # (that path lands in the outer `finally` without reaching here).
-            if skip_already_extracted and temp_dir is None and Path(dicom_path).is_dir():
-                _write_extract_marker(Path(dicom_path), Path(dataset_path_out))
+            # Record the fingerprint only when the whole source went through
+            # without an exception. For zips the marker is keyed to the zip
+            # file itself (size+mtime) so the ephemeral temp_dir is fine;
+            # for folders it's keyed to the folder. Per-series errors above
+            # are caught inside the loop so this fires even if individual
+            # series were skipped (e.g. localizers) — but not if
+            # `_read_dicom_files` itself raised.
+            if skip_already_extracted:
+                _write_extract_marker(source_for_marker, Path(dataset_path_out))
 
         finally:
             if temp_dir is not None:

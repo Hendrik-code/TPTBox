@@ -216,18 +216,35 @@ def extract_keys_from_json(  # noqa: C901
 
     #### NAKO FIXED ####
     if "StudyDescription" in simp_json and "nako" in _get("StudyDescription", "").lower():
-        keys["sub"] = _get("PatientID", "unnamed").split("_")[0]
-        series_description = _get("SeriesDescription", "unnamed")
+        # Read PatientID directly from simp_json — `_get` rewrites `_` to `-`,
+        # which would destroy the `<sub>_<sescode>` split we need below.
+        pid_raw = str(simp_json.get("PatientID", "unnamed")).strip()
+        sub_part, _sep, ses_part = pid_raw.partition("_")
+        keys["sub"] = re.sub(r'[<>:"/\\|?*\x00-\x1F\s]', "", sub_part) or "unnamed"
+        # NAKO encodes the exam wave as a suffix on PatientID:
+        # `<sub>_30` = U1 Baseline, `<sub>_60` = U2 Follow-up. The main NAKO
+        # baseline export has no suffix; leave `ses` untouched there so the
+        # existing `use_session` (StudyDate) fallback in _get_paths still wins.
+        if session and ses_part:
+            _nako_ses_map = {"30": "baseline", "60": "followup"}
+            ses_clean = re.sub(r'[<>:"/\\|?*\x00-\x1F\s]', "", ses_part)
+            keys["ses"] = _nako_ses_map.get(ses_clean, ses_clean)
+        # Raw values for pattern matching — `_get` rewrites `_`→`-`, which
+        # would break every `T2_TSE` / `3D_GRE_TRA` / `T1_3D_SAG` check below
+        # and the `ProtocolName.split("_")` chunk derivation.
+        series_description = str(simp_json.get("SeriesDescription", "unnamed"))
+        protocol_name = str(simp_json.get("ProtocolName", "unnamed"))
+        sequ = simp_json.get("SeriesNumber")
         """Determine the MRI format based on the series description."""
         if "T2_TSE" in series_description:
-            return "T2w", {"acq": "sag", "chunk": series_description.split("_")[-1], "sequ": simp_json["SeriesNumber"], **keys}, ".nii.gz"
+            return "T2w", {"acq": "sag", "chunk": series_description.rsplit("_", maxsplit=1)[-1], "sequ": sequ, **keys}, ".nii.gz"
         elif "3D_GRE_TRA" in series_description:
             return (
                 "vibe",
                 {
                     "acq": "ax",
-                    "part": dixon_mapping[series_description.split("_")[-1].lower()],
-                    "chunk": _get("ProtocolName", "unnamed").split("_")[-1],
+                    "part": dixon_mapping[series_description.rsplit("_", maxsplit=1)[-1].lower()],
+                    "chunk": protocol_name.rsplit("_", maxsplit=1)[-1],
                     **keys,
                 },
                 ".nii.gz",
@@ -235,9 +252,17 @@ def extract_keys_from_json(  # noqa: C901
         elif "ME_vibe" in series_description:
             return (
                 "mevibe",
-                {"acq": "ax", "part": dixon_mapping[series_description.split("_")[-1].lower()], "sequ": simp_json["SeriesNumber"], **keys},
+                {"acq": "ax", "part": dixon_mapping[series_description.rsplit("_", maxsplit=1)[-1].lower()], "sequ": sequ, **keys},
                 ".nii.gz",
             )
+        elif "T1_3D_SAG" in series_description:
+            # NAKO-1157 head T1 — plain sagittal ND and the MPR-Tra reformat.
+            acq = "tra" if "MPR_Tra" in series_description else "sag"
+            return "T1w", {"acq": acq, "sequ": sequ, **keys}, ".nii.gz"
+        elif "FLAIR" in series_description:
+            # NAKO-1157 head FLAIR (2D transverse).
+            acq = "tra" if "TRA" in series_description else "sag"
+            return "FLAIR", {"acq": acq, "sequ": sequ, **keys}, ".nii.gz"
         elif "PD" in series_description:
             return "pd", {"acq": "iso", **keys}, ".nii.gz"
         elif "T2_HASTE" in series_description:
