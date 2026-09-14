@@ -11,7 +11,7 @@ from TPTBox import BIDS_FILE, BIDS_Global_info, Print_Logger
 logger = Print_Logger()
 arg_parser = argparse.ArgumentParser()
 arg_parser.add_argument("-i", "--inputfolder", help="input folder (where the rawdata folder is located)", required=True)
-arg_parser.add_argument("-p", "--outparant", help="input folder (where the rawdata folder is located)", default="rawdata_stitched")
+arg_parser.add_argument("-p", "--outparant", help="input folder (where the rawdata folder is located)", default="rawdata-stitched")
 arg_parser.add_argument("-s", "--sleep", type=float, default=0, help="sleep after each save")
 arg_parser.add_argument("-r", "--rawdata", type=str, default="rawdata", help="the rawdata folder to be searched")
 args = arg_parser.parse_args()
@@ -60,7 +60,7 @@ for name, subj in bgi.enumerate_subjects(sort=True):
             already_stitched += 1
             continue
         print("Stich", out)
-        nii = st.GNC_stitch_T2w(files["HWS"], files["BWS"], files["LWS"])
+        nii = st.NAKO_stitch_T2w(files["HWS"], files["BWS"], files["LWS"])
         crop = nii.compute_crop()
         nii.apply_crop_(crop)
         nii.save(out)

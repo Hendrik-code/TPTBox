@@ -45,9 +45,11 @@ from TPTBox.core.np_utils import (
     np_fill_holes,
     np_fill_holes_global_with_majority_voting,
     np_filter_connected_components,
+    np_filter_connected_components_by_bbox_chain,
     np_get_connected_components_center_of_mass,
     np_is_empty,
     np_isin,
+    np_label_interface_thickness,
     np_map_labels,
     np_map_labels_based_on_majority_label_mask_overlap,
     np_point_coordinates,
@@ -452,7 +454,8 @@ class NII(NII_Math):
                 nii2 = Nifti1Image(arr_for_nib, self.affine, self.header)
                 nii2.set_data_dtype(safe_dtype)
                 nii = Nifti1Image(arr_for_nib, nii2.affine, nii2.header)  # type: ignore
-            if all(a is None for a in self.header.get_slope_inter()):
+            c = self.get_c_val()
+            if all(a is None for a in self.header.get_slope_inter()) and not np.isnan(c):
                 nii.header.set_slope_inter(1,self.get_c_val()) # type: ignore
             #if self.header is not None:
             #    self.header.set_sform(self.affine, code=1)
@@ -947,18 +950,6 @@ class NII(NII_Math):
         assert crop_x == shp_x and crop_y == shp_y and crop_z == shp_z
         return self.set_array(arr_cropped, inplace=inplace)
         #return self.apply_crop(crop_slices, inplace=inplace)
-
-    def apply_crop_slice(self, *args, **qargs) -> Self:
-        """Deprecated alias for `apply_crop`."""
-        import warnings
-        warnings.warn("apply_crop_slice id deprecated use apply_crop instead",stacklevel=5) #TODO remove in version 1.0
-        return self.apply_crop(*args,**qargs)
-
-    def apply_crop_slice_(self, *args, **qargs) -> Self:
-        """Deprecated alias for `apply_crop_`."""
-        import warnings
-        warnings.warn("apply_crop_slice_ id deprecated use apply_crop_ instead",stacklevel=5) #TODO remove in version 1.0
-        return self.apply_crop_(*args,**qargs)
 
     def apply_crop(self,ex_slice:tuple[slice,slice,slice]|Sequence[slice]|None , inplace=False) -> Self:
         """Crop the NIfTI volume by a per-axis slice tuple (thin wrapper around ``nibabel``'s ``.slicer``).
@@ -1570,7 +1561,7 @@ class NII(NII_Math):
             import ants
         except Exception:
             log.print_error()
-            log.on_fail("run 'pip install antspyx' to install hf-deepali")
+            log.on_fail("this function needs antspyx: run 'pip install antspyx'")
             raise
         try:
             from ants.utils.convert_nibabel import from_nibabel
@@ -2961,6 +2952,137 @@ class NII(NII_Math):
     def center_of_masses(self) -> dict[int, COORDINATE]:
         """Returns a dict stating the center of mass for each present label (not including zero!)."""
         return np_center_of_mass(self.get_seg_array())
+
+    def relabel_by_position(
+        self,
+        axis: DIRECTIONS = "I",
+        offset: int = 0,
+        inplace: bool = False,
+        verbose: logging = False,
+    ) -> Self:
+        """Relabels instances consecutively by their position along an anatomical axis.
+
+        Labels are renumbered ``1 + offset``, ``2 + offset``, ... in the order their centers of
+        mass appear when travelling along ``axis``. With the default ``axis="I"`` the most
+        superior instance becomes label ``1 + offset`` and numbering runs downwards.
+
+        This works in whatever orientation the image already has -- the direction is resolved
+        against :attr:`orientation`, so no reorientation round-trip is needed.
+
+        Args:
+            axis (DIRECTIONS, optional): Anatomical direction the numbering advances along.
+                Defaults to ``"I"`` (superior to inferior).
+            offset (int, optional): Added to every new label, so numbering starts at
+                ``1 + offset``. Defaults to 0.
+            inplace (bool, optional): If True, modifies this NII in place. Defaults to False.
+            verbose (logging, optional): Passed through to :meth:`map_labels`. Defaults to False.
+
+        Returns:
+            NII: The relabeled segmentation.
+
+        Examples:
+            >>> vert.relabel_by_position("I")  # doctest: +SKIP
+            # topmost vertebra -> 1, next one down -> 2, ...
+        """
+        ax = self.get_axis(axis)
+        # get_axis falls back to the opposite letter, so recover which way the axis actually runs.
+        forward = axis in self.orientation
+        coms = np_center_of_mass(self.get_seg_array())
+        ordered = sorted(coms.items(), key=lambda kv: kv[1][ax], reverse=not forward)
+        label_map = {int(label): idx + 1 + offset for idx, (label, _) in enumerate(ordered)}
+        return self.map_labels(label_map, verbose=verbose, inplace=inplace)
+
+    def relabel_by_position_(self, axis: DIRECTIONS = "I", offset: int = 0, verbose: logging = False) -> Self:
+        """In-place version of :meth:`relabel_by_position`."""
+        return self.relabel_by_position(axis=axis, offset=offset, inplace=True, verbose=verbose)
+
+    def filter_connected_components_by_bbox_chain(
+        self,
+        margin_mm: float = 0.0,
+        extra_margin_mm: float = 0.0,
+        extra_margin_axis: DIRECTIONS | None = None,
+        connectivity: int = 3,
+        inplace: bool = False,
+    ) -> Self:
+        """Keeps only components whose bounding boxes chain onto the largest component.
+
+        The mask is binarized and split into connected components. Starting from the largest one,
+        any component whose bounding box (grown by ``margin_mm``) overlaps the growing region on
+        every axis is kept, repeating until nothing new is added; everything else is removed.
+        Labels of the kept voxels are preserved.
+
+        This is the "keep the spine, drop the unrelated blobs" filter: a structure broken into
+        several pieces along its length stays, while a component sitting off to the side goes.
+
+        Margins are given in millimetres and converted per axis using :attr:`zoom`, so the region
+        grows by the same physical distance regardless of anisotropy.
+
+        Args:
+            margin_mm (float, optional): Bounding-box margin in mm applied on every axis.
+                Defaults to 0.0.
+            extra_margin_mm (float, optional): Additional margin in mm along ``extra_margin_axis``
+                only, to tolerate gaps along the structure's main direction. Defaults to 0.0.
+            extra_margin_axis (DIRECTIONS | None, optional): Anatomical direction the extra margin
+                applies to (e.g. ``"I"`` for a spine). Required when ``extra_margin_mm`` is set.
+                Defaults to None.
+            connectivity (int, optional): Connectivity used to find the components. Defaults to 3.
+            inplace (bool, optional): If True, modifies this NII in place. Defaults to False.
+
+        Returns:
+            NII: The filtered segmentation.
+        """
+        assert extra_margin_mm == 0 or extra_margin_axis is not None, "extra_margin_mm needs extra_margin_axis"
+        zoom = self.zoom
+        margin = [margin_mm / z for z in zoom]
+        axis = self.get_axis(extra_margin_axis) if extra_margin_axis is not None else None
+        extra = extra_margin_mm / zoom[axis] if axis is not None else 0.0
+        arr = np_filter_connected_components_by_bbox_chain(
+            self.get_seg_array(),
+            margin=margin,
+            extra_margin=extra,
+            extra_margin_axis=axis,
+            connectivity=connectivity,
+        )
+        return self.set_array(arr, inplace=inplace)
+
+    def label_interface_thickness(
+        self,
+        label: int | Sequence[int],
+        other_label: int | Sequence[int],
+        max_count_component: int | None = None,
+        sigma: float = 1.0,
+        max_steps: int | None = 1000,
+        max_distance: float | None = None,
+    ) -> np.ndarray:
+        """Measures how thick a structure is where it meets another structure.
+
+        At every voxel of ``other_label`` touching ``label``, a ray is marched along the inward
+        surface normal until it exits ``label``; the distance travelled is the local thickness.
+        Distances are returned in **millimetres**, using :attr:`zoom`.
+
+        Args:
+            label (int | Sequence[int]): The structure whose thickness is measured.
+            other_label (int | Sequence[int]): The structure the measurement starts from.
+            max_count_component (int | None, optional): Keep only this many largest connected
+                components of ``label`` before measuring. Defaults to None (keep all).
+            sigma (float, optional): Smoothing applied before computing the normals. Defaults to 1.0.
+            max_steps (int | None, optional): Step limit per ray. Defaults to 1000.
+            max_distance (float | None, optional): Distance limit per ray, in voxels. Defaults to None.
+
+        Returns:
+            np.ndarray: One thickness in mm per interface voxel; ``np.nan`` where a ray hit a
+            limit without leaving ``label``. Empty when the two labels do not touch.
+        """
+        return np_label_interface_thickness(
+            self.get_seg_array(),
+            label,
+            other_label,
+            zoom=self.zoom,
+            max_count_component=max_count_component,
+            sigma=sigma,
+            max_steps=max_steps,
+            max_distance=max_distance,
+        )
 
 
 

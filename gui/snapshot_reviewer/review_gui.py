@@ -113,8 +113,16 @@ BUTTONS_PER_ROW = 4
 PREFETCH_COUNT = 20  # how many upcoming snapshots to warm in the background
 CACHE_MAX_SIZE = 250  # how many decoded pixmaps to keep buffered (LRU)
 
+# Cap on how many entries the review queue holds after filtering. 0 = no cap.
+# Keeps the QListWidget snappy on very large datasets.
+MAX_QUEUE_ENTRIES = 0
+
 # Default derivatives folder scanned for snapshots (JPG/PNG). CLI: --parent-dir.
 DEFAULT_SNAPSHOT_PARENT = "derivatives-VIBESeg-12-points-snp"
+
+# Image fam-keys auto-checked in the Slicer launch dialog (pressing L).
+# Overridable via the ⚙ Settings dialog; multiple entries allowed.
+SLICER_AUTO_SELECT_KEYS: list[str] = ["ct"]
 
 STYLESHEET = f"""
 QMainWindow, QWidget {{
@@ -797,6 +805,8 @@ class SettingsDialog(QDialog):
         prefetch_count: int,
         cache_max_size: int,
         buttons_per_row: int,
+        slicer_auto_select_keys: list[str] | None = None,
+        max_queue_entries: int = 0,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
@@ -838,6 +848,16 @@ class SettingsDialog(QDialog):
         self.btn_row_spin.setRange(1, 12)
         self.btn_row_spin.setValue(int(buttons_per_row))
         form.addRow("Buttons per row (restart):", self.btn_row_spin)
+
+        self.max_queue_spin = QSpinBox()
+        self.max_queue_spin.setRange(0, 1_000_000)
+        self.max_queue_spin.setValue(int(max_queue_entries))
+        self.max_queue_spin.setSpecialValueText("unlimited")
+        form.addRow("Max entries in review queue (0 = ∞):", self.max_queue_spin)
+
+        self.slicer_keys_edit = QLineEdit(", ".join(slicer_auto_select_keys or []))
+        self.slicer_keys_edit.setPlaceholderText("ct, mri, t1  (comma or space separated)")
+        form.addRow("Slicer auto-selected image keys [L]:", self.slicer_keys_edit)
         layout.addLayout(form)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
@@ -849,12 +869,16 @@ class SettingsDialog(QDialog):
         """Return the edited settings as a keyword-mapping dict."""
         deriv_lines = [ln.strip() for ln in self.deriv_edit.toPlainText().splitlines()]
         deriv = [ln for ln in deriv_lines if ln]
+        raw_keys = self.slicer_keys_edit.text().replace(",", " ").split()
+        slicer_keys = [k.strip() for k in raw_keys if k.strip()]
         return {
             "slicer_exe": self.slicer_edit.text().strip(),
             "derivatives_search": deriv,
             "prefetch_count": int(self.prefetch_spin.value()),
             "cache_max_size": int(self.cache_spin.value()),
             "buttons_per_row": int(self.btn_row_spin.value()),
+            "slicer_auto_select_keys": slicer_keys,
+            "max_queue_entries": int(self.max_queue_spin.value()),
         }
 
 
@@ -874,6 +898,7 @@ class ReviewWindow(QMainWindow):
         prefetch_count: int | None = None,
         cache_max_size: int | None = None,
         buttons_per_row: int | None = None,
+        max_queue_entries: int | None = None,
     ):
         super().__init__()
         self.dataset_path = dataset_path
@@ -915,12 +940,31 @@ class ReviewWindow(QMainWindow):
                 else (self.log.get_setting("ui.buttons_per_row", str(BUTTONS_PER_ROW)) or BUTTONS_PER_ROW)
             ),
         )
+        self.max_queue_entries: int = max(
+            0,
+            int(
+                max_queue_entries
+                if max_queue_entries is not None
+                else (self.log.get_setting("ui.max_queue_entries", str(MAX_QUEUE_ENTRIES)) or MAX_QUEUE_ENTRIES)
+            ),
+        )
+        stored_keys = self.log.get_setting("slicer.auto_select_keys", None)
+        if stored_keys:
+            try:
+                self.slicer_auto_select_keys: list[str] = [s for s in json.loads(stored_keys) if isinstance(s, str)]
+            except Exception:
+                self.slicer_auto_select_keys = list(SLICER_AUTO_SELECT_KEYS)
+        else:
+            self.slicer_auto_select_keys = list(SLICER_AUTO_SELECT_KEYS)
+
         # Persist the resolved values so they are stable across restarts.
         self.log.set_setting("slicer.exe", self.slicer_exe)
+        self.log.set_setting("slicer.auto_select_keys", json.dumps(self.slicer_auto_select_keys))
         self.log.set_setting("derivatives.search", json.dumps(self.derivatives_search))
         self.log.set_setting("image.prefetch_count", str(self.prefetch_count))
         self.log.set_setting("image.cache_max_size", str(self.cache_max_size))
         self.log.set_setting("ui.buttons_per_row", str(self.buttons_per_row))
+        self.log.set_setting("ui.max_queue_entries", str(self.max_queue_entries))
 
         self.all_snapshots: list[Path] = []
         self.queue: list[Path] = []
@@ -1226,6 +1270,9 @@ class ReviewWindow(QMainWindow):
         # Keep any temporarily injected path even if it would be filtered out
         if self._injected_path and self._injected_path not in filtered:
             filtered.insert(0, self._injected_path)
+        # Cap queue length so the QListWidget stays fast on huge datasets.
+        if self.max_queue_entries > 0 and len(filtered) > self.max_queue_entries:
+            filtered = filtered[: self.max_queue_entries]
         self.queue = filtered
         if self.current_idx >= len(self.queue):
             self.current_idx = max(0, len(self.queue) - 1)
@@ -1316,6 +1363,8 @@ class ReviewWindow(QMainWindow):
             self.prefetch_count,
             self.cache_max_size,
             self.buttons_per_row,
+            self.slicer_auto_select_keys,
+            self.max_queue_entries,
             self,
         )
         if dlg.exec() != QDialog.DialogCode.Accepted:
@@ -1325,15 +1374,20 @@ class ReviewWindow(QMainWindow):
         self.slicer_exe = v["slicer_exe"]
         self.derivatives_search = list(v["derivatives_search"]) or list(_DERIVATIVES_SEARCH)
         old_prefetch, old_cache, old_bpr = self.prefetch_count, self.cache_max_size, self.buttons_per_row
+        old_max_queue = self.max_queue_entries
         self.prefetch_count = v["prefetch_count"]
         self.cache_max_size = v["cache_max_size"]
         self.buttons_per_row = v["buttons_per_row"]
+        self.max_queue_entries = int(v["max_queue_entries"])
+        self.slicer_auto_select_keys = list(v["slicer_auto_select_keys"])
 
         self.log.set_setting("slicer.exe", self.slicer_exe)
         self.log.set_setting("derivatives.search", json.dumps(self.derivatives_search))
         self.log.set_setting("image.prefetch_count", str(self.prefetch_count))
         self.log.set_setting("image.cache_max_size", str(self.cache_max_size))
         self.log.set_setting("ui.buttons_per_row", str(self.buttons_per_row))
+        self.log.set_setting("ui.max_queue_entries", str(self.max_queue_entries))
+        self.log.set_setting("slicer.auto_select_keys", json.dumps(self.slicer_auto_select_keys))
 
         # Reset the cached BIDS_Global_info so the new derivatives list applies.
         if hasattr(self, "_slicer_bgi"):
@@ -1348,6 +1402,9 @@ class ReviewWindow(QMainWindow):
             note += " Buttons-per-row change takes effect after a restart."
         if self.prefetch_count != old_prefetch:
             note += " Prefetch tuned."
+        if self.max_queue_entries != old_max_queue:
+            self._apply_filter()
+            note += " Queue cap applied."
         self.status_bar.showMessage(note, 5000)
 
     def _refresh_queue_list(self):
@@ -1530,6 +1587,7 @@ class ReviewWindow(QMainWindow):
         if p is None or verdict_key not in VERDICT_META:
             return
         reason = self.reason_edit.text().strip()
+        marked_idx = self.current_idx
         self._next()
         QApplication.processEvents()
         if verdict_key == "good":
@@ -1541,16 +1599,25 @@ class ReviewWindow(QMainWindow):
         actual_vk = actual["verdict"] if actual else verdict_key
         label = VERDICT_META.get(actual_vk, (verdict_key,))[0]
         self.status_bar.showMessage(f"{label}: {p.name}", 3000)
-        self._post_mark()
+        self._post_mark(marked_idx=marked_idx, marked_vk=actual_vk)
 
-    def _post_mark(self):
+    def _post_mark(self, marked_idx: int | None = None, marked_vk: str | None = None):
         # Warm the next 10 snapshots in the background so stepping forward
         # (or jumping back into recently-seen territory) doesn't stall on I/O.
         self._prefetch_upcoming()
         self._update_stats()
         self._update_verdict_log()
-        self._refresh_queue_list()
-        self._show_current()
+        # Update just the single row that changed instead of rebuilding the
+        # entire QListWidget — at 10k entries a full rebuild on every keypress
+        # is what makes the UI feel sluggish.
+        if marked_idx is not None and 0 <= marked_idx < self.queue_list.count():
+            item = self.queue_list.item(marked_idx)
+            if item is not None:
+                meta = VERDICT_META.get(marked_vk) if marked_vk else None
+                if meta is not None:
+                    item.setForeground(QColor(meta[1]))
+        else:
+            self._refresh_queue_list()
 
     def _open_in_slicer(self):
         """Open the current snapshot's BIDS family in 3D Slicer."""
@@ -1588,6 +1655,19 @@ class ReviewWindow(QMainWindow):
                     for k1, k2, coord in p2.items():
                         p[k1, k2] = coord
                     p.save(f)
+                    # out = _fam["ct"][0].get_changed_path(
+                    #    "nii.gz",
+                    #    "msk",
+                    #    parent="derivatives-final-points",
+                    #    info={"seg": "treg", "mod": None},
+                    # )
+                    # logger.on_debug("unlink", out, out.exists())
+                    # out.unlink(missing_ok=True)
+                    # for t in _fam.get("msk_seg-treg", []):
+                    #    logger.on_debug(t)
+                    #    if t.parent == "derivatives-final-points":
+                    #        logger.on_debug("unlink", t.file["nii.gz"])
+                    #        t.file["nii.gz"].unlink(missing_ok=True)
 
         dlg = SlicerLaunchDialog(
             p,
@@ -1597,6 +1677,7 @@ class ReviewWindow(QMainWindow):
             parent=self,
             slicer_exe=self.slicer_exe,
             derivatives_search=self.derivatives_search,
+            auto_select_keys=self.slicer_auto_select_keys,
         )
         dlg.exec()
 
