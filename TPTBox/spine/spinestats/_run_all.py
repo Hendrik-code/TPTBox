@@ -42,6 +42,14 @@ REQUIRED_MAIN_KEYS: tuple[str, ...] = (
     "body_composition_score",
     "muscle_fat_infiltration",
     "torso_vat_sat_muscle_mass",
+    # Extended curvature / balance / pelvic metrics (see curvature.py and pelvic_parameters.py).
+    "sva",
+    "coronal_balance",
+    "axial_rotation",
+    "segmental_endplate_angles",
+    "curvature_profile",
+    "multi_cobb",
+    "pelvic_parameters",
 )
 
 
@@ -85,6 +93,9 @@ def get_nako_paths(nako_id: str) -> dict[str, Path | None]:
             vert, spine = v, sp
             break
 
+    fullbody_poi = (
+        DATASET_ROOT / f"derivatives-fullbody-poi/{pfx}/{sub}/vibe/sub-{sub}_sequ-stitched_acq-ax_part-water_seg-fullbody_poi.json"
+    )
     roi = (
         DATASET_ROOT / f"derivatives_Abdominal-Segmentation/{pfx}/{sub}/vibe/sub-{nako_id}_sequ-stitched_acq-ax_mod-vibe_seg-ROI_msk.nii.gz"
     )
@@ -100,6 +111,7 @@ def get_nako_paths(nako_id: str) -> dict[str, Path | None]:
         "spine": spine,
         "roi": roi,
         "vibeseg100": vibeseg100 if vibeseg100.exists() else None,
+        "fullbody_poi": fullbody_poi if fullbody_poi.exists() else None,
         "dataset": DATASET_ROOT,
     }
 
@@ -152,6 +164,8 @@ def run_all(
     need_bcs=True,
     need_mfi=True,
     need_torso=True,
+    need_curvature=True,
+    need_pelvic=True,
 ) -> dict[str, Any] | None:
     """Run the full pipeline for one subject and return the results dict.
 
@@ -184,9 +198,19 @@ def run_all(
     """
     from TPTBox import Location, calc_poi_from_subreg_vert
     from TPTBox.spine.spinestats.angles import plot_cobb_and_lordosis_and_kyphosis
+    from TPTBox.spine.spinestats.curvature import (
+        compute_axial_rotation,
+        compute_coronal_balance,
+        compute_curvature_profile,
+        compute_multi_cobb,
+        compute_segmental_endplate_angles,
+        compute_sva,
+        compute_wedge_metrics,
+    )
     from TPTBox.spine.spinestats.measure_ivd_and_vertebra_geometry import (
         measure_ivd_and_vertebra_geometry,  # structure_label: int = 100 and structure_label: int = 49
     )
+    from TPTBox.spine.spinestats.pelvic_parameters import compute_pelvic_parameters
     from TPTBox.spine.spinestats.torso_vat_sat import VBQ_score, body_composition_score, muscle_fat_infiltration, torso_vat_sat_muscle_mass
 
     if "t2w" not in file_dict:
@@ -234,6 +258,9 @@ def run_all(
     need_bcs = _need("body_composition_score", compute=need_bcs)
     need_mfi = _need("muscle_fat_infiltration", compute=need_mfi)
     need_torso = _need("torso_vat_sat_muscle_mass", compute=need_torso)
+    _curvature_keys = ("sva", "coronal_balance", "axial_rotation", "segmental_endplate_angles", "curvature_profile", "multi_cobb")
+    need_curvature = _need(*_curvature_keys, compute=need_curvature)
+    need_pelvic = _need("pelvic_parameters", compute=need_pelvic)
     # Recompute area
     save = False
     if "VBQ_score" in out and "VBQ_L1-L1_old" in out["VBQ_score"]:
@@ -246,8 +273,42 @@ def run_all(
         need_torso = True
         del out["torso_vat_sat_muscle_mass"]
         save = True
+    # Redo pelvic_parameters if the cached entry is just an error stub (e.g. old runs where
+    # fullbody_poi wasn't resolved), OR if it was written with the old unsigned-SS
+    # implementation (detected via the PI = PT + SS invariant violated by > 0.1 deg).
+    if "pelvic_parameters" in out:
+        pp = out.get("pelvic_parameters", {})
+        redo = False
+        if isinstance(pp, dict):
+            if pp.get("fullbody_poi_json") is None and "error" in pp:
+                redo = True
+            else:
+                for variant_key in ("poi_ap", "poi_ala"):
+                    v = pp.get(variant_key)
+                    if not isinstance(v, dict):
+                        continue
+                    pi = v.get("pi_deg")
+                    pt = v.get("pt_deg")
+                    ss = v.get("ss_deg")
+                    if pi is None or pt is None or ss is None:
+                        continue
+                    try:
+                        if abs(float(pi) - (float(pt) + float(ss))) > 0.1:
+                            redo = True
+                            break
+                    except (TypeError, ValueError):
+                        continue
+        if redo:
+            need_pelvic = True
+            del out["pelvic_parameters"]
+            save = True
+    # Retrospectively fold per-vertebra metrics into vert_geometry / ivd_geometry
+    # for cached JSONs written before the merge was in place. Cheap and idempotent.
+    if any(k in out for k in ("axial_rotation", "endplate_internal_angle", "segmental_endplate_angles")):
+        _merge_per_vertebra_metrics(out)
+        save = True
     ####
-    need_poi = need_cobb or need_ivd or need_vert
+    need_poi = need_cobb or need_ivd or need_vert or need_curvature
     need_t2w = need_ivd or need_vert or need_vbq
     need_vert_nii = need_poi or need_vbq or need_bcs or need_mfi
     need_spine_nii = need_vert_nii or need_vbq
@@ -255,7 +316,7 @@ def run_all(
     need_roi = need_mfi or need_torso
     need_vibe_wf = need_mfi
 
-    if not (need_cobb or need_ivd or need_vert or need_vbq or need_bcs or need_mfi or need_torso):
+    if not (need_cobb or need_ivd or need_vert or need_vbq or need_bcs or need_mfi or need_torso or need_curvature or need_pelvic):
         if _merge_endplate_angles(out, Path(poi_out)) or save:
             save_json(final_out, out)
         return out
@@ -329,6 +390,66 @@ def run_all(
         logger.on_debug("torso_vat_sat_muscle_mass")
         torso_results, _body_comp = torso_vat_sat_muscle_mass(vibe_seg, roi, dataset_id=100)
         out["torso_vat_sat_muscle_mass"] = torso_results
+
+    if need_curvature and poi is not None:
+        try:
+            logger.on_debug("curvature metrics")
+            out["sva"] = compute_sva(poi)
+            out["coronal_balance"] = compute_coronal_balance(poi)
+            out["axial_rotation"] = compute_axial_rotation(poi)
+            out["segmental_endplate_angles"] = compute_segmental_endplate_angles(poi)
+            out["curvature_profile"] = compute_curvature_profile(poi)
+            out["multi_cobb"] = compute_multi_cobb(poi)
+        except Exception:
+            logger.on_fail("curvature error caught")
+            logger.print_error()
+
+    # Merge wedge metrics directly into the per-label vert_geometry / ivd_geometry
+    # entries so they land in per_vertebra.xlsx / per_ivd.xlsx automatically.
+    for geom_key in ("vert_geometry", "ivd_geometry"):
+        geom = out.get(geom_key)
+        if not isinstance(geom, dict):
+            continue
+        try:
+            geom_int_keys = {int(k): v for k, v in geom.items()}
+            wedge = compute_wedge_metrics(geom_int_keys)
+            for label, w in wedge.items():
+                target = geom.get(str(label)) or geom.get(label)
+                if isinstance(target, dict):
+                    for k, v in w.items():
+                        target.setdefault(k, v)
+        except Exception:
+            logger.on_fail(f"wedge merge failed for {geom_key}")
+            logger.print_error()
+
+    # Also fold per-vertebra dicts (axial_rotation, endplate_internal_angle) into
+    # vert_geometry entries and per-IVD segmental angles into ivd_geometry, so they
+    # land in per_vertebra.xlsx / per_ivd.xlsx rather than exploding per_subject
+    # into dozens of extra columns.
+    _merge_per_vertebra_metrics(out)
+
+    if need_pelvic:
+        try:
+            from TPTBox.spine.spinestats.pelvic_parameters import resolve_fullbody_poi_path
+
+            lumbar_ll = None
+            curv = out.get("curv")
+            if isinstance(curv, dict):
+                lumbar_ll = curv.get("lumbar_lordosis")
+            # Prefer an explicit path from file_dict (get_nako_paths sets one);
+            # fall back to resolving from (dataset, id) so subjects streamed from
+            # loop_over_repaired_nako (which doesn't add fullbody_poi) still work.
+            fb = file_dict.get("fullbody_poi")
+            if fb is None:
+                sub_id = file_dict.get("id")
+                ds = file_dict.get("dataset", DATASET_ROOT)
+                if sub_id is not None:
+                    fb = resolve_fullbody_poi_path(ds, str(sub_id))
+            out["pelvic_parameters"] = compute_pelvic_parameters(fb, lumbar_lordosis_deg=lumbar_ll)
+        except Exception:
+            logger.on_fail("pelvic_parameters error caught")
+            logger.print_error()
+
     _merge_endplate_angles(out, Path(poi_out))
     logger.on_save("save", final_out.name)
     save_json(final_out, out)
@@ -355,6 +476,59 @@ def _read_endplate_internal_angles(poi_json_path: Path) -> dict[str, Any]:
     if isinstance(data, dict) and isinstance(data.get("endplate_internal_angle"), dict):
         return data["endplate_internal_angle"]
     return {}
+
+
+def _merge_per_vertebra_metrics(out: dict[str, Any]) -> None:
+    """Fold per-vertebra top-level dicts into vert_geometry / ivd_geometry entries.
+
+    Moves values from:
+      - ``axial_rotation``           {vertebra_name: deg}  -> vert_geometry[label]["axial_rotation_deg"]
+      - ``endplate_internal_angle``  {vertebra_name: deg}  -> vert_geometry[label]["endplate_internal_angle_deg"]
+      - ``segmental_endplate_angles`` {"V1-V2": deg}       -> ivd_geometry[100+V1_label]["segmental_endplate_angle_deg"]
+
+    Non-destructive on the top-level dicts (kept for backward reads), but
+    the collector will exclude these keys from per_subject.xlsx.
+    """
+    from TPTBox.core.vert_constants import Vertebra_Instance
+
+    def _name_to_label(n: str) -> int | None:
+        try:
+            return Vertebra_Instance[n].value
+        except KeyError:
+            return None
+
+    def _find(geom: dict, label: int) -> dict | None:
+        return geom.get(str(label)) or geom.get(label)
+
+    vg = out.get("vert_geometry")
+    if isinstance(vg, dict):
+        for src_key, dst_key in (
+            ("axial_rotation", "axial_rotation_deg"),
+            ("endplate_internal_angle", "endplate_internal_angle_deg"),
+        ):
+            src = out.get(src_key)
+            if not isinstance(src, dict):
+                continue
+            for name, val in src.items():
+                lab = _name_to_label(str(name))
+                if lab is None:
+                    continue
+                target = _find(vg, lab)
+                if isinstance(target, dict):
+                    target.setdefault(dst_key, val)
+
+    ig = out.get("ivd_geometry")
+    if isinstance(ig, dict):
+        seg = out.get("segmental_endplate_angles")
+        if isinstance(seg, dict):
+            for pair, val in seg.items():
+                upper = str(pair).split("-", 1)[0]
+                lab = _name_to_label(upper)
+                if lab is None:
+                    continue
+                target = _find(ig, 100 + lab)
+                if isinstance(target, dict):
+                    target.setdefault("segmental_endplate_angle_deg", val)
 
 
 def _merge_endplate_angles(out: dict[str, Any], poi_json_path: Path) -> bool:
@@ -422,7 +596,16 @@ def _rows_from_json(subject_id: str, data: dict) -> tuple[dict[str, Any], list[d
     row limit (1_048_576).
     """
     per_subject: dict[str, Any] = {"subject": subject_id}
-    subject_view = {k: v for k, v in data.items() if k not in ("ivd_geometry", "vert_geometry")}
+    # Exclude per-label geometry dicts (their rows live in per_vertebra / per_ivd)
+    # and per-vertebra dicts that were already merged into vert_geometry / ivd_geometry.
+    _PER_SUBJECT_EXCLUDE = (
+        "ivd_geometry",
+        "vert_geometry",
+        "axial_rotation",
+        "endplate_internal_angle",
+        "segmental_endplate_angles",
+    )
+    subject_view = {k: v for k, v in data.items() if k not in _PER_SUBJECT_EXCLUDE}
     _flatten("", subject_view, per_subject)
 
     per_vert: list[dict[str, Any]] = []
@@ -457,21 +640,62 @@ def _collector_worker(
     ivd_rows: list[dict[str, Any]] = []
     seen: set[str] = set()
 
-    def _flush() -> None:
-        if subject_rows:
-            pd.DataFrame(subject_rows).to_excel(out_folder / per_subject_name, index=False)
-        if vertebra_rows:
-            pd.DataFrame(vertebra_rows).to_excel(out_folder / per_vertebra_name, index=False)
-        if ivd_rows:
-            pd.DataFrame(ivd_rows).to_excel(out_folder / per_ivd_name, index=False)
+    log_path = out_folder / "excel_collector.log"
 
+    def _log(msg: str) -> None:
+        try:
+            with log_path.open("a") as f:
+                from datetime import datetime as _dt
+
+                f.write(f"[{_dt.now().isoformat(timespec='seconds')}] {msg}\n")
+        except Exception:
+            pass
+
+    def _write(df_rows: list[dict[str, Any]], name: str) -> None:
+        if not df_rows:
+            return
+        target = out_folder / name
+        tmp = target.with_suffix(target.suffix + ".tmp")
+        # xlsxwriter is ~5-10x faster than openpyxl for wide sheets; fall back if unavailable.
+        engine: str | None = "xlsxwriter"
+        try:
+            import xlsxwriter  # noqa: F401
+        except ImportError:
+            engine = None
+        _log(f"writing {name}: rows={len(df_rows)} engine={engine or 'openpyxl'}")
+        try:
+            pd.DataFrame(df_rows).to_excel(tmp, index=False, engine=engine)
+            tmp.replace(target)
+            _log(f"  {name} done: {target.stat().st_size} bytes")
+        except Exception as e:
+            _log(f"  {name} FAILED: {type(e).__name__}: {e}")
+            try:
+                tmp.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    def _flush(final: bool) -> None:
+        # All three tables are now written only at shutdown. The mid-run
+        # per_subject flush was killing the daemon on large runs (silent
+        # xlsxwriter/openpyxl crash during full-DataFrame rewrites), so
+        # nothing is written mid-run — the log below still emits a heartbeat
+        # every ``flush_every`` subjects so progress stays visible.
+        if not final:
+            return
+        _write(subject_rows, per_subject_name)
+        _write(vertebra_rows, per_vertebra_name)
+        _write(ivd_rows, per_ivd_name)
+
+    _log(f"collector started; flush_every={flush_every} (heartbeat only; all writes at shutdown)")
     while True:
         try:
             item = task_q.get(timeout=1.0)
         except _queue.Empty:
             continue
         if item is None:
-            _flush()
+            _log(f"final flush triggered; seen={len(seen)} vertebra_rows={len(vertebra_rows)} ivd_rows={len(ivd_rows)}")
+            _flush(final=True)
+            _log("collector exiting")
             return
         subject_id, json_path = item
         if subject_id in seen:
@@ -486,7 +710,7 @@ def _collector_worker(
         ivd_rows.extend(per_ivd)
         seen.add(subject_id)
         if flush_every and len(seen) % flush_every == 0:
-            _flush()
+            _log(f"heartbeat: seen={len(seen)} vertebra_rows={len(vertebra_rows)} ivd_rows={len(ivd_rows)}")
 
 
 class ExcelCollector:
@@ -541,7 +765,15 @@ class ExcelCollector:
             raise RuntimeError("ExcelCollector not started")
         self._queue.put((str(subject_id), str(json_path)))
 
-    def close(self, join_timeout: float = 60.0) -> None:
+    def close(self, join_timeout: float = 1800.0) -> None:
+        """Signal the daemon to flush + exit and wait up to ``join_timeout`` seconds.
+
+        The final flush writes ``per_vertebra.xlsx`` and ``per_ivd.xlsx``
+        from scratch; with 30k subjects that can take 5-15 minutes per
+        file. The default timeout is generous (30 min) so the daemon
+        has enough time to finish the shutdown flush. Progress is
+        logged to ``<out_folder>/excel_collector.log``.
+        """
         if self._proc is None:
             return
         self._queue.put(None)
@@ -617,6 +849,7 @@ if __name__ == "__main__":
     aggregate = True
     do_not_update = False
     test = False
+    collector: ExcelCollector | None = None
     if aggregate:
         collector = ExcelCollector(out_folder=OUT_FOLDER)
         collector.start()
@@ -669,7 +902,15 @@ if __name__ == "__main__":
                             collector.submit(sub_id, _final_json_path(f))
 
     finally:
-        if aggregate:
+        if aggregate and collector is not None:
             collector.close()
             if missing_rows:
                 pd.DataFrame(missing_rows).to_excel(OUT_FOLDER / "missing_inputs.xlsx", index=False)
+            # Auto-generate the QC report next to the aggregated tables.
+            try:
+                from TPTBox.spine.spinestats._qc_report import build_qc_report
+
+                build_qc_report(OUT_FOLDER)
+            except Exception as e:  # noqa: BLE001
+                logger.on_fail(f"qc_report generation failed: {type(e).__name__}: {e}")
+                logger.print_error()

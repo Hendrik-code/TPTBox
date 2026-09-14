@@ -102,6 +102,7 @@ def get_corrected_mevibe(fam: BIDS_Family, compute_PDFF=True):  # TODO return di
 
 def get_current_best_T2w_seg(sub, black_list_t2w=None):
     if black_list_t2w is None:
+        # 111007 Needs fix, very strong scolisose
         black_list_t2w = [
             # Head missing T2w
             "106910",
