@@ -46,15 +46,28 @@ class DatasetConfig:
     deform_factor: float = 1.0
     degeneration_count: int = 0
     mirror: list[tuple[int | Enum, int | Enum]] | None = None
+    turn_on_mirroring: bool = False
 
     # ── Trainer ──────────────────────────────────────────────────────────────
     nn_trainer: Literal[
         "nnUNetTrainer",
         "nnUNetTrainerNoMirroring",
         "nnUNetTrainerDA5",
+        "nnUNetTrainerDAExt",
         "nnUNetTrainerDAExtGPU",
+        "nnUNetTrainerDAExtHybrid",
     ] = "nnUNetTrainer"
-    auglab_params_json: str = "transform_params_gpu_default01-23.json"
+    # Either one of SmaugLab's bundled configs (resolved from smauglab.configs) or an absolute path to a custom JSON.
+    smauglab_params_json: (
+        Literal[
+            "transform_params.json",  # noqa: PYI051
+            "transform_params_gpu.json",  # noqa: PYI051
+            "transform_params_hybrid.json",  # noqa: PYI051
+            "transform_params_hybrid_TAGE.json",  # noqa: PYI051
+            "transform_params_one-sequence-to-segment-them-all.json",  # noqa: PYI051
+        ]
+        | str
+    ) = "transform_params_one-sequence-to-segment-them-all.json"
 
     # ── Runtime ───────────────────────────────────────────────────────────────
     cpu_workers: int | None = None  # None → os.cpu_count()//2 + 3
@@ -62,14 +75,129 @@ class DatasetConfig:
     dry_run: bool = True  # print plan, skip actual processing
 
 
+# Filename that the SmaugLab params JSON is stored under inside the dataset folder.
+# Kept in sync with train.py's DATASET_SMAUGLAB_PARAMS_FILENAME.
+DATASET_SMAUGLAB_PARAMS_FILENAME = "smauglab_params.json"
+
+
+def _should_strip_mirroring(cfg: DatasetConfig) -> bool:
+    """Decide whether the SmaugLab params JSON should have mirror/flip stripped.
+
+    Strip when either:
+    - ``cfg.mirror`` is set (L/R paired labels — flipping would swap the pair), OR
+    - ``cfg.turn_on_mirroring`` is False AND the trainer explicitly says NoMirroring.
+
+    The trainer-name check alone is not enough: SmaugLab trainers
+    (``nnUNetTrainerDAExt*``) do not carry ``NoMirroring`` in their name but must
+    still disable mirroring when the dataset has anatomical L/R pairs.
+    """
+    if cfg.mirror:
+        assert not cfg.turn_on_mirroring
+        return True
+    return bool("NoMirroring" in cfg.nn_trainer and not cfg.turn_on_mirroring)
+
+
+def _resolve_source_params(cfg: DatasetConfig) -> Path:
+    """Resolve ``cfg.smauglab_params_json`` to an absolute path.
+
+    Relative filenames are looked up inside the shipped ``smauglab.configs``
+    package; anything else is treated as a path on disk.
+    """
+    src = Path(cfg.smauglab_params_json)
+    if src.is_absolute():
+        return src
+    try:
+        import importlib.resources
+
+        import smauglab.configs as _cfg_pkg  # type: ignore
+
+        candidate = Path(str(importlib.resources.files(_cfg_pkg))) / src.name
+        if candidate.is_file():
+            return candidate
+    except (ImportError, ModuleNotFoundError):
+        pass
+    return src.absolute()
+
+
+def _write_dataset_params_json(cfg: DatasetConfig, out_base: Path) -> Path | None:
+    """Copy ``cfg.smauglab_params_json`` into ``out_base`` as ``smauglab_params.json``.
+
+    - When ``cfg.nn_trainer`` contains ``NoMirroring`` the copy is passed through
+      :func:`_strip_mirroring` so that ``mirror_axes``/``FlipTransform``/``flip:true``
+      are removed. SmaugLab has no NoMirroring trainer subclass, so this is how we
+      disable mirroring for those trainers.
+    - Does nothing if the file already exists (user asked: "wenn nicht bereits
+      geschehen"). Returns the path either way, or ``None`` if the source JSON
+      could not be read.
+    """
+    import json
+
+    dst = Path(out_base) / DATASET_SMAUGLAB_PARAMS_FILENAME
+    if dst.is_file():
+        logger.on_text(f"SmaugLab params already present at {dst} — keeping existing file.")
+        return dst
+
+    src = _resolve_source_params(cfg)
+    if not src.is_file():
+        logger.on_warning(
+            f"SmaugLab params source not found at {src}; cannot write {dst}. "
+            "Set cfg.smauglab_params_json to an existing file or one of SmaugLab's bundled configs."
+        )
+        return None
+
+    try:
+        with src.open() as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        logger.on_warning(f"Failed to read SmaugLab params from {src} ({e}); dataset copy skipped.")
+        return None
+
+    if _should_strip_mirroring(cfg):
+        _strip_mirroring(data)
+        logger.on_text(
+            "Stripped mirror_axes / FlipTransform / flip=true from SmaugLab params "
+            f"(mirror pairs={bool(cfg.mirror)}, turn_on_mirroring={cfg.turn_on_mirroring}, trainer={cfg.nn_trainer})."
+        )
+
+    try:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        with dst.open("w") as f:
+            json.dump(data, f, indent=2)
+    except OSError as e:
+        logger.on_warning(f"Failed to write {dst} ({e}); dataset copy skipped.")
+        return None
+
+    logger.on_ok(f"Wrote SmaugLab params to dataset folder: {dst}")
+    return dst
+
+
+def _strip_mirroring(data: object) -> None:
+    """Recursively neutralize mirror/flip augmentations in a SmaugLab params tree."""
+    if isinstance(data, dict):
+        if "mirror_axes" in data:
+            data["mirror_axes"] = []
+        if "flip" in data and isinstance(data["flip"], bool):
+            data["flip"] = False
+        data.pop("FlipTransform", None)
+        for v in data.values():
+            _strip_mirroring(v)
+    elif isinstance(data, list):
+        for v in data:
+            _strip_mirroring(v)
+
+
 def _validate_config(cfg: DatasetConfig) -> None:
     """Raise ValueError with a clear message if the config is inconsistent."""
     errors: list[str] = []
 
-    if cfg.mirror and "NoMirroring" not in cfg.nn_trainer:
+    # Mirror pairs require the trainer to not mirror. SmaugLab DAExt trainers count as valid because
+    # _write_dataset_params_json strips mirror/flip from their params JSON.
+    _mirror_safe_trainers = {"nnUNetTrainerDAExt", "nnUNetTrainerDAExtGPU", "nnUNetTrainerDAExtHybrid"}
+    if cfg.mirror and "NoMirroring" not in cfg.nn_trainer and cfg.nn_trainer not in _mirror_safe_trainers:
         errors.append(
-            f"use_mirror=True but nn_trainer='{cfg.nn_trainer}' does not contain "
-            "'NoMirroring'. Either set use_mirror=False or use nnUNetTrainerNoMirroring."
+            f"mirror pairs are set but nn_trainer='{cfg.nn_trainer}' does not disable mirroring. "
+            "Use 'nnUNetTrainerNoMirroring', a SmaugLab DAExt trainer (mirror is stripped from its "
+            "params JSON), or drop the mirror pairs."
         )
     if errors:
         logger.on_fail("Config validation failed:")
@@ -230,12 +358,13 @@ def build_dataset(cfg: DatasetConfig) -> None:
         labels_mapping,
         spacing=cfg.spacing,
         nn_trainier=cfg.nn_trainer,
-        AUGLAB_PARAMS_GPU_JSON=cfg.auglab_params_json,
+        SMAUGLAB_PARAMS_GPU_JSON=cfg.smauglab_params_json,
         ignore=cfg.ignore_label,
         num_input=cfg.num_input,
         is_ct=cfg.is_ct,
-        base=cfg.nnunet_base,
+        base=str(cfg.nnunet_base),
         orientation=cfg.orientation,
+        turn_on_mirroring=cfg.turn_on_mirroring,
     )
     dataset_settings["labels_mapping"] = mapping_back
 
@@ -277,17 +406,25 @@ def build_dataset(cfg: DatasetConfig) -> None:
 
     # ── Finalise ──────────────────────────────────────────────────────────────
     finalize_ds(dataset_settings, out_base)
+    # Copy SmaugLab params into the dataset folder (mirror-stripped for NoMirroring trainers).
+    # train.py auto-picks this file up when a SmaugLab trainer is used.
+    _write_dataset_params_json(cfg, out_base)
     logger.on_ok(f"Dataset {cfg.dataset_id:03} written to {out_base}")
     logger.on_text("Next step:")
-    logger.on_text("Single Folds")
+    logger.on_text("1. Single Folds")
     logger.on_text(
         f"python {Path(__file__).parent}/train.py  -id {cfg.dataset_id} --gpu 0 -e 300 -el 1000 --num-folds 0 --start-fold 0 -b {cfg.nnunet_base.absolute()}"  # noqa: G004
     )  # noqa: G004
 
-    logger.on_text("k-Folds")
+    logger.on_text("2. k-Folds")
     logger.on_text(
         f"python {Path(__file__).parent}/train.py  -id {cfg.dataset_id} --gpu 0 -e 300 -el 1000 --num-folds 3 --start-fold 0 -b {cfg.nnunet_base.absolute()}"  # noqa: G004
     )
+    if cfg.nn_trainer in {"nnUNetTrainerDAExt", "nnUNetTrainerDAExtGPU", "nnUNetTrainerDAExtHybrid"}:
+        logger.on_text(
+            f"(SmaugLab trainer {cfg.nn_trainer!r} is recorded in dataset.json; train.py picks up "
+            f"{DATASET_SMAUGLAB_PARAMS_FILENAME} from the dataset folder automatically.)"
+        )
     # logger.on_text(
     #    f"  conda run --live-stream --name py3.12 python "
     #    f"/DATA/NAS/ongoing_projects/robert/code/totalvibesegmentor/"
