@@ -529,6 +529,13 @@ def extract_keys_from_json(  # noqa: C901
                     " km " in series_description.lower() or series_description.startswith("km") or series_description.endswith("km")
                 ) and keys.get("ce") is None:
                     keys["ce"] = "ContrastAgent"
+            # 2D projections (Philips MIP views of a TOF-MRA source volume,
+            # or any DICOM tagged with `PROJECTION IMAGE` in ImageType). Same
+            # SeriesDescription as the 3D source volume, but the pixel data
+            # is a MIP. Route these to the `MIP` format so the 3D recons keep
+            # `TOF` / `angio` labels and the MIPs live under `sub-*/ses-*/MIP/`.
+            if any("PROJECTION" in str(t).upper() for t in image_type):
+                mri_format = "MIP"
         elif modality.lower() == "pdf":
             return "report", keys, ".pdf"
         elif modality.lower() == "sr":
