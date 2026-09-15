@@ -385,6 +385,7 @@ def _rename_family(json_path: Path, new_json_path: Path, dataset_root: Path, dry
 
 
 _SEQU_ENTITY_RE = re.compile(r"_sequ-([^_\s.]+)")
+_SES_ENTITY_RE = re.compile(r"_ses-([^_\s.]+)")
 
 
 def _leftover_move_plan(
@@ -421,11 +422,21 @@ def _leftover_move_plan(
                 continue
             m = _SEQU_ENTITY_RE.search(src.name)
             sequ = m.group(1) if m else None
+            m_ses = _SES_ENTITY_RE.search(src.name)
+            ses = m_ses.group(1) if m_ses else None
             twin_stem: str | None = None
             target_dir: Path | None = None
             if sequ and new_dir.is_dir():
                 for twin in new_dir.rglob(f"*sequ-{sequ}*.json"):
                     if not twin.is_file():
+                        continue
+                    # Require (session, sequ) both to match. `sequ-<N>` on its
+                    # own repeats across sessions in longitudinal studies and
+                    # would otherwise glue a 2022 DWI onto a 2025 SWI just
+                    # because both happen to be scanner-slot 601.
+                    twin_ses_m = _SES_ENTITY_RE.search(twin.name)
+                    twin_ses = twin_ses_m.group(1) if twin_ses_m else None
+                    if ses is not None and twin_ses is not None and ses != twin_ses:
                         continue
                     twin_stem = twin.name.removesuffix(".json")
                     target_dir = twin.parent
