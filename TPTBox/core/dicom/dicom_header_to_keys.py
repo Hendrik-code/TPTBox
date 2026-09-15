@@ -104,6 +104,30 @@ map_series_description_to_file_format_default = {
 }
 
 
+def _single_echo_for_plane(dicoms: list[pydicom.FileDataset]) -> list[pydicom.FileDataset]:
+    """Return a DICOM subset with one echo per slice position for plane detection.
+
+    Multi-echo Philips DIXON (e.g. "mDIX quant") exports N slice positions × M
+    echos into a single DICOM sub-group. The M copies at each `ImagePositionPatient`
+    collapse the slice axis to ≈0 in `dicom2nifti.common.create_affine`, so after
+    clamping by `hires_threshold` every zoom is ~1 and the series is misdetected
+    as isotropic. Keep only the smallest `EchoNumbers` value so each spatial
+    position is represented once. No-op when the tag is absent or constant.
+    """
+    en_values = set()
+    for d in dicoms:
+        try:
+            en = int(getattr(d, "EchoNumbers", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if en > 0:
+            en_values.add(en)
+    if len(en_values) <= 1:
+        return dicoms
+    keep = min(en_values)
+    return [d for d in dicoms if int(getattr(d, "EchoNumbers", 0) or 0) == keep]
+
+
 def get_plane_dicom(dicoms: list[pydicom.FileDataset] | NII, hires_threshold: float = 0.8) -> str | None:
     """Determine the acquisition plane from a DICOM series or NIfTI image.
 
@@ -126,7 +150,7 @@ def get_plane_dicom(dicoms: list[pydicom.FileDataset] | NII, hires_threshold: fl
     if isinstance(dicoms, NII):
         return dicoms.get_plane(res_threshold=hires_threshold)
     try:
-        sorted_dicoms = common.sort_dicoms(dicoms)
+        sorted_dicoms = common.sort_dicoms(_single_echo_for_plane(dicoms))
         affine, _ = common.create_affine(sorted_dicoms)
         plane_dict = {"S": "ax", "I": "ax", "L": "sag", "R": "sag", "A": "cor", "P": "cor"}
         axc = np.array(nio.aff2axcodes(affine))
