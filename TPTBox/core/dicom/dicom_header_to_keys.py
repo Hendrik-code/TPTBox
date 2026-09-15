@@ -173,7 +173,15 @@ def get_plane_dicom(dicoms: list[pydicom.FileDataset] | NII, hires_threshold: fl
         else:
             plane = "iso"
         return plane  # noqa: TRY300
-    except Exception:
+    except Exception as e:  # noqa: BLE001
+        # Log so a downstream `acq-None` filename can be traced back to its cause,
+        # instead of the plane-detection silently swallowing every failure.
+        try:
+            from TPTBox import Print_Logger
+
+            Print_Logger().on_warning(f"get_plane_dicom: plane detection failed ({type(e).__name__}: {e}); returning None.")
+        except Exception:  # noqa: BLE001
+            pass
         return None
 
 
@@ -319,9 +327,9 @@ def extract_keys_from_json(  # noqa: C901
         if session:
             keys["ses"] = _get("StudyDate", keys.get("ses"))
         if isinstance(dcm_data_l, (str, Path, NII)):
-            keys["acq"] = to_nii(dcm_data_l).get_plane(1)
+            keys["acq"] = to_nii(dcm_data_l).get_plane(0.8)
         else:
-            keys["acq"] = get_plane_dicom(dcm_data_l, 1)
+            keys["acq"] = get_plane_dicom(dcm_data_l, 0.8)
         keys["part"] = dixon_mapping.get(_get("ProtocolName", "NO-PART").split("_")[-1])
 
         sequ = _get("SeriesNumber", None)
