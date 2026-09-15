@@ -298,6 +298,7 @@ def _export_pdf_from_dicom(dcm_path, out_pdf):
 def _collect_text(ds, txt_lines: list[str] | None = None):
     if txt_lines is None:
         txt_lines = []
+    start = len(txt_lines)
 
     def _help_collect_text(content_sequence, level: int = 0):
         for item in content_sequence:
@@ -329,6 +330,28 @@ def _collect_text(ds, txt_lines: list[str] | None = None):
 
     if hasattr(ds, "ContentSequence"):
         _help_collect_text(ds.ContentSequence)
+
+    # Fallback for non-SR modalities (Presentation State, Key Object Selection,
+    # Registration, Fiducials, waveforms, …). These carry no ContentSequence,
+    # so the SR walker above produces nothing and the previous behaviour left
+    # an empty .txt. Dump every DICOM element (minus the pixel data blob) —
+    # the same tag/name/VR/value view a DICOM tag inspector would show.
+    if len(txt_lines) == start:
+        try:
+            iterator = ds.iterall() if hasattr(ds, "iterall") else ds
+            for elem in iterator:
+                if getattr(elem, "tag", None) is not None and elem.tag.group == 0x7FE0:
+                    continue  # PixelData family
+                try:
+                    txt_lines.append(str(elem))
+                except Exception:  # noqa: BLE001
+                    txt_lines.append(f"({getattr(elem, 'tag', '?')}) <unrepresentable>")
+        except Exception:  # noqa: BLE001
+            # Last resort: Dataset.__str__ still gives a readable dump.
+            try:
+                txt_lines.extend(str(ds).splitlines())
+            except Exception:  # noqa: BLE001
+                pass
     return txt_lines
 
 
