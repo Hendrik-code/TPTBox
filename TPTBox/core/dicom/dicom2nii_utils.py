@@ -289,10 +289,18 @@ def test_name_conflict(json_ob: dict, file: str | Path) -> bool:
         ``False`` otherwise (file does not exist or content matches).
     """
     if Path(file).exists():
-        with open(file, encoding="utf-8") as f:
-            js = json.load(f)
-            if "grid" in js:
-                del js["grid"]
+        try:
+            with open(file, encoding="utf-8") as f:
+                js = json.load(f)
+        except (UnicodeDecodeError, json.JSONDecodeError, OSError):
+            # Corrupt / non-UTF-8 / non-JSON file already sits on that path
+            # (interrupted extraction, manual copy from another tool, unrelated
+            # file with the same name). Treat it as a conflict so the caller
+            # picks a fresh, non-colliding filename via `_inc_key` instead of
+            # crashing here with UnicodeDecodeError.
+            return True
+        if "grid" in js:
+            del js["grid"]
         return js != json_ob
     return False
 
