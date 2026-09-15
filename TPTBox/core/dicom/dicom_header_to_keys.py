@@ -94,6 +94,16 @@ map_series_description_to_file_format_default = {
     ".*survey.*": "localizer",
     ".*ref\\s*scan.*": "localizer",
     ".*smartexam.*": "localizer",
+    # Philips ``3DI_MC_HR`` = 3D-Inflow Motion-Corrected High-Resolution
+    # (TOF-MRA MIP projections; ImageType carries ``PROJECTION IMAGE``).
+    # Placed before the generic angio/tof rules below because the raw
+    # ``3di_mc_hr`` string contains neither "tof" nor "angio".
+    ".*3di[_-]?mc.*": "TOF",
+    # Post-contrast dynamic MR (KM = Kontrastmittel). Requires all three
+    # tokens so a generic ``dyn`` doesn't over-match.
+    ".*dyn.*post.*km.*": "DCE",
+    # German ``Halsgefäße`` neck-vessel angiography.
+    ".*halsgef.*": "angio",
     ".*t2.*": "T2w",
     ".*t1.*": "T1w",
     ".*dixon.*": "dixon",
