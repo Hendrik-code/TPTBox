@@ -179,6 +179,25 @@ formats = [
     "rtdose",  # RT dose grid
     "rtplan",  # RT plan
     "ot",  # explicit DICOM "Other" modality
+    # Non-imaging metadata DICOMs — routed to `.txt` sidecars by the modality
+    # fallback in `extract_keys_from_json` because they carry no pixel volume.
+    "pr",  # presentation state (GSPS / CSPS)
+    "ko",  # key object selection
+    "reg",  # registration
+    "fid",  # fiducials
+    "rwv",  # real world value map
+    "plan",  # plan
+    "stain",  # automated slide stainer
+    "resp",  # respiratory waveform
+    "hd",  # hemodynamic waveform
+    "ecg",  # electrocardiography
+    "eps",  # cardiac electrophysiology
+    "ar",  # autorefraction
+    "ker",  # keratometry
+    "len",  # lensometry
+    "va",  # visual acuity
+    "opv",  # ophthalmic visual field
+    "opm",  # ophthalmic mapping
 ]
 # https://bids-specification.readthedocs.io/en/stable/appendices/entity-table.html
 formats_relaxed = [*formats, "t2", "t1", "t2c", "t1c", "mr", "snapshot", "t1dixon", "dwi", "ctb"]

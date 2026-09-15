@@ -155,7 +155,7 @@ def _single_echo_for_plane(dicoms: list[pydicom.FileDataset]) -> list[pydicom.Fi
     return [d for d in dicoms if int(getattr(d, "EchoNumbers", 0) or 0) == keep]
 
 
-def _apply_view_keys(keys: dict, simp_json: dict, get: Callable) -> None:
+def _apply_view_keys(keys: dict, get: Callable) -> None:
     """Populate `acq` / `part` from DICOM ViewPosition + Laterality tags.
 
     Used by the 2D-modality fallback in :func:`extract_keys_from_json`. Without
@@ -522,6 +522,18 @@ def extract_keys_from_json(  # noqa: C901
         elif modality.lower() == "sr":
             keys["desc"] = _get("SeriesDescription", None)
             return "report", keys, ".txt"
+        # Non-imaging metadata DICOMs: Presentation State, Key Object Selection,
+        # Registration, Fiducials, Real World Value Map, Plan, Slide Stainer.
+        # Also physiological waveforms (RESP, HD, ECG, EPS) and ophthalmic
+        # measurements (AR, KER, LEN, VA, OPV, OPM) — none of these carry a
+        # NIfTI-shaped pixel volume. Route them through the same `.txt` report
+        # path as SR so the caller neither writes an empty NIfTI nor crashes
+        # in `_add_grid_info_to_json` on a file that was never produced.
+        elif modality.lower() in {"pr", "ko", "reg", "fid", "rwv", "plan", "stain",
+                                  "resp", "hd", "ecg", "eps",
+                                  "ar", "ker", "len", "va", "opv", "opm"}:
+            keys["desc"] = _get("SeriesDescription", None)
+            return modality.lower(), keys, ".txt"
         # Sensible defaults for the remaining common imaging modalities so we can
         # keep converting instead of raising on every non-CT/PET/MR/XA series.
         # Format names mirror BIDS conventions where they exist and fall back to
@@ -534,11 +546,11 @@ def extract_keys_from_json(  # noqa: C901
             # 2D X-ray family: computed / digital radiography, general radiographic,
             # panoramic, intra-oral, mammography. Kept under one `xray` bucket.
             mri_format = "xray"
-            _apply_view_keys(keys, simp_json, _get)
+            _apply_view_keys(keys, _get)
             _apply_bodypart_key(keys, _get)
         elif modality.lower() == "us":
             mri_format = "us"  # ultrasound
-            _apply_view_keys(keys, simp_json, _get)
+            _apply_view_keys(keys, _get)
             _apply_bodypart_key(keys, _get)
         elif modality.lower() == "nm":
             mri_format = "nm"  # nuclear medicine (planar/SPECT)
@@ -555,7 +567,7 @@ def extract_keys_from_json(  # noqa: C901
             mri_format = "photo"  # ophthalmic / external photography
             # Ophthalmic photos: OS = left eye, OD = right eye → same L/R signal
             # as radiography Laterality; reuse the same helper.
-            _apply_view_keys(keys, simp_json, _get)
+            _apply_view_keys(keys, _get)
             _apply_bodypart_key(keys, _get)
         elif modality.lower() == "es":
             mri_format = "endoscopy"
