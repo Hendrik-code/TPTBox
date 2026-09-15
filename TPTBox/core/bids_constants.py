@@ -129,6 +129,8 @@ formats = [
     "XPC",
     "phot",
     "TOF",  # Time-of-flight
+    "MIP",  # Maximum Intensity Projection
+    "DIR",  # Double Inversion Recovery
     "NerveVIEW",  # https://www.philips.de/healthcare/product/HCNMRB971/3D-NerveVIEW-Klinische-MR-Anwendung
     "3DDrive",  # https://www.philips.de/healthcare/product/HCNMRB178/3D-DRIVE-MR-Software
     "DCE",  # dynamic contrast-enhanced () "
