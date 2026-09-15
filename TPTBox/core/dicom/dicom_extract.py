@@ -778,8 +778,13 @@ def _find_all_files(dcm_dirs: Path | list[Path], verbose=False):
     if verbose:
         logger.on_neutral("Start file searching")
         i = 0
-    yield dcm_dirs
     dcm_dirs = dcm_dirs if isinstance(dcm_dirs, list) else [dcm_dirs]
+    # Yield each root path individually so callers can process a single-directory
+    # source without descending. Previously the raw `dcm_dirs` was yielded first
+    # (a list, when a list was passed) and downstream `str(dicom_path)` cast the
+    # list into a bogus string — no caller could parse it.
+    for dcm_dir in dcm_dirs:
+        yield dcm_dir
     for dcm_dir in dcm_dirs:
         if dcm_dir.is_dir():
             for root, _, files in os.walk(dcm_dir):
