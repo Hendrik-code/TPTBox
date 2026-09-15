@@ -190,9 +190,7 @@ def _ensure_smauglab_trainer_installed(trainer_class_name: str) -> None:
             f"`sudo smauglab_add_nnunettrainer --trainer {module_name} --overwrite` once."
         ) from e
     except OSError as e:
-        raise RuntimeError(
-            f"Failed to install SmaugLab trainer module {module_name!r} into nnunetv2 at {dst}: {e}"
-        ) from e
+        raise RuntimeError(f"Failed to install SmaugLab trainer module {module_name!r} into nnunetv2 at {dst}: {e}") from e
 
 
 def _apply_smauglab_params_env(trainer_class_name: str, dataset_folder: Path) -> None:
@@ -278,9 +276,7 @@ def _run_training(
         assert not disable_checkpointing, "--val_best is not compatible with --disable_checkpointing"
 
     try:
-        nnunet_trainer = get_trainer_from_args(
-            dataset_name_or_id, configuration, fold, trainer_class_name, plans_identifier, device=device
-        )
+        nnunet_trainer = get_trainer_from_args(dataset_name_or_id, configuration, fold, trainer_class_name, plans_identifier, device=device)
     except RuntimeError as e:
         hint = ""
         if trainer_class_name in _SMAUGLAB_TRAINERS:

@@ -79,9 +79,18 @@ def _summary_row(df: pd.DataFrame, col: str, lo: float, hi: float) -> dict:
     n_out = int(mask_out.sum())
     if n_valid == 0:
         return {
-            "column": col, "n_total": n_total, "n_valid": 0, "n_missing": n_total,
-            "median": None, "iqr_low": None, "iqr_high": None, "min": None, "max": None,
-            "outlier_range": f"[{lo}, {hi}]", "n_outliers": 0, "pct_outliers": None,
+            "column": col,
+            "n_total": n_total,
+            "n_valid": 0,
+            "n_missing": n_total,
+            "median": None,
+            "iqr_low": None,
+            "iqr_high": None,
+            "min": None,
+            "max": None,
+            "outlier_range": f"[{lo}, {hi}]",
+            "n_outliers": 0,
+            "pct_outliers": None,
         }
     return {
         "column": col,
@@ -99,9 +108,7 @@ def _summary_row(df: pd.DataFrame, col: str, lo: float, hi: float) -> dict:
     }
 
 
-def _outlier_frame(
-    df: pd.DataFrame, col: str, lo: float, hi: float, extra_cols: list[str]
-) -> pd.DataFrame:
+def _outlier_frame(df: pd.DataFrame, col: str, lo: float, hi: float, extra_cols: list[str]) -> pd.DataFrame:
     v = pd.to_numeric(df[col], errors="coerce")
     mask = v.notna() & ((v < lo) | (v > hi))
     if not mask.any():
@@ -133,8 +140,10 @@ def build_qc_report(folder: Path) -> Path:
             {"item": "per_subject_cols", "value": len(sub.columns)},
             {"item": "n_vertebra_rows", "value": len(vert)},
             {"item": "n_ivd_rows", "value": len(ivd)},
-            {"item": "pelvic_error_rate_%",
-             "value": round(100.0 * sub.get("pelvic_parameters.error", pd.Series([np.nan] * len(sub))).notna().sum() / len(sub), 3)},
+            {
+                "item": "pelvic_error_rate_%",
+                "value": round(100.0 * sub.get("pelvic_parameters.error", pd.Series([np.nan] * len(sub))).notna().sum() / len(sub), 3),
+            },
         ]
     )
 
@@ -163,15 +172,9 @@ def build_qc_report(folder: Path) -> Path:
     # ------------------------------------------------------------------
     # Per-column summary
     # ------------------------------------------------------------------
-    sub_summary = pd.DataFrame(
-        [_summary_row(sub, c, lo, hi) for c, (lo, hi) in OUTLIER_SUBJECT.items() if c in sub.columns]
-    )
-    vert_summary = pd.DataFrame(
-        [_summary_row(vert, c, lo, hi) for c, (lo, hi) in OUTLIER_LABEL.items() if c in vert.columns]
-    )
-    ivd_summary = pd.DataFrame(
-        [_summary_row(ivd, c, lo, hi) for c, (lo, hi) in OUTLIER_LABEL.items() if c in ivd.columns]
-    )
+    sub_summary = pd.DataFrame([_summary_row(sub, c, lo, hi) for c, (lo, hi) in OUTLIER_SUBJECT.items() if c in sub.columns])
+    vert_summary = pd.DataFrame([_summary_row(vert, c, lo, hi) for c, (lo, hi) in OUTLIER_LABEL.items() if c in vert.columns])
+    ivd_summary = pd.DataFrame([_summary_row(ivd, c, lo, hi) for c, (lo, hi) in OUTLIER_LABEL.items() if c in ivd.columns])
 
     # ------------------------------------------------------------------
     # Outlier rows

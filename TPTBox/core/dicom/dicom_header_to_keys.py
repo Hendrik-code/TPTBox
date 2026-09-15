@@ -529,9 +529,25 @@ def extract_keys_from_json(  # noqa: C901
         # NIfTI-shaped pixel volume. Route them through the same `.txt` report
         # path as SR so the caller neither writes an empty NIfTI nor crashes
         # in `_add_grid_info_to_json` on a file that was never produced.
-        elif modality.lower() in {"pr", "ko", "reg", "fid", "rwv", "plan", "stain",
-                                  "resp", "hd", "ecg", "eps",
-                                  "ar", "ker", "len", "va", "opv", "opm"}:
+        elif modality.lower() in {
+            "pr",
+            "ko",
+            "reg",
+            "fid",
+            "rwv",
+            "plan",
+            "stain",
+            "resp",
+            "hd",
+            "ecg",
+            "eps",
+            "ar",
+            "ker",
+            "len",
+            "va",
+            "opv",
+            "opm",
+        }:
             keys["desc"] = _get("SeriesDescription", None)
             return modality.lower(), keys, ".txt"
         # Sensible defaults for the remaining common imaging modalities so we can
