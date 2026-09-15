@@ -29,7 +29,6 @@ import re
 from collections.abc import Iterable
 from pathlib import Path
 
-import nibabel.orientations as nio
 import numpy as np
 
 from TPTBox import BIDS_FILE, Print_Logger
@@ -62,7 +61,7 @@ class _FakeDicomList:
     def __init__(self, json_path: Path) -> None:
         self._stub = _FakeDicom(str(json_path))
 
-    def __getitem__(self, i: int) -> _FakeDicom:
+    def __getitem__(self, _i: int) -> _FakeDicom:
         return self._stub
 
     def __iter__(self):
@@ -145,10 +144,32 @@ def _current_sub_id(folder: Path) -> str:
     return folder.name[len("sub-") :]
 
 
+def _read_existing_subject_map(dataset_root: Path, info_dir: str) -> dict[str, str]:
+    """Load a previously written ``subject_map.tsv`` if one exists.
+
+    Returns ``old_sub -> new_sub`` from every row (session columns are
+    ignored — subject-level identity is the only thing we need to keep
+    re-runs stable). Missing file → empty dict.
+    """
+    path = dataset_root / info_dir / "subject_map.tsv"
+    if not path.is_file():
+        return {}
+    saved: dict[str, str] = {}
+    with path.open(encoding="utf-8") as fh:
+        reader = csv.DictReader(fh, delimiter="\t")
+        for row in reader:
+            old = row.get("old_sub")
+            new = row.get("new_sub")
+            if old and new:
+                saved[old] = new
+    return saved
+
+
 def _build_subject_map(
     subject_folders: list[Path],
     subject_prefix: str | None,
     subject_number_width: int,
+    existing_map: dict[str, str] | None = None,
 ) -> dict[str, str]:
     """Map every existing subject id to its new BIDS-legal id.
 
@@ -157,18 +178,57 @@ def _build_subject_map(
       … in the natural sort order of the folder listing. Prefix itself is
       sanitised the same way so the caller can't accidentally reintroduce
       ``_`` via the prefix.
+
+    ``existing_map`` (loaded from ``<info_dir>/subject_map.tsv``) makes
+    re-runs safe. Folders whose id is already a value in ``existing_map``
+    (i.e. they were renamed on a previous pass) map to themselves; folders
+    whose id is still a key get their previously assigned new id back;
+    only truly fresh subjects get a new number, taken from the next slot
+    beyond the highest already-used one. Same semantics apply to the
+    sanitise-in-place branch — an already-sanitised id stays as-is.
     """
+    existing_map = existing_map or {}
+    already_new: set[str] = set(existing_map.values())
     mapping: dict[str, str] = {}
     if subject_prefix is None:
         for folder in subject_folders:
             old = _current_sub_id(folder)
-            new = _sanitize_entity_value(old)
-            mapping[old] = new
+            if old in existing_map:
+                mapping[old] = existing_map[old]
+            elif old in already_new:
+                mapping[old] = old
+            else:
+                mapping[old] = _sanitize_entity_value(old)
         return mapping
     clean_prefix = _sanitize_entity_value(subject_prefix)
-    for i, folder in enumerate(subject_folders, start=1):
+    used_numbers: set[int] = set()
+    id_re = re.compile(rf"^{re.escape(clean_prefix)}(\d+)$")
+    for new in already_new:
+        m = id_re.match(new)
+        if m:
+            used_numbers.add(int(m.group(1)))
+    for folder in subject_folders:
         old = _current_sub_id(folder)
-        mapping[old] = f"{clean_prefix}{i:0{subject_number_width}d}"
+        if old in existing_map:
+            mapping[old] = existing_map[old]
+            m = id_re.match(existing_map[old])
+            if m:
+                used_numbers.add(int(m.group(1)))
+            continue
+        m = id_re.match(old)
+        if m:  # folder is already numbered — keep it as identity.
+            mapping[old] = old
+            used_numbers.add(int(m.group(1)))
+    next_free = (max(used_numbers) + 1) if used_numbers else 1
+    for folder in subject_folders:
+        old = _current_sub_id(folder)
+        if old in mapping:
+            continue
+        while next_free in used_numbers:
+            next_free += 1
+        mapping[old] = f"{clean_prefix}{next_free:0{subject_number_width}d}"
+        used_numbers.add(next_free)
+        next_free += 1
     return mapping
 
 
@@ -280,14 +340,31 @@ def _new_bids_path_for(
 def _rename_family(json_path: Path, new_json_path: Path, dataset_root: Path, dry_run: bool) -> list[tuple[Path, Path]]:
     """Move every sibling of *json_path* to the *new_json_path* stem.
 
-    Extension detection reuses :meth:`BIDS_FILE.file`, which already collects
-    the sibling paths of one BIDS entry (`.nii.gz`, `.json`, `.txt`,
-    `.mrk.json`, …) into a dict keyed by extension.
+    Extension detection reuses :meth:`BIDS_FILE.file`, which collects
+    ``.json`` / ``.nii.gz`` / ``.mrk.json`` etc. as one BIDS entry.
+    In addition we glob the JSON's folder for any file sharing the exact
+    base stem — ``BIDS_FILE.file`` currently misses DWI companion files
+    (``.bval`` / ``.bvec``) and other non-standard extensions that live
+    next to the primary NIfTI. Same-stem globbing is safe because BIDS
+    guarantees only truly-paired sidecars share the stem.
     """
     if json_path == new_json_path:
         return []
     bf_current = BIDS_FILE(json_path, dataset_root, verbose=False)
-    ext_paths = dict(bf_current.file)
+    ext_paths: dict[str, Path] = {ext: Path(p) for ext, p in bf_current.file.items()}
+    # Add same-stem companions that BIDS_FILE didn't pick up. json_path.name
+    # ends with e.g. "…_dwi.json" — strip the trailing ".json" to get the
+    # stem the .bval / .bvec / other companions share.
+    stem = json_path.name.removesuffix(".json")
+    for sibling in json_path.parent.iterdir():
+        if not sibling.is_file():
+            continue
+        if sibling.name == json_path.name:
+            continue
+        if not sibling.name.startswith(stem + "."):
+            continue
+        ext = sibling.name[len(stem) + 1 :]
+        ext_paths.setdefault(ext, sibling)
     moves: list[tuple[Path, Path]] = []
     new_stem = str(new_json_path).removesuffix(".json")
     for ext, src in ext_paths.items():
@@ -303,6 +380,91 @@ def _rename_family(json_path: Path, new_json_path: Path, dataset_root: Path, dry
             logger.on_warning(f"target {dst} already exists; skipping {src}")
             continue
         src.rename(dst)
+    return moves
+
+
+_SEQU_ENTITY_RE = re.compile(r"_sequ-([^_\s.]+)")
+
+
+def _leftover_move_plan(
+    scan_root: Path,
+    subject_map: dict[str, str],
+    parent: str | None,
+) -> list[tuple[Path, Path]]:
+    """Compute (src, dst) moves for files left behind after the JSON pass.
+
+    After the JSON-driven Pass 1, an old ``sub-<OLD>/ses-<X>/`` folder can
+    still hold companion files whose primary sidecar has already migrated —
+    typical culprits are ``.bval`` / ``.bvec`` sitting apart from their
+    ``_dwi.nii.gz`` and DWI-derived ``_dwi_ADC.nii.gz`` maps. Move them under
+    ``sub-<NEW>/`` too, preferring to co-locate with their new-side twin
+    (matched by ``sequ-<N>``) so BIDS stem-linkage stays intact. Files that
+    can't be twinned drop at the session level of the new subject folder as
+    a safe fallback.
+    """
+    del parent  # kept for signature symmetry; scan_root already resolves it
+    moves: list[tuple[Path, Path]] = []
+    for old_sub, new_sub in subject_map.items():
+        if old_sub == new_sub:
+            continue
+        old_dir = scan_root / f"sub-{old_sub}"
+        new_dir = scan_root / f"sub-{new_sub}"
+        if not old_dir.is_dir():
+            continue
+        for src in old_dir.rglob("*"):
+            if not src.is_file():
+                continue
+            # Skip anything a re-run of the JSON pass would handle (we don't
+            # want to race the pass 1 output here).
+            if src.suffix == ".json":
+                continue
+            m = _SEQU_ENTITY_RE.search(src.name)
+            sequ = m.group(1) if m else None
+            twin_stem: str | None = None
+            target_dir: Path | None = None
+            if sequ and new_dir.is_dir():
+                for twin in new_dir.rglob(f"*sequ-{sequ}*.json"):
+                    if not twin.is_file():
+                        continue
+                    twin_stem = twin.name.removesuffix(".json")
+                    target_dir = twin.parent
+                    break
+            if twin_stem is not None and target_dir is not None:
+                # Extract the orphan's tail after the sequ-<N> segment. That
+                # tail carries the old format label plus any trailing suffix
+                # (`_ADC`, extensions like `.bval` / `.bvec` / `.nii.gz`).
+                # Replacing the twin's stem preserves the format-label change
+                # while keeping DWI derivatives glued to the twin.
+                seq_marker = f"_sequ-{sequ}"
+                idx = src.name.find(seq_marker)
+                if idx == -1:
+                    continue
+                after_sequ = src.name[idx + len(seq_marker) :]
+                # after_sequ starts with either `_<oldformat>...` or `.<ext>`.
+                # Strip the leading `_<oldformat>` so `_dwi.bval` becomes
+                # `.bval` and `_dwi_ADC.nii.gz` becomes `_ADC.nii.gz` — both
+                # then splice cleanly onto the twin stem.
+                if after_sequ.startswith("_"):
+                    body, sep, rest = after_sequ.partition(".")
+                    old_fmt_parts = body.split("_", 2)
+                    # body = "_<oldformat>" or "_<oldformat>_<suffix>"
+                    if len(old_fmt_parts) >= 2:
+                        suffix = ("_" + old_fmt_parts[2]) if len(old_fmt_parts) == 3 else ""
+                        after_sequ = f"{suffix}.{rest}" if sep else suffix
+                new_name = twin_stem + after_sequ
+                dst = target_dir / new_name
+            else:
+                # Fallback: mirror the old ses-* folder under sub-<NEW>/ and
+                # just swap the subject prefix in the filename.
+                try:
+                    rel = src.relative_to(old_dir)
+                except ValueError:
+                    continue
+                new_name = src.name.replace(f"sub-{old_sub}", f"sub-{new_sub}", 1)
+                dst = new_dir / rel.parent / new_name
+            if src == dst or dst.exists():
+                continue
+            moves.append((src, dst))
     return moves
 
 
@@ -378,7 +540,8 @@ def rerun_bids_naming(
         logger.on_warning(f"No sub-* folders found under {scan_root}; nothing to do.")
         return {"moves": [], "mapping_file": None}
 
-    subject_map = _build_subject_map(subject_folders, subject_prefix, subject_number_width)
+    existing_map = _read_existing_subject_map(dataset_root, info_dir)
+    subject_map = _build_subject_map(subject_folders, subject_prefix, subject_number_width, existing_map)
     logger.on_neutral(
         f"Renaming {len(subject_folders)} subject(s) "
         f"({'numeric ' + (subject_prefix or '') if subject_prefix else 'sanitising in place'}); "
@@ -414,6 +577,21 @@ def rerun_bids_naming(
             for src, dst in moves:
                 logger.on_neutral(f"{'[dry]' if dry_run else '[mv ]'} {src.relative_to(dataset_root)}  ->  {dst.relative_to(dataset_root)}")
         all_moves.extend(moves)
+
+    # Pass 2 — sweep orphan companions (.bval / .bvec / _ADC.nii.gz / other
+    # non-sidecar files) that Pass 1 didn't see because their JSON already
+    # moved on a previous run or they never had one.
+    leftover = _leftover_move_plan(scan_root, subject_map, parent_norm)
+    for src, dst in leftover:
+        if verbose:
+            logger.on_neutral(f"{'[dry]' if dry_run else '[lft]'} {src.relative_to(dataset_root)}  ->  {dst.relative_to(dataset_root)}")
+        if not dry_run:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if dst.exists() and dst.resolve() != src.resolve():
+                logger.on_warning(f"target {dst} already exists; skipping {src}")
+                continue
+            src.rename(dst)
+        all_moves.append((src, dst))
 
     mapping_file = _write_subject_map(dataset_root, info_dir, subject_map) if not dry_run else None
     if not dry_run:
