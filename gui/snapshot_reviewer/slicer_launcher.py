@@ -376,6 +376,7 @@ class SlicerLaunchDialog(QDialog):
         parent: QWidget | None = None,
         slicer_exe: str | None = None,
         derivatives_search: list[str] | None = None,
+        auto_select_keys: list[str] | None = None,
     ):
         super().__init__(parent)
         self.setWindowTitle("Open in Slicer")
@@ -387,6 +388,7 @@ class SlicerLaunchDialog(QDialog):
         self._watchers: list[SlicerFileWatcher] = []
         self._slicer_exe = slicer_exe or SLICER_EXE
         self._derivatives_search = list(derivatives_search or _DERIVATIVES_SEARCH)
+        self._auto_select_keys = [k for k in (auto_select_keys or ["ct"]) if k]
 
         # Build fam
         self._fam = build_fam_for_snapshot(snp_path, dataset_path, bgi, self._derivatives_search)
@@ -419,7 +421,7 @@ class SlicerLaunchDialog(QDialog):
                 for key, bf in self._images:
                     p = bf.file.get("nii.gz") or bf.file.get("nii", "")
                     cb = QCheckBox(f"{key}\n  {Path(str(p)).name}")
-                    cb.setChecked(True)
+                    cb.setChecked(key in self._auto_select_keys)
                     img_v.addWidget(cb)
                     self._img_checks.append((cb, bf))
             else:
@@ -435,7 +437,7 @@ class SlicerLaunchDialog(QDialog):
                 for key, bf in self._masks:
                     p = bf.file.get("nii.gz") or bf.file.get("nii", "")
                     cb = QCheckBox(f"{key}\n  {Path(str(p)).name}")
-                    cb.setChecked(False)
+                    cb.setChecked(key in self._auto_select_keys)
                     msk_v.addWidget(cb)
                     self._msk_checks.append((cb, bf))
             else:
@@ -450,7 +452,7 @@ class SlicerLaunchDialog(QDialog):
                 for key, bf in self._markups:
                     p = bf.file.get("json", "")
                     cb = QCheckBox(f"{key}\n  {Path(str(p)).name}")
-                    cb.setChecked(False)
+                    cb.setChecked(key in self._auto_select_keys)
                     mrk_v.addWidget(cb)
                     self._mrk_checks.append((cb, bf))
             else:

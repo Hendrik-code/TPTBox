@@ -83,7 +83,7 @@ def _crop_borders(nii: NII, chunk_info: str, cut: dict[str, tuple[slice, slice, 
     return nii.reorient_().apply_crop_(cut[chunk_info]).reorient_(ori)
 
 
-def GNC_stitch_T2w(
+def NAKO_stitch_T2w(
     HWS: Image_Reference,  # noqa: N803
     BWS: Image_Reference,  # noqa: N803
     LWS: Image_Reference,  # noqa: N803
@@ -94,7 +94,10 @@ def GNC_stitch_T2w(
     #    "LWS": (slice(None), slice(48, 448), slice(None)),
     # },
 ) -> NII:
-    """Apply N4 bias correction to each chunk, stitch them, then apply N4 again.
+    """Stitch the three NAKO sagittal T2w spine stations into a single volume.
+
+    Applies N4 bias correction to each chunk, stitches them, then optionally applies
+    N4 again. The chunk names follow the NAKO acquisition protocol.
 
     Args:
         HWS (NII | str | Path): Cervical region
@@ -110,7 +113,7 @@ def GNC_stitch_T2w(
     chunks["LWS"]["nii"] = NII.load(LWS, seg=False).reorient_()
     # for k in chunks.keys():
     #    # chunks[k]["n4"] = _crop_borders(n4_bias(chunks[k]["nii"], spline_param=200)[0], k, cut)
-    #    # chunks[k]["n4"].apply_crop_slice_(cut[k])
+    #    # chunks[k]["n4"].apply_crop_(cut[k])
     # chunks_m = {k: chunks[k]["n4"] for k in chunks.keys()}
     # chunks_a = list([l.nii for l in chunks_m.values()])
     chunks_a = [a["nii"].nii for a in chunks.values()]

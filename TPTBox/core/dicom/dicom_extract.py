@@ -25,6 +25,10 @@ from pydicom.dataset import FileDataset
 from TPTBox import BIDS_FILE, Log_Type, Print_Logger
 from TPTBox.core.compat import zip_strict
 from TPTBox.core.dicom.dicom_header_to_keys import extract_keys_from_json
+
+# _add_grid_info_to_json lives in nii_help (it needs no DICOM library at all), so that
+# BIDS_FILE.get_grid_info() does not drag pydicom/dicom2nifti in. Re-exported for compat.
+from TPTBox.core.internal.nii_help import _add_grid_info_to_json
 from TPTBox.core.nii_wrapper import NII
 
 sys.path.append(str(Path(__file__).parent))
@@ -652,47 +656,6 @@ def _with_echo_suffix(p: Path, eco_index: int) -> Path:
                 name = f"{name[: -len(ext)]}-eco{eco_index}{ext}"
                 break
     return p.with_name(name)
-
-
-def _add_grid_info_to_json(nii_path: Path | str, simp_json: Path | str, force_update: bool = False, add: bool = True) -> dict:
-    """Append grid metadata (shape, spacing, orientation, affine) to a sidecar JSON file.
-
-    Args:
-        nii_path: Path to the NIfTI file from which grid info is read.
-        simp_json: Path to the JSON sidecar file to update.
-        force_update: Re-compute and overwrite existing grid info when ``True``.
-        add: Write the updated dictionary back to disk when ``True``.
-
-    Returns:
-        The updated JSON dictionary including the ``"grid"`` key.
-    """
-    nii_path = Path(nii_path)
-    simp_json = Path(simp_json)
-
-    # Always preserve the existing JSON contents (DICOM metadata written by save_json).
-    # The mtime comparison is only used to short-circuit re-computing the grid when the
-    # sidecar is already up to date; it must NOT decide whether to keep the DICOM keys.
-    json_dict = load_json(simp_json) if simp_json.exists() else {}
-    json_up_to_date = (
-        simp_json.exists()
-        and nii_path.exists()
-        and datetime.fromtimestamp(simp_json.stat().st_mtime) > datetime.fromtimestamp(nii_path.stat().st_mtime)
-    )
-    if "grid" in json_dict and not force_update and json_up_to_date:
-        return json_dict
-    print("Read Grid info")
-    nii = NII.load(nii_path, False)
-    gird = {
-        "shape": nii.shape,
-        "spacing": nii.spacing,
-        "orientation": nii.orientation,
-        "rotation": nii.rotation.reshape(-1).tolist(),
-        "origin": nii.origin,
-        "dims": nii.get_num_dims(),
-    }
-    json_dict["grid"] = gird
-    save_json(json_dict, simp_json, override=add)
-    return json_dict
 
 
 _EXTRACT_CACHE_DIR = ".extract_cache"

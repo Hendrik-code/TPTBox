@@ -39,8 +39,8 @@ The Torso Processing ToolBox (TPTBox) is a multi-functional package to handle an
 conda create -n 3.10 python=3.10
 conda activate 3.10
 pip install TPTBox
-# Optional dependency Registration
-pip install hf-deepali
+# Optional dependency Registration (deepali backend)
+pip install "TPTBox[reg]"
 ```
 ### Install via github:
 (you should be in the project folder)
