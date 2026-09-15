@@ -255,11 +255,13 @@ def get_plane_dicom(dicoms: list[pydicom.FileDataset] | NII, hires_threshold: fl
         else:
             plane = "iso"
         return plane  # noqa: TRY300
-    except AttributeError:
-        # Non-imaging DICOMs (RTSTRUCT, RTDOSE, SR, presentation states, …) legally
-        # lack `ImagePositionPatient` / `ImageOrientationPatient` and hit an
-        # AttributeError inside `common.create_affine`. That is expected — no
-        # acquisition plane exists for those, so return None silently.
+    except (AttributeError, IndexError, KeyError, TypeError):
+        # Not usable image geometry: non-imaging DICOMs legally lack
+        # `ImagePositionPatient` / `ImageOrientationPatient` (AttributeError),
+        # empty lists trip `create_affine` on `dicoms[0]` (IndexError), and
+        # callers that hand in dicts or other pydicom-shaped-but-not-really
+        # objects raise KeyError / TypeError. All of these mean "no plane to
+        # compute" — return None silently instead of surfacing the noise.
         return None
     except Exception as e:  # noqa: BLE001
         # Log so a downstream `acq-None` filename can be traced back to its cause,
