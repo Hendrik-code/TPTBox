@@ -361,8 +361,15 @@ def _extract_nii_from_dicom(dicom_out_path, nii_path):
                     ds = dicom_out_path[0]
                     if hasattr(ds, "pixel_array") and len(ds.pixel_array.shape) >= 2:
                         dicom_to_nifti_multiframe(ds, nii_path)
-
-                    return True
+                        return True
+                    # Single-DICOM series without usable pixel data (Presentation
+                    # State, Key Object Selection, Registration, Fiducials, some
+                    # RT objects). Previously we returned True unconditionally,
+                    # which made the caller run `_add_grid_info_to_json` on a
+                    # NIfTI that was never written and crash with FileNotFoundError.
+                    logger.on_debug(f"Not exportable (no pixel_array): {Path(nii_path).name}")
+                    Path(str(nii_path).replace(".nii.gz", ".json")).unlink(missing_ok=True)
+                    return False
             except Exception as e:
                 logger.on_debug("Multi-Frame DICOM did not work:", e)
             ## The PDF dicom lands here
