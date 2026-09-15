@@ -101,6 +101,7 @@ def _plane_from_grid(grid: dict, hires_threshold: float = 0.8) -> str | None:
         return plane_dict.get(axc[ix_max][0])
     return "iso"
 
+
 logger = Print_Logger()
 
 
