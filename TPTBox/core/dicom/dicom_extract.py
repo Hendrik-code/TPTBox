@@ -818,6 +818,67 @@ def _unzip_files(dicom_zip_path: Path, out_dir: str | Path) -> Path:
     return dicom_out_path
 
 
+# Non-DICOM file extensions we can rule out without touching pydicom. Speeds up
+# `_read_dicom_files` significantly on trees that mix DICOMs with reports,
+# thumbnails, or metadata. Archive extensions are intentionally NOT listed
+# here — top-level `.zip` sources are already unpacked by `extract_dicom_folder`
+# before `_read_dicom_files` runs, and any residual archive would fail the
+# DICM-magic check below.
+_NON_DICOM_SUFFIXES = frozenset(
+    {
+        ".json",
+        ".txt",
+        ".md",
+        ".pdf",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".tif",
+        ".tiff",
+        ".gif",
+        ".bmp",
+        ".ini",
+        ".log",
+        ".csv",
+        ".tsv",
+        ".yaml",
+        ".yml",
+        ".html",
+        ".htm",
+        ".xml",
+        ".nii",  # already-extracted NIfTI
+        ".nrrd",
+        ".mha",
+        ".mhd",
+    }
+)
+
+
+def _looks_like_dicom(path: Path) -> bool:
+    """Cheap check whether *path* looks like a DICOM file.
+
+    First rules out common non-DICOM extensions, then reads the first 132 bytes
+    and checks for the ``DICM`` magic at offset 128 (the standard preamble).
+    Files without the preamble (deflated/implicit) fall back to a "no extension
+    and non-empty" heuristic — matches the previous behaviour where every
+    extensionless file was handed to :func:`pydicom.dcmread`.
+    """
+    suffix = path.suffix.lower()
+    if suffix in _NON_DICOM_SUFFIXES:
+        return False
+    try:
+        with path.open("rb") as fh:
+            head = fh.read(132)
+    except OSError:
+        return False
+    if len(head) >= 132 and head[128:132] == b"DICM":
+        return True
+    # Some DICOM files skip the 128-byte preamble; retain the old permissive
+    # behaviour for extensionless files (matches Siemens/Philips exports that
+    # ship as `IM000001` etc.).
+    return suffix in ("", ".dcm", ".ima", ".dicom")
+
+
 def _read_dicom_files(dicom_out_path: Path) -> tuple[dict[str, list[FileDataset]], dict[str, list[str]]]:
     """Read DICOM files from a directory and categorize them based on SeriesInstanceUID and type.
 
@@ -833,7 +894,7 @@ def _read_dicom_files(dicom_out_path: Path) -> tuple[dict[str, list[FileDataset]
     dicom_types: dict[str, list[str]] = {}
     for _paths in dicom_out_path.rglob("*"):
         path = Path(_paths)
-        if path.is_file():
+        if path.is_file() and _looks_like_dicom(path):
             try:
                 dcm_data = pydicom.dcmread(path, defer_size="1 KB", force=True)  # , stop_before_pixels=True
                 try:
