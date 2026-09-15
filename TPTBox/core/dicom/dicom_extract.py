@@ -859,6 +859,37 @@ def _read_dicom_files(dicom_out_path: Path) -> tuple[dict[str, list[FileDataset]
     return dicom_files, _filter_file_type(dicom_types)
 
 
+def _split_by_echo_numbers(dicoms: list[FileDataset]) -> tuple[list[FileDataset], dict[int, list[FileDataset]]]:
+    """Split DICOMs into a single-echo subset (for stack detection) and per-echo buckets.
+
+    Multi-echo Philips series (e.g. Philips mDIX quant) place M echoes at each
+    of N slice positions inside a single ImageType sub-group. Consecutive DICOMs
+    sorted by InstanceNumber then sit at the same ``ImagePositionPatient``, which
+    makes the direction-based stack detection in :func:`_classic_get_grouped_dicoms`
+    produce ``0 / 0 = NaN`` and split the stack into random chunks.
+
+    Returns a ``(single_echo_subset, per_echo_buckets)`` pair. ``single_echo_subset``
+    is the DICOMs of the smallest ``EchoNumbers`` value (i.e. one DICOM per slice
+    position) and can be handed straight to the stack detector. ``per_echo_buckets``
+    maps each ``EchoNumbers`` value to its DICOMs, so the caller can put the other
+    echoes back after stack detection.
+
+    No-op when there is 0 or 1 distinct ``EchoNumbers`` — the full input is returned
+    as ``single_echo_subset`` with an empty ``per_echo_buckets``.
+    """
+    per_echo: dict[int, list[FileDataset]] = {}
+    for d in dicoms:
+        try:
+            en = int(getattr(d, "EchoNumbers", 0) or 0)
+        except (TypeError, ValueError):
+            en = 0
+        per_echo.setdefault(en, []).append(d)
+    if len([k for k in per_echo if k > 0]) <= 1:
+        return list(dicoms), {}
+    keep = min(k for k in per_echo if k > 0)
+    return list(per_echo[keep]), per_echo
+
+
 def _classic_get_grouped_dicoms(dicom_input: list[FileDataset]) -> list[list[FileDataset]]:
     """Group DICOM slices into spatially contiguous stacks by analysing slice direction.
 
@@ -867,6 +898,12 @@ def _classic_get_grouped_dicoms(dicom_input: list[FileDataset]) -> list[list[Fil
     spatial acquisition stack.  Groups with three or fewer slices are collected
     into a single catch-all group at the end.
 
+    For multi-echo series (multiple ``EchoNumbers`` values), the stack detection
+    runs on a single-echo subset — DICOMs at the same ``ImagePositionPatient``
+    would otherwise produce ``0 / 0 = NaN`` in the direction test and split one
+    real acquisition into random stacks. The remaining echoes are re-attached
+    to the returned groups by ``ImagePositionPatient``.
+
     Args:
         dicom_input: Flat list of pydicom ``FileDataset`` objects for a single series.
 
@@ -874,8 +911,10 @@ def _classic_get_grouped_dicoms(dicom_input: list[FileDataset]) -> list[list[Fil
         List of groups, where each group is a list of ``FileDataset`` objects
         belonging to the same spatial stack.
     """
+    detection_set, per_echo = _split_by_echo_numbers(dicom_input)
+
     # Order all dicom files by InstanceNumber
-    dicoms = sorted(dicom_input, key=lambda x: x.InstanceNumber)
+    dicoms = sorted(detection_set, key=lambda x: x.InstanceNumber)
 
     # now group per stack
     grouped_dicoms: list[list[FileDataset]] = [[]]  # list with first element a list
@@ -889,8 +928,14 @@ def _classic_get_grouped_dicoms(dicom_input: list[FileDataset]) -> list[list[Fil
         current_direction = None
         # if the stack number decreases we moved to the next stack
         if previous_position is not None:
-            current_direction = np.array(dicom_.get("ImagePositionPatient", 0)) - previous_position
-            current_direction = current_direction / np.linalg.norm(current_direction)
+            delta = np.array(dicom_.get("ImagePositionPatient", 0)) - previous_position
+            norm = float(np.linalg.norm(delta))
+            # Zero-length delta = two DICOMs at the same position (residual
+            # multi-echo where the pre-filter didn't remove all duplicates,
+            # or a genuine repeated slice). Skip the direction update so we
+            # don't emit NaN and split the stack.
+            if norm > 1e-6:
+                current_direction = delta / norm
 
         if (
             current_direction is not None
@@ -902,7 +947,8 @@ def _classic_get_grouped_dicoms(dicom_input: list[FileDataset]) -> list[list[Fil
             stack_index += 1
         else:
             previous_position = np.array(dicom_.get("ImagePositionPatient", 0))
-            previous_direction = current_direction
+            if current_direction is not None:
+                previous_direction = current_direction
 
         if stack_index >= len(grouped_dicoms):
             grouped_dicoms.append([])
@@ -916,6 +962,32 @@ def _classic_get_grouped_dicoms(dicom_input: list[FileDataset]) -> list[list[Fil
             out.append(i)
     if len(others) != 0:
         out.append(others)
+
+    # Re-attach the other echoes to whichever stack their spatial position
+    # belongs to. Only meaningful when the input is genuinely multi-echo AND
+    # the stack detector actually split into more than one group.
+    if per_echo and len(out) > 1:
+        def _key(d: FileDataset) -> tuple:
+            return tuple(float(v) for v in d.get("ImagePositionPatient", (0.0, 0.0, 0.0)))
+
+        pos_to_stack: dict[tuple, int] = {}
+        for i, group in enumerate(out):
+            for d in group:
+                pos_to_stack[_key(d)] = i
+        detection_keep = min(k for k in per_echo if k > 0)
+        for en, echo_dicoms in per_echo.items():
+            if en == detection_keep:
+                continue  # already placed via the detection set
+            for d in echo_dicoms:
+                idx = pos_to_stack.get(_key(d))
+                if idx is not None:
+                    out[idx].append(d)
+                elif out:
+                    # Unknown position: dump into the catch-all "others" tail
+                    out[-1].append(d)
+    elif per_echo and len(out) == 1:
+        # Single-stack multi-echo: return every echo in one group.
+        out = [list(dicom_input)]
     return out
 
 
