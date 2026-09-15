@@ -380,8 +380,14 @@ def _extract_nii_from_dicom(dicom_out_path, nii_path):
         logger.print_error()
 
         return False
-    except Exception:
-        print(nii_path)
+    except Exception as e:  # noqa: BLE001
+        # Any other conversion failure: log and treat as a failed conversion so
+        # callers don't run downstream steps (e.g. `_add_grid_info_to_json` or
+        # `_split_multi_echo_dixon`) on a file that was never written.
+        logger.on_warning(f"_extract_nii_from_dicom: unexpected error on {nii_path}: {type(e).__name__}: {e}")
+        logger.print_error()
+        Path(str(nii_path).replace(".nii.gz", ".json")).unlink(missing_ok=True)
+        return False
 
     return True
 
