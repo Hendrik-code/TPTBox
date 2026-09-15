@@ -155,6 +155,61 @@ def _single_echo_for_plane(dicoms: list[pydicom.FileDataset]) -> list[pydicom.Fi
     return [d for d in dicoms if int(getattr(d, "EchoNumbers", 0) or 0) == keep]
 
 
+def _apply_view_keys(keys: dict, simp_json: dict, get: Callable) -> None:
+    """Populate `acq` / `part` from DICOM ViewPosition + Laterality tags.
+
+    Used by the 2D-modality fallback in :func:`extract_keys_from_json`. Without
+    this, MG series with four views (R-CC, L-CC, R-MLO, L-MLO), radiographs
+    with AP / PA / LAT projections, and ophthalmic photos of both eyes would
+    all collapse onto the same BIDS filename and clobber each other.
+
+    Convention chosen (matching this codebase's flexible ``acq`` usage):
+
+    * ``ViewPosition`` (e.g. ``CC``, ``MLO``, ``AP``, ``PA``, ``LAT``) →
+      lowercased into ``acq``. Only overwrites the existing ``acq`` when the
+      plane-detector returned ``None`` or ``"iso"``, both of which are
+      meaningless for single-slice imagery.
+    * ``ImageLaterality`` / ``Laterality`` (``L`` / ``R``, or ophthalmic
+      ``OS`` / ``OD`` → mapped to ``L`` / ``R``) → ``part``, only when
+      ``part`` is not already set by the DIXON / ImageType branches above.
+    """
+    view = get("ViewPosition")
+    if view:
+        view_clean = str(view).lower().strip("-.")
+        if view_clean and keys.get("acq") in (None, "iso"):
+            keys["acq"] = view_clean
+    laterality = get("ImageLaterality") or get("Laterality")
+    if laterality:
+        lat = str(laterality).upper()
+        # Ophthalmic (OS = oculus sinister = left, OD = oculus dexter = right)
+        # normalises to the same L/R vocabulary that radiography uses.
+        lat = {"OS": "L", "OD": "R"}.get(lat, lat)
+        if lat in {"L", "R", "B"} and keys.get("part") is None:
+            keys["part"] = lat.lower()
+
+
+def _apply_bodypart_key(keys: dict, get: Callable) -> None:
+    """Populate ``desc`` from DICOM ``BodyPartExamined`` when nothing else has set it.
+
+    ``BodyPartExamined`` (0018,0015) is a semi-standardised free-text tag with
+    common values like ``ABDOMEN``, ``PELVIS``, ``ABDOMENPELVIS``, ``CHEST``,
+    ``HEAD``, ``NECK``, ``SPINE``, ``KNEE``, ``HIP``, ``BREAST``. It is the
+    main discriminator when a single session contains scans of several body
+    regions and the ``SeriesDescription`` is not informative — typical for
+    plain radiography, ultrasound, nuclear medicine, and RT objects. Only
+    written when ``keys['desc']`` is empty, so an earlier branch that already
+    assigned ``desc`` (e.g. the SR / report path) wins.
+    """
+    if keys.get("desc") is not None:
+        return
+    body = get("BodyPartExamined")
+    if not body:
+        return
+    val = str(body).lower().strip("-.")
+    if val:
+        keys["desc"] = val
+
+
 def get_plane_dicom(dicoms: list[pydicom.FileDataset] | NII, hires_threshold: float = 0.8) -> str | None:
     """Determine the acquisition plane from a DICOM series or NIfTI image.
 
@@ -401,8 +456,10 @@ def extract_keys_from_json(  # noqa: C901
         found = False
         if modality == "ct":
             mri_format = "ct"
+            _apply_bodypart_key(keys, _get)
         elif modality.lower() == "pt":
             mri_format = "pet"
+            _apply_bodypart_key(keys, _get)
         elif modality == "xa":  # Angiography
             biplane = False
             if "BIPLANE A" in image_type or "SINGLE A" in image_type:
@@ -459,8 +516,64 @@ def extract_keys_from_json(  # noqa: C901
         elif modality.lower() == "sr":
             keys["desc"] = _get("SeriesDescription", None)
             return "report", keys, ".txt"
+        # Sensible defaults for the remaining common imaging modalities so we can
+        # keep converting instead of raising on every non-CT/PET/MR/XA series.
+        # Format names mirror BIDS conventions where they exist and fall back to
+        # the lowercased DICOM modality tag otherwise (e.g. `us`, `nm`, `sc`).
+        # For 2D modalities we also lift the DICOM ViewPosition / Laterality tags
+        # into `acq`, otherwise files that only differ by view (R-CC vs L-CC vs
+        # R-MLO vs L-MLO for MG, AP vs PA vs LAT for DX/CR) would all collapse
+        # to the same BIDS name.
+        elif modality.lower() in {"cr", "dx", "rg", "px", "io", "mg"}:
+            # 2D X-ray family: computed / digital radiography, general radiographic,
+            # panoramic, intra-oral, mammography. Kept under one `xray` bucket.
+            mri_format = "xray"
+            _apply_view_keys(keys, simp_json, _get)
+            _apply_bodypart_key(keys, _get)
+        elif modality.lower() == "us":
+            mri_format = "us"  # ultrasound
+            _apply_view_keys(keys, simp_json, _get)
+            _apply_bodypart_key(keys, _get)
+        elif modality.lower() == "nm":
+            mri_format = "nm"  # nuclear medicine (planar/SPECT)
+            # Radiopharmaceutical (tracer) is the useful discriminator for NM —
+            # e.g. FDG, PSMA, DOTATATE. When present, surface it as `ce`.
+            tracer = _get("Radiopharmaceutical")
+            if tracer and keys.get("ce") is None:
+                keys["ce"] = tracer
+            _apply_bodypart_key(keys, _get)
+        elif modality.lower() == "sc":
+            mri_format = "sc"  # secondary capture (screenshots, derived stills)
+            _apply_bodypart_key(keys, _get)
+        elif modality.lower() in {"op", "xc"}:
+            mri_format = "photo"  # ophthalmic / external photography
+            # Ophthalmic photos: OS = left eye, OD = right eye → same L/R signal
+            # as radiography Laterality; reuse the same helper.
+            _apply_view_keys(keys, simp_json, _get)
+            _apply_bodypart_key(keys, _get)
+        elif modality.lower() == "es":
+            mri_format = "endoscopy"
+            _apply_bodypart_key(keys, _get)
+        elif modality.lower() in {"rtimage", "rtstruct", "rtdose", "rtplan"}:
+            mri_format = modality.lower()  # radiotherapy objects
+            _apply_bodypart_key(keys, _get)
+        elif modality.lower() == "ot":
+            mri_format = "ot"  # explicit "Other" modality
+            _apply_bodypart_key(keys, _get)
         else:
-            raise NotImplementedError(f"modality='{modality}', ({modalities.get(modality.upper(), 'Non Standard Modality key')})")
+            # Unknown modality — warn once and fall back to a mri_format derived
+            # from the modality tag so extraction can still complete. Callers
+            # that really need to reject unknown modalities can inspect the
+            # returned mri_format.
+            from TPTBox import Print_Logger
+
+            Print_Logger().on_warning(
+                f"extract_keys_from_json: unhandled modality={modality!r} "
+                f"({modalities.get(modality.upper(), 'Non Standard Modality key')}); "
+                "falling back to modality tag as mri_format."
+            )
+            mri_format = str(modality).lower() or "mr"
+            _apply_bodypart_key(keys, _get)
 
             # ".*sub.*t1.*": "subtraktion",
         # "subtraktion.*t1.*": "subtraktion",

@@ -165,6 +165,20 @@ formats = [
     "labels",
     "report",
     "pet",
+    # Non-MR imaging modalities handled by `extract_keys_from_json`'s modality
+    # fallback (see `dicom_header_to_keys.py`). Listed here so `BIDS_FILE`
+    # accepts them without `non_strict_mode`.
+    "xray",  # 2D X-ray family: CR / DX / RG / MG / PX / IO
+    "us",  # ultrasound
+    "nm",  # nuclear medicine (planar / SPECT)
+    "sc",  # secondary capture (screenshots, derived stills)
+    "photo",  # ophthalmic / external / visible-light photography (OP / XC)
+    "endoscopy",  # ES
+    "rtimage",  # RT image
+    "rtstruct",  # RT structure set
+    "rtdose",  # RT dose grid
+    "rtplan",  # RT plan
+    "ot",  # explicit DICOM "Other" modality
 ]
 # https://bids-specification.readthedocs.io/en/stable/appendices/entity-table.html
 formats_relaxed = [*formats, "t2", "t1", "t2c", "t1c", "mr", "snapshot", "t1dixon", "dwi", "ctb"]
