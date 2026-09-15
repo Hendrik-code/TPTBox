@@ -619,7 +619,6 @@ def loop_over_repaired_nako(
             "derivatives-fullbody-poi",  # fullbody / fov101 / fov102 POIs + registered segmentations on the stitched-water grid
         ],
         filter_file=(lambda x: test_key in str(x)) if test else None,
-
     )
 
     for sub, subj in gbi.enumerate_subjects(sort=sort, shuffle=not sort):
