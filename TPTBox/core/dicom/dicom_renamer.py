@@ -190,7 +190,12 @@ def _build_subject_map(
     """
     existing_map = existing_map or {}
     already_new: set[str] = set(existing_map.values())
-    mapping: dict[str, str] = {}
+    # Seed the output with every historic entry so the on-disk translation
+    # table keeps growing rather than shrinking. Folders whose old-name
+    # already moved away are still in the map as ``old_random_id -> new_id``
+    # rows from the previous run; without this seeding they'd be dropped
+    # from the file on the next write and the audit trail would be lost.
+    mapping: dict[str, str] = dict(existing_map)
     if subject_prefix is None:
         for folder in subject_folders:
             old = _current_sub_id(folder)
@@ -366,8 +371,23 @@ def _rename_family(json_path: Path, new_json_path: Path, dataset_root: Path, dry
             continue
         ext = sibling.name[len(stem) + 1 :]
         ext_paths.setdefault(ext, sibling)
+    # Collision handling — resolve on the JSON pair (JSON header is the smallest
+    # authoritative sidecar, ideal for hashing). Then apply the same stem
+    # decision to every extension in the family.
+    action = "move"
+    final_json_path = new_json_path
+    if not dry_run:
+        source_json = ext_paths.get("json", json_path)
+        final_json_path, action = _resolve_stem_collision(new_json_path, Path(source_json))
+        if action == "duplicate":
+            logger.on_neutral(f"duplicate content; removing redundant source {source_json}")
+            for src in ext_paths.values():
+                Path(src).unlink(missing_ok=True)
+            return []
+        if action == "run":
+            logger.on_warning(f"target {new_json_path} exists with different content; using {final_json_path}")
     moves: list[tuple[Path, Path]] = []
-    new_stem = str(new_json_path).removesuffix(".json")
+    new_stem = str(final_json_path).removesuffix(".json")
     for ext, src in ext_paths.items():
         dst = Path(f"{new_stem}.{ext}")
         if not Path(src).exists():
@@ -378,6 +398,10 @@ def _rename_family(json_path: Path, new_json_path: Path, dataset_root: Path, dry
     for src, dst in moves:
         dst.parent.mkdir(parents=True, exist_ok=True)
         if dst.exists() and dst.resolve() != src.resolve():
+            # Second-layer safety: after the stem-level resolve above one of
+            # the per-extension companions may still hit an unrelated
+            # existing file. Fall back to the old skip-with-warning here so
+            # data is never silently overwritten.
             logger.on_warning(f"target {dst} already exists; skipping {src}")
             continue
         src.rename(dst)
@@ -386,6 +410,77 @@ def _rename_family(json_path: Path, new_json_path: Path, dataset_root: Path, dry
 
 _SEQU_ENTITY_RE = re.compile(r"_sequ-([^_\s.]+)")
 _SES_ENTITY_RE = re.compile(r"_ses-([^_\s.]+)")
+_RUN_ENTITY_RE = re.compile(r"_run-([^_\s.]+)")
+
+
+def _files_identical(a: Path, b: Path) -> bool:
+    """Cheap byte-identity check: same size then same SHA-256.
+
+    Used before applying a ``_run-<N>`` collision slot — when the two files
+    are literally the same content there's nothing to keep, and we drop the
+    source instead of proliferating ``_run-2`` copies of identical bytes.
+    """
+    try:
+        if a.stat().st_size != b.stat().st_size:
+            return False
+    except OSError:
+        return False
+    import hashlib
+
+    h_a, h_b = hashlib.sha256(), hashlib.sha256()
+    for path, h in ((a, h_a), (b, h_b)):
+        try:
+            with path.open("rb") as fh:
+                for chunk in iter(lambda: fh.read(1 << 20), b""):
+                    h.update(chunk)
+        except OSError:
+            return False
+    return h_a.digest() == h_b.digest()
+
+
+def _insert_run_entity(bids_path: Path, n: int) -> Path:
+    """Return *bids_path* with a ``_run-<n>`` entity inserted after ``_sequ-``.
+
+    ``run`` is a legal BIDS entity value used to disambiguate repeated
+    acquisitions. We keep the rest of the filename identical and only splice
+    in ``_run-<n>`` right after the ``_sequ-<N>`` group, so downstream BIDS
+    parsers still see the same sequence number and pair it with a
+    disambiguating run index.
+    """
+    name = bids_path.name
+    m = _SEQU_ENTITY_RE.search(name)
+    if not m:
+        # Fallback: prepend right before the trailing "_<format>.<ext>".
+        stem, sep, tail = name.rpartition("_")
+        return bids_path.with_name(f"{stem}_run-{n}{sep}{tail}") if sep else bids_path
+    end = m.end()
+    return bids_path.with_name(name[:end] + f"_run-{n}" + name[end:])
+
+
+def _resolve_stem_collision(new_json_path: Path, source_json: Path) -> tuple[Path, str]:
+    """Pick a non-colliding target JSON path, or signal "drop as duplicate".
+
+    Returns ``(final_json_path, action)`` where ``action`` is:
+      * ``"move"``  — target free, use ``new_json_path`` as-is;
+      * ``"run"``   — target taken with *different* content, use the
+        returned run-N variant instead;
+      * ``"duplicate"`` — target taken with *identical* content; caller
+        should drop the source rather than keep two copies. In this case
+        ``final_json_path`` is still ``new_json_path`` for the log.
+    """
+    if not new_json_path.exists() or new_json_path.resolve() == source_json.resolve():
+        return new_json_path, "move"
+    if _files_identical(new_json_path, source_json):
+        return new_json_path, "duplicate"
+    # Different content — walk `_run-2`, `_run-3`, … until we find a free slot.
+    n = 2
+    while True:
+        candidate = _insert_run_entity(new_json_path, n)
+        if not candidate.exists():
+            return candidate, "run"
+        n += 1
+        if n > 999:
+            return new_json_path, "move"  # give up; the outer skip guard kicks in
 
 
 def _leftover_move_plan(
