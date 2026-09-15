@@ -292,13 +292,22 @@ def test_name_conflict(json_ob: dict, file: str | Path) -> bool:
         try:
             with open(file, encoding="utf-8") as f:
                 js = json.load(f)
-        except (UnicodeDecodeError, json.JSONDecodeError, OSError):
-            # Corrupt / non-UTF-8 / non-JSON file already sits on that path
-            # (interrupted extraction, manual copy from another tool, unrelated
-            # file with the same name). Treat it as a conflict so the caller
-            # picks a fresh, non-colliding filename via `_inc_key` instead of
-            # crashing here with UnicodeDecodeError.
-            return True
+        except (UnicodeDecodeError, json.JSONDecodeError, OSError) as e:
+            # Unreadable JSON at the target path is almost always an artefact of
+            # a previous crashed / half-written extraction, not an unrelated
+            # file that the extractor should route around. Delete it and treat
+            # the slot as free so the caller writes fresh content over it,
+            # rather than piling up ``_sequ-<n>-a`` copies alongside the
+            # broken original. Fresh-content path relies on the caller passing
+            # ``override=True`` to `save_json` (the default) or having no file
+            # at all — both hold here.
+            Print_Logger().on_warning(f"test_name_conflict: replacing unreadable JSON at {file} ({type(e).__name__}: {e}).")
+            try:
+                Path(file).unlink(missing_ok=True)
+            except OSError as unlink_err:
+                Print_Logger().on_warning(f"test_name_conflict: could not unlink corrupt JSON {file}: {unlink_err}")
+                return True  # fall back to the "rename around it" path
+            return False
         if "grid" in js:
             del js["grid"]
         return js != json_ob
