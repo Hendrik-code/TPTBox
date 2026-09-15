@@ -44,7 +44,7 @@ logger = Print_Logger()
 # and viewer window/level/annotation presets — and always come out as noise
 # for automated pipelines. Callers can pass `skip_formats=set()` to keep them,
 # or add other formats (e.g. `{"pr", "ko"}` to also drop Key Object Selection).
-_DEFAULT_SKIP_FORMATS: set[str] = {"pr"}
+_DEFAULT_SKIP_FORMATS: set[str] = {"pr", "xa-helper"}
 
 
 def _next_letter_suffix(s: str, inc: int = 1) -> str:

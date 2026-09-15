@@ -479,6 +479,14 @@ def extract_keys_from_json(  # noqa: C901
             mri_format = "pet"
             _apply_bodypart_key(keys, _get)
         elif modality == "xa":  # Angiography
+            # Helper / non-imaging XA payload: SECONDARY captures, referenced-
+            # image thumbnails, and exam-protocol screenshots have modality XA
+            # but no diagnostic pixel volume. Route to `xa-helper` so
+            # `_DEFAULT_SKIP_FORMATS` drops them at the caller instead of
+            # cluttering the output with unusable derivations.
+            if any(t in image_type for t in ("SECONDARY", "REFIMAGE", "EXAM PROTOCOL")):
+                mri_format = "xa-helper"
+                return mri_format, keys, ".nii.gz"
             biplane = False
             if "BIPLANE A" in image_type or "SINGLE A" in image_type:
                 keys["acq"] = "A"
@@ -508,6 +516,17 @@ def extract_keys_from_json(  # noqa: C901
                 mri_format = "DSA"
             else:
                 mri_format = "XA"
+            # Manufacturer-agnostic ImageType fallbacks — override the plain
+            # `XA` fallback with more specific labels when the header
+            # unambiguously says so. `ORIGINAL` runs are live fluoro; a
+            # `DERIVED PRIMARY` subtracted plane is a DSA. Keeps the
+            # SeriesDescription-string checks above as first-pass and only
+            # kicks in when they didn't resolve past `XA`.
+            if mri_format == "XA":
+                if "ORIGINAL" in image_type:
+                    mri_format = "fluroscopy"
+                elif "DERIVED" in image_type and "PRIMARY" in image_type:
+                    mri_format = "DSA"
         elif modality == "mr":
             for key, mri_format_new in map_series_description_to_file_format.items():
                 regex = re.compile(key)
