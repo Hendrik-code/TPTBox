@@ -68,6 +68,32 @@ map_series_description_to_file_format_default = {
     ".*mp?ra?ge?.*": "MPR",
     ".*mip.*": "MIP",
     "b0map": "b0map",
+    # Specific quantitative / specialised patterns MUST come before the greedy
+    # ``.*t2.*`` / ``.*t1.*`` catch-alls below — otherwise "T2 STAR" / "T1 MAP"
+    # get misclassified as plain T2w / T1w on the first-match win.
+    ".*mp2rage.*": "MP2RAG",
+    ".*t2\\s*star.*": "T2star",
+    r".*t2\*.*": "T2star",
+    ".*r2\\s*star.*": "R2star",
+    r".*r2\*.*": "R2star",
+    ".*swi.*": "SWI",
+    ".*t1\\s*map.*": "T1map",
+    ".*t2star\\s*map.*": "T2starmap",
+    ".*t2\\s*map.*": "T2map",
+    # Multi-echo VIBE / DIXON — NAKO Siemens ``ME_vibe_fatquant_*`` and the
+    # generic ``mevibe``/``fatquant``/``fatfrac``/``pdff`` labels. Placed before
+    # ``.*mdix.*`` so the multi-echo classification wins where both apply.
+    ".*me[_\\s]?vibe.*": "mevibe",
+    ".*mevibe.*": "mevibe",
+    ".*fatquant.*": "mevibe",
+    ".*fatfrac.*": "dixon",
+    ".*pdff.*": "dixon",
+    ".*ideal.*": "dixon",  # GE's Dixon variant
+    # Philips-specific localizers / reference scans that the existing "pilot"
+    # / "scout" entries above don't catch.
+    ".*survey.*": "localizer",
+    ".*ref\\s*scan.*": "localizer",
+    ".*smartexam.*": "localizer",
     ".*t2.*": "T2w",
     ".*t1.*": "T1w",
     ".*dixon.*": "dixon",
@@ -82,6 +108,7 @@ map_series_description_to_file_format_default = {
     ".*sub.*": "subtraction",
     ".*dynamik.*": "DCE",
     ".*mdix.*": "dixon",
+    ".*mdixon.*": "dixon",
     ".*s3d.*": "s3D",
     ".*flip37.*": "s3D",
     ".*trak.*": "PWI",
