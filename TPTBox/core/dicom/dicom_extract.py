@@ -364,11 +364,22 @@ def _extract_nii_from_dicom(dicom_out_path, nii_path):
                         return True
                     # Single-DICOM series without usable pixel data (Presentation
                     # State, Key Object Selection, Registration, Fiducials, some
-                    # RT objects). Previously we returned True unconditionally,
-                    # which made the caller run `_add_grid_info_to_json` on a
-                    # NIfTI that was never written and crash with FileNotFoundError.
+                    # RT objects). Previously `return True` here made the caller
+                    # run `_add_grid_info_to_json` on a NIfTI that was never
+                    # written and crash with FileNotFoundError. Also try to lift
+                    # any ContentSequence into a `.txt` sidecar so structured-
+                    # report-style DICOMs don't lose their textual payload; the
+                    # `.json` header sidecar is kept in either case (it already
+                    # holds every non-pixel DICOM tag) so downstream inspection
+                    # still works. Return False so no grid step follows.
                     logger.on_debug(f"Not exportable (no pixel_array): {Path(nii_path).name}")
-                    Path(str(nii_path).replace(".nii.gz", ".json")).unlink(missing_ok=True)
+                    try:
+                        txt_path = str(nii_path).replace(".nii.gz", ".txt")
+                        _extract_txt_from_dicom(dicom_out_path, txt_path)
+                        if Path(txt_path).stat().st_size == 0:
+                            Path(txt_path).unlink(missing_ok=True)
+                    except Exception as e:  # noqa: BLE001
+                        logger.on_debug(f"Text dump failed for {Path(nii_path).name}: {e}")
                     return False
             except Exception as e:
                 logger.on_debug("Multi-Frame DICOM did not work:", e)
