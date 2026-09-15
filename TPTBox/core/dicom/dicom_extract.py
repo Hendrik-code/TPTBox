@@ -39,6 +39,13 @@ from TPTBox.core.dicom.dicom2nii_utils import get_json_from_dicom, load_json, sa
 
 logger = Print_Logger()
 
+# Modalities/BIDS formats we drop by default. Grayscale Softcopy Presentation
+# State (`pr`) DICOMs carry no pixel data — only Referenced SOP Instance UIDs
+# and viewer window/level/annotation presets — and always come out as noise
+# for automated pipelines. Callers can pass `skip_formats=set()` to keep them,
+# or add other formats (e.g. `{"pr", "ko"}` to also drop Key Object Selection).
+_DEFAULT_SKIP_FORMATS: set[str] = {"pr"}
+
 
 def _next_letter_suffix(s: str, inc: int = 1) -> str:
     """Increment a letter suffix: a -> b, z -> aa, aa -> ab."""
@@ -524,6 +531,7 @@ def _from_dicom_to_nii(
     skip_localizer: bool = False,
     parent="rawdata",
     censor_list=None,
+    skip_formats: set[str] | None = None,
 ):
     """Convert a list of DICOM datasets for one series to a NIfTI file.
 
@@ -541,11 +549,18 @@ def _from_dicom_to_nii(
         override_subject_name: Optional callable that returns a custom subject name.
         chunk: Chunk index for multi-stack series; ``None`` triggers automatic splitting.
         skip_localizer: Skip localizer series when ``True``.
+        skip_formats: BIDS format labels to drop entirely (no JSON, no sidecar,
+            no NIfTI). Defaults to :data:`_DEFAULT_SKIP_FORMATS` = ``{"pr"}``
+            — Grayscale Softcopy Presentation State DICOMs carry no pixel
+            data and only reference other series, so they normally contribute
+            nothing to a downstream pipeline. Pass ``set()`` to keep them.
 
     Returns:
         Path to the generated NIfTI file, ``None`` on failure, or a list of paths
         when the series was automatically split into multiple stacks.
     """
+    if skip_formats is None:
+        skip_formats = _DEFAULT_SKIP_FORMATS
     if censor_list is None:
         censor_list = [
             "StudyDate",
@@ -576,6 +591,7 @@ def _from_dicom_to_nii(
                     chunk=i,
                     skip_localizer=skip_localizer,
                     parent=parent,
+                    skip_formats=skip_formats,
                 )
                 outs.append(o)
             return outs
@@ -602,6 +618,9 @@ def _from_dicom_to_nii(
     )
     if skip_localizer and json_bids.bids_format == "localizer":
         return
+    if json_bids.bids_format in skip_formats:
+        logger.on_debug(f"Skipping {json_bids.bids_format!r} series (in skip_formats): {Path(json_file_name).name}")
+        return None
     logger.print(json_file_name, Log_Type.NEUTRAL, verbose=verbose)
     exist = save_json(simp_json, json_file_name, override=False)
     # logger.on_debug(exist, Path(nii_path).exists(), nii_path)
@@ -1177,6 +1196,7 @@ def extract_dicom_folder(
     censor_list: list | None = None,
     skip_already_extracted: bool = True,
     force_rescan: bool = False,
+    skip_formats: set[str] | None = None,
 ) -> dict:
     """Extract DICOM files from a directory or list of directories, convert them to NIfTI format, and store the output.
 
@@ -1214,6 +1234,12 @@ def extract_dicom_folder(
             added subjects. Defaults to True.
         force_rescan (bool, optional): If True, bypass the fast-skip marker and re-read every
             DICOM. Defaults to False.
+        skip_formats (set[str] | None, optional): BIDS format labels to drop
+            entirely (no JSON, no sidecar, no NIfTI). Defaults to
+            :data:`_DEFAULT_SKIP_FORMATS` = ``{"pr"}`` — Grayscale Softcopy
+            Presentation State DICOMs carry no pixel data and only reference
+            other series, so they normally contribute nothing to a downstream
+            pipeline. Pass ``set()`` to keep them.
 
     Returns:
         dict: A dictionary with keys representing DICOM series and values as paths to the generated NIfTI files.
@@ -1275,6 +1301,7 @@ def extract_dicom_folder(
                     skip_localizer=skip_localizer,
                     parent=parent,
                     censor_list=censor_list,
+                    skip_formats=skip_formats,
                 )
 
             # Process in parallel or sequentially based on n_cpu
