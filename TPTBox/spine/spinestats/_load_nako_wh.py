@@ -191,7 +191,9 @@ EXPECTED_IMAGES = {
 
 
 def verify_missing_images(cache: DecisionCache, sub: str, subj_dict: dict) -> None:
-    """For each expected base image absent from ``subj_dict``, ask the user whether it's
+    """Verify that every expected base image is either present or confirmed missing.
+
+    For each expected base image absent from ``subj_dict``, ask the user whether it's
     really missing. If confirmed missing, drop the base and its dependent seg keys from
     ``subj_dict`` (set to None). Decisions are cached per (subject, image).
     """
@@ -617,7 +619,7 @@ def loop_over_repaired_nako(
             "derivatives-fullbody-poi",  # fullbody / fov101 / fov102 POIs + registered segmentations on the stitched-water grid
         ],
         filter_file=(lambda x: test_key in str(x)) if test else None,
-        
+
     )
 
     for sub, subj in gbi.enumerate_subjects(sort=sort, shuffle=not sort):
@@ -724,7 +726,7 @@ def loop_over_repaired_nako(
                         if k in _MEVIBE_EXTRA_KEYS and len(v) > 1:
                             preferred = [bf for bf in v if "/derivatives_mevibe/" in _fmt_file(bf)]
                             if preferred:
-                                v = preferred
+                                v = preferred  # noqa: PLW2901
                         k = mapping.get(k, k)  # noqa: PLW2901
                         if len(v) > 1:
                             picked = resolve_pick(cache, sub, f"mevibe:{k}", f"Multiple mevibe files for {k}; pick one.", v)
@@ -1186,7 +1188,9 @@ def _apply_corrections_to_subj_dict(sub: str, subj_dict: dict, index: dict) -> d
 
 
 def verify_hardlink(sub: str, corrected_index_path: Path = _DEFAULT_CORRECTED_INDEX) -> None:
-    """Run the loop for a single subject, apply corrections, then trace what
+    """Dry-run a single subject's hard-link plan.
+
+    Run the loop for a single subject, apply corrections, then trace what
     :func:`hard_link` *would* do and check every source exists and every target
     would land on the same filesystem as its source (so :func:`os.link` won't
     hit ``EXDEV``).  Prints one line per file — no writes are performed.
@@ -1224,7 +1228,7 @@ def verify_hardlink(sub: str, corrected_index_path: Path = _DEFAULT_CORRECTED_IN
             status = "ok" if src_exists and same_fs else ("cross-fs" if src_exists else "src-missing")
             print(f"  [{status:>10s}]  {src}  ->  {target}")
 
-        for _key, t2w in (d.get("t2w_chunk") or {}).items():
+        for t2w in (d.get("t2w_chunk") or {}).values():
             if t2w:
                 _check(t2w[0], parent="rawdata", info={"ses": "baseline"})
         seg_keys = (
@@ -1275,9 +1279,10 @@ def _grid_worker(nii_path: str) -> tuple[str, str]:
     sidecar = Path(str(p).split(".")[0] + ".json")
     try:
         _add_grid_info_to_json(p, sidecar, add=True)
-        return nii_path, "ok"
     except Exception as e:  # noqa: BLE001
         return nii_path, f"error: {type(e).__name__}: {e}"
+    else:
+        return nii_path, "ok"
 
 
 def _iter_grid_targets(subj_dict: dict):
