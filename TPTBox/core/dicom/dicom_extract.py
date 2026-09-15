@@ -1153,7 +1153,13 @@ def extract_dicom_folder(
         validate_orientation (bool, optional): Enable ``dicom2nifti`` orientation validation. Defaults to True.
         validate_orthogonal (bool, optional): Enable ``dicom2nifti`` orthogonality validation. Defaults to False.
         validate_slice_increment (bool, optional): Enable ``dicom2nifti`` slice-increment validation. Defaults to True.
-        n_cpu (int, optional): Number of CPU cores to use for parallel processing. Defaults to 1 (sequential).
+        n_cpu (int | None, optional): Threading policy for per-series conversion.
+            ``1`` (default) processes series sequentially. ``>1`` uses that many
+            worker threads. ``None`` hands ``max_workers=None`` to
+            :class:`concurrent.futures.ThreadPoolExecutor`, whose Python default
+            is ``min(32, os.cpu_count() + 4)`` — effectively "use all cores, up
+            to 32". Note that DICOM extraction is I/O-heavy, so threads (not
+            processes) tend to be the right knob.
         override_subject_name (Callable[[dict, Path], str] | None, optional): Callable receiving the parsed DICOM
             header dict and file path; returns the subject id to use in the BIDS output. Defaults to None.
         skip_localizer (bool, optional): If True, skip series identified as scanner localisers. Defaults to True.
