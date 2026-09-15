@@ -57,6 +57,9 @@ def _next_letter_suffix(s: str, inc: int = 1) -> str:
     return "".join(reversed(result))
 
 
+_INC_KEY_MAX_TRIES = 10_000
+
+
 def _inc_key(keys: dict, inc: int = 1, k: str = "sequ", path_exists: Callable[[dict], bool] | None = None) -> None:
     """Increment the sequence key inside *keys* by appending letter suffixes.
 
@@ -64,6 +67,11 @@ def _inc_key(keys: dict, inc: int = 1, k: str = "sequ", path_exists: Callable[[d
     until the filename generated from *keys* no longer collides with an existing file
     on disk. This guarantees the caller never receives keys that would produce a
     duplicate filename.
+
+    Raises:
+        RuntimeError: If ``path_exists`` never returns ``False`` within
+            :data:`_INC_KEY_MAX_TRIES` iterations. Prevents a broken
+            ``path_exists`` callback from spinning forever.
     """
 
     def _step() -> None:
@@ -88,8 +96,15 @@ def _inc_key(keys: dict, inc: int = 1, k: str = "sequ", path_exists: Callable[[d
             keys[k] = f"{value}-a"
 
     _step()
+    tries = 0
     while path_exists is not None and path_exists(keys):
         _step()
+        tries += 1
+        if tries >= _INC_KEY_MAX_TRIES:
+            raise RuntimeError(
+                f"_inc_key: `path_exists` still True after {tries} increments (current keys[{k!r}]={keys.get(k)!r}). "
+                "This suggests a mis-configured `path_exists` callback rather than a real filename collision."
+            )
 
 
 def _generate_bids_path(
