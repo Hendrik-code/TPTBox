@@ -562,10 +562,12 @@ def _from_dicom_to_nii(
 
     if add_grid:
         _add_grid_info_to_json(nii_path, json_file_name)
-        # Multi-echo Philips DIXON (magnitude/phase) arrives as a 4-D NIfTI.
-        # Split it into per-echo 3-D files with `-eco<i>` appended to `part`.
-        if json_bids.get("part") in ("magnitude", "phase"):
-            _split_multi_echo_dixon(Path(nii_path), Path(json_file_name), dcm_data_l)
+        # Multi-echo Philips DIXON arrives as a 4-D NIfTI. Try to split whenever
+        # the output is 4-D — `_split_multi_echo_dixon` is a no-op on 3-D input
+        # and safely returns None. This catches multi-echo series whose `part`
+        # entity was mapped to something other than "magnitude"/"phase" via
+        # `dixon_mapping` or `parts_mapping`.
+        _split_multi_echo_dixon(Path(nii_path), Path(json_file_name), dcm_data_l)
     return nii_path if add_grid else None
 
 
@@ -619,7 +621,7 @@ def _split_multi_echo_dixon(nii_path: Path, json_path: Path, dcm_data_l) -> list
     parent_json = load_json(json_path) if Path(json_path).exists() else {}
     frames = nii.split_4D_image_to_3D()
     out_paths: list[Path] = []
-    for i, (frame, te) in enumerate(zip(frames, tes)):
+    for i, (frame, te) in enumerate(zip_strict(frames, tes)):
         new_nii = _with_echo_suffix(nii_path, i)
         new_json = _with_echo_suffix(json_path, i)
         frame.save(new_nii)
