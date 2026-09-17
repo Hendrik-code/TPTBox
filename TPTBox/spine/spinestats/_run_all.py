@@ -135,6 +135,9 @@ def _is_cache_valid(json_path: Path, seg_files: list[Path], required_keys: tuple
       - json fails to parse,
       - any required main key is missing from the loaded dict.
     """
+    # TODO(hash-invalidation): also compare each entry in data["_provenance"]["inputs"]
+    # against the current file's sha1 (see _build_provenance) and force recompute on
+    # mismatch. Deferred while we assume inputs are unchanged.
     if not json_path.exists():
         return False, None
     json_mtime = json_path.stat().st_mtime
@@ -151,6 +154,93 @@ def _is_cache_valid(json_path: Path, seg_files: list[Path], required_keys: tuple
         if k not in data:
             return False, None
     return True, data
+
+
+_PROVENANCE_INPUT_KEYS: tuple[str, ...] = (
+    "t2w",
+    "vibe_part-water",
+    "vibe_part-fat",
+    "vibe_part-inphase",
+    "vibe_part-outphase",
+    "vibe-water",
+    "vibe-fat",
+    "vibe-inphase",
+    "vibe-outphase",
+    "vert",
+    "spine",
+    "vibeseg100",
+    "roi",
+    "fullbody_poi",
+)
+
+
+def _resolve_prov_path(v) -> Path | None:
+    """Best-effort ``file_dict`` value → filesystem Path for provenance recording."""
+    if v is None:
+        return None
+    if isinstance(v, BIDS_FILE):
+        nii = v.get_nii_file()
+        if nii is not None:
+            return Path(nii)
+        j = v.file.get("json") if hasattr(v, "file") else None
+        return Path(j) if j is not None else None
+    if isinstance(v, (str, Path)):
+        s = str(v)
+        return Path(s) if s else None
+    return None
+
+
+def _file_provenance(path: Path, prior: dict | None = None) -> dict:
+    """Return provenance dict for ``path``.
+
+    Shape is either ``{"path", "mtime_ns", "sha1"}`` or, when the file is
+    missing, ``{"path", "missing": True}``.  When ``prior`` has the same
+    ``mtime_ns`` as the current file, its ``sha1`` is reused to avoid
+    re-hashing — this is what keeps reruns cheap while the "assume inputs
+    unchanged" mode is in effect.
+    """
+    import hashlib
+
+    p = Path(path)
+    if not p.exists():
+        return {"path": str(p), "missing": True}
+    st = p.stat()
+    if isinstance(prior, dict) and prior.get("mtime_ns") == st.st_mtime_ns and isinstance(prior.get("sha1"), str):
+        return {"path": str(p), "mtime_ns": st.st_mtime_ns, "sha1": prior["sha1"]}
+    h = hashlib.sha1()
+    with p.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return {"path": str(p), "mtime_ns": st.st_mtime_ns, "sha1": h.hexdigest()}
+
+
+def _build_provenance(file_dict: dict, poi_out: Path | str | None, prior: dict | None) -> dict:
+    """Build the ``_provenance`` block for an aggregated per-subject JSON.
+
+    Records ``path`` / ``mtime_ns`` / ``sha1`` for every known input in
+    ``file_dict`` plus the POI json at ``poi_out``.  Reuses
+    ``prior["inputs"][k]`` to skip re-hashing files whose mtime is unchanged.
+    """
+    from datetime import datetime, timezone
+
+    prior_inputs = (prior or {}).get("inputs", {}) if isinstance(prior, dict) else {}
+    inputs: dict[str, dict] = {}
+    for key in _PROVENANCE_INPUT_KEYS:
+        if key not in file_dict:
+            continue
+        p = _resolve_prov_path(file_dict[key])
+        if p is None:
+            continue
+        inputs[key] = _file_provenance(p, prior_inputs.get(key))
+    if poi_out is not None:
+        p = Path(poi_out)
+        if p.exists():
+            inputs["poi"] = _file_provenance(p, prior_inputs.get("poi"))
+    return {
+        "version": 1,
+        "written_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "inputs": inputs,
+    }
 
 
 def run_all(
@@ -318,6 +408,7 @@ def run_all(
 
     if not (need_cobb or need_ivd or need_vert or need_vbq or need_bcs or need_mfi or need_torso or need_curvature or need_pelvic):
         if _merge_endplate_angles(out, Path(poi_out)) or save:
+            out["_provenance"] = _build_provenance(file_dict, poi_out, out.get("_provenance"))
             save_json(final_out, out)
         return out
 
@@ -451,6 +542,7 @@ def run_all(
             logger.print_error()
 
     _merge_endplate_angles(out, Path(poi_out))
+    out["_provenance"] = _build_provenance(file_dict, poi_out, out.get("_provenance"))
     logger.on_save("save", final_out.name)
     save_json(final_out, out)
     return out
@@ -604,6 +696,7 @@ def _rows_from_json(subject_id: str, data: dict) -> tuple[dict[str, Any], list[d
         "axial_rotation",
         "endplate_internal_angle",
         "segmental_endplate_angles",
+        "_provenance",
     )
     subject_view = {k: v for k, v in data.items() if k not in _PER_SUBJECT_EXCLUDE}
     _flatten("", subject_view, per_subject)
