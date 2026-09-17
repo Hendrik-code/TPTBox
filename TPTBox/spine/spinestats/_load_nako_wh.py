@@ -523,6 +523,25 @@ def get_corrected_mevibe(fam: BIDS_Family, compute_PDFF=True):  # TODO return di
     return out
 
 
+def get_current_best_VERIDAH(sub) -> Path | None:
+    """Return the newest VERIDAH-label JSON for ``sub`` (V2 preferred), or ``None`` if missing.
+
+    The file lives alongside the T2w segmentation under
+    ``derivatives_spine_inference_162_sacrumfix/<pfx>/<sub>/T2w/`` and holds the
+    ``orig_label -> fpath`` remapping used by :func:`compute_veridah_variants`.
+    """
+    sub = str(sub).split("_")[0].replace("sub-", "")
+    for folder in ("derivatives_spine_inference_162_sacrumfix",):
+        for suffix in ("VERIDAH-label-V2", "VERIDAH-label"):
+            p = Path(
+                f"/DATA/NAS/datasets_processed/NAKO/dataset-nako/{folder}/{sub[:3]}/{sub}/T2w/"
+                f"sub-{sub}_sequ-stitched_acq-sag_mod-T2w_seg-vert_desc-{suffix}_stat.json"
+            )
+            if p.exists():
+                return p
+    return None
+
+
 def get_current_best_T2w_seg(sub, black_list_t2w=None):
     if black_list_t2w is None:
         black_list_t2w = [
@@ -902,6 +921,8 @@ def loop_over_repaired_nako(
         subj_dict["vert"] = vert
         subj_dict["spine"] = spine
         subj_dict["poi"] = poi
+        veridah = get_current_best_VERIDAH(sub)
+        subj_dict["veridah"] = str(veridah) if veridah is not None else None
         if corrected_index:
             _apply_corrections_to_subj_dict(str(sub), subj_dict, corrected_index)
         verify_missing_images(cache, sub, subj_dict)
@@ -1049,6 +1070,7 @@ def hard_link(
         "vert",  # t2w (stiched)
         "spine",  # t2w (stiched)
         "poi",  # t2w (stiched)
+        "veridah",  # VERIDAH enumeration-anomaly relabeling (V2 preferred)
     ]
     imgs = [
         "pd",

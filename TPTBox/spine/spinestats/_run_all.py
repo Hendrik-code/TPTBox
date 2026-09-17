@@ -96,6 +96,16 @@ def get_nako_paths(nako_id: str) -> dict[str, Path | None]:
     fullbody_poi = (
         DATASET_ROOT / f"derivatives-fullbody-poi/{pfx}/{sub}/vibe/sub-{sub}_sequ-stitched_acq-ax_part-water_seg-fullbody_poi.json"
     )
+    veridah = None
+    for suffix in ("VERIDAH-label-V2", "VERIDAH-label"):
+        p = (
+            DATASET_ROOT
+            / f"derivatives_spine_inference_162_sacrumfix/{pfx}/{sub}/T2w/"
+            f"sub-{sub}_sequ-stitched_acq-sag_mod-T2w_seg-vert_desc-{suffix}_stat.json"
+        )
+        if p.exists():
+            veridah = p
+            break
     roi = (
         DATASET_ROOT / f"derivatives_Abdominal-Segmentation/{pfx}/{sub}/vibe/sub-{nako_id}_sequ-stitched_acq-ax_mod-vibe_seg-ROI_msk.nii.gz"
     )
@@ -112,6 +122,7 @@ def get_nako_paths(nako_id: str) -> dict[str, Path | None]:
         "roi": roi,
         "vibeseg100": vibeseg100 if vibeseg100.exists() else None,
         "fullbody_poi": fullbody_poi if fullbody_poi.exists() else None,
+        "veridah": veridah,
         "dataset": DATASET_ROOT,
     }
 
@@ -171,6 +182,7 @@ _PROVENANCE_INPUT_KEYS: tuple[str, ...] = (
     "vibeseg100",
     "roi",
     "fullbody_poi",
+    "veridah",
 )
 
 
@@ -398,7 +410,8 @@ def run_all(
         _merge_per_vertebra_metrics(out)
         save = True
     ####
-    need_poi = need_cobb or need_ivd or need_vert or need_curvature
+    need_veridah = override or "curv_veridah" not in out
+    need_poi = need_cobb or need_ivd or need_vert or need_curvature or need_veridah
     need_t2w = need_ivd or need_vert or need_vbq
     need_vert_nii = need_poi or need_vbq or need_bcs or need_mfi
     need_spine_nii = need_vert_nii or need_vbq
@@ -406,7 +419,9 @@ def run_all(
     need_roi = need_mfi or need_torso
     need_vibe_wf = need_mfi
 
-    if not (need_cobb or need_ivd or need_vert or need_vbq or need_bcs or need_mfi or need_torso or need_curvature or need_pelvic):
+    if not (
+        need_cobb or need_ivd or need_vert or need_vbq or need_bcs or need_mfi or need_torso or need_curvature or need_pelvic or need_veridah
+    ):
         if _merge_endplate_angles(out, Path(poi_out)) or save:
             out["_provenance"] = _build_provenance(file_dict, poi_out, out.get("_provenance"))
             save_json(final_out, out)
@@ -493,6 +508,16 @@ def run_all(
             out["multi_cobb"] = compute_multi_cobb(poi)
         except Exception:
             logger.on_fail("curvature error caught")
+            logger.print_error()
+
+    if need_veridah and poi is not None:
+        try:
+            from TPTBox.spine.spinestats.veridah_angles import compute_veridah_variants
+
+            logger.on_debug("veridah variants")
+            out["curv_veridah"] = compute_veridah_variants(poi, file_dict.get("veridah"))
+        except Exception:
+            logger.on_fail("veridah variants error caught")
             logger.print_error()
 
     # Merge wedge metrics directly into the per-label vert_geometry / ivd_geometry

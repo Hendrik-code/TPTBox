@@ -7,6 +7,7 @@ import pandas as pd
 from TPTBox import Print_Logger
 from TPTBox.core.bids_files import BIDS_FILE, BIDS_Family, Buffered_BIDS_Global_info
 from TPTBox.core.nii_wrapper import to_nii
+from TPTBox.spine.spinestats._load_nako_wh import get_current_best_VERIDAH as _get_current_best_VERIDAH
 
 log = Print_Logger()
 
@@ -320,6 +321,8 @@ def loop_over_repaired_nako(
         subj_dict["vert"] = vert
         subj_dict["spine"] = spine
         subj_dict["poi"] = poi
+        veridah = _get_current_best_VERIDAH(sub)
+        subj_dict["veridah"] = str(veridah) if veridah is not None else None
         yield subj_dict
 
 

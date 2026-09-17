@@ -686,6 +686,7 @@ def plot_compute_lordosis_and_kyphosis(
     seg: Image_Reference | None = None,
     line_len=100,
     project_2D=True,
+    curvature_definition=curvature_definition,
 ) -> tuple[dict[str, float | None], Snapshot_Frame]:
     """Plots and computes the angles of lordosis and kyphosis on a spinal image.
 
@@ -701,6 +702,12 @@ def plot_compute_lordosis_and_kyphosis(
         seg (Image_Reference | None): The segmentation image reference. Optional, can be None.
         line_len (int): The length of the lines representing the vertebrae directions (default is 100).
         project_2D (bool, optional): If True, the angles are computed in the 2D sagittal projection; otherwise in 3D. Defaults to True.
+        curvature_definition (dict[str, Def_Curvature], optional): Mapping of output-key name
+            → :class:`Def_Curvature` describing which vertebra pair defines each angle.
+            Defaults to the module-level ``curvature_definition`` (cervical_lordosis,
+            thoracic_kyphosis, lumbar_lordosis). Pass a custom dict to compute a different
+            set of segmental angles or to override the ``last_thoracic`` / ``last_lumbar``
+            resolution — the output dict's keys mirror this mapping's keys.
 
     Returns:
         tuple: A tuple containing:
