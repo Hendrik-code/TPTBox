@@ -961,8 +961,8 @@ def plot_cobb_angle(
     if width < 50:
         padd = [(0, 0) for _ in range(3)]
         padd[axis] = (int(50 - width), int(50 - width))
-        img = to_nii(img).apply_pad(padd)
-        seg = to_nii(seg, True).apply_pad(padd)
+        img = to_nii(img).apply_pad(padd, verbose=False)
+        seg = to_nii(seg, True).apply_pad(padd, verbose=False)
         poi = poi.resample_from_to(seg)
     frame = Snapshot_Frame(
         img,

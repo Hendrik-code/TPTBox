@@ -1066,9 +1066,9 @@ if __name__ == "__main__":
         else:
             # subjects = tqdm(loop_over_repaired_nako(test=False, sort=aggregate), total=30645)
             l = loop_over_repaired_nako(test=False, sort=True)  # aggregate
-            total = 15
-            subjects = iter([next(l) for _ in range(total)])
-            # subjects = l
+            # total = 15
+            # subjects = iter([next(l) for _ in range(total)])
+            subjects = l
 
             # print(f"Run on {total=} random subset")
         if N_CPUS <= 1:
