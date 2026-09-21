@@ -512,10 +512,21 @@ def run_all(
 
     if need_veridah and poi is not None:
         try:
-            from TPTBox.spine.spinestats.veridah_angles import compute_veridah_variants
+            from TPTBox.spine.spinestats.veridah_angles import compute_veridah_variants, plot_veridah_variants
 
             logger.on_debug("veridah variants")
             out["curv_veridah"] = compute_veridah_variants(poi, file_dict.get("veridah"))
+            if file_dict.get("veridah") is not None and file_dict.get("vert") is not None:
+                veridah_jpg_out = t2w_bf.get_changed_path(
+                    "jpg", "snp", "derivatives_spine_inference_162_sacrumfix_subregionmeasures-v2", info={"seg": "cobb-veridah"}
+                )
+                plot_veridah_variants(
+                    veridah_jpg_out,
+                    poi,
+                    file_dict["t2w"],
+                    file_dict["vert"],
+                    file_dict.get("veridah"),
+                )
         except Exception:
             logger.on_fail("veridah variants error caught")
             logger.print_error()

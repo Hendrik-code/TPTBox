@@ -154,6 +154,14 @@ def resolve_pick(
         # (``main-conflict:pd``, ``mevibe-conflict:pd``, ``vibe-conflict:pd``, …).
         idx = max(range(len(labels)), key=labels.__getitem__)
         return candidates[idx]  # transient: do not save
+    if key == "main:T2haste" or key.endswith(":T2haste"):
+        # auto-accept: when duplicates differ only in the presence of a ``sequ`` entity
+        # (one raw file without sequ, one or more with an explicit sequ number for the same
+        # acquisition), prefer the sequ-numbered candidate. Skips the prompt only when this
+        # split is unambiguous (exactly one sequ'd candidate); otherwise falls through.
+        with_sequ = [c for c in candidates if getattr(c, "get", lambda *_: None)("sequ", None) is not None]
+        if len(with_sequ) == 1 and len(with_sequ) < len(candidates):
+            return with_sequ[0]  # transient: do not save
     choice, reason = _prompt_choice(sub, key, question, labels, allow_discard=allow_discard)
     if choice == "__skip__":
         return candidates[0] if candidates else None  # transient: do not save
@@ -1096,6 +1104,7 @@ def hard_link(
             info = {"run": None}
             if isinstance(bf, str):
                 bf = BIDS_FILE(bf, dataset)
+            bf.info.pop("run", None)
             assert len([k for k, v in bf.loop_keys() if k not in allowed_keys]) == 0, (
                 [k for k, v in bf.loop_keys() if k not in allowed_keys],
                 bf,
@@ -1564,7 +1573,7 @@ if __name__ == "__main__":
         "Pass '' to disable.",
     )
     args = parser.parse_args()
-    test = True
+    test = False
 
     if args.build_corrected_index:
         build_corrected_index()

@@ -17,6 +17,8 @@ from pathlib import Path
 file = Path(__file__).resolve()
 sys.path.append(str(file.parents[2]))
 
+from typing import ClassVar  # noqa: E402
+
 import numpy as np  # noqa: E402
 
 from TPTBox.core.poi import POI  # noqa: E402
@@ -256,6 +258,171 @@ class Test_LabelName_MapLabels(unittest.TestCase):
         ln = out.info["label_name"]
         self.assertIn(2, ln)
         self.assertEqual(ln[2][50], "L1_corpus")
+
+
+class Test_LabelName_LegacyMigration(unittest.TestCase):
+    """The old flat ``{"(region, subreg)": name}`` format must migrate cleanly.
+
+    Real-world fixture: a leg-atlas POI with 38 flat entries across 5 regions,
+    including multi-digit subregion ids like ``(2, 10)`` — those must survive
+    ``ast.literal_eval`` parsing.
+    """
+
+    _ATLAS_FLAT: ClassVar[dict[str, str]] = {
+        "(1, 1)": "TGT", "(1, 2)": "FHC", "(1, 3)": "FNC", "(1, 4)": "FAAP",
+        "(2, 1)": "FLCD", "(2, 2)": "FMCD", "(2, 3)": "FLCP", "(2, 4)": "FMCP",
+        "(2, 5)": "FNP", "(2, 6)": "FADP", "(2, 7)": "TGPP", "(2, 8)": "TGCP",
+        "(2, 9)": "FMCPC", "(2, 10)": "FLCPC", "(2, 11)": "TRMP", "(2, 12)": "TRLP",
+        "(3, 1)": "TLCL", "(3, 2)": "TMCM", "(3, 3)": "TKC", "(3, 4)": "TLCA",
+        "(3, 5)": "TLCP", "(3, 6)": "TMCA", "(3, 7)": "TMCP", "(3, 8)": "TTP",
+        "(3, 9)": "TAAP", "(3, 10)": "TMIT", "(3, 11)": "TLIT",
+        "(4, 1)": "FLM", "(4, 2)": "TMM", "(4, 3)": "TAC", "(4, 4)": "TADP",
+        "(5, 1)": "PPP", "(5, 2)": "PDP", "(5, 3)": "PMP", "(5, 4)": "PLP",
+        "(5, 5)": "PRPP", "(5, 6)": "PRDP", "(5, 7)": "PRHP",
+    }
+
+    def test_normalize_label_name_migrates_flat_atlas(self):
+        from TPTBox.core.poi_fun.poi_abstract import normalize_label_name
+
+        nested = normalize_label_name(dict(self._ATLAS_FLAT))
+        # region keys are ints
+        self.assertEqual(set(nested.keys()), {1, 2, 3, 4, 5})
+        # multi-digit inner keys survive parsing
+        self.assertEqual(nested[2][10], "FLCPC")
+        self.assertEqual(nested[2][12], "TRLP")
+        self.assertEqual(nested[3][11], "TLIT")
+        # inner keys are ints too, no leftover string keys
+        for region, inner in nested.items():
+            for k in inner:
+                self.assertIsInstance(k, int, f"inner key {k!r} in region {region} is not int")
+        # count is preserved
+        total = sum(len(v) for v in nested.values())
+        self.assertEqual(total, len(self._ATLAS_FLAT))
+
+    def test_normalize_is_idempotent(self):
+        from TPTBox.core.poi_fun.poi_abstract import normalize_label_name
+
+        once = normalize_label_name(dict(self._ATLAS_FLAT))
+        twice = normalize_label_name({**once})
+        self.assertEqual(once, twice)
+
+    def test_normalize_empty_and_none(self):
+        from TPTBox.core.poi_fun.poi_abstract import normalize_label_name
+
+        self.assertEqual(normalize_label_name(None), {})
+        self.assertEqual(normalize_label_name({}), {})
+
+    def test_label_name_dict_caches_migration_in_info(self):
+        from TPTBox.core.poi_fun.poi_abstract import label_name_dict
+
+        info = {"label_name": dict(self._ATLAS_FLAT)}
+        out = label_name_dict(info)
+        # returned dict is the normalized form
+        self.assertEqual(out[1][1], "TGT")
+        # and the migrated form is cached back into info
+        self.assertIs(info["label_name"], out)
+        # a second call is a no-op (still nested)
+        out2 = label_name_dict(info)
+        self.assertIs(out2, info["label_name"])
+
+    def test_load_poi_migrates_atlas_from_disk(self):
+        """End-to-end: write the legacy JSON, load it, expect the nested form."""
+        import json
+        import tempfile
+
+        from TPTBox.core.poi import POI
+
+        payload = [
+            {
+                "direction": ["R", "A", "S"],
+                "zoom": [1.0, 1.0, 1.0],
+                "origin": [0.0, 0.0, 0.0],
+                "shape": [10, 10, 10],
+                "rotation": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                "format": "POI",
+                "label_name": dict(self._ATLAS_FLAT),
+            },
+            # one dummy point so the file loads as a POI: {region: {subregion: (x,y,z)}}
+            {"1": {"1": [1.0, 2.0, 3.0]}},
+        ]
+        with tempfile.NamedTemporaryFile(mode="w", suffix="_poi.json", delete=False) as f:
+            json.dump(payload, f)
+            path = f.name
+        try:
+            poi = POI.load(path)
+            ln = poi.info["label_name"]
+            self.assertEqual(ln[1][1], "TGT")
+            self.assertEqual(ln[2][10], "FLCPC")
+            # no more flat "(...)"-style keys
+            self.assertFalse(any(isinstance(k, str) and k.startswith("(") for k in ln))
+        finally:
+            Path(path).unlink(missing_ok=True)
+
+    def test_migration_then_map_labels(self):
+        """A flat-format POI still remaps correctly through map_labels."""
+        poi = _make_poi()
+        poi.info["label_name"] = dict(self._ATLAS_FLAT)  # legacy flat
+        # rename region 2 -> 20 and region 5 -> 50 in one shot
+        out = poi.map_labels(label_map_region={2: 20, 5: 50})
+        ln = out.info["label_name"]
+        self.assertIn(20, ln)
+        self.assertIn(50, ln)
+        self.assertNotIn(2, ln)
+        self.assertNotIn(5, ln)
+        self.assertEqual(ln[20][10], "FLCPC")
+        self.assertEqual(ln[50][7], "PRHP")
+
+
+class Test_LabelName_Accessors(unittest.TestCase):
+    """`set_label_name` / `set_level_one_name` write into ``info['label_name']``
+    and get read back by ``label_name`` / ``level_one_name`` and by the
+    Slicer/mkr exporter."""
+
+    def _poi_with_enums(self) -> POI:
+        from TPTBox.core.vert_constants import Location, Vertebra_Instance
+
+        poi = _make_poi()
+        poi.level_one_info = Vertebra_Instance
+        poi.level_two_info = Location
+        return poi
+
+    def test_set_and_get_label_name(self):
+        poi = self._poi_with_enums()
+        poi.set_label_name(region=20, subregion=50, name="L1_corpus")
+        self.assertEqual(poi.label_name(20, 50), "L1_corpus")
+        # unset points fall back to the level_two_info enum name (or the raw id when
+        # no enum entry matches).
+        fallback = poi.label_name(21, 50)
+        self.assertIsInstance(fallback, str)
+        self.assertNotEqual(fallback, "L1_corpus")
+
+    def test_set_and_get_level_one_name(self):
+        poi = self._poi_with_enums()
+        poi.set_level_one_name(region=20, name="Vertebra L1 custom")
+        self.assertEqual(poi.level_one_name(20), "Vertebra L1 custom")
+        # unset region falls back to the level_one_info enum name (L1 -> "L1")
+        self.assertEqual(poi.level_one_name(21), "L2")
+
+    def test_set_label_name_persists_in_info(self):
+        poi = _make_poi()
+        poi.set_label_name(20, 50, "L1_corpus")
+        poi.set_level_one_name(20, "Femur")
+        ln = poi.info["label_name"]
+        self.assertEqual(ln[20][50], "L1_corpus")
+        self.assertEqual(ln[20]["name"], "Femur")
+
+    def test_names_flow_into_slicer_export(self):
+        """`get_desc` (used by save_mrk) reads label/group name from label_name."""
+        from TPTBox.core.poi_fun.save_mkr import get_desc
+
+        poi = _make_poi()
+        poi.set_label_name(20, 50, "L1_corpus")
+        poi.set_level_one_name(20, "Spine")
+        g = poi.to_global()
+        name, name2, label = get_desc(g, region=20, subregion=50)
+        # `label` is the per-point custom name; `name2` is the region group name.
+        self.assertEqual(label, "L1_corpus")
+        self.assertEqual(name2, "Spine")
 
 
 class Test_Composition(unittest.TestCase):

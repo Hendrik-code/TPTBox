@@ -91,20 +91,61 @@ if "my_scalar_field" not in lbl_fields:
 poi.info["my_scalar_field"] = {"L1": 3.14, ...}
 ```
 
-**Special-cased field — `info["label_name"]`:**
+**Assigning names (`info["label_name"]`):**
 
-Human-readable per-point / per-region names live in the nested structure
-`{region:int -> {subregion:int -> name:str, "name": group_name:str}}` (see
-`poi_abstract.LABEL_NAME` and `normalize_label_name`). `map_labels` remaps this
-field automatically via its own helper `_remap_label_name_inplace`, which:
+Human-readable per-point and per-region names live in
+`poi.info["label_name"]` as `{region: {subregion: name, "name": group_name}}`.
+Use the accessors on `Abstract_POI` (available on both `POI` and `POI_Global`)
+instead of writing the dict directly:
 
-- remaps the top-level `region` keys via `label_map_region`;
-- remaps the *inner* `subregion` keys via `label_map_subregion`;
-- preserves the special `"name"` group-name entry;
-- merges inner dicts with *last-write-wins* on inner-key collisions when two
-  source regions map onto the same target.
+```python
+poi.set_label_name(region=2, subregion=10, name="FLCPC")   # per-point label
+poi.set_level_one_name(region=2, name="Femur")             # region group name
 
-No explicit registration is required for `label_name` — it is always handled.
+poi.label_name(2, 10)      # -> "FLCPC"
+poi.level_one_name(2)      # -> "Femur"
+```
+
+`region` / `subregion` accept `int`, numeric string, or `Enum` members. A
+custom name in `label_name` always takes priority over the auto-derived name
+from `level_one_info` / `level_two_info`; if none is set, `.label_name(...)`
+falls back to the enum name, and finally to the raw id as a string. A warning
+is emitted when a custom name conflicts with the `level_two_info` enum name
+for the same id.
+
+`map_labels` remaps this field automatically: the same
+`_remap_vector_field_keys_inplace` helper handles both flat fields and the
+nested `label_name` structure by dispatching on value type. For `label_name`,
+`label_map_region` remaps the top-level region keys, `label_map_subregion`
+remaps the inner subregion keys, and the `"name"` group entry is preserved.
+Two source regions colliding onto one target merge inner dicts with
+*last-write-wins* on overlapping keys. No explicit registration required —
+`label_name` is always handled.
+
+**Names in 3D Slicer:**
+
+`POI_Global.save_mrk(...)` writes a `.mrk.json` markup file whose control
+points and groups inherit these names directly:
+
+```python
+poi_global = poi.to_global()
+poi_global.save_mrk("points.mrk.json", pointLabelsVisibility=True)
+```
+
+Per control point, `save_mkr.get_desc(poi, region, subregion)` looks up:
+
+- `label` — from `poi.info["label_name"][region][subregion]`; falls back to
+  the `level_two_info` enum name (or the raw subregion id).
+- `name2` (group label shown in the markup tree) — from
+  `poi.info["label_name"][region]["name"]`; falls back to
+  `poi.info["label_group_name"][region]` and finally to the
+  `level_one_info` enum name.
+
+So `poi.set_label_name(...)` and `poi.set_level_one_name(...)` are all you
+need: Slicer displays those strings on hover, in the markup tree, and (when
+`pointLabelsVisibility=True`) as 3D annotations. Enable
+`split_by_region=True` on `save_mrk` to get one Slicer group per region
+(named via `level_one_name`).
 
 **Caveats:**
 

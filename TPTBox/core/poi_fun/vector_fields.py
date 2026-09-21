@@ -60,84 +60,97 @@ def _transform_direction_vectors_inplace(info: dict, trans: np.ndarray) -> None:
             vectors[k] = tuple(float(x) for x in new_v)
 
 
-def _remap_vector_field_keys_inplace(info: dict, region_map: dict) -> None:
-    """Remap the top-level keys of every registered label-keyed field via ``region_map``.
+def _map_one_key(k, key_map: dict | None):
+    """Map a single dict key via ``key_map``.
+
+    ``int`` keys are looked up directly. ``str`` keys resolve through
+    ``Vertebra_Instance`` (name -> value) and, on hit, the mapped value is
+    turned back into the corresponding ``Vertebra_Instance`` name (or kept
+    as ``str(id)`` when the target isn't a known instance).
+    """
+    if not key_map:
+        return k
+    if isinstance(k, int) and k in key_map:
+        return key_map[k]
+    if isinstance(k, str):
+        try:
+            label = Vertebra_Instance[k].value
+        except KeyError:
+            return k
+        if label in key_map:
+            try:
+                return Vertebra_Instance(key_map[label]).name
+            except ValueError:
+                return str(key_map[label])
+    return k
+
+
+def _remap_vector_field_keys_inplace(info: dict, region_map: dict | None, subregion_map: dict | None = None) -> None:
+    """Remap keys of every registered label-keyed field in ``info``.
 
     Considers fields registered under both :data:`POI_INFO_VECTOR_FIELDS_KEY`
     (direction vectors) and :data:`POI_INFO_LABEL_KEYED_FIELDS_KEY` (scalar
-    per-label fields like ``endplate_internal_angle`` or ``curvature_*``).
-    Keys may be either integer region labels or ``Vertebra_Instance``-name
-    strings ("L1", "T12", ...); both are matched against ``region_map``
-    (int-keyed). Duplicates after remapping keep the last write. No-op if
-    no fields are registered or ``region_map`` is empty.
+    per-label fields), plus ``label_name`` (always handled; migrated to the
+    nested form on the fly).
+
+    Behaviour is dispatched by *value type*:
+
+    - **Flat fields** (values are tuples / scalars): only outer keys are
+      remapped via ``region_map``.
+    - **Nested fields** (values are dicts, e.g. ``label_name`` /
+      ``{region: {subregion: name, "name": group}}``): outer keys are
+      remapped via ``region_map``, inner keys via ``subregion_map``, and the
+      special ``"name"`` group entry is preserved. When two source regions
+      collide onto one target, their inner dicts merge (last-write-wins on
+      overlapping keys).
+
+    Keys may be integer labels or ``Vertebra_Instance``-name strings; both
+    are matched against the int-keyed maps. No-op if there is nothing to do.
     """
-    if not region_map:
+    from TPTBox.core.poi_fun.poi_abstract import LABEL_NAME, _GROUP_NAME_KEY, label_name_dict
+
+    if not region_map and not subregion_map:
         return
     field_names: list[str] = []
     for key in (POI_INFO_VECTOR_FIELDS_KEY, POI_INFO_LABEL_KEYED_FIELDS_KEY):
         names = info.get(key)
         if names:
             field_names.extend(names)
+    # label_name is always handled -- ensure the nested-form migration runs, then include it.
+    if LABEL_NAME in info and LABEL_NAME not in field_names:
+        label_name_dict(info)
+        field_names.append(LABEL_NAME)
     if not field_names:
         return
     for name in field_names:
         vectors = info.get(name)
         if not isinstance(vectors, dict):
             continue
-        remapped = {}
+        remapped: dict = {}
         for k, v in vectors.items():
-            new_k = k
-            if isinstance(k, int) and k in region_map:
-                new_k = region_map[k]
-            elif isinstance(k, str):
-                try:
-                    label = Vertebra_Instance[k].value
-                except KeyError:
-                    label = None
-                if label is not None and label in region_map:
-                    try:
-                        new_k = Vertebra_Instance(region_map[label]).name
-                    except ValueError:
-                        new_k = k
-            remapped[new_k] = v
+            new_k = _map_one_key(k, region_map)
+            if new_k is None:
+                continue  # drop entries whose region is mapped to None
+            new_v = v
+            # Nested field: recurse into inner dict.
+            if isinstance(v, dict):
+                new_inner: dict = {}
+                for ik, iv in v.items():
+                    if ik == _GROUP_NAME_KEY:
+                        new_inner[_GROUP_NAME_KEY] = iv
+                        continue
+                    new_ik = _map_one_key(ik, subregion_map)
+                    if new_ik is None:
+                        continue  # drop entries whose subregion is mapped to None
+                    new_inner[new_ik] = iv
+                new_v = new_inner
+            # Merge on outer-key collision when both values are dicts (label_name-style).
+            if new_k in remapped and isinstance(remapped[new_k], dict) and isinstance(new_v, dict):
+                remapped[new_k].update(new_v)
+            else:
+                remapped[new_k] = new_v
         vectors.clear()
         vectors.update(remapped)
-
-
-def _remap_label_name_inplace(info: dict, region_map: dict | None, subregion_map: dict | None) -> None:
-    """Remap the region + subregion keys of ``info["label_name"]`` in place.
-
-    ``label_name`` uses the nested format
-    ``{region:int -> {subregion:int -> name:str, "name": group_name:str}}``
-    (see :func:`normalize_label_name`). This helper remaps top-level region keys
-    via ``region_map`` and, for each inner dict, remaps subregion keys via
-    ``subregion_map``. The special ``"name"`` group-name entry is preserved.
-    No-op if the field is absent or both maps are empty.
-    """
-    from TPTBox.core.poi_fun.poi_abstract import LABEL_NAME, _GROUP_NAME_KEY, label_name_dict
-
-    if not region_map and not subregion_map:
-        return
-    if LABEL_NAME not in info:
-        return
-    ln = label_name_dict(info)  # ensures nested form
-    remapped: dict[int, dict] = {}
-    for region, inner in ln.items():
-        new_region = region_map[region] if region_map and region in region_map else region
-        new_inner: dict = {}
-        for k, v in inner.items():
-            if k == _GROUP_NAME_KEY:
-                new_inner[_GROUP_NAME_KEY] = v
-            elif subregion_map and k in subregion_map:
-                new_inner[subregion_map[k]] = v
-            else:
-                new_inner[k] = v
-        # merge if two source regions collide onto one target (last-write-wins on inner keys).
-        if new_region in remapped:
-            remapped[new_region].update(new_inner)
-        else:
-            remapped[new_region] = new_inner
-    info[LABEL_NAME] = remapped
 
 
 def _rotate_direction_vectors_inplace(info: dict, src_rot, tgt_rot) -> None:
