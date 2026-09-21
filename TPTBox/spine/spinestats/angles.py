@@ -66,10 +66,10 @@ class MoveTo(Enum):
             subreg = Location.Additional_Vertebral_Body_Middle_Inferior_Median
             if (v, subreg) in poi:
                 return (v, subreg)
-            # Test if it has next POINT
+            # Fall back to averaging v's centroid with the next vertebra's centroid.
             next_vert = v.get_next_poi(poi)
-            if next_vert is not None and (next_vert, 50) in poi:
-                return (v, subreg, next_vert, subreg)
+            if next_vert is not None and (v, 50) in poi and (next_vert, 50) in poi:
+                return (v, 50, next_vert, 50)
         elif self == self.TOP:
             prev_vert = v.get_previous_poi(poi)
             # Test IVD
@@ -84,9 +84,9 @@ class MoveTo(Enum):
             subreg = Location.Additional_Vertebral_Body_Middle_Superior_Median
             if (v, subreg) in poi:
                 return (v, subreg)
-            # Test if it has next POINT
-            if prev_vert is not None and (prev_vert, 50) in poi:
-                return (v, subreg, prev_vert, subreg)
+            # Fall back to averaging v's centroid with the previous vertebra's centroid.
+            if prev_vert is not None and (v, 50) in poi and (prev_vert, 50) in poi:
+                return (v, 50, prev_vert, 50)
         return (v, 50)
 
     def get_point(self, v: Vertebra_Instance | int, poi: POI) -> np.ndarray:
@@ -395,10 +395,67 @@ def compute_lordosis_and_kyphosis(poi: POI, project_2D=True) -> dict[str, float 
     return out
 
 
+def _endplate_ap_direction(poi: POI, vert: Vertebra_Instance, mv: MoveTo) -> np.ndarray | None:
+    """Return an endplate-plane A/P direction from the buffered endplate POIs, or None.
+
+    Uses the *relevant* endplate landmark for ``mv`` (``Vertebral_Body_Endplate_Superior``
+    for :attr:`MoveTo.TOP`, ``Vertebral_Body_Endplate_Inferior`` for :attr:`MoveTo.BOTTOM`)
+    together with ``Vertebra_Direction_Right`` and ``Vertebra_Corpus`` to build a P/A
+    vector that lies in the specific endplate plane, rather than the averaged
+    vertebral body plane implied by ``Vertebra_Direction_Posterior``.
+
+    The sign convention matches :func:`_get_norm` for ``Location.Vertebra_Direction_Posterior``
+    with ``inv=1`` — the returned vector points anteriorly, so callers can multiply
+    by ``inv`` unchanged.
+    """
+    if mv == MoveTo.TOP:
+        endplate_loc = Location.Vertebral_Body_Endplate_Superior
+    elif mv == MoveTo.BOTTOM:
+        endplate_loc = Location.Vertebral_Body_Endplate_Inferior
+    else:
+        return None
+    if (vert, 50) not in poi or (vert, endplate_loc) not in poi or (vert, Location.Vertebra_Direction_Right) not in poi:
+        return None
+    corpus = np.array(poi[vert, 50], dtype=float)
+    ep = np.array(poi[vert, endplate_loc], dtype=float)
+    r_pt = np.array(poi[vert, Location.Vertebra_Direction_Right], dtype=float)
+    n = ep - corpus
+    if mv == MoveTo.BOTTOM:
+        n = -n  # flip inferior endplate so both cases point superior
+    n_norm = np.linalg.norm(n)
+    r_vec = r_pt - corpus
+    r_norm = np.linalg.norm(r_vec)
+    if n_norm < 1e-8 or r_norm < 1e-8:
+        return None
+    n /= n_norm
+    r_vec /= r_norm
+    # cross(right, superior-pointing) lies in the endplate plane and points posterior;
+    # negate to match _get_norm's default sign (anterior for inv=1).
+    p = -np.cross(r_vec, n)
+    p_norm = np.linalg.norm(p)
+    if p_norm < 1e-8:
+        return None
+    return p / p_norm
+
+
 def _get_norm(poi: POI, id1: int | Vertebra_Instance, mv: MoveTo, location: Location, inv: int = 1) -> np.ndarray | None:  # noqa: ARG001
-    """Return the normalised direction vector from a location POI to the vertebra centroid."""
+    """Return the normalised direction vector from a location POI to the vertebra centroid.
+
+    When ``location`` is :attr:`Location.Vertebra_Direction_Posterior` and ``mv`` targets
+    an endplate (:attr:`MoveTo.TOP` / :attr:`MoveTo.BOTTOM`), the buffered per-endplate
+    landmark (``Vertebral_Body_Endplate_Superior`` / ``_Inferior``) is preferred over
+    the averaged vertebral-body posterior direction — this yields the classical
+    endplate-line orientation used in Cobb-style lordosis/kyphosis measurements.
+    The endplate direction is used only when both the relevant endplate point and
+    ``Vertebra_Direction_Right`` are present in ``poi`` for that vertebra; otherwise
+    the code falls back to the WK-based averaged direction below.
+    """
     if isinstance(id1, int):
         id1 = Vertebra_Instance(id1)
+    if location == Location.Vertebra_Direction_Posterior and mv in (MoveTo.TOP, MoveTo.BOTTOM):
+        ep_norm = _endplate_ap_direction(poi, id1, mv)
+        if ep_norm is not None:
+            return ep_norm * inv
     subreg = 50
     if location in [Location.Vertebra_Disc_Inferior, Location.Vertebra_Disc_Superior]:
         subreg = 100

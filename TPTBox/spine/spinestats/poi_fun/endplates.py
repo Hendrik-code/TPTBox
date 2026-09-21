@@ -399,10 +399,26 @@ def calc_endplate_points_(
 
     poi.info.setdefault("angle_superior_endplate", {})
     poi.info.setdefault("angle_inferior_endplate", {})
+    # Register direction-vector fields (auto-transformed by reorient / resample /
+    # to_cord_system) and additional per-label scalar fields (whose keys are
+    # remapped by map_labels).
+    from TPTBox.core.poi_fun.vector_fields import POI_INFO_LABEL_KEYED_FIELDS_KEY, POI_INFO_VECTOR_FIELDS_KEY
+
+    _vec_fields = poi.info.setdefault(POI_INFO_VECTOR_FIELDS_KEY, [])
+    for _f in ("angle_superior_endplate", "angle_inferior_endplate"):
+        if _f not in _vec_fields:
+            _vec_fields.append(_f)
+    _lbl_fields = poi.info.setdefault(POI_INFO_LABEL_KEYED_FIELDS_KEY, [])
+    for _f in ("endplate_internal_angle",):
+        if _f not in _lbl_fields:
+            _lbl_fields.append(_f)
 
     if compute_curvature:
         poi.info.setdefault("curvature_superior_endplate", {})
         poi.info.setdefault("curvature_inferior_endplate", {})
+        for _f in ("curvature_superior_endplate", "curvature_inferior_endplate"):
+            if _f not in _lbl_fields:
+                _lbl_fields.append(_f)
 
     # Collect normals per vertebra so we can compute the inter-endplate
     # angle once both superior and inferior have been processed.

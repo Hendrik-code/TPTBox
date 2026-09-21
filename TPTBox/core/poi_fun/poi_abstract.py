@@ -558,12 +558,19 @@ class Abstract_POI:
                     continue
                 poi_new[region:subreg] = value
             new_values = poi_new
+        from TPTBox.core.poi_fun.vector_fields import _remap_vector_field_keys_inplace
+
         if new_values is None:
-            return self if inplace else self.copy()
+            out = self if inplace else self.copy()
+            _remap_vector_field_keys_inplace(out.info, label_map_region_)
+            return out
         if inplace:
             self.centroids = new_values
+            _remap_vector_field_keys_inplace(self.info, label_map_region_)
             return self
-        return self.copy(centroids=new_values)
+        out = self.copy(centroids=new_values)
+        _remap_vector_field_keys_inplace(out.info, label_map_region_)
+        return out
 
     def map_labels_(
         self,
