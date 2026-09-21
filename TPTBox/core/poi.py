@@ -1401,6 +1401,9 @@ def calc_centroids(
             ctd_list[first_stage, int(i)] = out_coord
         else:
             ctd_list[int(i), second_stage] = out_coord
+    if extend_to is not None:
+        args.setdefault("level_one_info", extend_to.level_one_info)
+        args.setdefault("level_two_info", extend_to.level_two_info)
     return POI(ctd_list, **msk_nii._extract_affine(), **args)
 
 

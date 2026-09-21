@@ -23,8 +23,7 @@ from typing import Any
 
 from tqdm import tqdm
 
-from TPTBox import Print_Logger
-from TPTBox.core.bids_files import BIDS_FILE
+from TPTBox import BIDS_FILE, POI, Print_Logger
 from TPTBox.core.dicom.dicom2nii_utils import load_json
 from TPTBox.core.internal.nii_help import save_json
 from TPTBox.core.nii_wrapper import to_nii
@@ -32,6 +31,16 @@ from TPTBox.spine.spinestats._load_nako import loop_over_repaired_nako
 
 DATASET_ROOT = Path("/DATA/NAS/datasets_processed/NAKO/dataset-nako")
 logger = Print_Logger()
+# Version stamp written into every aggregate `_stat.json` at
+# ``_provenance.version`` (built by :func:`_build_provenance`). Bump this whenever
+# the produced numbers change in a way that requires already-cached files to be
+# recomputed. Current bumps:
+#   1 -- initial release (WK-direction based cobb/lordosis; no S1 sacrum endplate).
+#   2 -- endplate-plane based lordosis / kyphosis (average of the two flanking
+#        endplates at each disc), S1 sacrum-endplate landmarks, and correct
+#        cranio-caudal ordering for the T13 annotation label.
+CURRENT_VERSION = 2
+
 # Top-level keys we require inside a finished json before we consider a
 # subject "done" and skip recomputation. cobb/curv are optional and only
 # added when run_all is called with cobb=True.
@@ -99,8 +108,7 @@ def get_nako_paths(nako_id: str) -> dict[str, Path | None]:
     veridah = None
     for suffix in ("VERIDAH-label-V2", "VERIDAH-label"):
         p = (
-            DATASET_ROOT
-            / f"derivatives_spine_inference_162_sacrumfix/{pfx}/{sub}/T2w/"
+            DATASET_ROOT / f"derivatives_spine_inference_162_sacrumfix/{pfx}/{sub}/T2w/"
             f"sub-{sub}_sequ-stitched_acq-sag_mod-T2w_seg-vert_desc-{suffix}_stat.json"
         )
         if p.exists():
@@ -137,6 +145,33 @@ def _segmentation_inputs(file_dict: dict) -> list[Path]:
     ]
 
 
+def _stat_version(loaded_stat: dict | None) -> int:
+    """Return the ``_provenance.version`` of a loaded stat dict (defaults to 1)."""
+    if not isinstance(loaded_stat, dict):
+        return 1
+    prov = loaded_stat.get("_provenance")
+    if isinstance(prov, dict):
+        try:
+            return int(prov.get("version", 1))
+        except (TypeError, ValueError):
+            return 1
+    return 1
+
+
+def _poi_is_stale_wrt_stat(stat_path: Path, loaded_stat: dict) -> bool:
+    """Return True when the POI buffer sitting next to ``stat_path`` should be rebuilt.
+
+    Staleness is derived from the stat json's ``_provenance.version``: whenever
+    that reads < :data:`ANGLES_VERSION`, the sibling POI buffer is treated as
+    outdated (v1 stat + v1 POI travelled together). ``loaded_stat`` is the
+    already-loaded stat dict — pass ``{}`` if none exists (then nothing is stale
+    since there's no v1 marker to invalidate against).
+    """
+    if not stat_path.exists() or not loaded_stat:
+        return False
+    return _stat_version(loaded_stat) < CURRENT_VERSION
+
+
 def _is_cache_valid(json_path: Path, seg_files: list[Path], required_keys: tuple[str, ...]) -> tuple[bool, dict | None]:
     """Return (valid, loaded_dict).
 
@@ -164,6 +199,8 @@ def _is_cache_valid(json_path: Path, seg_files: list[Path], required_keys: tuple
     for k in required_keys:
         if k not in data:
             return False, None
+    if _stat_version(data) < CURRENT_VERSION:
+        return False, None
     return True, data
 
 
@@ -249,7 +286,7 @@ def _build_provenance(file_dict: dict, poi_out: Path | str | None, prior: dict |
         if p.exists():
             inputs["poi"] = _file_provenance(p, prior_inputs.get("poi"))
     return {
-        "version": 1,
+        "version": CURRENT_VERSION,
         "written_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "inputs": inputs,
     }
@@ -349,6 +386,26 @@ def run_all(
                     out = loaded
             except Exception:
                 out = {}
+        # Version stale -> drop the ANGLE-related keys so the corresponding _need()
+        # checks trigger a recompute of just the affected metrics + JPGs, without
+        # invalidating the expensive body-composition / VBQ / muscle_fat / torso
+        # blocks that don't depend on the endplate-based lordosis fix.
+        _cur_ver = _stat_version(out)
+        if _cur_ver < 2:
+            logger.on_warning("version bump", _cur_ver, "->", CURRENT_VERSION, ": recomputing angle keys")
+            for _k in (
+                "cobb",
+                "curv",
+                "curv_veridah",
+                "sva",
+                "coronal_balance",
+                "axial_rotation",
+                "segmental_endplate_angles",
+                "curvature_profile",
+                "multi_cobb",
+                "endplate_internal_angle",
+            ):
+                out.pop(_k, None)
 
     def _need(*keys: str, compute: bool) -> bool:
         return override or (any(k not in out for k in keys) and compute)
@@ -420,7 +477,16 @@ def run_all(
     need_vibe_wf = need_mfi
 
     if not (
-        need_cobb or need_ivd or need_vert or need_vbq or need_bcs or need_mfi or need_torso or need_curvature or need_pelvic or need_veridah
+        need_cobb
+        or need_ivd
+        or need_vert
+        or need_vbq
+        or need_bcs
+        or need_mfi
+        or need_torso
+        or need_curvature
+        or need_pelvic
+        or need_veridah
     ):
         if _merge_endplate_angles(out, Path(poi_out)) or save:
             out["_provenance"] = _build_provenance(file_dict, poi_out, out.get("_provenance"))
@@ -440,13 +506,18 @@ def run_all(
     poi = None
     if need_poi:
         logger.on_debug("calc_poi_from_subreg_vert")
-        poi = calc_poi_from_subreg_vert(
-            vert,
-            spine,
-            subreg_id=[Location.Vertebra_Corpus, Location.Vertebra_Direction_Posterior, Location.Endplate, Location.Vertebra_Disc],
-            buffer_file=poi_out,
-            save_buffer_file=True,
-        )
+        if _poi_is_stale_wrt_stat(final_out, out):
+            Path(poi_out).unlink(missing_ok=True)
+        if poi_out.exists():
+            poi = POI.load(poi_out)
+        else:
+            poi = calc_poi_from_subreg_vert(
+                vert,
+                spine,
+                subreg_id=[Location.Vertebra_Corpus, Location.Vertebra_Direction_Posterior, Location.Endplate, Location.Vertebra_Disc],
+                buffer_file=poi_out,
+                save_buffer_file=True,
+            )
     if need_cobb:
         try:
             project_2D = False
@@ -579,6 +650,7 @@ def run_all(
 
     _merge_endplate_angles(out, Path(poi_out))
     out["_provenance"] = _build_provenance(file_dict, poi_out, out.get("_provenance"))
+    out.pop("_version", None)  # TODO can beremoved
     logger.on_save("save", final_out.name)
     save_json(final_out, out)
     return out
@@ -975,7 +1047,7 @@ if __name__ == "__main__":
     OUT_FOLDER.mkdir(parents=True, exist_ok=True)
     N_CPUS = 1  # set >1 to parallelize
     OVERRIDE = False
-    aggregate = True
+    aggregate = False
     do_not_update = False
     test = False
     collector: ExcelCollector | None = None
@@ -993,10 +1065,10 @@ if __name__ == "__main__":
             subjects = loop_over_repaired_nako(test=False, sort=aggregate)
         else:
             # subjects = tqdm(loop_over_repaired_nako(test=False, sort=aggregate), total=30645)
-            l = loop_over_repaired_nako(test=False, sort=aggregate)
-            # total = 1000
-            # subjects = iter([next(l) for _ in range(total)])
-            subjects = l
+            l = loop_over_repaired_nako(test=False, sort=True)  # aggregate
+            total = 15
+            subjects = iter([next(l) for _ in range(total)])
+            # subjects = l
 
             # print(f"Run on {total=} random subset")
         if N_CPUS <= 1:

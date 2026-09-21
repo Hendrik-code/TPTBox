@@ -258,7 +258,7 @@ def compute_angel_between_two_points_(
     if id1 > id2:
         id1, id2 = id2, id1
     # Reorient and rescale the POI data
-    poi.reorient_().rescale_()
+    poi.reorient_().rescale_(verbose=False)
     recompute_use_ivd_direction = False
     # Determine direction-specific settings
     location2 = None
@@ -395,22 +395,17 @@ def compute_lordosis_and_kyphosis(poi: POI, project_2D=True) -> dict[str, float 
     return out
 
 
-def _endplate_ap_direction(poi: POI, vert: Vertebra_Instance, mv: MoveTo) -> np.ndarray | None:
-    """Return an endplate-plane A/P direction from the buffered endplate POIs, or None.
+def _single_endplate_ap_direction(poi: POI, vert: Vertebra_Instance, side: MoveTo) -> np.ndarray | None:
+    """A/P direction of *one* endplate (superior for TOP, inferior for BOTTOM).
 
-    Uses the *relevant* endplate landmark for ``mv`` (``Vertebral_Body_Endplate_Superior``
-    for :attr:`MoveTo.TOP`, ``Vertebral_Body_Endplate_Inferior`` for :attr:`MoveTo.BOTTOM`)
-    together with ``Vertebra_Direction_Right`` and ``Vertebra_Corpus`` to build a P/A
-    vector that lies in the specific endplate plane, rather than the averaged
-    vertebral body plane implied by ``Vertebra_Direction_Posterior``.
-
-    The sign convention matches :func:`_get_norm` for ``Location.Vertebra_Direction_Posterior``
-    with ``inv=1`` — the returned vector points anteriorly, so callers can multiply
-    by ``inv`` unchanged.
+    Uses ``Vertebra_Corpus``, ``Vertebral_Body_Endplate_Superior/Inferior`` and
+    ``Vertebra_Direction_Right`` to build a unit vector that lies in the endplate
+    plane and points *anteriorly* (matches :func:`_get_norm`'s ``inv=1`` sign
+    convention). Returns ``None`` if any required POI landmark is missing.
     """
-    if mv == MoveTo.TOP:
+    if side == MoveTo.TOP:
         endplate_loc = Location.Vertebral_Body_Endplate_Superior
-    elif mv == MoveTo.BOTTOM:
+    elif side == MoveTo.BOTTOM:
         endplate_loc = Location.Vertebral_Body_Endplate_Inferior
     else:
         return None
@@ -420,7 +415,7 @@ def _endplate_ap_direction(poi: POI, vert: Vertebra_Instance, mv: MoveTo) -> np.
     ep = np.array(poi[vert, endplate_loc], dtype=float)
     r_pt = np.array(poi[vert, Location.Vertebra_Direction_Right], dtype=float)
     n = ep - corpus
-    if mv == MoveTo.BOTTOM:
+    if side == MoveTo.BOTTOM:
         n = -n  # flip inferior endplate so both cases point superior
     n_norm = np.linalg.norm(n)
     r_vec = r_pt - corpus
@@ -436,6 +431,49 @@ def _endplate_ap_direction(poi: POI, vert: Vertebra_Instance, mv: MoveTo) -> np.
     if p_norm < 1e-8:
         return None
     return p / p_norm
+
+
+def _endplate_ap_direction(poi: POI, vert: Vertebra_Instance, mv: MoveTo) -> np.ndarray | None:
+    """Return the endplate-plane A/P direction at a vertebra-disc *boundary*.
+
+    For a lordosis / kyphosis chain to close at every transition (e.g. so
+    ``thoracic_kyphosis + lumbar_lordosis`` measures the same T4-top→L5-inferior
+    end-to-end angle as the total), the "bottom of upper" and "top of lower" at
+    each disc must use the *same* reference direction. This function averages the
+    two flanking endplate P/A directions at the disc:
+
+    - :attr:`MoveTo.BOTTOM` at vertebra ``V`` averages ``V``'s inferior endplate
+      with the superior endplate of the next vertebra in the POI (``V.get_next_poi``).
+    - :attr:`MoveTo.TOP` at vertebra ``V`` averages ``V``'s superior endplate
+      with the inferior endplate of the previous vertebra (``V.get_previous_poi``).
+
+    Falls back to the single-endplate direction when the neighbour is missing.
+    Returns ``None`` when even the local endplate is unavailable.
+    """
+    if isinstance(vert, int):
+        vert = Vertebra_Instance(vert)
+    if mv == MoveTo.BOTTOM:
+        neighbour = vert.get_next_poi(poi)
+        neighbour_side = MoveTo.TOP
+    elif mv == MoveTo.TOP:
+        neighbour = vert.get_previous_poi(poi)
+        neighbour_side = MoveTo.BOTTOM
+    else:
+        return _single_endplate_ap_direction(poi, vert, mv)
+    own = _single_endplate_ap_direction(poi, vert, mv)
+    other = _single_endplate_ap_direction(poi, neighbour, neighbour_side) if neighbour is not None else None
+    # If the local endplate landmark is missing (calc_endplate_points_ ray-cast
+    # sometimes fails to hit the mask), mirror across the disc: use the neighbour's
+    # endplate as the direction proxy so both sides of the boundary agree.
+    if own is None:
+        return other
+    if other is None:
+        return own
+    avg = own + other
+    n = np.linalg.norm(avg)
+    if n < 1e-8:
+        return own
+    return avg / n
 
 
 def _get_norm(poi: POI, id1: int | Vertebra_Instance, mv: MoveTo, location: Location, inv: int = 1) -> np.ndarray | None:  # noqa: ARG001
@@ -788,7 +826,7 @@ def plot_compute_lordosis_and_kyphosis(
         >>> print(angles)
         {'cervical_lordosis': 34.5, 'thoracic_kyphosis': 42.7, 'lumbar_lordosis': 50.3}
     """
-    poi = poi.reorient().rescale_()
+    poi = poi.reorient().rescale_(verbose=False)
     poi = _add_artificial_ivd(poi)
     out = []
     text_out = []
@@ -813,7 +851,16 @@ def plot_compute_lordosis_and_kyphosis(
         id1 = curvature_definition[name].get_start_vert(poi)
         id2 = curvature_definition[name].get_stop_vert(poi)
 
-        vert = round((id1.value + id2.value) / 2)
+        # Cranio-caudal midpoint via the anatomical order — arithmetic mean of
+        # `.value` breaks for T13 (value 28, ordered after T12 but numbered after
+        # S1/COCC), landing the annotation on L1 instead of somewhere thoracic.
+        order = Vertebra_Instance.order()
+        try:
+            i1, i2 = order.index(id1), order.index(id2)
+            mid_inst = order[(min(i1, i2) + max(i1, i2)) // 2]
+            vert = mid_inst.value
+        except ValueError:
+            vert = round((id1.value + id2.value) / 2)
         while (vert, 50) not in poi and vert != 0:
             vert -= 1
         text_out.append((vert, (f"{v:.1f}° - {str(name).split('_')[-1]}", 25)))
@@ -870,7 +917,7 @@ def plot_cobb_angle(
 
         >>> plot_cobb_angle("output.png", poi, img, seg, line_len=100, threshold_deg=10)
     """
-    poi = poi.reorient().rescale_()
+    poi = poi.reorient().rescale_(verbose=False)
     poi = _add_artificial_ivd(poi)
 
     out = []

@@ -71,10 +71,12 @@ def _last_k_relabel(poi: POI, k: int) -> POI:
     return _relabel_poi(poi, mapping)
 
 
-def _compute_anomaly_variant(poi: POI, veridah_json_path: Path | None) -> dict[str, float | None] | None:
+def _compute_anomaly_variant(poi: POI, veridah_json_path: Path | None, project_2D: bool = False) -> dict[str, float | None] | None:
     """Recompute the three regional angles after applying the VERIDAH label correction.
 
-    Returns ``None`` when the VERIDAH file is missing or unusable.
+    ``project_2D`` must match the setting used for the standard ``curv`` block
+    in :mod:`_run_all` (default ``False``, i.e. 3D angles). Returns ``None``
+    when the VERIDAH file is missing or unusable.
     """
     if veridah_json_path is None:
         return None
@@ -86,15 +88,15 @@ def _compute_anomaly_variant(poi: POI, veridah_json_path: Path | None) -> dict[s
     if not isinstance(orig, list) or not isinstance(fpath, list) or len(orig) != len(fpath):
         return None
     mapping = {int(o): int(f) for o, f in zip(orig, fpath) if int(o) != int(f)}
-    return compute_lordosis_and_kyphosis(_relabel_poi(poi, mapping))
+    return compute_lordosis_and_kyphosis(_relabel_poi(poi, mapping), project_2D=project_2D)
 
 
-def _compute_k_variant(poi: POI, k: int) -> dict[str, float | None]:
+def _compute_k_variant(poi: POI, k: int, project_2D: bool = False) -> dict[str, float | None]:
     """Compute lumbar-lordosis only, with the last ``k`` vertebrae treated as L1..Lk."""
     relabeled = _last_k_relabel(poi, k)
     if not relabeled.centroids:
         return {"lumbar_lordosis": None}
-    full = compute_lordosis_and_kyphosis(relabeled)
+    full = compute_lordosis_and_kyphosis(relabeled, project_2D=project_2D)
     return {"lumbar_lordosis": full.get("lumbar_lordosis")}
 
 
@@ -117,7 +119,7 @@ def plot_veridah_variants(
     seg_vert: Image_Reference,
     veridah_json_path: Path | str | None,
     line_len: int = 100,
-    project_2D: bool = True,
+    project_2D: bool = False,
 ) -> tuple[dict[str, float | None] | None, str | None]:
     """Render the VERIDAH-corrected lordosis / kyphosis snapshot next to the standard one.
 
@@ -174,7 +176,7 @@ def plot_veridah_variants(
     return angles, saved
 
 
-def compute_veridah_variants(poi: POI, veridah_json_path: Path | str | None) -> dict:
+def compute_veridah_variants(poi: POI, veridah_json_path: Path | str | None, project_2D: bool = False) -> dict:
     """Return the ``curv_veridah`` block for one subject.
 
     Shape::
@@ -186,7 +188,7 @@ def compute_veridah_variants(poi: POI, veridah_json_path: Path | str | None) -> 
         }
     """
     veridah_path = Path(veridah_json_path) if veridah_json_path is not None else None
-    out: dict = {"anomaly": _compute_anomaly_variant(poi, veridah_path)}
+    out: dict = {"anomaly": _compute_anomaly_variant(poi, veridah_path, project_2D=project_2D)}
     for k in (4, 5, 6, 7):
-        out[f"k{k}"] = _compute_k_variant(poi, k)
+        out[f"k{k}"] = _compute_k_variant(poi, k, project_2D=project_2D)
     return out
