@@ -508,7 +508,7 @@ def endplate_to_super_infer_endplate(vert: NII, spine: NII) -> tuple[NII, NII]:
     spine = spine.copy()
     vert_org = vert.copy()
     vert[vert >= 40] = 0
-    vert[spine.extract_label([Location.Vertebra_Corpus, Location.Vertebra_Corpus_border]) != 1] = 0
+    vert[spine.extract_label([Location.Vertebra_Corpus, Location.Vertebra_Corpus_border, Vertebra_Instance.S1]) != 1] = 0
     vert %= 100
     v = vert.infect(
         spine.extract_label(
@@ -522,8 +522,10 @@ def endplate_to_super_infer_endplate(vert: NII, spine: NII) -> tuple[NII, NII]:
         verbose=False,
     )
     endplate_nii = v * endplate_nii
+    spine[endplate_nii == Vertebra_Instance.S1.value] = Location.Sacrum_Endplate.value
     spine[np.logical_and(endplate_nii == vert_org % 100, endplate_nii != 0)] = Location.Vertebral_Body_Endplate_Inferior.value
     spine[spine == Location.Endplate.value] = Location.Vertebral_Body_Endplate_Superior.value
+
     vert_org[endplate_nii != 0] = v[endplate_nii != 0] + 200
     return vert_org, spine
 
