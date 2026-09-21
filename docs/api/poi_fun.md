@@ -91,6 +91,21 @@ if "my_scalar_field" not in lbl_fields:
 poi.info["my_scalar_field"] = {"L1": 3.14, ...}
 ```
 
+**Special-cased field — `info["label_name"]`:**
+
+Human-readable per-point / per-region names live in the nested structure
+`{region:int -> {subregion:int -> name:str, "name": group_name:str}}` (see
+`poi_abstract.LABEL_NAME` and `normalize_label_name`). `map_labels` remaps this
+field automatically via its own helper `_remap_label_name_inplace`, which:
+
+- remaps the top-level `region` keys via `label_map_region`;
+- remaps the *inner* `subregion` keys via `label_map_subregion`;
+- preserves the special `"name"` group-name entry;
+- merges inner dicts with *last-write-wins* on inner-key collisions when two
+  source regions map onto the same target.
+
+No explicit registration is required for `label_name` — it is always handled.
+
 **Caveats:**
 
 - `resample_from_to` uses the real `R_ref.T @ R_self` rotation of the two
@@ -98,7 +113,8 @@ poi.info["my_scalar_field"] = {"L1": 3.14, ...}
   avoided.
 - `map_labels` handles duplicates with a *last-write-wins* policy after remap.
 - `map_labels`' `label_map_full` (mapping `(region, subreg)` tuples) does NOT
-  trigger the key-remap of these fields — only `label_map_region` does.
+  trigger the key-remap of these fields — only `label_map_region` /
+  `label_map_subregion` do.
 
 ::: TPTBox.core.poi_fun.vector_fields
     options:

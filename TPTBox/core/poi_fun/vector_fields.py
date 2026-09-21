@@ -104,6 +104,42 @@ def _remap_vector_field_keys_inplace(info: dict, region_map: dict) -> None:
         vectors.update(remapped)
 
 
+def _remap_label_name_inplace(info: dict, region_map: dict | None, subregion_map: dict | None) -> None:
+    """Remap the region + subregion keys of ``info["label_name"]`` in place.
+
+    ``label_name`` uses the nested format
+    ``{region:int -> {subregion:int -> name:str, "name": group_name:str}}``
+    (see :func:`normalize_label_name`). This helper remaps top-level region keys
+    via ``region_map`` and, for each inner dict, remaps subregion keys via
+    ``subregion_map``. The special ``"name"`` group-name entry is preserved.
+    No-op if the field is absent or both maps are empty.
+    """
+    from TPTBox.core.poi_fun.poi_abstract import LABEL_NAME, _GROUP_NAME_KEY, label_name_dict
+
+    if not region_map and not subregion_map:
+        return
+    if LABEL_NAME not in info:
+        return
+    ln = label_name_dict(info)  # ensures nested form
+    remapped: dict[int, dict] = {}
+    for region, inner in ln.items():
+        new_region = region_map[region] if region_map and region in region_map else region
+        new_inner: dict = {}
+        for k, v in inner.items():
+            if k == _GROUP_NAME_KEY:
+                new_inner[_GROUP_NAME_KEY] = v
+            elif subregion_map and k in subregion_map:
+                new_inner[subregion_map[k]] = v
+            else:
+                new_inner[k] = v
+        # merge if two source regions collide onto one target (last-write-wins on inner keys).
+        if new_region in remapped:
+            remapped[new_region].update(new_inner)
+        else:
+            remapped[new_region] = new_inner
+    info[LABEL_NAME] = remapped
+
+
 def _rotate_direction_vectors_inplace(info: dict, src_rot, tgt_rot) -> None:
     """Rotate registered direction-vector fields from ``src_rot`` to ``tgt_rot``.
 

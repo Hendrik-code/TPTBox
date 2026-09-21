@@ -183,6 +183,81 @@ class Test_MapLabels(unittest.TestCase):
         self.assertEqual(tuple(out.info["v"]["L1"]), v)
 
 
+class Test_LabelName_MapLabels(unittest.TestCase):
+    """label_name (nested {region: {subregion: name, "name": group}}) rides map_labels."""
+
+    def _poi_with_label_name(self) -> POI:
+        poi = _make_poi()
+        # nested format directly
+        poi.info["label_name"] = {
+            20: {50: "L1_corpus", 100: "L1_disc", "name": "Spine"},
+            21: {50: "L2_corpus"},
+        }
+        return poi
+
+    def test_region_remap(self):
+        poi = self._poi_with_label_name()
+        out = poi.map_labels(label_map_region={20: 2})
+        ln = out.info["label_name"]
+        self.assertNotIn(20, ln)
+        self.assertIn(2, ln)
+        # inner subregion keys unchanged, group name preserved
+        self.assertEqual(ln[2][50], "L1_corpus")
+        self.assertEqual(ln[2][100], "L1_disc")
+        self.assertEqual(ln[2]["name"], "Spine")
+        # unaffected region still there
+        self.assertEqual(ln[21][50], "L2_corpus")
+
+    def test_subregion_remap(self):
+        poi = self._poi_with_label_name()
+        out = poi.map_labels(label_map_subregion={50: 51})
+        ln = out.info["label_name"]
+        # region keys unchanged
+        self.assertIn(20, ln)
+        self.assertNotIn(50, ln[20])
+        self.assertIn(51, ln[20])
+        self.assertEqual(ln[20][51], "L1_corpus")
+        # group name key survives
+        self.assertEqual(ln[20]["name"], "Spine")
+        # unrelated subregion 100 preserved
+        self.assertEqual(ln[20][100], "L1_disc")
+
+    def test_region_and_subregion_remap(self):
+        poi = self._poi_with_label_name()
+        out = poi.map_labels(label_map_region={20: 2}, label_map_subregion={50: 51})
+        ln = out.info["label_name"]
+        self.assertEqual(ln[2][51], "L1_corpus")
+        self.assertEqual(ln[2]["name"], "Spine")
+
+    def test_region_collision_last_write_wins_on_inner(self):
+        # Both 20 and 21 map onto 2: their inner dicts should merge; overlapping
+        # inner keys let the later region's value win.
+        poi = _make_poi()
+        poi.info["label_name"] = {
+            20: {50: "A", "name": "grp20"},
+            21: {50: "B", 60: "unique"},
+        }
+        out = poi.map_labels(label_map_region={20: 2, 21: 2})
+        ln = out.info["label_name"]
+        self.assertIn(2, ln)
+        # value at key 50 should come from the second insert (21 -> "B")
+        self.assertEqual(ln[2][50], "B")
+        # inner keys from both are preserved
+        self.assertEqual(ln[2][60], "unique")
+        # group name from region 20 comes along
+        self.assertEqual(ln[2].get("name"), "grp20")
+
+    def test_flat_legacy_format_migrated_and_remapped(self):
+        # Ensure the migration path in label_name_dict / normalize_label_name is
+        # triggered by the remap, so old flat "(region, subreg)" strings work too.
+        poi = _make_poi()
+        poi.info["label_name"] = {"(20, 50)": "L1_corpus"}
+        out = poi.map_labels(label_map_region={20: 2})
+        ln = out.info["label_name"]
+        self.assertIn(2, ln)
+        self.assertEqual(ln[2][50], "L1_corpus")
+
+
 class Test_Composition(unittest.TestCase):
     def test_reorient_and_map_labels_commute(self):
         # For a vector-transform + key-remap, order shouldn't matter.
