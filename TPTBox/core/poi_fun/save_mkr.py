@@ -10,8 +10,8 @@ from typing import TYPE_CHECKING, Any, Literal, TypedDict, Union
 import numpy as np
 from typing_extensions import NotRequired
 
-from TPTBox.core.poi_fun.poi_abstract import _GROUP_NAME_KEY, label_name_dict
 from TPTBox.core.internal.nii_help import save_json
+from TPTBox.core.poi_fun.poi_abstract import _GROUP_NAME_KEY, label_name_dict
 from TPTBox.logger.log_file import log
 from TPTBox.mesh3D.mesh_colors import RGB_Color, get_color_by_label
 
