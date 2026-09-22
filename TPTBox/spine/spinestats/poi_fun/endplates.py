@@ -454,9 +454,16 @@ def calc_endplate_points_(
             endplate_nii = c.extract_label(superior_label)
         cms_local_override = None
 
-        last_vert = max(vert_ids)
+        # A vertebra can appear in the segmentation (vert_ids) but have no POI
+        # entry (e.g. too few voxels for a centroid). Pick the highest vertebra
+        # that actually has a centroid in poi so the fallback to Vertebra_Corpus
+        # below cannot KeyError.
+        vert_ids_in_poi = [v for v in vert_ids if (v, Location.Vertebra_Corpus.value) in poi]
+        last_vert = max(vert_ids_in_poi) if vert_ids_in_poi else None
 
-        if (last_vert, Location.Vertebral_Body_Endplate_Inferior.value) in poi:
+        if last_vert is None:
+            pass  # no anchor available; skip the sacrum endplate override
+        elif (last_vert, Location.Vertebral_Body_Endplate_Inferior.value) in poi:
             cms_local_override = poi[last_vert, Location.Vertebral_Body_Endplate_Inferior]
         elif (last_vert, Location.Vertebra_Disc.value) in poi:
             cms_local_override = poi[last_vert, Location.Vertebra_Disc.value]
@@ -464,17 +471,19 @@ def calc_endplate_points_(
             cms_local_override = vert.extract_label(100 + last_vert).center_of_masses()[1]
         else:
             cms_local_override = poi[last_vert, Location.Vertebra_Corpus]
-        _endplate(
-            poi,
-            endplate_nii,
-            Location.Vertebral_Body_Endplate_Superior,
-            Vertebra_Instance.S1.value,
-            log,
-            normals_by_vert,
-            cms_local_override=cms_local_override,
-            flip_direction=True,
-            compute_curvature=compute_curvature,
-        )
+
+        if last_vert is not None:
+            _endplate(
+                poi,
+                endplate_nii,
+                Location.Vertebral_Body_Endplate_Superior,
+                Vertebra_Instance.S1.value,
+                log,
+                normals_by_vert,
+                cms_local_override=cms_local_override,
+                flip_direction=True,
+                compute_curvature=compute_curvature,
+            )
     # Angle between superior and inferior endplate normals, per vertebra.
     for vert_id, normals in normals_by_vert.items():
         n_sup = normals.get(Location.Vertebral_Body_Endplate_Superior)
