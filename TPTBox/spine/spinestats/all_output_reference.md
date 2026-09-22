@@ -12,13 +12,19 @@ Python API.
 
 | Key | Source function | What it covers |
 |---|---|---|
-| `ivd_geometry` | `measure_ivd_and_vertebra_geometry(..., structure_label=100)` | intervertebral discs |
-| `vert_geometry` | `measure_ivd_and_vertebra_geometry(..., structure_label=50)` | vertebral bodies |
+| `ivd_geometry` | `measure_ivd_and_vertebra_geometry(..., structure_label=100)` | intervertebral discs (per-label entries carry wedge angles/indices) |
+| `vert_geometry` | `measure_ivd_and_vertebra_geometry(..., structure_label=50)` | vertebral bodies (per-label entries carry wedge angles/indices) |
 | `VBQ_score` | `VBQ_score` | vertebral bone quality (T2 signal ratio) |
 | `body_composition_score` | `body_composition_score` | axial CSA per tissue at chosen vertebral levels |
 | `muscle_fat_infiltration` | `muscle_fat_infiltration` | Dixon fat-fraction based muscle-quality metrics |
 | `torso_vat_sat_muscle_mass` | `torso_vat_sat_muscle_mass` | whole-torso VAT / SAT / muscle volume |
 | `cobb`, `curv` | `plot_cobb_and_lordosis_and_kyphosis` | only when called with `cobb=True` |
+| `sva`, `coronal_balance` | `curvature.compute_sva`, `compute_coronal_balance` | plumb-line balance offsets in mm (sagittal/coronal) |
+| `axial_rotation` | `curvature.compute_axial_rotation` | per-vertebra axial rotation angle in the axial plane |
+| `segmental_endplate_angles` | `curvature.compute_segmental_endplate_angles` | inter-vertebral (disc) wedge angle in the sagittal plane |
+| `curvature_profile` | `curvature.compute_curvature_profile` | spline arc/chord/κ profile plus apex positions |
+| `multi_cobb` | `curvature.compute_multi_cobb` | multi-curve Cobb from the coronal spline projection |
+| `pelvic_parameters` | `pelvic_parameters.compute_pelvic_parameters` | PI / PT / SS + PI-LL mismatch, two variants |
 
 Angles are in **degrees**, lengths in **millimetres**, areas in **mm²**,
 volumes in **mm³**, fat fractions are **unitless** in `[0, 1]`, MR signal
@@ -244,19 +250,119 @@ Implementation notes:
   Values can be `None` if the required vertebrae are missing from the
   POI.
 
+## `sva` (Sagittal Vertical Axis)
+
+Signed horizontal offset (mm) in the sagittal plane between the top
+vertebra (default C7) and a base reference (S1 → L5 → L4 fallback).
+Positive = C7 anterior of the base (typical). Additional fields
+`top_vertebra`, `base_vertebra`, `base_landmark`, `top_pi_coords`,
+`base_pi_coords`. **Caveat:** supine MRI values differ from standing
+X-ray by ~10 mm.
+
+## `coronal_balance`
+
+Signed horizontal offset (mm) in the coronal plane between C7 and the
+CSVL (approximated by the base vertebra R-coordinate). Positive = C7
+right of CSVL. Extra fields: `top_vertebra`, `base_vertebra`,
+`top_r_coord`, `base_r_coord`.
+
+## `axial_rotation`
+
+`dict[vertebra_name, degrees]`. Signed angle between
+`Vertebra_Direction_Right` and the image right axis in the axial plane.
+Positive = rotation towards the patient's left.
+
+## `segmental_endplate_angles`
+
+`dict["<upper>-<lower>", degrees]`. Signed sagittal-plane wedge angle
+between the inferior endplates of two adjacent vertebrae. Approximates
+the disc wedge without needing the disc mesh.
+
+## `curvature_profile`
+
+Cubic B-spline through the `Vertebra_Corpus` centroids. Reports arc
+length, chord length, tortuosity (arc/chord), and |κ| statistics in
+3D as well as the two 2D projections. `apices` (3D), `sagittal_apices`,
+`coronal_apices` are lists of up to 6 dicts `{arc_mm, kappa_1_per_mm}`
+ordered by arc position (superior → inferior).
+
+## `multi_cobb`
+
+Multi-curve Cobb detection from the coronal spline projection. Sign
+changes of the signed curvature act as inflection points; one Cobb
+angle is emitted per segment.
+
+- `curves`: `[{arc_start_mm, arc_end_mm, apex_arc_mm, length_mm,
+  cobb_deg, handedness}]`
+- `max_cobb_deg`: max absolute Cobb across curves
+
+Handedness is `"right"` or `"left"` referring to the direction of the
+curve's concavity.
+
+## Wedge fields on `vert_geometry` / `ivd_geometry`
+
+Added per label:
+
+- `sagittal_wedge_deg` — `atan((x1 − x2) / x6)` (positive = anterior taller)
+- `coronal_wedge_deg` — `atan((x3 − x4) / x5)` (positive = right taller)
+- `sagittal_wedge_index` — `(x1 − x2) / mean(x1, x2)`
+- `coronal_wedge_index` — `(x3 − x4) / mean(x3, x4)`
+
+Genant-style fracture screening: `sagittal_wedge_index` below ≈ −0.4
+corresponds to > 40 % anterior height loss.
+
+## `pelvic_parameters`
+
+Present when the fullbody-POI json for the subject exists under
+`derivatives-fullbody-poi/…/vibe/sub-*_seg-fullbody_poi.json`. Two
+variants side by side (compare in QC):
+
+- `poi_ap` — canonical: uses `Sacral_Crest_S1` posterior + `Anterior_Longitudinal_Medial` anterior for the S1 endplate
+- `poi_ala` — alternate: uses the midpoint of `Sacrum_Ala_Superior_L/R` as the "anterior" reference. Included as a robustness check; in practice it under-estimates PI compared to `poi_ap`
+
+Per variant:
+
+- `pi_deg` (unsigned, anatomical constant)
+- `pt_deg` (signed, positive = sacrum posterior of hip axis)
+- `ss_deg` (unsigned, endplate tilt from horizontal)
+- `pi_ll_mismatch_deg` = `pi_deg − curv["lumbar_lordosis"]`; `None`
+  if lumbar lordosis is missing
+- `hip_center_mm`, `s1_endplate_center_mm` for QC
+
+Relationship: `PI = PT + SS` (up to sign).
+
+**Limitations:**
+
+1. **Supine vs. standing.** SS/PT are position-dependent — supine SS
+   is systematically lower than standing SS by ~10-15°, PT
+   correspondingly higher. **PI is position-invariant** and the safe
+   number to compare across cohorts. PI-LL uses the supine LL and is
+   not directly comparable to Schwab-style standing thresholds.
+2. S1 endplate is reconstructed from two point landmarks; the anterior
+   ligament attachment can drift inferior with age / degeneration.
+3. Bi-femoral axis uses the atlas-registered `PELVIS_CENTER` landmark
+   under each femur (label 13/113 in the fullbody-POI mapping).
+4. No axial-pelvic-obliquity correction; sagittal plane = world `(y, z)`.
+
 ---
 
 ## Excel collector
 
-`ExcelCollector` in `all.py` runs a background process that turns each
-finished json into two rolling Excel files in a configurable folder:
+`ExcelCollector` in `_run_all.py` runs a background process that turns
+each finished json into three rolling Excel files in a configurable
+folder:
 
 - `per_subject.xlsx` — one row per subject with every scalar top-level
   metric flattened to dotted keys
   (e.g. `VBQ_score.VBQ_L1-L4`, `torso_vat_sat_muscle_mass.VAT`).
-- `per_vertebra.xlsx` — one row per (subject, label), populated from
-  `vert_geometry` and `ivd_geometry`. The `source` column indicates
-  which of the two sections the row came from.
+  `ivd_geometry` and `vert_geometry` are excluded here.
+- `per_vertebra.xlsx` — one row per (subject, label) from
+  `vert_geometry` (vertebra bodies).
+- `per_ivd.xlsx` — one row per (subject, label) from `ivd_geometry`
+  (intervertebral discs).
+
+The vertebra and IVD tables are split so that the full NAKO cohort stays
+under Excel's per-sheet row limit (1 048 576 rows).
 
 Usage:
 

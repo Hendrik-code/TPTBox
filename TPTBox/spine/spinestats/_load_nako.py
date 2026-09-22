@@ -7,6 +7,7 @@ import pandas as pd
 from TPTBox import Print_Logger
 from TPTBox.core.bids_files import BIDS_FILE, BIDS_Family, Buffered_BIDS_Global_info
 from TPTBox.core.nii_wrapper import to_nii
+from TPTBox.spine.spinestats._load_nako_wh import get_current_best_VERIDAH as _get_current_best_VERIDAH
 
 log = Print_Logger()
 
@@ -102,6 +103,7 @@ def get_corrected_mevibe(fam: BIDS_Family, compute_PDFF=True):  # TODO return di
 
 def get_current_best_T2w_seg(sub, black_list_t2w=None):
     if black_list_t2w is None:
+        # 111007 Needs fix, very strong scolisose
         black_list_t2w = [
             # Head missing T2w
             "106910",
@@ -234,8 +236,12 @@ def loop_over_repaired_nako(
                     if "PatientSize" in js:
                         subj_dict["height_m"] = js["PatientSize"]
                         break
-                except json.decoder.JSONDecodeError:
-                    log.on_fail(f, "json.decoder.JSONDecodeError")
+                except json.decoder.JSONDecodeError as e:
+                    json_path = f.file.get("json", f)
+                    log.on_fail(
+                        f"json.decoder.JSONDecodeError while reading {json_path}: {e} "
+                        f"(subject={sub}, dataset={dataset}); continuing with next sidecar"
+                    )
         if verbose:
             log.on_log(sub)
         mapping = {"T2w": "t2w"}
@@ -315,6 +321,8 @@ def loop_over_repaired_nako(
         subj_dict["vert"] = vert
         subj_dict["spine"] = spine
         subj_dict["poi"] = poi
+        veridah = _get_current_best_VERIDAH(sub)
+        subj_dict["veridah"] = str(veridah) if veridah is not None else None
         yield subj_dict
 
 

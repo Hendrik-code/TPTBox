@@ -399,10 +399,26 @@ def calc_endplate_points_(
 
     poi.info.setdefault("angle_superior_endplate", {})
     poi.info.setdefault("angle_inferior_endplate", {})
+    # Register direction-vector fields (auto-transformed by reorient / resample /
+    # to_cord_system) and additional per-label scalar fields (whose keys are
+    # remapped by map_labels).
+    from TPTBox.core.poi_fun.vector_fields import POI_INFO_LABEL_KEYED_FIELDS_KEY, POI_INFO_VECTOR_FIELDS_KEY
+
+    _vec_fields = poi.info.setdefault(POI_INFO_VECTOR_FIELDS_KEY, [])
+    for _f in ("angle_superior_endplate", "angle_inferior_endplate"):
+        if _f not in _vec_fields:
+            _vec_fields.append(_f)
+    _lbl_fields = poi.info.setdefault(POI_INFO_LABEL_KEYED_FIELDS_KEY, [])
+    for _f in ("endplate_internal_angle",):
+        if _f not in _lbl_fields:
+            _lbl_fields.append(_f)
 
     if compute_curvature:
         poi.info.setdefault("curvature_superior_endplate", {})
         poi.info.setdefault("curvature_inferior_endplate", {})
+        for _f in ("curvature_superior_endplate", "curvature_inferior_endplate"):
+            if _f not in _lbl_fields:
+                _lbl_fields.append(_f)
 
     # Collect normals per vertebra so we can compute the inter-endplate
     # angle once both superior and inferior have been processed.
@@ -438,9 +454,16 @@ def calc_endplate_points_(
             endplate_nii = c.extract_label(superior_label)
         cms_local_override = None
 
-        last_vert = max(vert_ids)
+        # A vertebra can appear in the segmentation (vert_ids) but have no POI
+        # entry (e.g. too few voxels for a centroid). Pick the highest vertebra
+        # that actually has a centroid in poi so the fallback to Vertebra_Corpus
+        # below cannot KeyError.
+        vert_ids_in_poi = [v for v in vert_ids if (v, Location.Vertebra_Corpus.value) in poi]
+        last_vert = max(vert_ids_in_poi) if vert_ids_in_poi else None
 
-        if (last_vert, Location.Vertebral_Body_Endplate_Inferior.value) in poi:
+        if last_vert is None:
+            pass  # no anchor available; skip the sacrum endplate override
+        elif (last_vert, Location.Vertebral_Body_Endplate_Inferior.value) in poi:
             cms_local_override = poi[last_vert, Location.Vertebral_Body_Endplate_Inferior]
         elif (last_vert, Location.Vertebra_Disc.value) in poi:
             cms_local_override = poi[last_vert, Location.Vertebra_Disc.value]
@@ -448,17 +471,19 @@ def calc_endplate_points_(
             cms_local_override = vert.extract_label(100 + last_vert).center_of_masses()[1]
         else:
             cms_local_override = poi[last_vert, Location.Vertebra_Corpus]
-        _endplate(
-            poi,
-            endplate_nii,
-            Location.Vertebral_Body_Endplate_Superior,
-            Vertebra_Instance.S1.value,
-            log,
-            normals_by_vert,
-            cms_local_override=cms_local_override,
-            flip_direction=True,
-            compute_curvature=compute_curvature,
-        )
+
+        if last_vert is not None:
+            _endplate(
+                poi,
+                endplate_nii,
+                Location.Vertebral_Body_Endplate_Superior,
+                Vertebra_Instance.S1.value,
+                log,
+                normals_by_vert,
+                cms_local_override=cms_local_override,
+                flip_direction=True,
+                compute_curvature=compute_curvature,
+            )
     # Angle between superior and inferior endplate normals, per vertebra.
     for vert_id, normals in normals_by_vert.items():
         n_sup = normals.get(Location.Vertebral_Body_Endplate_Superior)
@@ -508,7 +533,7 @@ def endplate_to_super_infer_endplate(vert: NII, spine: NII) -> tuple[NII, NII]:
     spine = spine.copy()
     vert_org = vert.copy()
     vert[vert >= 40] = 0
-    vert[spine.extract_label([Location.Vertebra_Corpus, Location.Vertebra_Corpus_border]) != 1] = 0
+    vert[spine.extract_label([Location.Vertebra_Corpus, Location.Vertebra_Corpus_border, Vertebra_Instance.S1]) != 1] = 0
     vert %= 100
     v = vert.infect(
         spine.extract_label(
@@ -522,8 +547,10 @@ def endplate_to_super_infer_endplate(vert: NII, spine: NII) -> tuple[NII, NII]:
         verbose=False,
     )
     endplate_nii = v * endplate_nii
+    spine[endplate_nii == Vertebra_Instance.S1.value] = Location.Sacrum_Endplate.value
     spine[np.logical_and(endplate_nii == vert_org % 100, endplate_nii != 0)] = Location.Vertebral_Body_Endplate_Inferior.value
     spine[spine == Location.Endplate.value] = Location.Vertebral_Body_Endplate_Superior.value
+
     vert_org[endplate_nii != 0] = v[endplate_nii != 0] + 200
     return vert_org, spine
 
