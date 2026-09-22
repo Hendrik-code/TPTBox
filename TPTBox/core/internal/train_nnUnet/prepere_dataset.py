@@ -199,6 +199,13 @@ def _validate_config(cfg: DatasetConfig) -> None:
             "Use 'nnUNetTrainerNoMirroring', a SmaugLab DAExt trainer (mirror is stripped from its "
             "params JSON), or drop the mirror pairs."
         )
+    # SmaugLab DAExt trainers assume the SmaugLab (non-CT) preprocessing path; combining them with
+    # is_ct=True mixes CT normalization with augmentations tuned for the SmaugLab regime.
+    if cfg.is_ct and "DAExt" in cfg.nn_trainer:
+        logger.on_warning(
+            f"is_ct=True combined with nn_trainer='{cfg.nn_trainer}': SmaugLab DAExt trainers are "
+            "not intended to be used with CT normalization. Set is_ct=False or pick a non-DAExt trainer."
+        )
     if errors:
         logger.on_fail("Config validation failed:")
         for e in errors:

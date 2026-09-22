@@ -158,7 +158,8 @@ class POI_Global(Abstract_POI):
         """Convert between ITK (LPS) and NIfTI (RAS) coordinate systems.
 
         Flips the first two coordinate axes when switching between the two
-        systems (LPS ↔ RAS only differs in the sign of x and y).
+        systems (LPS ↔ RAS only differs in the sign of x and y). Registered
+        direction-vector fields in ``info`` are flipped along the same axes.
 
         Args:
             itk_coords: ``True`` for ITK/LPS output, ``False`` for NIfTI/RAS.
@@ -167,12 +168,19 @@ class POI_Global(Abstract_POI):
         Returns:
             ``POI_Global`` in the requested coordinate system.
         """
+        import numpy as np
+
+        from TPTBox.core.poi_fun.vector_fields import _transform_direction_vectors_inplace
+
         out = self if inplace else self.copy()
         if self.itk_coords == itk_coords:
             return out
         out.itk_coords = itk_coords
         for k1, k2, v in self.items():
             out[k1, k2] = (-v[0], -v[1], v[2])
+        # x and y are negated, z is kept -- express as a signed-permutation trans.
+        trans = np.array([[0, -1], [1, -1], [2, 1]], dtype=int)
+        _transform_direction_vectors_inplace(out.info, trans)
         return out
 
     def to_other(self, msk: Has_Grid, verbose=False) -> poi.POI:
@@ -208,7 +216,14 @@ class POI_Global(Abstract_POI):
                     log.print(v, "-->", v_out)
                 out[k1, k2] = tuple(v_out)
 
-        return poi.POI(centroids=out, **msk._extract_affine(), info=self.info, format=self.format)
+        return poi.POI(
+            centroids=out,
+            **msk._extract_affine(),
+            info=self.info,
+            format=self.format,
+            level_one_info=self.level_one_info,
+            level_two_info=self.level_two_info,
+        )
 
     def copy(self, centroids: POI_Descriptor | None = None) -> Self:
         """Return a deep copy of this ``POI_Global``.

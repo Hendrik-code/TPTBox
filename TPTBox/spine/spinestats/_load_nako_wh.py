@@ -154,6 +154,14 @@ def resolve_pick(
         # (``main-conflict:pd``, ``mevibe-conflict:pd``, ``vibe-conflict:pd``, …).
         idx = max(range(len(labels)), key=labels.__getitem__)
         return candidates[idx]  # transient: do not save
+    if key == "main:T2haste" or key.endswith(":T2haste"):
+        # auto-accept: when duplicates differ only in the presence of a ``sequ`` entity
+        # (one raw file without sequ, one or more with an explicit sequ number for the same
+        # acquisition), prefer the sequ-numbered candidate. Skips the prompt only when this
+        # split is unambiguous (exactly one sequ'd candidate); otherwise falls through.
+        with_sequ = [c for c in candidates if getattr(c, "get", lambda *_: None)("sequ", None) is not None]
+        if len(with_sequ) == 1 and len(with_sequ) < len(candidates):
+            return with_sequ[0]  # transient: do not save
     choice, reason = _prompt_choice(sub, key, question, labels, allow_discard=allow_discard)
     if choice == "__skip__":
         return candidates[0] if candidates else None  # transient: do not save
@@ -455,49 +463,93 @@ def get_corrected_mevibe(fam: BIDS_Family, compute_PDFF=True):  # TODO return di
     # PDFF is recomputed
     out = {key: _check(fam[f"mevibe_part-{key}"]) for key in ["eco0-opp1", "eco1-pip1", "eco2-opp2", "eco3-in1", "eco4-pop1", "eco5-arb1"]}
 
-    pdff = _check(fam["mevibe_part-fat-fraction"])
     if "mevibe_part-water_desc-reconstructed" in fam:
-        # if "mevibe_part-fat-fraction_desc-reconstructed" not in fam:
         fat = _check(fam["mevibe_part-fat_desc-reconstructed"])
         water = _check(fam["mevibe_part-water_desc-reconstructed"])
-
-    else:
+    elif "mevibe_part-water" in fam:
         fat = _check(fam["mevibe_part-fat"])
         water = _check(fam["mevibe_part-water"])
-    out["mevibe_part-fat"] = fat
-    out["mevibe_part-fat"] = water
-    pdff = water.get_changed_bids(
-        "nii.gz", bids_format=water.bids_format, parent=water.parent, info={"part": "fat-fraction", "desc": "reconstructed"}
+    else:
+        fat = None
+        water = None
+
+    # Anchor for BIDS derivations: prefer a raw/reconstructed water image, fall back to
+    # whatever fraction file the family exposes.
+    if water is not None:
+        anchor = water
+    elif "mevibe_part-water-fraction" in fam:
+        anchor = _check(fam["mevibe_part-water-fraction"])
+    elif "mevibe_part-fat-fraction" in fam:
+        anchor = _check(fam["mevibe_part-fat-fraction"])
+    else:
+        return out
+
+    pdff = anchor.get_changed_bids(
+        "nii.gz", bids_format=anchor.bids_format, parent=anchor.parent, info={"part": "fat-fraction", "desc": "reconstructed"}
     )
-    pdwf = water.get_changed_bids(
-        "nii.gz", bids_format=water.bids_format, parent=water.parent, info={"part": "water-fraction", "desc": "reconstructed"}
+    pdwf = anchor.get_changed_bids(
+        "nii.gz", bids_format=anchor.bids_format, parent=anchor.parent, info={"part": "water-fraction", "desc": "reconstructed"}
     )
 
     if compute_PDFF and (not pdff.exists() or not pdwf.exists()):
-        water_nii = to_nii(water)
-        fat_nii = to_nii(fat)
-        water_nii.set_dtype_()
-        fat_nii.set_dtype_()
-        if not pdff.exists():
-            nii = fat_nii / (water_nii + fat_nii)
-            nii[water_nii + fat_nii == 0] = 0
-            nii *= 1000
-            nii.set_dtype_("smallest_int")
-            nii.save(pdff)
-        if not pdwf.exists():
-            nii = water_nii / (water_nii + fat_nii)
-            nii[water_nii + fat_nii == 0] = 0
-            nii *= 1000
-            nii.set_dtype_("smallest_int")
-            nii.save(pdwf)
+        if fat is not None and water is not None:
+            water_nii = to_nii(water)
+            fat_nii = to_nii(fat)
+            water_nii.set_dtype_()
+            fat_nii.set_dtype_()
+            if not pdff.exists():
+                nii = fat_nii / (water_nii + fat_nii)
+                nii[water_nii + fat_nii == 0] = 0
+                nii *= 1000
+                nii.set_dtype_("smallest_int")
+                nii.save(pdff)
+            if not pdwf.exists():
+                nii = water_nii / (water_nii + fat_nii)
+                nii[water_nii + fat_nii == 0] = 0
+                nii *= 1000
+                nii.set_dtype_("smallest_int")
+                nii.save(pdwf)
+        else:
+            # No raw fat/water — derive the missing fraction from the one the scanner shipped.
+            if not pdff.exists() and "mevibe_part-water-fraction" in fam:
+                wf_nii = to_nii(_check(fam["mevibe_part-water-fraction"]))
+                nii = 1000 - wf_nii
+                nii.set_dtype_("smallest_int")
+                nii.save(pdff)
+            if not pdwf.exists() and "mevibe_part-fat-fraction" in fam:
+                ff_nii = to_nii(_check(fam["mevibe_part-fat-fraction"]))
+                nii = 1000 - ff_nii
+                nii.set_dtype_("smallest_int")
+                nii.save(pdwf)
+
+    # Downstream (see _apply_corrections_to_subj_dict) expects "mevibe_part-fat" to hold PDFF.
     if pdff.exists():
         out["mevibe_part-fat"] = pdff
-    if pdff.exists():
+    if pdwf.exists():
         out["mevibe_part-fat"] = pdwf
         # else:
         #    pdff = _check(fam["mevibe_part-fat-fraction_desc-reconstructed"])
 
     return out
+
+
+def get_current_best_VERIDAH(sub) -> Path | None:
+    """Return the newest VERIDAH-label JSON for ``sub`` (V2 preferred), or ``None`` if missing.
+
+    The file lives alongside the T2w segmentation under
+    ``derivatives_spine_inference_162_sacrumfix/<pfx>/<sub>/T2w/`` and holds the
+    ``orig_label -> fpath`` remapping used by :func:`compute_veridah_variants`.
+    """
+    sub = str(sub).split("_")[0].replace("sub-", "")
+    for folder in ("derivatives_spine_inference_162_sacrumfix",):
+        for suffix in ("VERIDAH-label-V2", "VERIDAH-label"):
+            p = Path(
+                f"/DATA/NAS/datasets_processed/NAKO/dataset-nako/{folder}/{sub[:3]}/{sub}/T2w/"
+                f"sub-{sub}_sequ-stitched_acq-sag_mod-T2w_seg-vert_desc-{suffix}_stat.json"
+            )
+            if p.exists():
+                return p
+    return None
 
 
 def get_current_best_T2w_seg(sub, black_list_t2w=None):
@@ -569,10 +621,11 @@ def loop_over_repaired_nako(
     test=False,
     verbose=False,
     sort=True,
-    test_key="/100/10",  # path matching. if you want on specific us a 6 digits
+    test_key="/102/",  # path matching. if you want on specific us a 6 digits
     decision_cache: DecisionCache | Path | str | None = None,
     corrected_index: dict | Path | str | None = None,
     skip_subject=None,
+    vibe_mismatch_snap_dir: Path | str | None = None,
 ):
     """Iterate over the repaired NAKO dataset yielding per-subject file dicts.
 
@@ -595,6 +648,12 @@ def loop_over_repaired_nako(
         test_key: Path substring passed to the BIDS scanner's ``filter_file`` when ``test=True``; only paths
             containing this substring are indexed. Defaults to a hard-coded example subject.
         baseline_metadata: Path to the NAKO baseline CSV used to look up height metadata.
+        vibe_mismatch_snap_dir: When set, subjects whose VIBE parts don't share a shape are skipped
+            (not yielded); a review snapshot is written to this directory as
+            ``sub-<id>_vibe-shape-mismatch.jpg`` when that file doesn't already exist.
+            Two sub-folders ``accept/`` and ``reject/`` are also created on demand: if the reviewer
+            moves the jpg into ``accept/`` the next run auto-answers the grid prompt with "y"
+            (resample); if moved into ``reject/`` it auto-answers "n" (drop mismatched keys).
 
     Yields:
         Dict mapping short keys to ``BIDS_FILE`` entries for one subject.
@@ -703,6 +762,18 @@ def loop_over_repaired_nako(
             q.filter_format("mevibe")
             # q.filter("sequ", "me1")
             mevibe_fams = list(q.loop_dict(key_addendum=["mod", "part", "desc"]))
+            # Drop derivative-only families and incomplete acquisitions: get_corrected_mevibe
+            # unconditionally indexes all six echoes, so a family missing any of them would crash.
+            _echo_keys = [f"mevibe_part-{k}" for k in ("eco0-opp1", "eco1-pip1", "eco2-opp2", "eco3-in1", "eco4-pop1", "eco5-arb1")]
+            _kept = []
+            for f in mevibe_fams:
+                missing = [k for k in _echo_keys if k not in f]
+                if missing:
+                    if "mevibe_part-eco0-opp1" in f:
+                        log.on_warning(f"sub-{sub}: incomplete mevibe family {f.family_id!r} (missing {missing}); skipping")
+                    continue
+                _kept.append(f)
+            mevibe_fams = _kept
             if len(mevibe_fams) > 1:
                 labels = [str(f.get("mevibe_part-eco0-opp1", f)) for f in mevibe_fams]
                 cached_pick = _cached_pick(cache.get(sub, "mevibe_fam"))
@@ -792,6 +863,7 @@ def loop_over_repaired_nako(
                     else:
                         cache.set(sub, "vibe_fam", {"pick": labels[choice], "reason": reason})
                         vibe_fams = [vibe_fams[choice]]
+            _vibe_skip_subject = False
             for fam in vibe_fams:
                 vibe_by_key: dict = {}
                 for _k in (
@@ -804,6 +876,34 @@ def loop_over_repaired_nako(
                 ):
                     if fam.get(_k):
                         vibe_by_key[_k] = fam[_k][0]
+                if vibe_mismatch_snap_dir is not None:
+                    sigs = _vibe_grid_sigs(vibe_by_key)
+                    if len(set(sigs.values())) > 1:
+                        snap_dir = Path(vibe_mismatch_snap_dir)
+                        accept_dir = snap_dir / "accept"
+                        reject_dir = snap_dir / "reject"
+                        for d in (snap_dir, accept_dir, reject_dir):
+                            d.mkdir(parents=True, exist_ok=True)
+                        snap_name = f"sub-{sub}_vibe-shape-mismatch.jpg"
+                        snap_path = snap_dir / snap_name
+                        if (accept_dir / snap_name).exists():
+                            # User verified this mismatch is fine — auto-answer "y" (resample).
+                            cache.set(sub, "grid_mismatch:vibe", {"decision": "resample", "reason": "accepted-via-snap"})
+                        elif (reject_dir / snap_name).exists():
+                            # User rejected this subject's VIBE — auto-answer "n" (drop mismatched keys).
+                            cache.set(sub, "grid_mismatch:vibe", {"decision": "remove", "reason": "rejected-via-snap"})
+                        else:
+                            if not snap_path.exists():
+                                try:
+                                    _save_vibe_shape_mismatch_snapshot(vibe_by_key, snap_path)
+                                except Exception as e:  # noqa: BLE001
+                                    log.on_warning(f"sub-{sub}: failed to save vibe mismatch snapshot: {e}")
+                            log.on_warning(
+                                f"sub-{sub}: VIBE grid mismatch {sigs} — awaiting review "
+                                f"(move {snap_name} into accept/ or reject/); skipping subject"
+                            )
+                            _vibe_skip_subject = True
+                            break
                 check_same_grid(cache, sub, "vibe", vibe_by_key, inphase_key="vibe_part-inphase")
                 # Propagate the check's outcome back to ``fam`` so the downstream unpack
                 # loop below picks up resampled files (or skips removed keys).
@@ -835,10 +935,14 @@ def loop_over_repaired_nako(
                 for k, k2 in mapp.items():
                     if k in fam:
                         subj_dict[k2] = fam[k][0]
+            if _vibe_skip_subject:
+                continue
         vert, spine, poi = get_current_best_T2w_seg(sub)
         subj_dict["vert"] = vert
         subj_dict["spine"] = spine
         subj_dict["poi"] = poi
+        veridah = get_current_best_VERIDAH(sub)
+        subj_dict["veridah"] = str(veridah) if veridah is not None else None
         if corrected_index:
             _apply_corrections_to_subj_dict(str(sub), subj_dict, corrected_index)
         verify_missing_images(cache, sub, subj_dict)
@@ -864,6 +968,69 @@ def _is_grid_only_json(path: Path | str) -> bool:
 
 
 _CANONICAL_DONE_ROOT = Path("/DATA/NAS/datasets_processed/NAKO/dataset-nako-canonical/.hardlink_done")
+
+_VIBE_MISMATCH_SNAP_DIR = Path("/DATA/NAS/datasets_processed/NAKO/dataset-nako-canonical/snaps/vibe-missmatch")
+
+
+def _vibe_grid_sigs(vibe_by_key: dict) -> dict[str, str]:
+    """Return ``{key: grid-signature-string}`` for each present VIBE part.
+
+    Mirrors ``check_same_grid``'s comparison: reads ``bf.get_grid_info()`` and
+    stringifies it, skipping msk entries and files that have no NIfTI. Two
+    signatures being unequal is exactly what would cause ``check_same_grid``
+    to prompt the user.
+    """
+    sigs: dict[str, str] = {}
+    for k, bf in vibe_by_key.items():
+        if bf is None:
+            continue
+        if getattr(bf, "format", None) == "msk" or k.startswith("msk"):
+            continue
+        get_nii_file = getattr(bf, "get_nii_file", None)
+        if callable(get_nii_file) and get_nii_file() is None:
+            continue
+        try:
+            g = bf.get_grid_info()
+        except Exception:  # noqa: BLE001
+            continue
+        if g is None:
+            continue
+        sigs[k] = str(g)
+    return sigs
+
+
+def _save_vibe_shape_mismatch_snapshot(vibe_by_key: dict, out_path: Path) -> None:
+    """Save a review snapshot of VIBE parts whose grids don't agree.
+
+    Renders one sagittal+coronal frame per present VIBE part (in/out/water/fat),
+    titled with the part's shape, so a reviewer can eyeball what's off.
+    """
+    from TPTBox.spine.snapshot2D import Snapshot_Frame, create_snapshot
+
+    frames = []
+    for k in ("vibe_part-inphase", "vibe_part-outphase", "vibe_part-water", "vibe_part-fat"):
+        bf = vibe_by_key.get(k)
+        if bf is None:
+            continue
+        try:
+            shape = tuple(bf.get_grid_info().shape)  # type: ignore[union-attr]
+        except Exception:  # noqa: BLE001
+            shape = None
+        frames.append(
+            Snapshot_Frame(
+                image=bf,
+                mode="MRI",
+                sagittal=True,
+                coronal=True,
+                axial=False,
+                crop_msk=False,
+                title=f"{k} shape={shape}",
+            )
+        )
+    if not frames:
+        return
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    create_snapshot(snp_path=[out_path], frames=frames)
 
 
 def _hard_link_done_marker(sub: str) -> Path:
@@ -923,6 +1090,7 @@ def hard_link(
         "vert",  # t2w (stiched)
         "spine",  # t2w (stiched)
         "poi",  # t2w (stiched)
+        "veridah",  # VERIDAH enumeration-anomaly relabeling (V2 preferred)
     ]
     imgs = [
         "pd",
@@ -948,6 +1116,7 @@ def hard_link(
             info = {"run": None}
             if isinstance(bf, str):
                 bf = BIDS_FILE(bf, dataset)
+            bf.info.pop("run", None)
             assert len([k for k, v in bf.loop_keys() if k not in allowed_keys]) == 0, (
                 [k for k, v in bf.loop_keys() if k not in allowed_keys],
                 bf,
@@ -1407,8 +1576,19 @@ if __name__ == "__main__":
         help="Trace hard_link()'s planned links for one subject; check src exists + same fs as target.",
     )
     parser.add_argument("--workers", type=int, default=None, help="Number of worker processes (default: cpu_count-1).")
+    parser.add_argument(
+        "--vibe-mismatch-snaps",
+        nargs="?",
+        const=str(_VIBE_MISMATCH_SNAP_DIR),
+        # default=None,
+        default=str(_VIBE_MISMATCH_SNAP_DIR),
+        metavar="DIR",
+        help="Skip subjects whose VIBE parts have grid mismatches; write a review .jpg to DIR "
+        f"(defaults to {_VIBE_MISMATCH_SNAP_DIR}) unless one already exists there. "
+        "Pass '' to disable.",
+    )
     args = parser.parse_args()
-    test = True
+    test = False
 
     if args.build_corrected_index:
         build_corrected_index()
@@ -1418,5 +1598,10 @@ if __name__ == "__main__":
         precompute_grid_info_parallel(num_workers=args.workers, test=test)
     else:
         corrected = load_corrected_index()
-        for d in loop_over_repaired_nako(test=test, corrected_index=corrected, skip_subject=is_hard_linked):
+        for d in loop_over_repaired_nako(
+            test=test,
+            corrected_index=corrected,
+            skip_subject=is_hard_linked,
+            vibe_mismatch_snap_dir=args.vibe_mismatch_snaps or None,
+        ):
             hard_link(d)
