@@ -183,6 +183,14 @@ def VBQ_score(
         bodies = vert_mask * corpus
         bodies.erode_msk_(n_erode, verbose=False)
 
+        if not bodies.get_array().any():
+            out[f"mean_signal_vertebra_{start.name}-{goal.name}"] = None
+            out[f"mean_signal_liquor_{start.name}-{goal.name}"] = None
+            out[f"mean_signal_liquor_{start.name}-{goal.name}_old"] = None
+            out[f"VBQ_{start.name}-{goal.name}"] = None
+            out[f"VBQ_{start.name}-{goal.name}_old"] = None
+            continue
+
         signal_vertebra = t2w.mean(where=bodies)
 
         # ---- restrict spinal canal to same S/I extent ----
@@ -324,7 +332,8 @@ def body_composition_score(
     out = {}
     u = vert.unique()
     for start, goal in regions:
-        end = verts_order.index(goal.get_next_poi(u))
+        next_after_goal = goal.get_next_poi(u)
+        end = verts_order.index(next_after_goal) if next_after_goal is not None else verts_order.index(goal) + 1
         labels = verts_order[verts_order.index(start) : end]
 
         vertebral_body = vert.extract_label(labels) * body_mask
@@ -365,7 +374,7 @@ def body_composition_score(
             if name == "muscle":
                 out[f"n_slices_{region_name}"] = n_slices
 
-                if height_m is not None and np.isfinite(mean_area):
+                if height_m is not None and height_m > 0 and np.isfinite(mean_area):
                     out[f"muscle_index_{region_name}"] = round(mean_area / (height_m**2))
 
         vat = out[f"mean_VAT_area_{region_name}"]

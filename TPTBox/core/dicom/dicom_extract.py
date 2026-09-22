@@ -39,6 +39,13 @@ from TPTBox.core.dicom.dicom2nii_utils import get_json_from_dicom, load_json, sa
 
 logger = Print_Logger()
 
+# Modalities/BIDS formats we drop by default. Grayscale Softcopy Presentation
+# State (`pr`) DICOMs carry no pixel data — only Referenced SOP Instance UIDs
+# and viewer window/level/annotation presets — and always come out as noise
+# for automated pipelines. Callers can pass `skip_formats=set()` to keep them,
+# or add other formats (e.g. `{"pr", "ko"}` to also drop Key Object Selection).
+_DEFAULT_SKIP_FORMATS: set[str] = {"pr", "xa-helper"}
+
 
 def _next_letter_suffix(s: str, inc: int = 1) -> str:
     """Increment a letter suffix: a -> b, z -> aa, aa -> ab."""
@@ -57,6 +64,9 @@ def _next_letter_suffix(s: str, inc: int = 1) -> str:
     return "".join(reversed(result))
 
 
+_INC_KEY_MAX_TRIES = 10_000
+
+
 def _inc_key(keys: dict, inc: int = 1, k: str = "sequ", path_exists: Callable[[dict], bool] | None = None) -> None:
     """Increment the sequence key inside *keys* by appending letter suffixes.
 
@@ -64,6 +74,11 @@ def _inc_key(keys: dict, inc: int = 1, k: str = "sequ", path_exists: Callable[[d
     until the filename generated from *keys* no longer collides with an existing file
     on disk. This guarantees the caller never receives keys that would produce a
     duplicate filename.
+
+    Raises:
+        RuntimeError: If ``path_exists`` never returns ``False`` within
+            :data:`_INC_KEY_MAX_TRIES` iterations. Prevents a broken
+            ``path_exists`` callback from spinning forever.
     """
 
     def _step() -> None:
@@ -88,8 +103,15 @@ def _inc_key(keys: dict, inc: int = 1, k: str = "sequ", path_exists: Callable[[d
             keys[k] = f"{value}-a"
 
     _step()
+    tries = 0
     while path_exists is not None and path_exists(keys):
         _step()
+        tries += 1
+        if tries >= _INC_KEY_MAX_TRIES:
+            raise RuntimeError(
+                f"_inc_key: `path_exists` still True after {tries} increments (current keys[{k!r}]={keys.get(k)!r}). "
+                "This suggests a mis-configured `path_exists` callback rather than a real filename collision."
+            )
 
 
 def _generate_bids_path(
@@ -283,6 +305,7 @@ def _export_pdf_from_dicom(dcm_path, out_pdf):
 def _collect_text(ds, txt_lines: list[str] | None = None):
     if txt_lines is None:
         txt_lines = []
+    start = len(txt_lines)
 
     def _help_collect_text(content_sequence, level: int = 0):
         for item in content_sequence:
@@ -314,6 +337,28 @@ def _collect_text(ds, txt_lines: list[str] | None = None):
 
     if hasattr(ds, "ContentSequence"):
         _help_collect_text(ds.ContentSequence)
+
+    # Fallback for non-SR modalities (Presentation State, Key Object Selection,
+    # Registration, Fiducials, waveforms, …). These carry no ContentSequence,
+    # so the SR walker above produces nothing and the previous behaviour left
+    # an empty .txt. Dump every DICOM element (minus the pixel data blob) —
+    # the same tag/name/VR/value view a DICOM tag inspector would show.
+    if len(txt_lines) == start:
+        try:
+            iterator = ds.iterall() if hasattr(ds, "iterall") else ds
+            for elem in iterator:
+                if getattr(elem, "tag", None) is not None and elem.tag.group == 0x7FE0:
+                    continue  # PixelData family
+                try:
+                    txt_lines.append(str(elem))
+                except Exception:  # noqa: BLE001
+                    txt_lines.append(f"({getattr(elem, 'tag', '?')}) <unrepresentable>")
+        except Exception:  # noqa: BLE001
+            # Last resort: Dataset.__str__ still gives a readable dump.
+            try:
+                txt_lines.extend(str(ds).splitlines())
+            except Exception:  # noqa: BLE001
+                pass
     return txt_lines
 
 
@@ -346,8 +391,26 @@ def _extract_nii_from_dicom(dicom_out_path, nii_path):
                     ds = dicom_out_path[0]
                     if hasattr(ds, "pixel_array") and len(ds.pixel_array.shape) >= 2:
                         dicom_to_nifti_multiframe(ds, nii_path)
-
-                    return True
+                        return True
+                    # Single-DICOM series without usable pixel data (Presentation
+                    # State, Key Object Selection, Registration, Fiducials, some
+                    # RT objects). Previously `return True` here made the caller
+                    # run `_add_grid_info_to_json` on a NIfTI that was never
+                    # written and crash with FileNotFoundError. Also try to lift
+                    # any ContentSequence into a `.txt` sidecar so structured-
+                    # report-style DICOMs don't lose their textual payload; the
+                    # `.json` header sidecar is kept in either case (it already
+                    # holds every non-pixel DICOM tag) so downstream inspection
+                    # still works. Return False so no grid step follows.
+                    logger.on_debug(f"Not exportable (no pixel_array): {Path(nii_path).name}")
+                    try:
+                        txt_path = str(nii_path).replace(".nii.gz", ".txt")
+                        _extract_txt_from_dicom(dicom_out_path, txt_path)
+                        if Path(txt_path).stat().st_size == 0:
+                            Path(txt_path).unlink(missing_ok=True)
+                    except Exception as e:  # noqa: BLE001
+                        logger.on_debug(f"Text dump failed for {Path(nii_path).name}: {e}")
+                    return False
             except Exception as e:
                 logger.on_debug("Multi-Frame DICOM did not work:", e)
             ## The PDF dicom lands here
@@ -380,8 +443,14 @@ def _extract_nii_from_dicom(dicom_out_path, nii_path):
         logger.print_error()
 
         return False
-    except Exception:
-        print(nii_path)
+    except Exception as e:  # noqa: BLE001
+        # Any other conversion failure: log and treat as a failed conversion so
+        # callers don't run downstream steps (e.g. `_add_grid_info_to_json` or
+        # `_split_multi_echo_dixon`) on a file that was never written.
+        logger.on_warning(f"_extract_nii_from_dicom: unexpected error on {nii_path}: {type(e).__name__}: {e}")
+        logger.print_error()
+        Path(str(nii_path).replace(".nii.gz", ".json")).unlink(missing_ok=True)
+        return False
 
     return True
 
@@ -462,6 +531,7 @@ def _from_dicom_to_nii(
     skip_localizer: bool = False,
     parent="rawdata",
     censor_list=None,
+    skip_formats: set[str] | None = None,
 ):
     """Convert a list of DICOM datasets for one series to a NIfTI file.
 
@@ -479,11 +549,18 @@ def _from_dicom_to_nii(
         override_subject_name: Optional callable that returns a custom subject name.
         chunk: Chunk index for multi-stack series; ``None`` triggers automatic splitting.
         skip_localizer: Skip localizer series when ``True``.
+        skip_formats: BIDS format labels to drop entirely (no JSON, no sidecar,
+            no NIfTI). Defaults to :data:`_DEFAULT_SKIP_FORMATS` = ``{"pr"}``
+            — Grayscale Softcopy Presentation State DICOMs carry no pixel
+            data and only reference other series, so they normally contribute
+            nothing to a downstream pipeline. Pass ``set()`` to keep them.
 
     Returns:
         Path to the generated NIfTI file, ``None`` on failure, or a list of paths
         when the series was automatically split into multiple stacks.
     """
+    if skip_formats is None:
+        skip_formats = _DEFAULT_SKIP_FORMATS
     if censor_list is None:
         censor_list = [
             "StudyDate",
@@ -514,6 +591,7 @@ def _from_dicom_to_nii(
                     chunk=i,
                     skip_localizer=skip_localizer,
                     parent=parent,
+                    skip_formats=skip_formats,
                 )
                 outs.append(o)
             return outs
@@ -540,6 +618,9 @@ def _from_dicom_to_nii(
     )
     if skip_localizer and json_bids.bids_format == "localizer":
         return
+    if json_bids.bids_format in skip_formats:
+        logger.on_debug(f"Skipping {json_bids.bids_format!r} series (in skip_formats): {Path(json_file_name).name}")
+        return None
     logger.print(json_file_name, Log_Type.NEUTRAL, verbose=verbose)
     exist = save_json(simp_json, json_file_name, override=False)
     # logger.on_debug(exist, Path(nii_path).exists(), nii_path)
@@ -556,10 +637,12 @@ def _from_dicom_to_nii(
 
     if add_grid:
         _add_grid_info_to_json(nii_path, json_file_name)
-        # Multi-echo Philips DIXON (magnitude/phase) arrives as a 4-D NIfTI.
-        # Split it into per-echo 3-D files with `-eco<i>` appended to `part`.
-        if json_bids.get("part") in ("magnitude", "phase"):
-            _split_multi_echo_dixon(Path(nii_path), Path(json_file_name), dcm_data_l)
+        # Multi-echo Philips DIXON arrives as a 4-D NIfTI. Try to split whenever
+        # the output is 4-D — `_split_multi_echo_dixon` is a no-op on 3-D input
+        # and safely returns None. This catches multi-echo series whose `part`
+        # entity was mapped to something other than "magnitude"/"phase" via
+        # `dixon_mapping` or `parts_mapping`.
+        _split_multi_echo_dixon(Path(nii_path), Path(json_file_name), dcm_data_l)
     return nii_path if add_grid else None
 
 
@@ -613,7 +696,7 @@ def _split_multi_echo_dixon(nii_path: Path, json_path: Path, dcm_data_l) -> list
     parent_json = load_json(json_path) if Path(json_path).exists() else {}
     frames = nii.split_4D_image_to_3D()
     out_paths: list[Path] = []
-    for i, (frame, te) in enumerate(zip(frames, tes)):
+    for i, (frame, te) in enumerate(zip_strict(frames, tes)):
         new_nii = _with_echo_suffix(nii_path, i)
         new_json = _with_echo_suffix(json_path, i)
         frame.save(new_nii)
@@ -686,6 +769,32 @@ def _folder_fingerprint(folder: Path) -> tuple[int, str] | None:
         return None
 
 
+def _zip_fingerprint(zip_path: Path) -> tuple[int, str] | None:
+    """Cheap zip identity: (1, sha1(size + mtime_ns)).
+
+    We deliberately do NOT open the archive — for typical NAKO zips that
+    would take seconds per file. Size + mtime is enough to detect a fresh
+    re-download or a re-packed archive.
+    """
+    import hashlib
+
+    try:
+        st = zip_path.stat()
+    except OSError:
+        return None
+    payload = f"{st.st_size}:{st.st_mtime_ns}".encode()
+    return 1, hashlib.sha1(payload).hexdigest()  # noqa: S324
+
+
+def _source_fingerprint(source: Path) -> tuple[int, str] | None:
+    """Dispatch to the folder- or zip-fingerprint based on the source kind."""
+    if source.is_file() and source.suffix.lower() == ".zip":
+        return _zip_fingerprint(source)
+    if source.is_dir():
+        return _folder_fingerprint(source)
+    return None
+
+
 def _extract_marker_path(source_folder: Path, dataset_path_out: Path) -> Path:
     """Path of the fast-skip marker for a source folder, kept under the OUTPUT dataset.
 
@@ -698,36 +807,36 @@ def _extract_marker_path(source_folder: Path, dataset_path_out: Path) -> Path:
     return dataset_path_out / _EXTRACT_CACHE_DIR / f"{key}.json"
 
 
-def _is_already_extracted(source_folder: Path, dataset_path_out: Path) -> bool:
-    """True when the source folder was extracted before and its file list is unchanged."""
+def _is_already_extracted(source: Path, dataset_path_out: Path) -> bool:
+    """True when the source (folder or zip) was extracted before and its fingerprint is unchanged."""
     import json as _json
 
-    marker = _extract_marker_path(source_folder, dataset_path_out)
+    marker = _extract_marker_path(source, dataset_path_out)
     if not marker.is_file():
         return False
     try:
         prev = _json.loads(marker.read_text())
     except (OSError, ValueError):
         return False
-    fp = _folder_fingerprint(source_folder)
+    fp = _source_fingerprint(source)
     if fp is None:
         return False
     count, h = fp
     return prev.get("count") == count and prev.get("hash") == h
 
 
-def _write_extract_marker(source_folder: Path, dataset_path_out: Path) -> None:
-    """Record the current file-list fingerprint for the source folder."""
+def _write_extract_marker(source: Path, dataset_path_out: Path) -> None:
+    """Record the current fingerprint for the source folder or zip."""
     import json as _json
 
-    fp = _folder_fingerprint(source_folder)
+    fp = _source_fingerprint(source)
     if fp is None:
         return
     count, h = fp
-    marker = _extract_marker_path(source_folder, dataset_path_out)
+    marker = _extract_marker_path(source, dataset_path_out)
     try:
         marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text(_json.dumps({"source": str(source_folder), "count": count, "hash": h}))
+        marker.write_text(_json.dumps({"source": str(source), "count": count, "hash": h}))
     except OSError:
         pass  # writing the marker is best-effort; missing it just disables the fast-path
 
@@ -744,8 +853,13 @@ def _find_all_files(dcm_dirs: Path | list[Path], verbose=False):
     if verbose:
         logger.on_neutral("Start file searching")
         i = 0
-    yield dcm_dirs
     dcm_dirs = dcm_dirs if isinstance(dcm_dirs, list) else [dcm_dirs]
+    # Yield each root path individually so callers can process a single-directory
+    # source without descending. Previously the raw `dcm_dirs` was yielded first
+    # (a list, when a list was passed) and downstream `str(dicom_path)` cast the
+    # list into a bogus string — no caller could parse it.
+    for dcm_dir in dcm_dirs:
+        yield dcm_dir
     for dcm_dir in dcm_dirs:
         if dcm_dir.is_dir():
             for root, _, files in os.walk(dcm_dir):
@@ -779,6 +893,67 @@ def _unzip_files(dicom_zip_path: Path, out_dir: str | Path) -> Path:
     return dicom_out_path
 
 
+# Non-DICOM file extensions we can rule out without touching pydicom. Speeds up
+# `_read_dicom_files` significantly on trees that mix DICOMs with reports,
+# thumbnails, or metadata. Archive extensions are intentionally NOT listed
+# here — top-level `.zip` sources are already unpacked by `extract_dicom_folder`
+# before `_read_dicom_files` runs, and any residual archive would fail the
+# DICM-magic check below.
+_NON_DICOM_SUFFIXES = frozenset(
+    {
+        ".json",
+        ".txt",
+        ".md",
+        ".pdf",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".tif",
+        ".tiff",
+        ".gif",
+        ".bmp",
+        ".ini",
+        ".log",
+        ".csv",
+        ".tsv",
+        ".yaml",
+        ".yml",
+        ".html",
+        ".htm",
+        ".xml",
+        ".nii",  # already-extracted NIfTI
+        ".nrrd",
+        ".mha",
+        ".mhd",
+    }
+)
+
+
+def _looks_like_dicom(path: Path) -> bool:
+    """Cheap check whether *path* looks like a DICOM file.
+
+    First rules out common non-DICOM extensions, then reads the first 132 bytes
+    and checks for the ``DICM`` magic at offset 128 (the standard preamble).
+    Files without the preamble (deflated/implicit) fall back to a "no extension
+    and non-empty" heuristic — matches the previous behaviour where every
+    extensionless file was handed to :func:`pydicom.dcmread`.
+    """
+    suffix = path.suffix.lower()
+    if suffix in _NON_DICOM_SUFFIXES:
+        return False
+    try:
+        with path.open("rb") as fh:
+            head = fh.read(132)
+    except OSError:
+        return False
+    if len(head) >= 132 and head[128:132] == b"DICM":
+        return True
+    # Some DICOM files skip the 128-byte preamble; retain the old permissive
+    # behaviour for extensionless files (matches Siemens/Philips exports that
+    # ship as `IM000001` etc.).
+    return suffix in ("", ".dcm", ".ima", ".dicom")
+
+
 def _read_dicom_files(dicom_out_path: Path) -> tuple[dict[str, list[FileDataset]], dict[str, list[str]]]:
     """Read DICOM files from a directory and categorize them based on SeriesInstanceUID and type.
 
@@ -794,7 +969,7 @@ def _read_dicom_files(dicom_out_path: Path) -> tuple[dict[str, list[FileDataset]
     dicom_types: dict[str, list[str]] = {}
     for _paths in dicom_out_path.rglob("*"):
         path = Path(_paths)
-        if path.is_file():
+        if path.is_file() and _looks_like_dicom(path):
             try:
                 dcm_data = pydicom.dcmread(path, defer_size="1 KB", force=True)  # , stop_before_pixels=True
                 try:
@@ -827,6 +1002,37 @@ def _read_dicom_files(dicom_out_path: Path) -> tuple[dict[str, list[FileDataset]
     return dicom_files, _filter_file_type(dicom_types)
 
 
+def _split_by_echo_numbers(dicoms: list[FileDataset]) -> tuple[list[FileDataset], dict[int, list[FileDataset]]]:
+    """Split DICOMs into a single-echo subset (for stack detection) and per-echo buckets.
+
+    Multi-echo Philips series (e.g. Philips mDIX quant) place M echoes at each
+    of N slice positions inside a single ImageType sub-group. Consecutive DICOMs
+    sorted by InstanceNumber then sit at the same ``ImagePositionPatient``, which
+    makes the direction-based stack detection in :func:`_classic_get_grouped_dicoms`
+    produce ``0 / 0 = NaN`` and split the stack into random chunks.
+
+    Returns a ``(single_echo_subset, per_echo_buckets)`` pair. ``single_echo_subset``
+    is the DICOMs of the smallest ``EchoNumbers`` value (i.e. one DICOM per slice
+    position) and can be handed straight to the stack detector. ``per_echo_buckets``
+    maps each ``EchoNumbers`` value to its DICOMs, so the caller can put the other
+    echoes back after stack detection.
+
+    No-op when there is 0 or 1 distinct ``EchoNumbers`` — the full input is returned
+    as ``single_echo_subset`` with an empty ``per_echo_buckets``.
+    """
+    per_echo: dict[int, list[FileDataset]] = {}
+    for d in dicoms:
+        try:
+            en = int(getattr(d, "EchoNumbers", 0) or 0)
+        except (TypeError, ValueError):
+            en = 0
+        per_echo.setdefault(en, []).append(d)
+    if len([k for k in per_echo if k > 0]) <= 1:
+        return list(dicoms), {}
+    keep = min(k for k in per_echo if k > 0)
+    return list(per_echo[keep]), per_echo
+
+
 def _classic_get_grouped_dicoms(dicom_input: list[FileDataset]) -> list[list[FileDataset]]:
     """Group DICOM slices into spatially contiguous stacks by analysing slice direction.
 
@@ -835,6 +1041,12 @@ def _classic_get_grouped_dicoms(dicom_input: list[FileDataset]) -> list[list[Fil
     spatial acquisition stack.  Groups with three or fewer slices are collected
     into a single catch-all group at the end.
 
+    For multi-echo series (multiple ``EchoNumbers`` values), the stack detection
+    runs on a single-echo subset — DICOMs at the same ``ImagePositionPatient``
+    would otherwise produce ``0 / 0 = NaN`` in the direction test and split one
+    real acquisition into random stacks. The remaining echoes are re-attached
+    to the returned groups by ``ImagePositionPatient``.
+
     Args:
         dicom_input: Flat list of pydicom ``FileDataset`` objects for a single series.
 
@@ -842,8 +1054,10 @@ def _classic_get_grouped_dicoms(dicom_input: list[FileDataset]) -> list[list[Fil
         List of groups, where each group is a list of ``FileDataset`` objects
         belonging to the same spatial stack.
     """
+    detection_set, per_echo = _split_by_echo_numbers(dicom_input)
+
     # Order all dicom files by InstanceNumber
-    dicoms = sorted(dicom_input, key=lambda x: x.InstanceNumber)
+    dicoms = sorted(detection_set, key=lambda x: x.InstanceNumber)
 
     # now group per stack
     grouped_dicoms: list[list[FileDataset]] = [[]]  # list with first element a list
@@ -857,8 +1071,14 @@ def _classic_get_grouped_dicoms(dicom_input: list[FileDataset]) -> list[list[Fil
         current_direction = None
         # if the stack number decreases we moved to the next stack
         if previous_position is not None:
-            current_direction = np.array(dicom_.get("ImagePositionPatient", 0)) - previous_position
-            current_direction = current_direction / np.linalg.norm(current_direction)
+            delta = np.array(dicom_.get("ImagePositionPatient", 0)) - previous_position
+            norm = float(np.linalg.norm(delta))
+            # Zero-length delta = two DICOMs at the same position (residual
+            # multi-echo where the pre-filter didn't remove all duplicates,
+            # or a genuine repeated slice). Skip the direction update so we
+            # don't emit NaN and split the stack.
+            if norm > 1e-6:
+                current_direction = delta / norm
 
         if (
             current_direction is not None
@@ -870,7 +1090,8 @@ def _classic_get_grouped_dicoms(dicom_input: list[FileDataset]) -> list[list[Fil
             stack_index += 1
         else:
             previous_position = np.array(dicom_.get("ImagePositionPatient", 0))
-            previous_direction = current_direction
+            if current_direction is not None:
+                previous_direction = current_direction
 
         if stack_index >= len(grouped_dicoms):
             grouped_dicoms.append([])
@@ -884,6 +1105,33 @@ def _classic_get_grouped_dicoms(dicom_input: list[FileDataset]) -> list[list[Fil
             out.append(i)
     if len(others) != 0:
         out.append(others)
+
+    # Re-attach the other echoes to whichever stack their spatial position
+    # belongs to. Only meaningful when the input is genuinely multi-echo AND
+    # the stack detector actually split into more than one group.
+    if per_echo and len(out) > 1:
+
+        def _key(d: FileDataset) -> tuple:
+            return tuple(float(v) for v in d.get("ImagePositionPatient", (0.0, 0.0, 0.0)))
+
+        pos_to_stack: dict[tuple, int] = {}
+        for i, group in enumerate(out):
+            for d in group:
+                pos_to_stack[_key(d)] = i
+        detection_keep = min(k for k in per_echo if k > 0)
+        for en, echo_dicoms in per_echo.items():
+            if en == detection_keep:
+                continue  # already placed via the detection set
+            for d in echo_dicoms:
+                idx = pos_to_stack.get(_key(d))
+                if idx is not None:
+                    out[idx].append(d)
+                elif out:
+                    # Unknown position: dump into the catch-all "others" tail
+                    out[-1].append(d)
+    elif per_echo and len(out) == 1:
+        # Single-stack multi-echo: return every echo in one group.
+        out = [list(dicom_input)]
     return out
 
 
@@ -949,6 +1197,7 @@ def extract_dicom_folder(
     censor_list: list | None = None,
     skip_already_extracted: bool = True,
     force_rescan: bool = False,
+    skip_formats: set[str] | None = None,
 ) -> dict:
     """Extract DICOM files from a directory or list of directories, convert them to NIfTI format, and store the output.
 
@@ -966,7 +1215,13 @@ def extract_dicom_folder(
         validate_orientation (bool, optional): Enable ``dicom2nifti`` orientation validation. Defaults to True.
         validate_orthogonal (bool, optional): Enable ``dicom2nifti`` orthogonality validation. Defaults to False.
         validate_slice_increment (bool, optional): Enable ``dicom2nifti`` slice-increment validation. Defaults to True.
-        n_cpu (int, optional): Number of CPU cores to use for parallel processing. Defaults to 1 (sequential).
+        n_cpu (int | None, optional): Threading policy for per-series conversion.
+            ``1`` (default) processes series sequentially. ``>1`` uses that many
+            worker threads. ``None`` hands ``max_workers=None`` to
+            :class:`concurrent.futures.ThreadPoolExecutor`, whose Python default
+            is ``min(32, os.cpu_count() + 4)`` — effectively "use all cores, up
+            to 32". Note that DICOM extraction is I/O-heavy, so threads (not
+            processes) tend to be the right knob.
         override_subject_name (Callable[[dict, Path], str] | None, optional): Callable receiving the parsed DICOM
             header dict and file path; returns the subject id to use in the BIDS output. Defaults to None.
         skip_localizer (bool, optional): If True, skip series identified as scanner localisers. Defaults to True.
@@ -980,6 +1235,12 @@ def extract_dicom_folder(
             added subjects. Defaults to True.
         force_rescan (bool, optional): If True, bypass the fast-skip marker and re-read every
             DICOM. Defaults to False.
+        skip_formats (set[str] | None, optional): BIDS format labels to drop
+            entirely (no JSON, no sidecar, no NIfTI). Defaults to
+            :data:`_DEFAULT_SKIP_FORMATS` = ``{"pr"}`` — Grayscale Softcopy
+            Presentation State DICOMs carry no pixel data and only reference
+            other series, so they normally contribute nothing to a downstream
+            pipeline. Pass ``set()`` to keep them.
 
     Returns:
         dict: A dictionary with keys representing DICOM series and values as paths to the generated NIfTI files.
@@ -1001,18 +1262,16 @@ def extract_dicom_folder(
 
         if str(dicom_path).endswith(".pkl"):
             continue
-        # Fast-skip: identical file listing since last successful extraction
-        # → no DICOM headers read for this folder. Zips are excluded because
-        # their inner file list isn't visible without unpacking.
-        if (
-            skip_already_extracted
-            and not force_rescan
-            and not str(dicom_path).endswith(".zip")
-            and Path(dicom_path).is_dir()
-            and _is_already_extracted(Path(dicom_path), Path(dataset_path_out))
-        ):
+        # Fast-skip: identical fingerprint since the last successful extraction
+        # → no DICOM headers read for this source. Folders fingerprint their
+        # rglob'd file list; zips fingerprint (size, mtime_ns) of the archive
+        # itself (see `_source_fingerprint`).
+        if skip_already_extracted and not force_rescan and _is_already_extracted(Path(dicom_path), Path(dataset_path_out)):
             logger.print(f"Skip {dicom_path} (already extracted; fingerprint matches)", verbose=verbose)
             continue
+        # Track the original source path so the marker below is keyed to the
+        # zip itself, not the ephemeral unpack directory.
+        source_for_marker = Path(dicom_path)
         temp_dir = None
         try:
             if str(dicom_path).endswith(".zip"):
@@ -1039,6 +1298,7 @@ def extract_dicom_folder(
                     skip_localizer=skip_localizer,
                     parent=parent,
                     censor_list=censor_list,
+                    skip_formats=skip_formats,
                 )
 
             # Process in parallel or sequentially based on n_cpu
@@ -1061,14 +1321,15 @@ def extract_dicom_folder(
                     except Exception:
                         logger.print_error()
 
-            # Record the fingerprint only when the whole folder went through
-            # without an exception AND the source is a real directory (not a
-            # zip mount that's about to disappear). Errors above are caught
-            # per-series so this fires even if individual series were skipped
-            # (e.g. localizers) — but not if `_read_dicom_files` itself raised
-            # (that path lands in the outer `finally` without reaching here).
-            if skip_already_extracted and temp_dir is None and Path(dicom_path).is_dir():
-                _write_extract_marker(Path(dicom_path), Path(dataset_path_out))
+            # Record the fingerprint only when the whole source went through
+            # without an exception. For zips the marker is keyed to the zip
+            # file itself (size+mtime) so the ephemeral temp_dir is fine;
+            # for folders it's keyed to the folder. Per-series errors above
+            # are caught inside the loop so this fires even if individual
+            # series were skipped (e.g. localizers) — but not if
+            # `_read_dicom_files` itself raised.
+            if skip_already_extracted:
+                _write_extract_marker(source_for_marker, Path(dataset_path_out))
 
         finally:
             if temp_dir is not None:
