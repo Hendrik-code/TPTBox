@@ -1,18 +1,56 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Literal
 from warnings import warn
 
 import numpy as np
 from numpy.linalg import norm
 
 from TPTBox import NII, POI, Print_Logger, calc_poi_from_subreg_vert
+from TPTBox.core.np_utils import np_angle_between
 from TPTBox.core.poi_fun._help import make_spine_plot, sacrum_w_o_direction
-from TPTBox.core.vert_constants import DIRECTIONS, Location, _plane_dict, never_called
+from TPTBox.core.vert_constants import DIRECTIONS, Location, Vertebra_Instance, _plane_dict, never_called
 
 Vertebra_Orientation = tuple[np.ndarray, np.ndarray, np.ndarray]
 _log = Print_Logger()
 #### Directions ####
+
+
+def _create_plane_mask(
+    shape: tuple[int, int, int], start_point: np.ndarray, normal_vector: np.ndarray, axis: int, dim1: int, dim2: int
+) -> np.ndarray:
+    """Rasterize the plane through ``start_point`` with normal ``normal_vector`` into a voxel mask.
+
+    For every ``(dim1, dim2)`` grid position the position along ``axis`` is solved from the plane
+    equation. Grid positions whose solution falls outside the volume are dropped. Clamping them into
+    the volume instead (as this code used to do) collapses them onto slice 0 of ``axis``, which lays a
+    spurious sheet across the top of the volume and contaminates whatever the plane is intersected with.
+
+    Args:
+        shape: Shape of the volume to rasterize into.
+        start_point: A point lying on the plane, in voxel coordinates.
+        normal_vector: Plane normal. Must not be perpendicular to ``axis``.
+        axis: Index of the axis that is solved for (the S/I axis).
+        dim1: First of the two axes spanning the sampling grid.
+        dim2: Second of the two axes spanning the sampling grid.
+
+    Returns:
+        ``uint8`` array of ``shape`` that is 1 on the rasterized plane and 0 elsewhere.
+    """
+    z_max = shape[axis] - 1
+    shift_total = -start_point.dot(normal_vector)
+    xx, yy = np.meshgrid(range(shape[dim1]), range(shape[dim2]), indexing="ij")
+    zz = (-normal_vector[dim1] * xx - normal_vector[dim2] * yy - shift_total) * 1.0 / normal_vector[axis]
+    inside = (zz >= 0) & (zz <= z_max)
+    plane_coords = np.zeros([*xx.shape, 3])
+    plane_coords[:, :, axis] = np.clip(zz, 0, z_max)
+    plane_coords[:, :, dim1] = xx
+    plane_coords[:, :, dim2] = yy
+    plane_coords = plane_coords.astype(int)[inside]
+    select = np.zeros(shape, dtype=np.uint8)
+    select[plane_coords[:, 0], plane_coords[:, 1], plane_coords[:, 2]] = 1
+    return select
 
 
 #### Vertebra Direction ###
@@ -24,11 +62,24 @@ def calc_orientation_of_vertebra_PIR(
     source_subreg_point_id=Location.Vertebra_Corpus,
     subreg_id=Location.Spinal_Canal,
     do_fill_back: bool = False,
-    spine_plot_path: None | str = None,
+    spine_plot_path: str | None = None,
     save_normals_in_info=False,
     _orientation_version=0,
+    method: Literal["spline", "endplate"] = "endplate",
 ) -> tuple[POI, NII | None]:
-    """Calculate the orientation of vertebrae using PIR (Posterior, Inferior, Right) DIRECTIONS.
+    """Compute the PIR (Posterior–Inferior–Right) orientation for each vertebra.
+
+    The algorithm proceeds in four stages:
+
+    1. Estimate the inferior direction from vertebral endplates when available,
+       otherwise fall back to the local spline tangent.
+    2. Construct a plane through the vertebral corpus orthogonal to the
+       inferior direction and intersect it with the posterior vertebral
+       structures.
+    3. Compute the posterior direction from the corpus to the intersection
+       centroid.
+    4. Construct the PIR coordinate frame and store the corresponding
+       direction landmarks.
 
     Args:
         poi (POI | None): Point of interest. If None, computed from `vert` and `subreg`.
@@ -40,6 +91,9 @@ def calc_orientation_of_vertebra_PIR(
         do_fill_back (bool, optional): Whether to fill back. Defaults to False.
         spine_plot_path (None | str, optional): Path to spine plot. Defaults to None.
         save_normals_in_info (bool, optional): Whether to save normals in info. Defaults to False.
+        method (Literal["spline", "endplate"], optional): Strategy for the inferior-direction estimate — ``"endplate"``
+            uses vertebral endplate landmarks when available, ``"spline"`` uses the local spinal spline tangent.
+            Defaults to ``"endplate"``.
 
     Returns:
         Tuple[POI, NII | None]: Point of interest and filled back NII.
@@ -49,12 +103,61 @@ def calc_orientation_of_vertebra_PIR(
 
     if _orientation_version != 0:
         warn("out dated _orientation_version; Set is to 0", stacklevel=1)
-    # Step 1 compute the up direction
+    # ---------------------------------------------------------------------
+    # 1. Compute inferior directions
+    # ---------------------------------------------------------------------
     # check if label 50 is already computed in POI
     if poi is None or spline_subreg_point_id.value not in poi.keys_subregion():
         poi = calc_poi_from_subreg_vert(vert, subreg, extend_to=poi, subreg_id=spline_subreg_point_id)
     # compute Spline in ISO space
     poi_iso = poi.rescale().reorient()
+    vert_keys = list(poi.keys_region())
+    down_vector: dict[int, np.ndarray] = {}
+
+    if method == "endplate":
+        for key in poi_iso.keys_region():
+            if (key, Location.Vertebra_Corpus.value) not in poi_iso:
+                continue
+
+            corpus = np.asarray(poi_iso[key, Location.Vertebra_Corpus], float)
+            directions = []
+
+            if (key, Location.Vertebral_Body_Endplate_Inferior.value) in poi_iso:
+                inf = np.asarray(poi_iso[key, Location.Vertebral_Body_Endplate_Inferior], float)
+                v = inf - corpus
+                if norm(v) > 1e-6:
+                    directions.append(v / norm(v))
+
+            if (key, Location.Vertebral_Body_Endplate_Superior.value) in poi_iso:
+                sup = np.asarray(poi_iso[key, Location.Vertebral_Body_Endplate_Superior], float)
+                v = corpus - sup
+                if norm(v) > 1e-6:
+                    directions.append(v / norm(v))
+
+            if len(directions) == 1:
+                down_vector[key] = directions[0]
+            elif len(directions) == 2:
+                down = directions[0] + directions[1]
+                if norm(down) > 1e-6:
+                    down_vector[key] = down / norm(down)
+    ### Add last endplate to spline
+    last_vert = 25
+    while last_vert not in vert_keys:
+        last_vert -= 1
+        if last_vert == 20:
+            last_vert = None
+            break
+    max_vert_key = max(vert_keys)
+    if (Vertebra_Instance.S1.value, Location.Vertebral_Body_Endplate_Superior.value) in poi_iso:
+        poi_iso[max_vert_key + 1, spline_subreg_point_id] = poi_iso[
+            (Vertebra_Instance.S1.value, Location.Vertebral_Body_Endplate_Superior.value)
+        ]
+        max_vert_key += 1
+    if last_vert is not None and (last_vert, Location.Vertebral_Body_Endplate_Inferior.value) in poi_iso:
+        poi_iso[max_vert_key + 1, spline_subreg_point_id] = poi_iso[(last_vert, Location.Vertebral_Body_Endplate_Inferior.value)]
+        max_vert_key += 1
+    #####
+    # spline:
     body_spline, body_spline_der = poi_iso.fit_spline(location=spline_subreg_point_id, vertebra=True)
     # Step 2 compute the back direction by Spinosus_Process or arcus
     intersection_target = [Location.Spinosus_Process, Location.Arcus_Vertebrae]
@@ -79,14 +182,17 @@ def calc_orientation_of_vertebra_PIR(
     out = target_labels * 0
     fill_back_nii = subreg_iso.copy() if do_fill_back else None
     fill_back = out.copy() if do_fill_back else None
-    down_vector: dict[int, np.ndarray] = {}
     # Draw a plain with the up_vector an cut it with intersection_target
     for reg_label, _, cords in poi_iso.extract_subregion(source_subreg_point_id).items():
         # calculate_normal_vector
-        distances = np.sqrt(np.sum((body_spline - np.array(cords)) ** 2, -1))
-        normal_vector_post = body_spline_der[np.argmin(distances)]
-        normal_vector_post /= np.linalg.norm(normal_vector_post)
-        down_vector[reg_label] = normal_vector_post.copy()
+        if reg_label in down_vector:
+            normal_vector_down = down_vector[reg_label]
+        else:
+            # spline fallback
+            distances = np.sqrt(np.sum((body_spline - np.array(cords)) ** 2, -1))
+            normal_vector_down = body_spline_der[np.argmin(distances)]
+            normal_vector_down /= np.linalg.norm(normal_vector_down)
+            down_vector[reg_label] = normal_vector_down.copy()
         # create_plane_coords
         # The main axis will be treated differently
         idx = [_plane_dict[i] for i in subreg_iso.orientation]
@@ -96,23 +202,8 @@ def calc_orientation_of_vertebra_PIR(
         dims.remove(axis)
         dim1, dim2 = dims
         # Make a plane through start_point with the norm of "normal_vector", which is shifted by "shift" along the norm
-        start_point_np = np.array(cords)
-        start_point_np[axis] = start_point_np[axis]
-        shift_total = -start_point_np.dot(normal_vector_post)
-        xx, yy = np.meshgrid(range(subreg_iso.shape[dim1]), range(subreg_iso.shape[dim2]))  # type: ignore
-        zz = (-normal_vector_post[dim1] * xx - normal_vector_post[dim2] * yy - shift_total) * 1.0 / normal_vector_post[axis]
-        z_max = subreg_iso.shape[axis] - 1
-        zz[zz < 0] = 0
-        zz[zz > z_max] = 0
-        plane_coords = np.zeros([xx.shape[0], xx.shape[1], 3])
-        plane_coords[:, :, axis] = zz
-        plane_coords[:, :, dim1] = xx
-        plane_coords[:, :, dim2] = yy
-        plane_coords = plane_coords.astype(int)
-        # create_subregion
-        # 1 where the selected subreg is, else 0
-        select = subreg_iso.get_array() * 0
-        select[plane_coords[:, :, 0], plane_coords[:, :, 1], plane_coords[:, :, 2]] = 1
+        # create_subregion: 1 where the selected subreg is, else 0
+        select = _create_plane_mask(subreg_iso.shape, np.array(cords), normal_vector_down, axis, dim1, dim2)  # type: ignore
         out[out == 0] += (target_labels * select * reg_label)[out == 0]
 
         if fill_back is not None:
@@ -126,8 +217,9 @@ def calc_orientation_of_vertebra_PIR(
             cond = np.where(curr_slice != 0)
             x_slice[cond] = np.minimum(curr_slice[cond], x_slice[cond])
             fill_back[i] = x_slice
-        subreg_sar.set_array(fill_back).reorient(poi.orientation).rescale_(poi.zoom)
-        arr = subreg_sar.get_array()
+        # set_array/reorient are out-of-place: the chained result must be captured, otherwise
+        # `arr` is still in (S,A,R) at iso spacing. Mirrors calc_center_spinal_cord below.
+        arr = subreg_sar.set_array(fill_back).reorient(poi.orientation).rescale_(poi.zoom).get_array()
         fill_back_nii.set_array_(arr)
 
     ret = calc_centroids(subreg_iso.set_array(out), second_stage=subreg_id, extend_to=poi_iso.copy(), inplace=True)
@@ -143,18 +235,23 @@ def calc_orientation_of_vertebra_PIR(
             b = np.array(ret[vert_id : source_subreg_point_id.value]) - 1
             normal_vector_post = a - b
             normal_vector_post = normal_vector_post / norm(normal_vector_post)
+            # The posterior direction is a two-point estimate while the inferior direction comes from the body
+            # spline; nothing ties the two together, so they end up a degree or two off perpendicular and the
+            # cross product is shorter than 1. Orthonormalize -- keeping the smoother spline direction fixed --
+            # so the triad is a proper basis. get_vert_direction_matrix() inverts it.
+            normal_vector_post = normal_vector_post - normal_down * normal_vector_post.dot(normal_down)
+            normal_vector_post = normal_vector_post / norm(normal_vector_post)
+            normal_right = np.cross(normal_vector_post, normal_down)
             poi._vert_orientation_pir[vert_id] = (
                 normal_vector_post,
                 normal_down,
-                np.cross(normal_vector_post, normal_down),
+                normal_right,
             )
 
             ### MAKE DIRECTIONS POIs ###
             ret[vert_id, Location.Vertebra_Direction_Posterior] = tuple(ret[vert_id, source_subreg_point_id] + normal_vector_post * 10)
             ret[vert_id, Location.Vertebra_Direction_Inferior] = tuple(ret[vert_id, source_subreg_point_id] + normal_down * 10)
-            ret[vert_id, Location.Vertebra_Direction_Right] = tuple(
-                ret[vert_id:source_subreg_point_id] + np.cross(normal_vector_post, normal_down * 10)
-            )
+            ret[vert_id, Location.Vertebra_Direction_Right] = tuple(ret[vert_id, source_subreg_point_id] + normal_right * 10)
         except KeyError as e:
             if vert_id not in sacrum_w_o_direction:
                 _log.on_fail(f"calc_orientation_of_vertebra_PIR {vert_id=} - KeyError=", e)
@@ -266,6 +363,7 @@ def get_vert_direction_PIR(poi: POI, vert_id: int, do_norm: bool = True, to_pir:
     """
     if vert_id in poi._vert_orientation_pir and to_pir:
         return poi._vert_orientation_pir[vert_id]  # Elusive buffer of iso/PIR directions.
+    cache_owner = poi  # `poi` is rebound below; the cache belongs on the object we were called with
     poi = poi.extract_subregion(
         Location.Vertebra_Corpus,
         Location.Vertebra_Direction_Posterior,
@@ -284,7 +382,7 @@ def get_vert_direction_PIR(poi: POI, vert_id: int, do_norm: bool = True, to_pir:
     right = np.array(poi[vert_id : Location.Vertebra_Direction_Right])
     out = n(post - center), n(down - center), n(right - center)
     if to_pir:
-        poi._vert_orientation_pir[vert_id] = out
+        cache_owner._vert_orientation_pir[vert_id] = out
 
     return out
 
@@ -310,6 +408,32 @@ def get_vert_direction_matrix(poi: POI, vert_id: int, to_pir: bool = False) -> t
     from_vert_orient = np.stack([P, I, R], axis=1)
     to_vert_orient = np.linalg.inv(from_vert_orient)
     return to_vert_orient, from_vert_orient
+
+
+def get_vert_direction_angles(poi: POI, vert_id: int, to_pir: bool = False, degrees: bool = True) -> tuple[float, float, float]:
+    """Return how far a vertebra's local frame is tilted from the global PIR axes.
+
+    Each of the vertebra's Posterior/Inferior/Right direction vectors is compared with the
+    corresponding global axis, giving one angle per axis. Useful as a quality check: a healthy
+    frame stays within a few degrees of orthogonal to its neighbours, whereas an implausibly
+    large angle (e.g. a "posterior" direction more than 90 degrees from global posterior)
+    indicates that the direction landmarks are wrong.
+
+    Args:
+        poi: ``POI`` object with pre-computed vertebra direction landmarks.
+        vert_id: Vertebra identifier (integer label).
+        to_pir: Whether to convert the POI to isotropic PIR space before computing.
+            Defaults to ``False``.
+        degrees: Return the angles in degrees rather than radians. Defaults to ``True``.
+
+    Returns:
+        Tuple of three angles ``(posterior, inferior, right)`` between the vertebra's direction
+        vectors and the global PIR axes.
+    """
+    directions = get_vert_direction_PIR(poi, vert_id=vert_id, to_pir=to_pir)
+    global_pir = (np.array([1, 0, 0]), np.array([0, 1, 0]), np.array([0, 0, 1]))
+    a, b, c = (np_angle_between(v, g, degrees=degrees) for v, g in zip(directions, global_pir))
+    return a, b, c
 
 
 def calc_center_spinal_cord(
@@ -386,23 +510,8 @@ def calc_center_spinal_cord(
         dims.remove(axis)
         dim1, dim2 = dims
         # Make a plane through start_point with the norm of "normal_vector", which is shifted by "shift" along the norm
-        start_point_np = np.array(cords)
-        start_point_np[axis] = start_point_np[axis]
-        shift_total = -start_point_np.dot(normal_vector)
-        xx, yy = np.meshgrid(range(subreg_iso.shape[dim1]), range(subreg_iso.shape[dim2]))  # type: ignore
-        zz = (-normal_vector[dim1] * xx - normal_vector[dim2] * yy - shift_total) * 1.0 / normal_vector[axis]
-        z_max = subreg_iso.shape[axis] - 1
-        zz[zz < 0] = 0
-        zz[zz > z_max] = 0
-        plane_coords = np.zeros([xx.shape[0], xx.shape[1], 3])
-        plane_coords[:, :, axis] = zz
-        plane_coords[:, :, dim1] = xx
-        plane_coords[:, :, dim2] = yy
-        plane_coords = plane_coords.astype(int)
-        # create_subregion
-        # 1 where the selected subreg is, else 0
-        select = subreg_iso.get_array() * 0
-        select[plane_coords[:, :, 0], plane_coords[:, :, 1], plane_coords[:, :, 2]] = 1
+        # create_subregion: 1 where the selected subreg is, else 0
+        select = _create_plane_mask(subreg_iso.shape, np.array(cords), normal_vector, axis, dim1, dim2)  # type: ignore
         out += target_labels * select * reg_label
 
         if fill_back is not None:

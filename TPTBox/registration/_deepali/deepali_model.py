@@ -23,10 +23,8 @@ from TPTBox.core.compat import zip_strict
 from TPTBox.core.internal.deep_learning_utils import DEVICES, get_device
 from TPTBox.core.nii_poi_abstract import Grid as TPTBox_Grid
 from TPTBox.core.nii_poi_abstract import Has_Grid
-from TPTBox.registration._deepali.deepali_trainer import (
-    LOSS,
-    DeepaliPairwiseImageTrainer,
-)
+from TPTBox.core.poi_fun.poi_global import POI_Global
+from TPTBox.registration._deepali.deepali_trainer import LOSS, DeepaliPairwiseImageTrainer
 
 
 def center_of_mass(tensor: torch.Tensor) -> torch.Tensor:
@@ -78,6 +76,85 @@ def _load_config(path: str | Path) -> dict:
 default_device = torch.device("cuda:0")
 
 
+def _is_poi_like(x) -> bool:
+    """True iff ``x`` looks like a TPTBox POI (or POI_Global)."""
+    if x is None:
+        return False
+    try:
+        return isinstance(x, (POI, POI_Global))
+    except Exception:
+        return False
+
+
+def _poi_to_target_cube_tensor(
+    poi_local: POI | POI_Global,
+    keys: list[tuple[int, int]],
+    target_grid: Has_Grid,
+    align_corners: bool,
+) -> torch.Tensor:
+    """Convert POI landmarks (moving or fixed) into target-grid cube coordinates.
+
+    The DeepALI trainer expects both source and target landmark tensors to live
+    in the transform's grid axes (target grid CUBE_CORNERS if
+    ``align_corners=True``). We first resolve each landmark's world coordinate
+    – either the POI's own local→global for a ``POI`` in its native voxel space,
+    or the pre-computed world coord for a ``POI_Global`` – and then map that
+    world point into ``target_grid``'s cube coordinates using
+    :meth:`deepali.core.Grid.world_to_cube`.
+    """
+    from deepali.core import Axes as _Axes  # noqa: PLC0415
+
+    tgrid = target_grid.to_deepali_grid(align_corners)
+    axes_cube = _Axes.CUBE_CORNERS if tgrid.align_corners() else _Axes.CUBE
+    # Get LPS world coords for each key
+    world_lps: list[tuple[float, float, float]] = []
+    if isinstance(poi_local, POI_Global):
+        for k in keys:
+            w = poi_local[k]
+            if poi_local.itk_coords:  # already LPS
+                world_lps.append((float(w[0]), float(w[1]), float(w[2])))
+            else:  # RAS -> LPS
+                world_lps.append((-float(w[0]), -float(w[1]), float(w[2])))
+    else:  # regular POI: voxel -> world (RAS) -> LPS
+        for k in keys:
+            v = poi_local[k]
+            ras = poi_local.local_to_global(v)
+            world_lps.append((-float(ras[0]), -float(ras[1]), float(ras[2])))
+    world_t = torch.as_tensor(world_lps, dtype=torch.float32)
+    # world -> target cube
+    cube = tgrid.transform_points(world_t.unsqueeze(0), axes=_Axes.WORLD, to_axes=axes_cube, decimals=None)
+    return cube  # (1, N, 3)
+
+
+def _match_poi_landmarks_for_deepali(
+    source_landmarks,
+    target_landmarks,
+    target_grid: Has_Grid,
+    align_corners: bool,
+) -> tuple:
+    """Convert paired POI landmark sets into DeepALI landmark tensors.
+
+    * If either side is missing or is not a POI/POI_Global, both are passed
+      through unchanged (existing tensor behavior).
+    * When both are POI-like, only keys present in *both* are used.
+    * Both are converted to shape ``(1, N, D)`` tensors in target-grid cube
+      coordinates so they can be compared with :class:`LandmarkPointDistance`.
+    """
+    if not (_is_poi_like(source_landmarks) and _is_poi_like(target_landmarks)):
+        return source_landmarks, target_landmarks
+    src_keys = set(source_landmarks.keys())
+    tgt_keys = set(target_landmarks.keys())
+    shared = sorted(src_keys & tgt_keys)
+    if not shared:
+        raise ValueError(
+            "General_Registration: POI landmarks provided but no shared IDs "
+            f"between source ({len(src_keys)}) and target ({len(tgt_keys)}) sets."
+        )
+    src_t = _poi_to_target_cube_tensor(source_landmarks, shared, target_grid, align_corners)
+    tgt_t = _poi_to_target_cube_tensor(target_landmarks, shared, target_grid, align_corners)
+    return src_t, tgt_t
+
+
 def _warp_image(
     source_image: deepaliImage,
     target_grid: Deepali_Grid,
@@ -85,6 +162,7 @@ def _warp_image(
     mode: str = "linear",
     device: torch.device = default_device,
     inverse: bool = False,
+    source_grid: Deepali_Grid | None = None,
 ) -> torch.Tensor:
     """Warp a source image to the target grid using the given spatial transform.
 
@@ -95,6 +173,9 @@ def _warp_image(
         mode: Interpolation mode (``"linear"`` or ``"nearest"``).
         device: PyTorch device on which warping is performed.
         inverse: Apply the inverse transform when ``True``.
+        source_grid: Grid the ``source_image`` lives on. When ``None`` (legacy
+            behavior), the source is assumed to share ``target_grid`` – only
+            correct when target and moving image are already in the same space.
 
     Returns:
         Warped image data as a ``torch.Tensor``.
@@ -103,7 +184,7 @@ def _warp_image(
         transform = transform.inverse(update_buffers=True)
     warp_func = TransformImage(
         target=target_grid,
-        source=target_grid,
+        source=target_grid if source_grid is None else source_grid,
         sampling=mode,
         padding=source_image.min(),
     ).to(device)
@@ -177,11 +258,17 @@ def _warp_points(
     """Warp points using a spatial transform.
 
     Args:
-        points (list): List of points to warp: (b,n) b points with n coordinates.
+        points (list): List of points to warp: (b, n) b points with n coordinates.
+        axes (Axes): Coordinate system that ``points`` are expressed in.
+        to_axes (Axes): Coordinate system requested for the returned points.
+        grid (Deepali_Grid): Grid used as the reference for ``axes``.
+        to_grid (Deepali_Grid): Grid used as the reference for ``to_axes``.
         transform (SpatialTransform): Spatial transform to apply.
-        align_corners (bool): Whether to align corners during warping.
-        device (torch.device, optional): Device to perform computation on. Defaults to default_device.
+        device (torch.device, optional): Device to perform computation on. Defaults to ``default_device``.
         inverse (bool, optional): Whether to apply the inverse transform. Defaults to True.
+
+    Returns:
+        torch.Tensor: The warped points on CPU.
     """
     with torch.inference_mode():
         data = torch.Tensor(points)
@@ -195,13 +282,24 @@ def _warp_points(
 
 
 class General_Registration(DeepaliPairwiseImageTrainer):
-    """A class for performing deformable registration between a fixed and moving image.
+    """Deep-learning-based pairwise image registration built on top of DeepALI.
+
+    Wraps :class:`DeepaliPairwiseImageTrainer` with TPTBox ``NII``/``POI`` I/O.
+    The registration flavour (rigid / affine / SVFFD / …) is chosen via
+    ``transform_name`` and matched deepali transform class; the default
+    ``"SVFFD"`` produces a non-rigid B-spline transform. Registration runs in
+    the constructor when ``auto_run=True``; results are then applied through
+    :meth:`transform_nii`, :meth:`transform_poi`, or :meth:`transform_points`.
 
     Attributes:
-        transform (torch.Tensor): The transformation matrix resulting from the registration.
-        ref_nii (NII): Reference NII object used for registration.
-        grid (torch.Tensor): Target grid for image warping.
-        mov (NII): Processed version of the moving image.
+        target_grid (Grid): Grid of the fixed / reference image the transform
+            is defined on. Used as the default target grid in
+            :meth:`transform_nii` / :meth:`transform_poi`.
+        input_grid (Grid): Grid of the moving image (before resampling).
+        source_landmarks_poi (POI | None): Landmarks on the moving image, if any.
+        target_landmarks_poi (POI | None): Landmarks on the fixed image, if any.
+        transform (SpatialTransform): Fitted spatial transform (available after
+            training completes; inherited from the trainer base class).
     """
 
     def __init__(
@@ -213,8 +311,8 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         reference_image: Image_Reference | None = None,
         source_pset=None,
         target_pset=None,
-        source_landmarks: POI | None = None,
-        target_landmarks: POI | None = None,
+        source_landmarks: POI | POI_Global | None = None,
+        target_landmarks: POI | POI_Global | None = None,
         # source_seg: Optional[Union[Image, PathStr]] = None,  # Masking the registration source
         # target_seg: Optional[Union[Image, PathStr]] = None,  # Masking the registration target
         device: Union[torch.device, str, int] | None = None,
@@ -251,7 +349,27 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         loss_terms: list[LOSS | str] | dict[str, LOSS] | dict[str, str] | dict[str, tuple[str, dict]] | None = None,
         weights: list[float] | dict[str, float | list[float]] | None = None,
         auto_run=True,
+        same_space: bool = True,
+        landmarks_align_corners: bool = True,
     ) -> None:
+        """Additional parameters (see class docstring for the shared ones).
+
+        Args:
+            same_space: When True (default, legacy behavior) the moving image
+                is assumed to live on the fixed grid: ``transform_nii`` treats the
+                source cube as the target cube, which is only correct when both
+                grids match. Set to False to keep the fixed and moving images on
+                their own grids; ``transform_nii`` then feeds the correct source
+                grid to :class:`TransformImage` so different sizes/orientations/
+                spacings are handled.
+            source_landmarks / target_landmarks: Either raw DeepALI tensors as
+                before or TPTBox ``POI`` / ``POI_Global`` objects. When POIs are
+                supplied on both sides, only shared IDs are used and the point
+                sets are converted to target-grid cube coordinates automatically
+                (used with a ``LandmarkPointDistance`` loss term).
+            landmarks_align_corners: ``align_corners`` used to convert POI
+                landmarks to target-grid cube coordinates.
+        """
         if device is None:
             # self.gpu = gpu
             # self.ddevice: DEVICES = ddevice
@@ -269,19 +387,29 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         ## Load configuration and perform registration
         self.target_grid = fix.to_gird()
         self.input_grid = mov.to_gird()
-        self.source_landmarks_poi = source_landmarks
-        self.target_landmarks_poi = target_landmarks
+        self.same_space = same_space
+        self.landmarks_align_corners = landmarks_align_corners
+        # Convert POI landmarks (if provided) into deepali target-cube tensors.
+        self.source_landmarks_poi = source_landmarks if _is_poi_like(source_landmarks) else None
+        self.target_landmarks_poi = target_landmarks if _is_poi_like(target_landmarks) else None
+        source_landmarks_t, target_landmarks_t = _match_poi_landmarks_for_deepali(
+            source_landmarks,
+            target_landmarks,
+            target_grid=self.target_grid,
+            align_corners=landmarks_align_corners,
+        )
         self._is_inverted = False
 
         super().__init__(
             source=source.to_deepali(),
             target=fix.to_deepali(),
-            source_seg=to_nii(moving_seg, True).to_deepali() if fixed_seg is not None else None,
-            target_seg=to_nii(fixed_seg, True).to_deepali() if moving_seg is not None else None,
+            # each branch used to test the *other* variable
+            source_seg=to_nii(moving_seg, True).to_deepali() if moving_seg is not None else None,
+            target_seg=to_nii(fixed_seg, True).to_deepali() if fixed_seg is not None else None,
             source_pset=source_pset,
             target_pset=target_pset,
-            source_landmarks=source_landmarks,
-            target_landmarks=target_landmarks,
+            source_landmarks=source_landmarks_t,
+            target_landmarks=target_landmarks_t,
             device=device,
             target_mask=to_nii(fixed_mask, True).resample_from_to(fix, verbose=False).to_deepali() if fixed_mask is not None else None,
             source_mask=to_nii(moving_mask, True).to_deepali() if moving_mask is not None else None,
@@ -441,6 +569,11 @@ class General_Registration(DeepaliPairwiseImageTrainer):
 
         Args:
             img (NII): The NII image to be transformed.
+            gpu (int | None, optional): GPU index override. Defaults to the device used during registration.
+            ddevice (DEVICES | None, optional): Device family override (e.g. ``"cuda"``). Defaults to the registration device.
+            target (Has_Grid | None, optional): Target grid to resample the output into. Defaults to ``self.target_grid``.
+            align_corners (bool, optional): Whether to align corners when converting grids to Deepali grids. Defaults to True.
+            inverse (bool, optional): Apply the inverse transform. XOR-combined with ``self._is_inverted``. Defaults to False.
 
         Returns:
             NII: The transformed image as an NII object.
@@ -451,6 +584,10 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         target_grid_nii = self.target_grid if target is None else target
         target_grid = target_grid_nii.to_deepali_grid(align_corners)
         source_image = img.resample_from_to(self.input_grid, mode="constant").to_deepali()
+        # When the fixed/moving images are NOT on the same grid, feed the true
+        # source grid to _warp_image so SampleImage does the correct target→
+        # source cube conversion. Otherwise keep the legacy behaviour.
+        source_grid_arg = None if getattr(self, "same_space", True) else self.input_grid.to_deepali_grid(align_corners)
         data = _warp_image(
             source_image,
             target_grid,
@@ -458,6 +595,7 @@ class General_Registration(DeepaliPairwiseImageTrainer):
             "nearest" if img.seg else "linear",
             device=device,
             inverse=inverse,
+            source_grid=source_grid_arg,
         ).squeeze()
         data: torch.Tensor = data.permute(*torch.arange(data.ndim - 1, -1, -1))  # type: ignore
         out = target_grid_nii.make_nii(data.detach().cpu().numpy(), img.seg)
@@ -555,9 +693,15 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         """Return a serialisable tuple of the registration state for pickling.
 
         Returns:
-            Tuple of ``(transform, target_grid, input_grid, _is_inverted)``.
+            Tuple of ``(transform, target_grid, input_grid, _is_inverted, same_space)``.
         """
-        return (self.transform, self.target_grid, self.input_grid, self._is_inverted)
+        return (
+            self.transform,
+            self.target_grid,
+            self.input_grid,
+            self._is_inverted,
+            getattr(self, "same_space", True),
+        )
 
     def save(self, path: str | Path) -> None:
         """Serialise the registration result to a pickle file.
@@ -595,11 +739,17 @@ class General_Registration(DeepaliPairwiseImageTrainer):
         Returns:
             Reconstructed ``General_Registration`` instance.
         """
-        transform, grid, mov, _is_inverted = w
+        # backwards-compat: older dumps have 4-tuples without same_space.
+        if len(w) == 4:
+            transform, grid, mov, _is_inverted = w
+            same_space = True
+        else:
+            transform, grid, mov, _is_inverted, same_space = w
         self = cls.__new__(cls)
         self.transform = transform
         self.target_grid = grid
         self.input_grid = mov
         self._is_inverted = _is_inverted
+        self.same_space = same_space
         self.device = get_device(ddevice, gpu)
         return self

@@ -7,6 +7,7 @@ from numpy.linalg import norm
 from scipy.spatial.distance import cdist
 
 from TPTBox import NII, POI, Logger_Interface, Print_Logger
+from TPTBox.core.np_utils import np_find_closest_point_index
 from TPTBox.core.poi_fun._help import to_local_np
 from TPTBox.core.poi_fun.vertebra_direction import _get_sub_array_by_direction, get_direction, get_vert_direction_matrix
 from TPTBox.core.vert_constants import COORDINATE, DIRECTIONS, Location
@@ -32,13 +33,9 @@ def get_nearest_neighbor(
         1-D integer array ``(x, y, z)`` of the voxel in ``sr_msk`` with label
         ``region_label`` that minimises the Euclidean distance to ``p``.
     """
-    if len(p.shape) == 1:
-        p = np.expand_dims(p, 1)
-    locs = np.where(sr_msk == region_label)
-    locs_array = np.array(list(locs)).T
-    distances = cdist(p.T, locs_array)
-
-    return locs_array[distances.argmin()]
+    p = np.asarray(p).reshape(-1)
+    locs_array = np.array(list(np.where(sr_msk == region_label))).T
+    return locs_array[np_find_closest_point_index(locs_array, p)]
 
 
 def max_distance_ray_cast_pixel_level(
@@ -61,6 +58,8 @@ def max_distance_ray_cast_pixel_level(
         normal_vector_points (Union[Tuple[Location, Location], DIRECTIONS], optional):
             Points defining the normal vector or the direction. Defaults to "R".
         start_point (Location, optional): Starting point of the ray. Defaults to Location.Vertebra_Corpus.
+        two_sided (bool, optional): If True, cast rays in both the positive and negative normal direction and keep
+            the further hit. Defaults to False.
         log (Logger_Interface, optional): Logger interface. Defaults to _log.
 
     Returns:
@@ -246,9 +245,7 @@ def project_pois_onto_set_of_points(poi: POI, point_set: list[COORDINATE]) -> PO
     point_arr = np.asarray(point_set)
 
     for r, s, c in poi.items():
-        distance_to_point = cdist_to_point(c, point_arr)
-        new_coord = point_arr[np.argmin(distance_to_point)]
-        poi_n[r, s] = new_coord
+        poi_n[r, s] = point_arr[np_find_closest_point_index(point_arr, c)]
 
     return poi_n
 

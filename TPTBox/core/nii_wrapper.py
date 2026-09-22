@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 import traceback
 import warnings
 import zlib
@@ -20,7 +19,12 @@ from typing_extensions import Self
 
 from TPTBox.core import bids_files
 from TPTBox.core.compat import zip_strict
-from TPTBox.core.internal.nii_help import _resample_from_to, secure_save
+from TPTBox.core.internal.nii_help import (
+    _arr_for_nifti1,
+    _nifti_safe_dtype,
+    _resample_from_to,
+    secure_save,
+)
 from TPTBox.core.nii_poi_abstract import Has_Grid
 from TPTBox.core.nii_wrapper_math import NII_Math
 from TPTBox.core.np_utils import (
@@ -41,8 +45,11 @@ from TPTBox.core.np_utils import (
     np_fill_holes,
     np_fill_holes_global_with_majority_voting,
     np_filter_connected_components,
+    np_filter_connected_components_by_bbox_chain,
     np_get_connected_components_center_of_mass,
     np_is_empty,
+    np_isin,
+    np_label_interface_thickness,
     np_map_labels,
     np_map_labels_based_on_majority_label_mask_overlap,
     np_point_coordinates,
@@ -72,7 +79,6 @@ from TPTBox.logger.log_file import Log_Type
 if TYPE_CHECKING:
     from stl.mesh import Mesh
     from torch import device
-MODES = Literal["constant", "nearest", "reflect", "wrap"]
 _unpacked_nii = tuple[np.ndarray, AFFINE, nib.nifti1.Nifti1Header]
 _formatwarning = warnings.formatwarning
 
@@ -97,6 +103,33 @@ _dtype_max = {
 }  # uint32 not supported by nifty
 _dtype_u = {"uint8", "uint16"}
 _dtype_non_u = {"int8", "int16"}
+
+
+def _smallest_int_dtype(arr: np.ndarray, unsigned: bool) -> type:
+    """Smallest integer dtype that can represent every value in ``arr``.
+
+    Both bounds are considered: picking on ``max()`` alone silently wraps negative
+    values, because the casts here use ``casting="unsafe"``.
+
+    Args:
+        arr: Array whose value range determines the dtype.
+        unsigned: If True, choose an unsigned type (requires ``arr.min() >= 0``).
+
+    Returns:
+        The selected numpy dtype.
+    """
+    mi = arr.min()
+    ma = arr.max()
+    if unsigned:
+        assert mi >= 0, f"an unsigned dtype requires non-negative values, but the minimum is {mi}"
+        for cand, limit in ((np.uint8, 256), (np.uint16, 65536), (np.uint32, 2**32)):
+            if ma < limit:
+                return cand
+        return np.uint64
+    for cand, limit in ((np.int8, 128), (np.int16, 32768), (np.int32, 2**31)):
+        if ma < limit and mi >= -limit:
+            return cand
+    return np.int64
 
 
 def _check_if_nifty_is_lying_about_its_dtype(self: NII):
@@ -132,13 +165,14 @@ def _check_if_nifty_is_lying_about_its_dtype(self: NII):
             stacklevel=3,
         )
 
-    out_dtype = dtype
-    if dtype == np.float16:
+    # Delegate the "which dtypes are unsupported on disk?" question to the
+    # canonical mapping in nii_help so we only ever maintain it in one place.
+    out_dtype = _nifti_safe_dtype(dtype)
+    if out_dtype != dtype:
         warnings.warn(
             f"Loaded NIfTY: incorrect dtype detected: {dtype} is not supported",
             stacklevel=3,
         )
-        out_dtype = np.float32
     if "float" in dtype_s and not change_dtype:
         pass
     elif positive and change_dtype:
@@ -174,6 +208,7 @@ Interpolateable_Image_Reference = Union[
 
 Proxy = tuple[tuple[int, int, int], np.ndarray]
 suppress_dtype_change_printout_in_set_array = False
+
 # fmt: off
 
 class NII(NII_Math):
@@ -224,7 +259,7 @@ class NII(NII_Math):
     Fields:
     - `nii`: The NIfTI image object
     - `seg`: A flag indicating whether the image is a segmentation mask
-    - `c_val`: The default value for the segmentation mask
+    - `c_val`: Background / fill value used for non-segmentation images (segmentations always use 0)
 
     Note: This class assumes that the input NIfTI images are in the NIfTI-1 format.
     """
@@ -240,7 +275,7 @@ class NII(NII_Math):
         self.set_description(desc)
         if seg:
             self._unpack()
-            if isinstance(self.dtype,np.floating):
+            if np.issubdtype(self.dtype,np.floating):
                 self.set_dtype_("smallest_uint")
 
 
@@ -260,8 +295,7 @@ class NII(NII_Math):
         Returns:
             A new NII wrapping the given array and affine.
         """
-        nii = nib.nifti1.Nifti1Image(arr,affine)
-        return NII(nii=nii, seg=seg, c_val=c_val, desc=desc, info=info)
+        return NII(nii=(arr,affine,None), seg=seg, c_val=c_val, desc=desc, info=info)
 
     @classmethod
     def load(cls, path: Image_Reference, seg: bool, c_val: float | None = None) -> Self:
@@ -284,12 +318,13 @@ class NII(NII_Math):
         return nii
 
     @classmethod
-    def load_nrrd(cls, path: str | Path, seg: bool,verbos=False):
+    def load_nrrd(cls, path: str | Path, seg: bool,verbose=False):
         """Load an NRRD file and convert it into a Nifti1Image object.
 
         Args:
             path (str | Path): The file path to the NRRD file to be loaded.
             seg (bool): A flag indicating if the data represents segmentation data.
+            verbose (bool, optional): Passed through to ``load_slicer_nrrd``; prints per-segment info when True. Defaults to False.
 
         Returns:
             NII: An NII object containing the loaded Nifti1Image and the segmentation flag.
@@ -307,7 +342,7 @@ class NII(NII_Math):
         except ModuleNotFoundError:
             raise ImportError("The `pynrrd` package is required but not installed. Install it with `pip install pynrrd`.") from None
         from TPTBox.core.internal.slicer_nrrd import load_slicer_nrrd
-        return load_slicer_nrrd(path,seg,verbos=verbos)
+        return load_slicer_nrrd(path,seg,verbose=verbose)
     @classmethod
     def load_bids(cls, nii_bids: bids_files.BIDS_FILE) -> NII:
         """Loads an NII from a BIDS_FILE object, inferring seg and c_val from the format.
@@ -405,16 +440,22 @@ class NII(NII_Math):
         current array. Use ``nii_abstract`` if you want to avoid this reconstruction overhead.
         """
         if self.__divergent:
-            self._nii = Nifti1Image(self._arr,self.affine,self.header)
-            if self.dtype == self._arr.dtype: #type: ignore
-                nii = Nifti1Image(self._arr,self.affine,self.header)
+            # NIfTI-1 cannot encode a handful of dtypes (float16, bool). Upcast
+            # only the *materialised* array/header; leave `self._arr` alone so
+            # callers who kept a reference still see the native dtype.
+            arr_for_nib = _arr_for_nifti1(self._arr)  # type: ignore
+            safe_dtype = _nifti_safe_dtype(self._arr.dtype)  # type: ignore
+            self._nii = Nifti1Image(arr_for_nib, self.affine, self.header)
+            if self.dtype == self._arr.dtype:  # type: ignore
+                nii = Nifti1Image(arr_for_nib, self.affine, self.header)
             else:
                 if not suppress_dtype_change_printout_in_set_array:
                     log.print(f"'set_array' with different dtype: from {self.dtype} to {self._arr.dtype}",verbose=True) #type: ignore
-                nii2 = Nifti1Image(self._arr,self.affine,self.header)
-                nii2.set_data_dtype(self._arr.dtype)
-                nii = Nifti1Image(self._arr,nii2.affine,nii2.header) # type: ignore
-            if all(a is None for a in self.header.get_slope_inter()):
+                nii2 = Nifti1Image(arr_for_nib, self.affine, self.header)
+                nii2.set_data_dtype(safe_dtype)
+                nii = Nifti1Image(arr_for_nib, nii2.affine, nii2.header)  # type: ignore
+            c = self.get_c_val()
+            if all(a is None for a in self.header.get_slope_inter()) and not np.isnan(c):
                 nii.header.set_slope_inter(1,self.get_c_val()) # type: ignore
             #if self.header is not None:
             #    self.header.set_sform(self.affine, code=1)
@@ -447,7 +488,7 @@ class NII(NII_Math):
                 header = header.copy()
                 header.set_sform(aff, code='aligned')
                 header.set_qform(aff, code='unknown')
-                header.set_data_dtype(arr.dtype)
+                header.set_data_dtype(_nifti_safe_dtype(arr.dtype))
                 rotation_zoom = aff[:n, :n]
                 zoom = np.sqrt(np.sum(rotation_zoom * rotation_zoom, axis=0))
                 #print(aff.shape,arr.shape,zoom)
@@ -455,7 +496,7 @@ class NII(NII_Math):
                 self._header = header
                 return
             else:
-                nii = Nifti1Image(arr,aff)
+                nii = Nifti1Image(_arr_for_nifti1(arr), aff)
         self.__unpacked = False
         self.__divergent = False
         self._nii = nii
@@ -659,7 +700,7 @@ class NII(NII_Math):
                 ``self.seg`` is True.
             inplace: If True, modifies this NII in place and returns ``self``.
                 Defaults to False.
-            verbose: Controls verbosity of dtype-change log messages. Defaults to False.
+            verbose: Currently unused; accepted for API parity with other setters. Defaults to False.
             seg: Override the ``seg`` flag on the returned/modified NII. Defaults to None
                 (keep the current value).
 
@@ -668,15 +709,13 @@ class NII(NII_Math):
         """
         if hasattr(arr,"get_array"):
             arr = arr.get_array() # type: ignore
-        if arr.dtype == bool:
-            arr = arr.astype(np.uint8)
-        if arr.dtype == np.float16:
-            arr = arr.astype(np.float32)
-        if self.seg and isinstance(arr, (np.floating, float)):
+        # Segmentations must not be floats; force an integer dtype.
+        # bool/float16 are kept in memory here - only upcast for storage when
+        # we hand a Nifti1Image out (see `_nifti_safe_dtype`).
+        if self.seg and np.issubdtype(arr.dtype, np.floating):
             arr = arr.astype(np.int32)
-        #if self.dtype == arr.dtype: #type: ignore
         nii:_unpacked_nii = (arr,self.affine,self.header.copy())
-        self.header.set_data_dtype(arr.dtype)
+        self.header.set_data_dtype(_nifti_safe_dtype(arr.dtype))
         #else:
         #    if not suppress_dtype_change_printout_in_set_array:
         #        log.print(f"'set_array' with different dtype: from {self.nii.dataobj.dtype} to {arr.dtype}",verbose=verbose) #type: ignore
@@ -712,30 +751,23 @@ class NII(NII_Math):
             The NII with the new dtype (``self`` when ``inplace=True``, a new NII otherwise).
         """
         sel = self if inplace else self.copy()
-        if dtype == "smallest_uint":
+        arr = None  # get_array() copies the whole volume; fetch it at most once
+        if dtype in ("smallest_uint", "smallest_int"):
             arr = self.get_array()
-            if arr.max()<256:
-                dtype = np.uint8
-            elif arr.max()<65536:
-                dtype = np.uint16
-            else:
-                dtype = np.int32
-        elif dtype == "smallest_int":
-            arr = self.get_array()
-            if arr.max()<128:
-                dtype = np.int8
-            elif arr.max()<32768:
-                dtype = np.int16
-            else:
-                dtype = np.int32
+            dtype = _smallest_int_dtype(arr, unsigned=dtype == "smallest_uint")
         if self.__unpacked:
             self._unpack()
             sel._arr = sel._arr.astype(dtype)
-            sel.header.set_data_dtype(dtype)
+            # header may only encode nibabel-safe dtypes; the array itself
+            # keeps whatever the caller asked for.
+            sel.header.set_data_dtype(_nifti_safe_dtype(dtype))
         else:
-            sel.nii.set_data_dtype(dtype)
+            sel.nii.set_data_dtype(_nifti_safe_dtype(dtype))
             if sel.nii.get_data_dtype() != self.dtype: #type: ignore
-                sel.nii = Nifti1Image(self.get_array().astype(dtype,casting=casting,order=order),self.affine,self.header)
+                if arr is None:
+                    arr = self.get_array()
+                new_arr = arr.astype(dtype, casting=casting, order=order)
+                sel.nii = Nifti1Image(_arr_for_nifti1(new_arr), self.affine, self.header)
 
         return sel
     def set_dtype_(self, dtype: type | Literal['smallest_uint', 'smallest_int'] = np.float32, order: Literal["C", "F", "A", "K"] = 'K', casting: Literal["no", "equiv", "safe", "same_kind", "unsafe"] = "unsafe") -> Self:
@@ -774,7 +806,7 @@ class NII(NII_Math):
             inplace (bool): If True, modifies the input image in place. Default value is False.
 
         Returns:
-            If inplace is True, returns None. Otherwise, returns a new instance of the NII class representing the reoriented image.
+            This instance if ``inplace=True``, otherwise a new NII with the reoriented image.
 
         Note:
         The nibabel axes codes describe the direction, not the origin, of axes. The direction "PIR+" corresponds to the origin "ASL".
@@ -808,7 +840,7 @@ class NII(NII_Math):
             new_img = arr, new_aff,self.header
             log.print("Image reoriented from", nio.ornt2axcodes(ornt_fr), "to", axcodes_to,verbose=verbose)
         else:
-            return self if not inplace else self.copy()
+            return self if inplace else self.copy()
         if inplace:
             self.nii = new_img
             return self
@@ -822,18 +854,21 @@ class NII(NII_Math):
 
 
     def compute_crop(self,minimum: float=0, dist: float = 0, use_mm=False, other_crop:tuple[slice,...]|None=None, maximum_size:tuple[slice,...]|int|tuple[int,...]|None=None, raise_error=True)->tuple[slice,slice,slice]:
-        """Computes the minimum slice that removes unused space from the image and returns the corresponding slice tuple along with the origin shift required for centroids.
+        """Computes the minimum slice that removes unused space from the image and returns the corresponding slice tuple.
 
         Args:
             minimum (int): The minimum value of the array (0 for MRI, -1024 for CT). Default value is 0.
             dist (int): The amount of padding to be added to the cropped image. Default value is 0.
             use_mm: dist will be mm instead of number of voxels
             other_crop (tuple[slice,...], optional): A tuple of slice objects representing the slice of an other image to be combined with the current slice. Default value is None.
+            maximum_size: If given, expand each axis of the crop so it reaches at
+                least this size (int → same for every axis; tuple → per-axis). The
+                expansion is centred on the original crop and clamped to the image
+                bounds. Defaults to None (no expansion).
             raise_error: if crop is empty a "ValueError: bbox_nd: img is empty, cannot calculate a bbox" is produced. When False return None instead.
 
         Returns:
-            ex_slice: A tuple of slice objects that need to be applied to crop the image.
-            origin_shift: A tuple of integers representing the shift required to obtain the centroids of the cropped image.
+            A tuple of slice objects that need to be applied to crop the image.
 
         Note:
             - The computed slice removes the unused space from the image based on the minimum value.
@@ -916,27 +951,19 @@ class NII(NII_Math):
         return self.set_array(arr_cropped, inplace=inplace)
         #return self.apply_crop(crop_slices, inplace=inplace)
 
-    def apply_crop_slice(self, *args, **qargs) -> Self:
-        """Deprecated alias for `apply_crop`."""
-        import warnings
-        warnings.warn("apply_crop_slice id deprecated use apply_crop instead",stacklevel=5) #TODO remove in version 1.0
-        return self.apply_crop(*args,**qargs)
-
-    def apply_crop_slice_(self, *args, **qargs) -> Self:
-        """Deprecated alias for `apply_crop_`."""
-        import warnings
-        warnings.warn("apply_crop_slice_ id deprecated use apply_crop_ instead",stacklevel=5) #TODO remove in version 1.0
-        return self.apply_crop_(*args,**qargs)
-
     def apply_crop(self,ex_slice:tuple[slice,slice,slice]|Sequence[slice]|None , inplace=False) -> Self:
-        """The apply_crop_slice function applies a given slice to reduce the Nifti image volume. If a list of slices is provided, it computes the minimum volume of all slices and applies it.
+        """Crop the NIfTI volume by a per-axis slice tuple (thin wrapper around ``nibabel``'s ``.slicer``).
+
+        The affine is updated automatically so the resulting image stays in the same world coordinate system.
+        To *compute* an intersection of several crops first, use :meth:`compute_crop` with ``other_crop=``.
 
         Args:
-            ex_slice (tuple[slice,slice,slice] | list[tuple[slice,slice,slice]]): A tuple or a list of tuples, where each tuple represents a slice for each axis (x, y, z).
-            inplace (bool, optional): If True, it applies the slice to the original image and returns it. If False, it returns a new NII object with the sliced image.
+            ex_slice: A 3-slice sequence ``(slice_x, slice_y, slice_z)`` — typically what :meth:`compute_crop`
+                returns. ``None`` skips cropping and returns the image unchanged.
+            inplace (bool, optional): If True, mutate this NII and return ``self``. If False, return a new NII.
 
         Returns:
-            NII: A new NII object containing the sliced image if inplace=False. Otherwise, it returns the original NII object after applying the slice.
+            NII: A new NII with the cropped volume when ``inplace=False``; otherwise ``self``.
         """
         nii = self.nii.slicer[tuple(ex_slice)] if ex_slice is not None else self.nii_abstract
         if inplace:
@@ -979,9 +1006,10 @@ class NII(NII_Math):
         new voxel (0, 0, 0) corresponds to the same world coordinate as before).
 
         Args:
-            padd: A sequence of ``(before, after)`` integer tuples, one per spatial
-                dimension. ``None`` as the ``before`` value means no padding on that
-                side. Pass ``None`` for the whole argument to skip padding entirely.
+            padd: Either a sequence of ``(before, after)`` integer tuples, one per
+                spatial dimension (``None`` in either slot means no padding on that
+                side), or a single ``int`` / ``float`` applied symmetrically to every
+                axis. Pass ``None`` for the whole argument to skip padding entirely.
             mode: Padding mode forwarded to ``numpy.pad``. Defaults to ``"constant"``.
                 In ``"constant"`` mode the fill value is ``self.get_c_val()``.
             inplace: If True, modifies this NII in place. Defaults to False.
@@ -1053,7 +1081,7 @@ class NII(NII_Math):
 
         return self.copy(nii)
 
-    def rescale_and_reorient(self, axcodes_to=None, voxel_spacing=(-1, -1, -1), verbose: logging = True, inplace=False, c_val: float | None = None, mode: MODES = 'nearest') -> Self:
+    def rescale_and_reorient(self, axcodes_to=None, voxel_spacing=(-1, -1, -1), verbose: logging = True, inplace=False, c_val: float | None = None, mode: MODES = 'nearest', out_dtype: np.dtype | type | str | None = None) -> Self:
         """Reorients and then rescales the image in a single step.
 
         Args:
@@ -1065,6 +1093,9 @@ class NII(NII_Math):
             inplace: If True, modifies this NII in place. Defaults to False.
             c_val: Background fill value for resampling. Defaults to None.
             mode: Interpolation / boundary mode. Defaults to ``"nearest"``.
+            out_dtype: Forwarded to :meth:`rescale` – see there for semantics
+                and caveats. Only affects the rescale step; the preceding
+                reorient keeps the source dtype.
 
         Returns:
             The reoriented and rescaled NII.
@@ -1076,11 +1107,11 @@ class NII(NII_Math):
             axcodes_to = nio.ornt2axcodes(ornt_img)
         else:
             curr = self.reorient(axcodes_to=axcodes_to, verbose=verbose, inplace=inplace)
-        return curr.rescale(voxel_spacing=voxel_spacing, verbose=verbose, inplace=inplace,c_val=c_val,mode=mode)
+        return curr.rescale(voxel_spacing=voxel_spacing, verbose=verbose, inplace=inplace,c_val=c_val,mode=mode, out_dtype=out_dtype)
 
-    def rescale_and_reorient_(self, axcodes_to=None, voxel_spacing=(-1, -1, -1), c_val: float | None = None, mode: MODES = 'nearest', verbose: logging = True) -> Self:
+    def rescale_and_reorient_(self, axcodes_to=None, voxel_spacing=(-1, -1, -1), c_val: float | None = None, mode: MODES = 'nearest', verbose: logging = True, out_dtype: np.dtype | type | str | None = None) -> Self:
         """In-place variant of `rescale_and_reorient`."""
-        return self.rescale_and_reorient(axcodes_to=axcodes_to,voxel_spacing=voxel_spacing,c_val=c_val,mode=mode,verbose=verbose,inplace=True)
+        return self.rescale_and_reorient(axcodes_to=axcodes_to,voxel_spacing=voxel_spacing,c_val=c_val,mode=mode,verbose=verbose,inplace=True, out_dtype=out_dtype)
 
     def reorient_same_as(self, img_as: Nifti1Image | Self, verbose: logging = False, inplace=False) -> Self:
         """Reorients this image to match the orientation of another image.
@@ -1099,7 +1130,7 @@ class NII(NII_Math):
     def reorient_same_as_(self, img_as: Nifti1Image | Self, verbose: logging = False) -> Self:
         """In-place variant of `reorient_same_as`."""
         return self.reorient_same_as(img_as=img_as,verbose=verbose,inplace=True)
-    def rescale(self, voxel_spacing:float|tuple[float,...]=(1, 1, 1), c_val:float|None=None, verbose:logging=False, inplace=False,mode:MODES='nearest',order: int |None = None,align_corners:bool=False,atol=0.001) -> Self:
+    def rescale(self, voxel_spacing:float|tuple[float,...]=(1, 1, 1), c_val:float|None=None, verbose:logging=False, inplace=False,mode:MODES='nearest',order: int |None = None,align_corners:bool=False,atol=0.001, out_dtype: np.dtype | type | str | None = None) -> Self:
         """Rescales the NIfTI image to a new voxel spacing.
 
         Args:
@@ -1111,20 +1142,27 @@ class NII(NII_Math):
                 False.
             inplace (bool, optional): Whether to modify the current object or return a new one. Defaults to False.
             mode (str, optional): One of the supported modes by scipy.ndimage.interpolation (e.g., "constant", "nearest",
-                "reflect", "wrap"). See the documentation for more details. Defaults to "constant".
+                "reflect", "wrap"). See the documentation for more details. Defaults to "nearest".
+            order (int | None, optional): Interpolation order (0..5) passed to the resampler. Defaults to
+                None, which selects 0 for segmentations and 3 otherwise.
             align_corners (bool|default): If True or not set and seg==True. Aline corners for scaling. This prevents segmentation mask to shift in a direction.
             atol: absolute tolerance for skipping if already close in voxel_spacing
+            out_dtype (dtype-like | None, optional): Requested dtype of the resampled array.
+                Forwarded to scipy as ``output=``, so the cast happens in-place during interpolation
+                (no extra full-volume copy). ``None`` keeps the source dtype. With integer targets and
+                ``order > 0`` the float→int cast is a plain truncation - pass ``order=0`` for label maps.
+
         Returns:
             NII: A new NII object with the resampled image data.
         """
         if isinstance(voxel_spacing, (int,float)):
-            voxel_spacing =(voxel_spacing for _ in range(min(3,self.affine.shape[0]-1)))
+            voxel_spacing =tuple(voxel_spacing for _ in range(min(3,self.affine.shape[0]-1)))
         n = self.dims
         while  n> len(voxel_spacing):
             voxel_spacing = (*voxel_spacing, -1)
         if all(a in (-1, b) for a,b in zip(voxel_spacing, self.zoom)):
             log.print(f"Image already resampled to voxel size {self.zoom}",verbose=verbose)
-            return self.copy() if inplace else self
+            return self if inplace else self.copy()
 
         c_val = self.get_c_val(c_val)
         # resample to new voxel spacing based on the current x-y-z-orientation
@@ -1137,7 +1175,7 @@ class NII(NII_Math):
         voxel_spacing = tuple([v if v != -1 else z for v,z in zip_strict(voxel_spacing,zms)])
         if np.isclose(voxel_spacing, self.zoom,atol=atol).all():
             log.print(f"Image already resampled to voxel size {self.zoom}",verbose=verbose)
-            return self.copy() if inplace else self
+            return self if inplace else self.copy()
 
         # Calculate new shape
         new_shp = tuple(np.rint([shp[i] * zms[i] / voxel_spacing[i] for i in range(len(voxel_spacing))]).astype(int))
@@ -1145,26 +1183,35 @@ class NII(NII_Math):
             new_shp = new_shp + shp[len(new_shp):]
         new_aff = _rescale_affine(aff, shp, voxel_spacing, new_shp)  # type: ignore
         new_aff[:n, n] = nib.affines.apply_affine(aff, [0 for _ in range(n)])# type: ignore
-        new_img = _resample_from_to(self, (new_shp, new_aff,voxel_spacing), order=order, mode=mode,align_corners=align_corners)
+        new_img = _resample_from_to(self, (new_shp, new_aff,voxel_spacing), order=order, mode=mode,align_corners=align_corners, out_dtype=out_dtype)
         log.print(f"Image resampled from {zms} to voxel size {voxel_spacing}",verbose=verbose)
         if inplace:
             self.nii = new_img
             return self
         return self.copy(new_img)
 
-    def rescale_(self, voxel_spacing=(1, 1, 1), c_val: float | None = None, verbose: logging = False, mode: MODES = 'nearest') -> Self:
+    def rescale_(self, voxel_spacing=(1, 1, 1), c_val: float | None = None, verbose: logging = False, mode: MODES = 'nearest', out_dtype: np.dtype | type | str | None = None) -> Self:
         """In-place variant of `rescale`."""
-        return self.rescale( voxel_spacing=voxel_spacing, c_val=c_val, verbose=verbose,mode=mode, inplace=True)
+        return self.rescale( voxel_spacing=voxel_spacing, c_val=c_val, verbose=verbose,mode=mode, inplace=True, out_dtype=out_dtype)
 
-    def resample_from_to(self, to_vox_map:Image_Reference|Has_Grid|tuple[SHAPE,AFFINE,ZOOMS], mode:MODES='nearest', order: int |None=None, c_val=None, inplace = False,verbose:logging=True,align_corners:bool=False) -> Self:
-        r"""Self will be resampled in coordinate of given other image. Adheres to global space not to local pixel space.
+    def resample_from_to(self, to_vox_map:Image_Reference|Has_Grid|tuple[SHAPE,AFFINE,ZOOMS], mode:MODES='nearest', order: int |None=None, c_val=None, inplace = False,verbose:logging=True,align_corners:bool=False, out_dtype: np.dtype | type | str | None = None) -> Self:
+        """Self will be resampled in coordinate of given other image. Adheres to global space not to local pixel space.
 
         Args:
             to_vox_map (Image_Reference|Proxy): If object, has attributes shape giving input voxel shape, and affine giving mapping of input voxels to output space. If length 2 sequence, elements are (shape, affine) with same meaning as above. The affine is a (4, 4) array-like.\n
-            mode (str, optional): Points outside the boundaries of the input are filled according to the given mode ('constant', 'nearest', 'reflect' or 'wrap').Defaults to 'constant'.\n
-            cval (float, optional): Value used for points outside the boundaries of the input if mode='nearest'. Defaults to 0.0.\n
-            aline_corners (bool|default): If True or not set and seg==True. Aline corners for scaling. This prevents segmentation mask to shift in a direction.
+            mode (str, optional): Points outside the boundaries of the input are filled according to the given mode ('constant', 'nearest', 'reflect' or 'wrap'). Defaults to 'nearest'.\n
+            order (int | None, optional): Interpolation order (0..5) passed to the resampler. Defaults to
+                None, which selects 0 for segmentations and 3 otherwise.\n
+            c_val (float, optional): Value used for points outside the boundaries of the input when mode='constant'. Defaults to None (inferred from the image / segmentation).\n
+            align_corners (bool|default): If True or not set and seg==True. Aline corners for scaling. This prevents segmentation mask to shift in a direction.
             inplace (bool, optional): Defaults to False.
+            verbose (logging, optional): If True, log resampling shortcuts (skip / reorient-only). Defaults to True.
+            out_dtype (dtype-like | None, optional): Requested dtype of the resampled array.
+                Forwarded to scipy as ``output=``, so the cast happens in-place during interpolation
+                (no extra full-volume copy). ``None`` keeps the source dtype. With integer targets and
+                ``order > 0`` the float→int cast is a plain truncation - pass ``order=0`` for label maps.
+                Only applies when the actual resample is executed (the skip / reorient-only /
+                pad-only shortcuts return the source dtype).
 
         Returns:
             NII:
@@ -1216,7 +1263,7 @@ class NII(NII_Math):
         log.print(f"resample_from_to: {self} to {mapping}",verbose=verbose)
         if order is None:
             order = 0 if self.seg else 3
-        nii = _resample_from_to(self, mapping,order=order, mode=mode,align_corners=align_corners)
+        nii = _resample_from_to(self, mapping,order=order, mode=mode,align_corners=align_corners, out_dtype=out_dtype)
 
 
         if inplace:
@@ -1224,9 +1271,9 @@ class NII(NII_Math):
             return self
         else:
             return self.copy(nii)
-    def resample_from_to_(self, to_vox_map: Image_Reference | Has_Grid | tuple[SHAPE, AFFINE, ZOOMS], mode: MODES = 'nearest', c_val: float | None = None, verbose: logging = True, aline_corners=False) -> Self:
+    def resample_from_to_(self, to_vox_map: Image_Reference | Has_Grid | tuple[SHAPE, AFFINE, ZOOMS], mode: MODES = 'nearest', c_val: float | None = None, verbose: logging = True, aline_corners=False, out_dtype: np.dtype | type | str | None = None) -> Self:
         """In-place variant of `resample_from_to`."""
-        return self.resample_from_to(to_vox_map,mode=mode,c_val=c_val,inplace=True,verbose=verbose,align_corners=aline_corners)
+        return self.resample_from_to(to_vox_map,mode=mode,c_val=c_val,inplace=True,verbose=verbose,align_corners=aline_corners, out_dtype=out_dtype)
 
     @property
     def is_empty(self) -> bool:
@@ -1253,14 +1300,14 @@ class NII(NII_Math):
 
         Args:
             threshold (int, optional): If != 0, will mask the input based on the threshold. Defaults to 60.
-            mask (_type_, optional): If threshold==0, this can be set to input a individual mask. If none, lets the algorithm automatically determine the mask. Defaults to None.
-            shrink_factor (int, optional): _description_. Defaults to 4.
-            convergence (dict, optional): _description_. Defaults to {"iters": [50, 50, 50, 50], "tol": 1e-07}.
-            spline_param (int, optional): _description_. Defaults to 200.
-            verbose (bool, optional): _description_. Defaults to False.
-            weight_mask (_type_, optional): _description_. Defaults to None.
-            crop (bool, optional): _description_. Defaults to False.
-            inplace (bool, optional): _description_. Defaults to False.
+            mask (ants.ANTsImage | None, optional): If ``threshold == 0``, use this custom mask (as an ANTs image). If None and ``threshold == 0``, ANTs derives the mask automatically. Defaults to None.
+            shrink_factor (int, optional): Downsampling factor for the coarse bias estimation stage. Defaults to 4.
+            convergence (dict, optional): Iteration / tolerance schedule forwarded to ANTs. Defaults to {"iters": [50, 50, 50, 50], "tol": 1e-07}.
+            spline_param (int, optional): B-spline mesh resolution (mm) for the bias field. Defaults to 200.
+            verbose (bool, optional): If True, ANTs prints progress information. Defaults to False.
+            weight_mask (ants.ANTsImage | None, optional): Optional per-voxel weighting image (ANTs image) passed through to ANTs. Defaults to None.
+            crop (bool, optional): If True, crop the output to the region actually touched by the correction. Defaults to False.
+            inplace (bool, optional): If True, mutate this NII and return ``self``; otherwise return a new NII. Defaults to False.
 
         Returns:
             NII: The NII with bias field corrected image
@@ -1274,10 +1321,11 @@ class NII(NII_Math):
             import ants.ops.bias_correction as bc  # install antspyx not ants!
         except ModuleNotFoundError:
             import ants.utils.bias_correction as bc  # install antspyx not ants!
-        from ants.utils.convert_nibabel import from_nibabel
         from scipy.ndimage import binary_dilation, generate_binary_structure
+
+        from TPTBox.core.internal import ants_to_nifti
         dtype = self.dtype
-        input_ants:ants.ANTsImage = from_nibabel(nib.nifti1.Nifti1Image(self.get_array(),self.affine))
+        input_ants:ants.ANTsImage = self.to_ants()
         if threshold != 0:
             mask_arr = self.get_array()
             mask_arr[mask_arr < threshold] = 0
@@ -1286,7 +1334,7 @@ class NII(NII_Math):
             struct = generate_binary_structure(3, 3)
             mask_arr = binary_dilation(mask_arr.copy(), structure=struct, iterations=3)
             mask_arr = mask_arr.astype(np.uint8)
-            mask:ants.ANTsImage = from_nibabel(nib.nifti1.Nifti1Image(mask_arr,self.affine))#self.set_array(mask,verbose=False).nii
+            mask:ants.ANTsImage = self.set_array(mask_arr,verbose=False).to_ants()
             mask = mask.set_spacing(input_ants.spacing) # type: ignore
         out = bc.n4_bias_field_correction(
             input_ants,
@@ -1299,11 +1347,10 @@ class NII(NII_Math):
 
         )
 
-
-        out_nib:Nifti1Image = out.to_nibabel()
+        out_nib:Nifti1Image = ants_to_nifti(out)
         if crop:
             # Crop to regions that had a normalization applied. Removes a lot of dead space
-            dif = NII((input_ants - out).to_nibabel())
+            dif = NII(ants_to_nifti(input_ants - out))
             dif_arr = dif.get_array()
             dif_arr[dif_arr != 0] = 1
             dif.set_array_(dif_arr,verbose=verbose)
@@ -1348,7 +1395,7 @@ class NII(NII_Math):
 
         Args:
             bins (int, optional): Number of bins for the histogram. Defaults to 256.
-            range (tuple, optional): Range of values to consider for the histogram. Defaults to None.
+            hrange (tuple, optional): Range of values to consider for the histogram (forwarded to ``numpy.histogram`` as ``range``). Defaults to None.
             density (bool, optional): If True, the result is the probability density function at the bin, normalized such that the integral over the range is 1. Defaults to False.
             c_val (float|None, optional): The value below which all values are set to c_val. Defaults to None.
 
@@ -1446,9 +1493,12 @@ class NII(NII_Math):
             truncate (int, optional): Truncate of the gaussian blur. Defaults to 4.
             boundary_mode (str, optional): Boundary Mode of the gaussian blur. Defaults to "nearest".
             dilate_prior (int, optional): Dilate this many voxels before starting the gaussian blur algorithm. Defaults to 0.
-            dilate_connectivity (int, optional): Connectivity of the dilation process, if applied. Defaults to 3.
+            dilate_connectivity (int, optional): Connectivity of the dilation process, if applied. Defaults to 1.
+            dilate_channelwise (bool, optional): If True, dilate each per-label channel separately instead of on the joint mask. Defaults to False.
             smooth_background (bool, optional): If true, will also smooth the background. If False, the background voxels stay the same and the segmentation cannot add voxels. Defaults to True.
+            background_threshold (float | None, optional): Cutoff on the smoothed background probability below which a voxel is assigned to the foreground argmax; ``None`` disables the cutoff. Defaults to None.
             inplace (bool, optional): If true, will overwrite the input NII instead of making a copy. Defaults to False.
+            verbose (bool, optional): If True, log that ``smooth_gaussian_labelwise`` is running. Defaults to False.
 
         Returns:
             NII: The smoothed NII object.
@@ -1511,9 +1561,16 @@ class NII(NII_Math):
             import ants
         except Exception:
             log.print_error()
-            log.on_fail("run 'pip install antspyx' to install hf-deepali")
+            log.on_fail("this function needs antspyx: run 'pip install antspyx'")
             raise
-        return ants.from_nibabel(self.nii)
+        try:
+            from ants.utils.convert_nibabel import from_nibabel
+
+            return from_nibabel(self.nii)
+        except ModuleNotFoundError:
+            from ants.utils.nibabel_nifti_to_ants import from_nibabel_nifti
+
+            return from_nibabel_nifti(self.nii)
 
     def to_simpleITK(self) -> Any:
         """Converts this NII to a SimpleITK image.
@@ -1543,7 +1600,7 @@ class NII(NII_Math):
 
         arr = img_.data.squeeze().cpu().detach().numpy()
         arr = np.transpose(arr, axes=tuple(reversed(range(arr.ndim))))
-        return  NII((nib.Nifti1Image(arr,grid.affine)),seg=seg)
+        return  NII((arr,grid.affine,None),seg=seg)
 
     def to_deepali(self, align_corners: bool = True, dtype=None, device: device | str = "cpu") -> Any:
         """Converts this NII to a DeepALI ``Image`` tensor (requires the ``hf-deepali`` package).
@@ -1608,12 +1665,15 @@ class NII(NII_Math):
         """Erodes the binary segmentation mask by the specified number of voxels.
 
         Args:
-            mm (int, optional): The number of voxels to erode the mask by. Defaults to 5.
+            n_pixel (int, optional): The number of voxels to erode the mask by. Defaults to 5.
             labels (LABEL_REFERENCE, optional): Labels that should be dilated. If None, will erode all labels (not including zero!)
             connectivity (int, optional): Elements up to a squared distance of connectivity from the center are considered neighbors. connectivity may range from 1 (no diagonal elements are neighbors) to rank (all elements are neighbors).
             inplace (bool, optional): Whether to modify the mask in place or return a new object. Defaults to False.
             verbose (bool, optional): Whether to print a message indicating that the mask was eroded. Defaults to True.
+            border_value: Value used for voxels outside the image when eroding at the border. Defaults to 0.
             use_crop: speed up computation by cropping and un-cropping the segmentation. Minor overhead if the segmentation fills most of the image
+            ignore_direction: Axis (as ``DIRECTIONS`` code or int) that should NOT be eroded — the structuring element is flattened along this axis. Defaults to None.
+
         Returns:
             NII: The eroded mask.
 
@@ -1721,6 +1781,9 @@ class NII(NII_Math):
             inplace (bool, optional): Whether to modify the mask in place or return a new object. Defaults to False.
             verbose (bool, optional): Whether to print a message indicating that the mask was dilated. Defaults to True.
             use_crop: speed up computation by cropping and un-cropping the segmentation. Minor overhead if the segmentation fills most of the image
+            ignore_direction (DIRECTIONS | int | None, optional): Axis to exclude from the dilation structuring
+                element (e.g. ``"S"`` to disallow superior/inferior growth). ``None`` dilates isotropically. Defaults to None.
+
         Returns:
             NII: The dilated mask.
 
@@ -1786,7 +1849,9 @@ class NII(NII_Math):
         """Calculates the convex hull of this segmentation nifty.
 
         Args:
-            axis (int | None, optional): If given axis, will calculate convex hull along that axis (remaining dimension must be at least 2). Defaults to None.
+            axis (DIRECTIONS | None, optional): If given axis, will calculate convex hull along that axis (remaining dimension must be at least 2). Defaults to ``"S"``.
+            inplace (bool, optional): If True, mutate this NII and return ``self``; otherwise return a new NII. Defaults to False.
+            verbose (bool, optional): If True, print progress from the underlying ``np_calc_convex_hull``. Defaults to False.
         """
         assert self.seg, "To calculate the convex hull, this must be a segmentation"
         axis_int = self.get_axis(axis) if axis is not None else None
@@ -1795,7 +1860,7 @@ class NII(NII_Math):
             return self.set_array_(convex_hull_arr)
         return self.set_array(convex_hull_arr)
 
-    def calc_convex_hull_(self, axis: None | DIRECTIONS = "S", verbose: bool = False) -> Self:
+    def calc_convex_hull_(self, axis: DIRECTIONS | None = "S", verbose: bool = False) -> Self:
         """In-place variant of `calc_convex_hull`."""
         return self.calc_convex_hull(axis=axis, inplace=True, verbose=verbose)
 
@@ -1804,8 +1869,8 @@ class NII(NII_Math):
         """Calculate a boundary mask based on the input image.
 
         Parameters:
-        - img (NII): The image used to create the boundary mask.
-        - threshold(float): threshold
+        - threshold (float): Intensity threshold used to seed the boundary infection.
+        - inplace (bool): If True, modifies this NII in place. Defaults to False.
 
         Returns:
         NII: A segmentation of the boundary.
@@ -1873,10 +1938,12 @@ class NII(NII_Math):
         max_count_component (int | None): Maximum number of components to retain. Once this limit is reached, remaining components will be removed.
         connectivity (int): Connectivity criterion for defining connected components (default is 3).
         removed_to_label (int): Label to assign to removed components (default is 0).
+        keep_label (bool): If True, preserve the original label values on retained components instead of replacing them with component indices. Defaults to False.
+        inplace (bool): If True, modify this NII in place. Defaults to False.
         TODO : max_count_component currently filters over all labels instead of per label. will be changed.
         TODO : removed_to_label does not work when keep_label=False
         Returns:
-        None
+        NII: The filtered segmentation.
         """
         assert self.seg, "This only works on segmentations"
         arr = np_filter_connected_components(self.get_seg_array(), largest_k_components=max_count_component,label_ref=labels,connectivity=connectivity,return_original_labels=keep_label,min_volume=min_volume,max_volume=max_volume,removed_to_label=removed_to_label,)
@@ -1916,13 +1983,23 @@ class NII(NII_Math):
 
 
     def get_largest_k_segmentation_connected_components(self, k: int | None, labels: int | list[int] | None = None, connectivity: int = 1, return_original_labels: bool = True,inplace=False,min_volume:int=0,max_volume:int|None=None,removed_to_label=0) -> Self:
-        """Finds the largest k connected components in a given array (does NOT work with zero as label!).
+        """DEPRECATED — always raises ``DeprecationWarning``; use :meth:`filter_connected_components` instead.
+
+        The signature is kept for backwards compatibility only; calling this method never
+        performs any computation.
 
         Args:
-            arr (np.ndarray): input array
             k (int | None): finds the k-largest components. If k is None, will find all connected components and still sort them by size
             labels (int | list[int] | None, optional): Labels that the algorithm should be applied to. If none, applies on all labels found in this NII. Defaults to None.
+            connectivity (int): Voxel connectivity forwarded to the underlying filter. Defaults to 1.
             return_original_labels (bool): If set to False, will label the components from 1 to k. Defaults to True
+            inplace (bool): Would modify this NII in place. Defaults to False.
+            min_volume (int): Minimum component volume to keep. Defaults to 0.
+            max_volume (int | None): Maximum component volume to keep. Defaults to None.
+            removed_to_label (int): Label assigned to removed components. Defaults to 0.
+
+        Raises:
+            DeprecationWarning: Always.
         """
         raise DeprecationWarning("Use filter_connected_components instead")
         msk_i_data = self.get_seg_array()
@@ -1979,10 +2056,11 @@ class NII(NII_Math):
         """Relabels all individual labels from input array to the majority labels of a given label_mask.
 
         Args:
-            label_mask (np.ndarray): the mask from which to pull the target labels.
+            label_mask (Self): the segmentation NII from which to pull the target labels.
             labels (int | list[int] | None, optional): Which labels in the input to process. Defaults to None.
             dilate_pixel (int, optional): If true, will dilate the input to calculate the overlap. Defaults to 1.
             inplace (bool, optional): Defaults to False.
+            no_match_label (int, optional): Label assigned to input voxels whose relabeling has no majority match in ``label_mask``. Defaults to 0.
 
         Returns:
             NII: Relabeled nifti
@@ -1995,7 +2073,8 @@ class NII(NII_Math):
         """Calculates an NII that represents the segmentation difference between self and given groundtruth mask.
 
         Args:
-            mask_groundtruth (Self): The ground truth mask. Must match in orientation, zoom, and shape
+            mask_gt (Self): The ground truth mask. Must match in orientation, zoom, and shape.
+            ignore_background_tp (bool): If True, background-background matches (both zero) are left as 0 instead of being counted as TP. Defaults to False.
 
         Returns:
             NII: Difference NII (1: FN, 2: TP, 3: FP, 4: Wrong label)
@@ -2037,27 +2116,40 @@ class NII(NII_Math):
         assert self.seg and mask_other.seg
         return np_calc_overlapping_labels(self.get_seg_array(), mask_other.get_seg_array())
 
-    def is_segmentation_in_border(self,minimum=0, voxel_tolerance: int = 2,use_mm=False) -> bool:
-        """Checks if the segmentation is touching the border of the image volume.
+    def is_segmentation_in_border(self,minimum=0,voxel_tolerance: int = 2,use_mm: bool = False) -> bool:
+        """Checks if the segmentation touches the border of the image volume.
 
         Parameters:
-        - minimum (int, optional): Minimum intensity threshold for segmentation. Defaults to 0.
-        - voxel_tolerance (int, optional): Number of voxels allowed as tolerance from the border. Defaults to 2.
-        - use_mm (bool, optional): Whether to use millimeter units instead of voxels. Defaults to False.
+        - minimum (int, optional): Minimum intensity threshold for segmentation.
+        Defaults to 0.
+        - voxel_tolerance (int, optional): Number of voxels allowed as tolerance
+        from the border. Defaults to 2.
+        - use_mm (bool, optional): Whether to use millimeter units instead of
+        voxels. Defaults to False.
 
         Returns:
-        - bool: True if the segmentation is within the defined voxel tolerance of the border, False otherwise.
+        - bool: True if the segmentation is within the defined tolerance of the
+        border, False otherwise.
         """
+        # compute_crop(raise_error=False) returns full-extent slices for an empty mask rather
+        # than None, so an explicit emptiness check is needed - otherwise "nothing segmented"
+        # is reported as "touching the border".
+        if self.is_empty:
+            return False
         slices = self.compute_crop(minimum,dist=0,use_mm=use_mm,raise_error=False)
         if slices is None:
             return False
-        shp = self.shape
-        seg_at_border = False
-        for d in range(3):
-            if slices[d].start <= voxel_tolerance or slices[d].stop - 1 >= shp[d] - voxel_tolerance:
-                seg_at_border = True
-                break
-        return seg_at_border
+        for dim, s in enumerate(slices):
+            shape_dim = self.shape[dim]
+            # Interpret open-ended slices as full image bounds
+            start = 0 if s.start is None else s.start
+            stop = shape_dim if s.stop is None else s.stop
+            # stop is exclusive, so the last occupied voxel is stop - 1
+            if start <= voxel_tolerance:
+                return True
+            if stop - 1 >= shape_dim - voxel_tolerance:
+                return True
+        return False
 
     def truncate_labels_beyond_reference_(
         self, idx: int | list[int] = 1, not_beyond: int | list[int] = 1, fill: int = 0,  axis: DIRECTIONS = "S", inclusion: bool = False, inplace: bool = True
@@ -2067,7 +2159,6 @@ class NII(NII_Math):
         Replaces those voxels with ``fill`` (default 0).
 
         Parameters:
-            nii (NII): The NIfTI-like object with 3D imaging data.
             idx (int or list[int]): The index/label(s) to process in the array. Default is 1.
             not_beyond (int or list[int]): The label/index used to determine the reference position. Default is 1.
             fill (int): The value to set for voxels beyond the reference point. Default is 0.
@@ -2092,10 +2183,11 @@ class NII(NII_Math):
         flip = self.orientation[axis_] != axis  # Check orientation for flipping
         # Get the array data
         np_array = self.get_array()
-        np_array_cond = self.extract_label(idx).get_seg_array()
+        # both masks come directly from np_array via np_isin (avoids two extract_label round-trips)
+        np_array_cond = np_isin(np_array, idx)
 
         # Find the lowest point (smallest index) along the axis where `not_above` exists
-        threshold = np.where(self.extract_label(not_beyond).get_seg_array() == 1)
+        threshold = np.where(np_isin(np_array, not_beyond))
         if len(threshold[axis_]) == 0:
             return self if inplace else self.copy()
         flip_up = flip
@@ -2115,7 +2207,7 @@ class NII(NII_Math):
         mask = np.broadcast_to(mask, self.shape)
 
         # Replace values of `idx` with `fill` in the masked region
-        np_array = np.where((np_array_cond == 1) & mask, fill, np_array)
+        np_array = np.where(np_array_cond & mask, fill, np_array)
 
         # Update the NIfTI object with the modified array
         return self.set_array(np_array, inplace=inplace)
@@ -2240,20 +2332,32 @@ class NII(NII_Math):
         return self.infect(reference_mask, inplace=True,verbose=verbose,axis=axis,_do_crop=_do_crop)
 
     def map_labels(self, label_map:LABEL_MAP , verbose:logging=True, inplace=False) -> Self:
-        """Maps labels in the given NIfTI image according to the label_map dictionary.
+        """Remap segmentation labels according to a dict.
+
+        Keys and values may be integers or vertebra name strings — strings are
+        resolved through :data:`v_name2idx` (e.g. ``"T1"`` → ``8``); unknown
+        strings fall back to ``int(k)`` and will raise if not numeric. A value
+        of ``None`` maps its key to the background (``0``). The output array is
+        always cast to ``np.uint16``.
 
         Args:
-            label_map (dict): A dictionary that maps the original label values (str or int) to the new label values (int).
-                For example, `{"T1": 1, 2: 3, 4: 5}` will map the original labels "T1", 2, and 4 to the new labels 1, 3, and 5, respectively.
+            label_map (dict): A dictionary that maps the original label values (str or int)
+                to the new label values (int, str, or ``None`` for background).
+                For example, ``{"T1": "T2", 2: 3, 4: 5}`` remaps the T1 label to the T2 label,
+                ``2`` to ``3``, and ``4`` to ``5``.
             verbose (bool): Whether to print the label mapping and the number of labels reassigned. Default is True.
             inplace (bool): Whether to modify the current NIfTI image object in place or create a new object with the mapped labels.
                 Default is False.
 
         Returns:
-            If inplace is True, returns the current NIfTI image object with mapped labels. Otherwise, returns a new NIfTI image object with mapped labels.
+            NII: Self when ``inplace=True``, otherwise a new NII with the remapped mask.
         """
         data_orig = self.get_seg_array()
-        labels_before = [v for v in np_unique(data_orig) if v > 0]
+        if len(label_map) == 0:
+            log.print("Skip map_labels; map is empty", verbose=verbose)
+            return self if inplace else self.copy()
+        # the before/after np_unique scans are only used for the verbose log line; skip them otherwise
+        labels_before = [v for v in np_unique(data_orig) if v > 0] if verbose else None
         # enforce keys to be str to support both str and int
         label_map_ = {
             (v_name2idx[k] if k in v_name2idx else int(k)): (
@@ -2263,15 +2367,16 @@ class NII(NII_Math):
         }
         log.print("label_map_ =", label_map_, verbose=verbose)
         data = np_map_labels(data_orig, label_map_)
-        labels_after = [v for v in np_unique(data) if v > 0]
-        log.print(
-                "N =",
-                len(label_map_),
-                "labels reassigned, before labels: ",
-                labels_before,
-                " after: ",
-                labels_after,verbose=verbose
-            )
+        if verbose:
+            labels_after = [v for v in np_unique(data) if v > 0]
+            log.print(
+                    "N =",
+                    len(label_map_),
+                    "labels reassigned, before labels: ",
+                    labels_before,
+                    " after: ",
+                    labels_after,verbose=verbose
+                )
         nii = data.astype(np.uint16), self.affine, self.header
         if inplace:
             self.nii = nii
@@ -2343,14 +2448,18 @@ class NII(NII_Math):
             return self.save_nrrd(file,verbose=verbose)
 
         arr = self.get_array() if not self.seg else self.get_seg_array()
-        if isinstance(arr,np.floating) and self.seg:
-            self.set_dtype_("smallest_uint")
-            arr = self.get_array() if not self.seg else self.get_seg_array()
+        if self.seg and np.issubdtype(arr.dtype, np.floating):
+            # A segmentation must never be written out as float. Cast the local array:
+            # `save` is a query and must not mutate `self`.
+            arr = arr.astype(_smallest_int_dtype(arr, unsigned=True))
 
-        self.header.set_data_dtype(arr.dtype)
-        out = Nifti1Image(arr, self.affine,self.header)#,dtype=arr.dtype)
+        # NIfTI-1 has no float16 (or bool) datatype. Upcast just the on-disk
+        # copy; the caller-owned ``self._arr`` keeps its native dtype.
+        safe_arr = _arr_for_nifti1(arr)
+        self.header.set_data_dtype(_nifti_safe_dtype(safe_arr.dtype))
+        out = Nifti1Image(safe_arr, self.affine, self.header)  # ,dtype=arr.dtype)
         if dtype is not None:
-            out.set_data_dtype(dtype)
+            out.set_data_dtype(_nifti_safe_dtype(dtype))
         if out.header["qform_code"] == 0: #NIFTI_XFORM_UNKNOWN Will cause an error for some rounding of the affine in ITKSnap ...
             # 1 means Scanner coordinate system
             # 2 means align (to something) coordinate system
@@ -2360,11 +2469,14 @@ class NII(NII_Math):
 
     @secure_save
     def save_nrrd(self:Self, file: str | Path|bids_files.BIDS_FILE,make_parents=True,verbose:logging=True,**args) -> None:
-        """Save an NII object to an NRRD file.
+        """Save this NII to an NRRD file.
 
         Args:
-            nii_obj (NII): The NII object to be saved.
-            path (str | Path): The file path where the NRRD file will be saved.
+            file (str | Path | BIDS_FILE): Destination path (or a BIDS_FILE whose
+                ``file["nrrd"]`` gives the path).
+            make_parents (bool, optional): Create missing parent directories. Defaults to True.
+            verbose (bool, optional): If True, log the save. Defaults to True.
+            **args: Additional keyword arguments forwarded to :func:`save_slicer_nrrd`.
 
         Raises:
             ImportError: If the `pynrrd` package is not installed.
@@ -2394,8 +2506,6 @@ class NII(NII_Math):
         applies `to_stl_single` to each label independently.
 
         Args:
-            seg (NII):
-                Segmentation object containing one or more labels.
             out_path (Path | dict[int, Path] | None, optional):
                 Output specification:
                     - Path → save all meshes into the same directory or file pattern
@@ -2454,6 +2564,7 @@ class NII(NII_Math):
         to_world: bool = True,
         include_normals: bool = False,
         number_path=False,
+        _crop = True
     ) -> Mesh:
         """Convert a binary segmentation label into an STL surface mesh using marching cubes.
 
@@ -2462,10 +2573,9 @@ class NII(NII_Math):
         into world (physical) coordinates using the NIfTI affine.
 
         Args:
-            seg (NII):
-                Segmentation object containing a 3D mask.
-            label (int, optional):
-                Label value to extract from the segmentation. Defaults to 1.
+            label (int | Enum | Sequence[int | Enum]):
+                Label value(s) to extract from the segmentation. When a sequence is
+                given, all listed labels are merged into one mask before meshing.
             out_path (Path | dict[int, Path] | None, optional):
                 Output specification:
                     - Path → save mesh to this file
@@ -2476,7 +2586,7 @@ class NII(NII_Math):
                 vertex coordinates are shifted by the bounding box start indices.
             to_world (bool, optional):
                 If True, transform vertices from voxel coordinates into world
-                coordinates using `seg.affine`. Defaults to True.
+                coordinates using this NII's affine. Defaults to True.
             include_normals (bool, optional):
                 If True, compute and include per-face normals in the returned mesh
                 using `mesh.Mesh.update_normals()`. Note that STL supports only
@@ -2484,6 +2594,10 @@ class NII(NII_Math):
             number_path (bool, optional):
                 If True, append the label to the output filename when saving.
                 Defaults to False.
+            _crop (bool, optional):
+                Internal speed optimisation: when True and ``to_world`` is True, crop
+                the mask to its bounding box before running marching cubes and shift
+                the resulting vertices back. Defaults to True.
 
         Returns:
             mesh.Mesh:
@@ -2503,6 +2617,9 @@ class NII(NII_Math):
         from stl import mesh
         seg = self.extract_label(label)
         # Prepare binary mask
+        if _crop and to_world: # this speed up the stl generation
+            crop = seg.compute_crop(0,1)
+            seg = seg.apply_crop(crop)
         seg_arr = np.pad(seg.clamp(0, 1).get_array(), 1)
         # Marching cubes (voxel coordinates)
         try:
@@ -2536,7 +2653,7 @@ class NII(NII_Math):
                 elif number_path:
                     out_path.with_name(f"{out_path.stem}_{label}.stl")
                 log.on_save(f"Saving STL to {out_path}")
-                out_path.parent.mkdir(exist_ok=True)
+                out_path.parent.mkdir(exist_ok=True,parents=True)
                 cube.save(str(out_path))
 
         if include_normals:
@@ -2583,7 +2700,8 @@ class NII(NII_Math):
         elif isinstance(key,np.ndarray):
             return self.get_array()[key]
         elif isinstance(key,slice):
-            self.__getitem__((key,Ellipsis,Ellipsis))
+            # pad with full slices for the trailing dimensions; Ellipsis is rejected above
+            return self.__getitem__((key, *(slice(None) for _ in range(len(self.shape) - 1))))
         else:
             raise TypeError("Invalid argument type:", type(key))
     def __setitem__(self, key,value):
@@ -2637,7 +2755,7 @@ class NII(NII_Math):
             return True
         return min_v < x2[2] < max_v
 
-    def get_intersecting_volume(self, b: Self) -> float:
+    def get_intersecting_volume_slow(self, b: Self) -> float:
         """Returns the number of voxels in ``self``'s grid that overlap with image ``b``.
 
         ``b`` is binarised (all non-zero → 1) and resampled into ``self``'s voxel
@@ -2675,42 +2793,57 @@ class NII(NII_Math):
         return self.set_array(arr_bg, inplace, False)
 
     def extract_label(self,label:int|Enum|Sequence[int]|Sequence[Enum]|None, keep_label=False,inplace=False) -> Self:
-        """If this NII is a segmentation you can single out one label with [0,1]."""
+        """Extract one or more labels from this segmentation mask.
+
+        Args:
+            label: Label id(s) to extract. Accepts an ``int``, an ``Enum`` member,
+                a sequence of either, or ``None``. When ``None`` and
+                ``keep_label=False``, the mask is binarised via ``clamp(0, 1)``.
+                Passing ``0`` is rejected — the background is never a valid label.
+            keep_label: If True, keep the original label values inside the mask
+                (voxels not in ``label`` become 0). If False (default), all
+                selected voxels are remapped to ``1`` and everything else to ``0``.
+            inplace: If True, mutate this NII and return ``self``; otherwise return a new NII.
+
+        Returns:
+            Self: The extracted segmentation.
+        """
         assert self.seg, "extracting a label only makes sense for a segmentation mask"
         if label is None:
             if keep_label:
-                return self.copy() if inplace else self
+                return self if inplace else self.copy()
             else:
                 return self.clamp(0,1,inplace=inplace)
         seg_arr = self.get_seg_array()
 
+        if isinstance(label,str):
+            label = int(label)  # a str is also a Sequence, so this must come first
         if isinstance(label, Sequence):
-            label_int:list[int] = [idx.value if isinstance(idx,Enum) else idx for idx in label]
-            assert 0 not in label_int, 'Zero label does not make sense. This is the background'
-            seg_arr = np_extract_label(seg_arr, label_int, to_label=1, inplace=True)
+            labels:int|list[int] = [idx.value if isinstance(idx,Enum) else idx for idx in label]
+            assert 0 not in labels, 'Zero label does not make sense. This is the background'
         else:
             if isinstance(label,Enum):
                 label = label.value
-            if isinstance(label,str):
-                label = int(label)
 
             assert label != 0, 'Zero label does not make sense. This is the background'
-            seg_arr = np_extract_label(seg_arr, label, to_label=1, inplace=True)
+            labels = label
         if keep_label:
-            seg_arr = seg_arr * self.get_seg_array()
+            # keep the original label values where in `labels`, zero everywhere else.
+            # single get_seg_array() copy + one np_isin mask (faster than extract + a second copy/multiply)
+            seg_arr[~np_isin(seg_arr, labels)] = 0
+        else:
+            seg_arr = np_extract_label(seg_arr, labels, to_label=1, inplace=True)
         return self.set_array(seg_arr,inplace=inplace)
     def ravel(self,order:Literal["K", "A", "C", "F"] | None="C")->np.ndarray:
-        """Return a contiguous flattened array.
-
-        A 1-D array, containing the elements of the input, is returned. A copy is made only if needed.
-
-        As of NumPy 1.10, the returned array will have the same type as the input array. (for example, a masked array will be returned for a masked array input)
+        """Return a contiguous 1-D flattened copy of the voxel array (thin wrapper around ``numpy.ravel``).
 
         Args:
-            order (Literal[&quot;K&quot;, &quot;A&quot;, &quot;C&quot;, &quot;F&quot;] | None, optional): The elements of a are read using this index order. ‘C’ means to index the elements in row-major, C-style order, with the last axis index changing fastest, back to the first axis index changing slowest. ‘F’ means to index the elements in column-major, Fortran-style order, with the first index changing fastest, and the last index changing slowest. Note that the ‘C’ and ‘F’ options take no account of the memory layout of the underlying array, and only refer to the order of axis indexing. ‘A’ means to read the elements in Fortran-like index order if a is Fortran contiguous in memory, C-like order otherwise. ‘K’ means to read the elements in the order they occur in memory, except for reversing the data when strides are negative. By default, ‘C’ index order is used. Defaults to "C".
+            order: NumPy iteration order — ``"C"`` (row-major, default), ``"F"`` (column-major),
+                ``"A"`` (Fortran-like if the array is F-contiguous, else C-like), or ``"K"``
+                (memory order, honouring negative strides).
 
         Returns:
-            np.ndarray
+            np.ndarray: The flattened voxel array.
         """
         return self.get_array().ravel(order=order)
     def extract_label_(self, label: int | Enum | Sequence[int] | Sequence[Enum], keep_label=False) -> Self:
@@ -2719,15 +2852,19 @@ class NII(NII_Math):
     def remove_labels(self,label:int|Enum|Sequence[int]|Sequence[Enum], inplace=False, verbose:logging=True, removed_to_label=0) -> Self:
         """If this NII is a segmentation you can single out one label."""
         assert label != 0, 'Zero label does not make sens.  This is the background'
-        seg_arr = self.get_seg_array()
+        if isinstance(label,str):
+            label = int(label)  # a str is also a Sequence, so this must come first
         if not isinstance(label,Sequence):
             label = [label] # type: ignore
+        flat: list[int] = []
         for l in label:
             if isinstance(l, list):
-                for g in l:
-                    seg_arr[seg_arr == g] = removed_to_label
+                flat.extend(g.value if isinstance(g, Enum) else g for g in l)
             else:
-                seg_arr[seg_arr == l] = removed_to_label
+                flat.append(l.value if isinstance(l, Enum) else l)
+        # one np_map_labels gather is constant-time in the number of labels (a per-label
+        # `seg_arr == l` loop costs one full pass per label).
+        seg_arr = np_map_labels(self.get_seg_array(), dict.fromkeys(flat, removed_to_label))
         return self.set_array(seg_arr,inplace=inplace, verbose=verbose)
     def remove_labels_(self, label: int | Enum | Sequence[int] | Sequence[Enum], removed_to_label=0, verbose: logging = True) -> Self:
         """In-place variant of `remove_labels`."""
@@ -2764,10 +2901,7 @@ class NII(NII_Math):
         out = np_unique_withoutzero(arr)
         log.print(out,verbose=verbose)
         return out
-    def voxel_volume(self) -> float:
-        """Returns the volume of a single voxel in mm³ (product of all zoom values)."""
-        product = math.prod(self.spacing)
-        return product
+
 
     def volumes(self, include_zero: bool = False, in_mm3=False,sort=False) -> dict[int, float]|dict[int, int]:
         """Returns a dict stating how many pixels are present for each label."""
@@ -2818,6 +2952,137 @@ class NII(NII_Math):
     def center_of_masses(self) -> dict[int, COORDINATE]:
         """Returns a dict stating the center of mass for each present label (not including zero!)."""
         return np_center_of_mass(self.get_seg_array())
+
+    def relabel_by_position(
+        self,
+        axis: DIRECTIONS = "I",
+        offset: int = 0,
+        inplace: bool = False,
+        verbose: logging = False,
+    ) -> Self:
+        """Relabels instances consecutively by their position along an anatomical axis.
+
+        Labels are renumbered ``1 + offset``, ``2 + offset``, ... in the order their centers of
+        mass appear when travelling along ``axis``. With the default ``axis="I"`` the most
+        superior instance becomes label ``1 + offset`` and numbering runs downwards.
+
+        This works in whatever orientation the image already has -- the direction is resolved
+        against :attr:`orientation`, so no reorientation round-trip is needed.
+
+        Args:
+            axis (DIRECTIONS, optional): Anatomical direction the numbering advances along.
+                Defaults to ``"I"`` (superior to inferior).
+            offset (int, optional): Added to every new label, so numbering starts at
+                ``1 + offset``. Defaults to 0.
+            inplace (bool, optional): If True, modifies this NII in place. Defaults to False.
+            verbose (logging, optional): Passed through to :meth:`map_labels`. Defaults to False.
+
+        Returns:
+            NII: The relabeled segmentation.
+
+        Examples:
+            >>> vert.relabel_by_position("I")  # doctest: +SKIP
+            # topmost vertebra -> 1, next one down -> 2, ...
+        """
+        ax = self.get_axis(axis)
+        # get_axis falls back to the opposite letter, so recover which way the axis actually runs.
+        forward = axis in self.orientation
+        coms = np_center_of_mass(self.get_seg_array())
+        ordered = sorted(coms.items(), key=lambda kv: kv[1][ax], reverse=not forward)
+        label_map = {int(label): idx + 1 + offset for idx, (label, _) in enumerate(ordered)}
+        return self.map_labels(label_map, verbose=verbose, inplace=inplace)
+
+    def relabel_by_position_(self, axis: DIRECTIONS = "I", offset: int = 0, verbose: logging = False) -> Self:
+        """In-place version of :meth:`relabel_by_position`."""
+        return self.relabel_by_position(axis=axis, offset=offset, inplace=True, verbose=verbose)
+
+    def filter_connected_components_by_bbox_chain(
+        self,
+        margin_mm: float = 0.0,
+        extra_margin_mm: float = 0.0,
+        extra_margin_axis: DIRECTIONS | None = None,
+        connectivity: int = 3,
+        inplace: bool = False,
+    ) -> Self:
+        """Keeps only components whose bounding boxes chain onto the largest component.
+
+        The mask is binarized and split into connected components. Starting from the largest one,
+        any component whose bounding box (grown by ``margin_mm``) overlaps the growing region on
+        every axis is kept, repeating until nothing new is added; everything else is removed.
+        Labels of the kept voxels are preserved.
+
+        This is the "keep the spine, drop the unrelated blobs" filter: a structure broken into
+        several pieces along its length stays, while a component sitting off to the side goes.
+
+        Margins are given in millimetres and converted per axis using :attr:`zoom`, so the region
+        grows by the same physical distance regardless of anisotropy.
+
+        Args:
+            margin_mm (float, optional): Bounding-box margin in mm applied on every axis.
+                Defaults to 0.0.
+            extra_margin_mm (float, optional): Additional margin in mm along ``extra_margin_axis``
+                only, to tolerate gaps along the structure's main direction. Defaults to 0.0.
+            extra_margin_axis (DIRECTIONS | None, optional): Anatomical direction the extra margin
+                applies to (e.g. ``"I"`` for a spine). Required when ``extra_margin_mm`` is set.
+                Defaults to None.
+            connectivity (int, optional): Connectivity used to find the components. Defaults to 3.
+            inplace (bool, optional): If True, modifies this NII in place. Defaults to False.
+
+        Returns:
+            NII: The filtered segmentation.
+        """
+        assert extra_margin_mm == 0 or extra_margin_axis is not None, "extra_margin_mm needs extra_margin_axis"
+        zoom = self.zoom
+        margin = [margin_mm / z for z in zoom]
+        axis = self.get_axis(extra_margin_axis) if extra_margin_axis is not None else None
+        extra = extra_margin_mm / zoom[axis] if axis is not None else 0.0
+        arr = np_filter_connected_components_by_bbox_chain(
+            self.get_seg_array(),
+            margin=margin,
+            extra_margin=extra,
+            extra_margin_axis=axis,
+            connectivity=connectivity,
+        )
+        return self.set_array(arr, inplace=inplace)
+
+    def label_interface_thickness(
+        self,
+        label: int | Sequence[int],
+        other_label: int | Sequence[int],
+        max_count_component: int | None = None,
+        sigma: float = 1.0,
+        max_steps: int | None = 1000,
+        max_distance: float | None = None,
+    ) -> np.ndarray:
+        """Measures how thick a structure is where it meets another structure.
+
+        At every voxel of ``other_label`` touching ``label``, a ray is marched along the inward
+        surface normal until it exits ``label``; the distance travelled is the local thickness.
+        Distances are returned in **millimetres**, using :attr:`zoom`.
+
+        Args:
+            label (int | Sequence[int]): The structure whose thickness is measured.
+            other_label (int | Sequence[int]): The structure the measurement starts from.
+            max_count_component (int | None, optional): Keep only this many largest connected
+                components of ``label`` before measuring. Defaults to None (keep all).
+            sigma (float, optional): Smoothing applied before computing the normals. Defaults to 1.0.
+            max_steps (int | None, optional): Step limit per ray. Defaults to 1000.
+            max_distance (float | None, optional): Distance limit per ray, in voxels. Defaults to None.
+
+        Returns:
+            np.ndarray: One thickness in mm per interface voxel; ``np.nan`` where a ray hit a
+            limit without leaving ``label``. Empty when the two labels do not touch.
+        """
+        return np_label_interface_thickness(
+            self.get_seg_array(),
+            label,
+            other_label,
+            zoom=self.zoom,
+            max_count_component=max_count_component,
+            sigma=sigma,
+            max_steps=max_steps,
+            max_distance=max_distance,
+        )
 
 
 

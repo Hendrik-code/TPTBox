@@ -118,6 +118,35 @@ def argmin(lst: list) -> int:
     return lst.index(min(lst))
 
 
+def _occupancy_bbox(occ: np.ndarray) -> tuple[np.ndarray, np.ndarray] | None:
+    """Axis-aligned bounding box (min, max inclusive) of the nonzero region of `occ`.
+
+    Uses three 1-D `np.any` reductions rather than `np.where`, so cost is O(N)
+    with cache-friendly access. Returns ``None`` for an all-zero occupancy.
+    """
+    mask = occ > 0
+    axes = mask.ndim
+    lo = np.empty(axes, dtype=np.int64)
+    hi = np.empty(axes, dtype=np.int64)
+    for ax in range(axes):
+        collapsed = np.any(mask, axis=tuple(i for i in range(axes) if i != ax))
+        idx = np.flatnonzero(collapsed)
+        if idx.size == 0:
+            return None
+        lo[ax] = idx[0]
+        hi[ax] = idx[-1]
+    return lo, hi
+
+
+def _aabb_overlaps(a: tuple[np.ndarray, np.ndarray] | None, b: tuple[np.ndarray, np.ndarray] | None) -> bool:
+    """Whether two axis-aligned bounding boxes touch or intersect. ``None`` means empty."""
+    if a is None or b is None:
+        return False
+    a_lo, a_hi = a
+    b_lo, b_hi = b
+    return bool(np.all(a_lo <= b_hi) and np.all(b_lo <= a_hi))
+
+
 def get_max_affine_and_shape(
     points: np.ndarray,
     affines: list[np.ndarray],
@@ -198,24 +227,25 @@ def get_max_affine_and_shape(
     return nib.Nifti1Image(np.zeros(shape.astype(int), dtype=dtype), affine)  # type: ignore
 
 
-def compute_crop_slice(nii: Nifti1Image, minimum=0, dist=0) -> tuple[slice, slice, slice]:
-    """Computes the minimum slice that removes unused space from the image and returns the corresponding slice tuple along with the origin shift required for centroids.
+def compute_crop_slice(nii: Nifti1Image, minimum: float = 0, dist: int = 0) -> tuple[slice, slice, slice]:
+    """Compute the tight 3-D crop slice that removes empty space from a NIfTI volume.
+
+    A voxel is considered "filled" when its value is strictly greater than
+    ``minimum``.  The returned slice tuple can be applied via ``nii.slicer``
+    to crop the image.
 
     Args:
-        minimum (int): The minimum value of the array (0 for MRI, -1024 for CT). Default value is 0.
-        dist (int): The amount of padding to be added to the cropped image. Default value is 0.
-        other_crop (tuple[slice,...], optional): A tuple of slice objects representing the slice of an other image to be combined with the current slice. Default value is None.
+        nii: Input NIfTI image whose bounding box is computed.
+        minimum: Background threshold. Voxels above this value delimit the crop
+            (0 for MRI, -1024 for CT).
+        dist: Padding in millimetres added on every side of the crop. Converted
+            to voxels using the image's zooms.
 
     Returns:
-        ex_slice: A tuple of slice objects that need to be applied to crop the image.
-        origin_shift: A tuple of integers representing the shift required to obtain the centroids of the cropped image.
+        A 3-tuple of ``slice`` objects to apply along the (X, Y, Z) axes.
 
-    Note:
-        - The computed slice removes the unused space from the image based on the minimum value.
-        - The padding is added to the computed slice.
-        - If the computed slice reduces the array size to zero, a ValueError is raised.
-        - If other_crop is not None, the computed slice is combined with the slice of another image to obtain a common region of interest.
-        - Only None slice is supported for combining slices.
+    Raises:
+        ValueError: If no voxels exceed ``minimum`` (crop would be empty).
     """
     shp = nii.shape
     zms = nii.header.get_zooms()  # type: ignore
@@ -323,7 +353,7 @@ def n4_bias_field_correction(
 
             Parameters
             ----------
-                img: NiftiImage
+                nib_image: nibabel Nifti1Image
 
             Returns:
             -------
@@ -430,6 +460,21 @@ type_mapping = {
 }
 
 
+def _auto_output_dtype(niis: list[nib.nifti1.Nifti1Image]) -> type:
+    """Pick the smallest lossless output dtype from the inputs' on-disk dtypes.
+
+    Reads only the NIfTI headers — no pixel data is loaded. If every input is
+    integer-typed, returns the widest integer dtype that covers them all;
+    otherwise falls back to float32. This lets the stitcher store magnitude
+    MR outputs as uint16 (or int16) when the source already fit in 16 bits,
+    halving the on-disk and downstream RAM footprint versus float64.
+    """
+    dtypes = [np.dtype(nii.get_data_dtype()) for nii in niis]
+    if all(np.issubdtype(d, np.integer) for d in dtypes):
+        return max(dtypes, key=lambda d: d.itemsize).type  # e.g. np.uint16
+    return np.float32
+
+
 def main(  # noqa: C901
     images: list[str] | list[Path] | list[nib.nifti1.Nifti1Image],
     output: str | None,
@@ -493,6 +538,9 @@ def main(  # noqa: C901
         dtype: Output data type. Accepts a Python type (e.g. ``float``,
             ``np.uint16``) or a string key from the internal type mapping.
         save: If True, writes the stitched image to ``output``.
+        ramp_path: Optional explicit output path for the ramp NIfTI. Only used
+            when ``store_ramp`` is True; when None the ramp path is derived
+            from ``output``.
 
     Returns:
         A 2-tuple ``(stitched_nii, ramp_nii)`` where ``ramp_nii`` is None
@@ -568,6 +616,11 @@ def main(  # noqa: C901
             dtype2 = np.uint64
         dtype = dtype2
     else:
+        # Auto-detect the output dtype from the input headers when the caller
+        # asked for "auto". Blending math still runs in float; only the final
+        # cast at save time uses the picked dtype (e.g. uint16 for magnitude MR).
+        if isinstance(dtype, str) and dtype == "auto":
+            dtype = _auto_output_dtype(niis)
         dtype2 = float
     nii_out = get_max_affine_and_shape(corners_current, affines, min_spacing=min_spacing, dtype=dtype2, verbose=verbose)
     target_list = []
@@ -578,8 +631,10 @@ def main(  # noqa: C901
         print(f"{i:2}/{len(niis):2} resampled", end="\r") if verbose else None
         nii_new = nip.resample_from_to(nii, nii_out, 0 if is_segmentation else 3, mode="constant", cval=min_value)
         arr_new = get_array(nii_new)
+        if not is_segmentation and np.issubdtype(arr_new.dtype, np.floating):
+            np.nan_to_num(arr_new, copy=False, nan=min_value, posinf=min_value, neginf=min_value)
         target_list.append(arr_new)
-        b = nib.Nifti1Image(get_array(nii) * 0 + 1, affine=nii.affine)  # type: ignore
+        b = nib.Nifti1Image(np.ones(nii.shape, dtype=np.float32), affine=nii.affine)  # type: ignore
         b = nip.resample_from_to(b, nii_new, 0, cval=0, mode="constant")
         if is_segmentation:
             x = arr_new > 0
@@ -589,10 +644,18 @@ def main(  # noqa: C901
             occupancy_list.append(get_array(b).astype(np.float32))
 
     print("\n### ramp stitching ###") if verbose else None
+    # Per-chunk axis-aligned bounding box in target-space voxel coords.
+    # Precomputing once avoids the O(N_chunks^2) full-volume copy + multiply
+    # inside the ramp loop for pairs that don't touch. `_occupancy_bbox`
+    # returns None for an empty occupancy — treated as "no overlap possible".
+    bboxes = [_occupancy_bbox(occ) for occ in occupancy_list]
     # ramp stitching
     combinations = list(itertools.combinations(range(len(target_list)), 2))
     for idx, item in enumerate(combinations, 1):
         print(f"{idx:2}/{len(combinations):2} ramp stitching", end="\r") if verbose else None
+        # Skip disjoint pairs before touching the full-volume arrays.
+        if not _aabb_overlaps(bboxes[item[0]], bboxes[item[1]]):
+            continue
         # TODO fix intersection with more than two occupancies
         arr_1_full = occupancy_list[item[0]]
         arr_2_full = occupancy_list[item[1]]

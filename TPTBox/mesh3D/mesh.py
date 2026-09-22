@@ -113,6 +113,22 @@ class SegmentationMesh(Mesh3D):
     """Mesh generated from a segmentation volume using the marching-cubes algorithm."""
 
     def __init__(self, int_arr: np.ndarray | Image_Reference) -> None:
+        """Build a surface mesh from a 3D integer segmentation array or image reference.
+
+        The array is cropped to its non-zero bounding box (with a 2-voxel margin),
+        then converted to a surface mesh via marching cubes. Vertex coordinates are
+        shifted back so they remain aligned with the original (uncropped) voxel grid.
+
+        Args:
+            int_arr: A 3D numpy array with integer labels (background must be 0),
+                or an ``Image_Reference`` that can be loaded as a segmentation
+                ``NII``. ``NII`` inputs are reoriented and rescaled to isotropic
+                spacing before extraction.
+
+        Raises:
+            AssertionError: If the array's minimum value is not zero or the array
+                does not have exactly three dimensions.
+        """
         if not isinstance(int_arr, np.ndarray):
             seg_nii = to_nii_seg(int_arr)
             seg_nii.reorient_().rescale_()
@@ -123,7 +139,7 @@ class SegmentationMesh(Mesh3D):
         # Force dtype to uint
         if np.issubdtype(int_arr.dtype, np.floating):
             print("input is of type float, converting to int")
-            int_arr.astype(np.uint16)
+            int_arr = int_arr.astype(np.uint16)  # astype returns a new array; the result was discarded
         # calculate bounding box cutout
         bbox_crop = np_bbox_binary(int_arr, px_dist=2)
         x1, y1, z1 = bbox_crop[0].start, bbox_crop[1].start, bbox_crop[2].start
@@ -196,6 +212,25 @@ class POIMesh(Mesh3D):
         subregions: list[int] | None = None,
         size_factor: float = 5,
     ) -> None:
+        """Build a glyph mesh (spheres) from a POI container.
+
+        Filters POIs by region and subregion, then renders each remaining coordinate
+        as a small sphere so it can be visualized alongside a segmentation mesh.
+
+        Args:
+            poi: Input ``POI`` container. Reoriented in place and optionally
+                rescaled to isotropic spacing.
+            rescale_to_iso: If True, rescales ``poi`` to isotropic spacing before
+                extracting coordinates.
+            regions: Vertebra / region IDs to keep. If None, all regions in ``poi``
+                are used.
+            subregions: Subregion IDs to keep. If None, all subregions in ``poi``
+                are used.
+            size_factor: Radius (in the POI's coordinate units) of each sphere glyph.
+
+        Raises:
+            AssertionError: If no POIs match the requested region/subregion filter.
+        """
         poi.reorient_()
         if rescale_to_iso:
             poi.rescale_()

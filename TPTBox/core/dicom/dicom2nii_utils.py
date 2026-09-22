@@ -5,12 +5,16 @@ import pickle
 from copy import deepcopy
 from datetime import date
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
-import pydicom
 from tqdm import tqdm
 
+if TYPE_CHECKING:
+    import pydicom
+
 from TPTBox import BIDS_FILE, NII, BIDS_Global_info, Print_Logger
+from TPTBox.core.internal.nii_help import save_json as secure_save_json
 
 # source_folder = Path("/DATA/NAS/datasets_source/epi/NAKO/NAKO-732_Nachlieferung_20_25/")
 source_folder = Path("/DATA/NAS/datasets_source/epi/NAKO/NAKO_2D_issue/")
@@ -252,6 +256,8 @@ def get_json_from_dicom(data: list[pydicom.FileDataset] | pydicom.FileDataset) -
 
 def _get_json_from_dicom(py_dict: dict):
     """Rearrange a pydicom ``to_json_dict`` output into a JSON-serialisable form."""
+    import pydicom  # only this helper actually needs the library at runtime
+
     data1 = {}
     for key, value in py_dict.items():
         try:
@@ -283,7 +289,7 @@ def test_name_conflict(json_ob: dict, file: str | Path) -> bool:
         ``False`` otherwise (file does not exist or content matches).
     """
     if Path(file).exists():
-        with open(file) as f:
+        with open(file, encoding="utf-8") as f:
             js = json.load(f)
             if "grid" in js:
                 del js["grid"]
@@ -309,21 +315,12 @@ def save_json(json_ob: dict, file: str | Path, check_exist: bool = False, overri
         FileExistsError: When *check_exist* is ``True`` and the existing file
             contains different content.
     """
-
-    def convert(obj):
-        if isinstance(obj, np.integer):
-            return int(obj)
-        if isinstance(obj, np.floating):
-            return float(obj)
-        raise TypeError(type(obj))
-
     if check_exist and test_name_conflict(json_ob, file):
         raise FileExistsError(file)
     if Path(file).exists() and not override:
         return True
     Print_Logger().on_save("save json with grid info", file)
-    with open(file, "w") as file_handel:
-        json.dump(json_ob, file_handel, indent=4, default=convert)
+    secure_save_json(file, json_ob, indent=4)
     return False
 
 
@@ -336,7 +333,7 @@ def load_json(file: str | Path) -> dict:
     Returns:
         Parsed contents of the JSON file.
     """
-    with open(file) as file_handel:
+    with open(file, encoding="utf-8") as file_handel:
         return json.load(file_handel)
 
 

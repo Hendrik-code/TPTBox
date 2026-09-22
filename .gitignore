@@ -170,3 +170,4 @@ examples
 slicerio_data
 *.nrrd
 nnUNet_results
+CLAUDE*.md

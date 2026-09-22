@@ -1,18 +1,83 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+from math import ceil
 from pathlib import Path
 
 import numpy as np
 import torch
 
-from TPTBox import NII, Log_Type, No_Logger
+from TPTBox import NII, Log_Type, Print_Logger
 
 from .predictor import nnUNetPredictor
 
-logger = No_Logger()
+logger = Print_Logger()
 logger.prefix = "API"
 
 _interop = False
+
+
+def _get_total_ram_mb() -> float:
+    """Return total system RAM in MB, or a conservative fallback if it cannot be determined."""
+    try:
+        import psutil
+
+        return psutil.virtual_memory().total / (1024 * 1024)
+    except ImportError:
+        pass
+    try:
+        import os
+
+        return (os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")) / (1024 * 1024)
+    except (AttributeError, ValueError, OSError):
+        return 8000.0
+
+
+def estimate_peak_ram_mb(shape: Sequence[int], num_classes: int, num_channels: int = 1) -> float:
+    """Estimate peak CPU RAM usage during a single-pass nnU-Net inference in MB.
+
+    Accounts for the dominant allocations held roughly simultaneously by
+    :func:`run_inference` and the underlying predictor:
+
+    * ``predicted_logits`` : ``num_classes * prod(shape) * 2 B`` (float16)
+    * ``n_predictions``    : ``prod(shape) * 2 B``               (float16)
+    * Model input tensor + a transposed / stacked copy :
+      ``2 * num_channels * prod(shape) * 2 B``                 (float16)
+    * Output segmentation  : ``prod(shape) * 1 B``               (uint8)
+
+    A 1.3x headroom multiplier is applied to cover temporary transpose
+    buffers, per-tile predictions, gaussian weights, and torch allocator
+    overhead.
+    """
+    n_voxels = int(np.prod(shape))
+    bytes_per_voxel = (num_classes * 2) + 2 + (num_channels * 2 * 2) + 1
+    return n_voxels * bytes_per_voxel * 1.3 / (1024 * 1024)
+
+
+def compute_cpu_chunks_for_ram(
+    shape: Sequence[int],
+    split_axis: int,
+    num_classes: int,
+    num_channels: int,
+    overlap: int,
+    target_mb: float,
+) -> int:
+    """Return the smallest ``n_chunks`` such that a single chunk's peak RAM stays under ``target_mb``.
+
+    Returns ``1`` when the whole volume already fits.
+    """
+    length = int(shape[split_axis])
+    if length <= 1 or target_mb <= 0:
+        return 1
+    for n_chunks in range(1, length + 1):
+        chunk_length = length // n_chunks
+        if chunk_length == 0:
+            return length
+        chunk_shape = list(shape)
+        chunk_shape[split_axis] = chunk_length + 2 * overlap
+        if estimate_peak_ram_mb(chunk_shape, num_classes, num_channels) <= target_mb:
+            return n_chunks
+    return length
 
 
 # Adapted from https://github.com/MIC-DKFZ/nnUNet
@@ -36,6 +101,7 @@ def load_inf_model(
     wait_till_gpu_percent_is_free: float = 0.3,
     fail_on_missing_memory=False,
     tile_batch_size: int = 1,
+    logger=logger,
 ) -> nnUNetPredictor:
     """Load and initialise an nnU-Net model predictor from a trained model folder.
 
@@ -71,6 +137,9 @@ def load_inf_model(
         tile_batch_size: Number of sliding-window tiles per network forward pass.
             ``1`` reproduces the original per-tile path; larger values batch
             tiles to improve GPU utilisation at higher peak memory.
+        fail_on_missing_memory: If True, raise an error when the estimated GPU memory
+            exceeds the available memory instead of waiting.
+        logger: Logger used for progress and error output.
 
     Returns:
         Initialised ``nnUNetPredictor`` ready for inference.
@@ -144,11 +213,84 @@ def load_inf_model(
     return predictor
 
 
+def _split_ranges(length: int, n_chunks: int, overlap: int):
+    step = length // n_chunks
+    ranges = []
+    for i in range(n_chunks):
+        start = i * step
+        end = length if i == n_chunks - 1 else (i + 1) * step
+        read_start = max(0, start - overlap)
+        read_end = min(length, end + overlap)
+        crop_start = start - read_start
+        crop_end = crop_start + (end - start)
+        ranges.append((read_start, read_end, crop_start, crop_end))
+    return ranges
+
+
+def _run_inference_patches(input_nii: list[NII], nnunet, _cpu_chunks, ram_fraction: float = 0.5, logger=logger):
+    """Split image into k _cpu_chunks along the largest dimension.
+
+    Should only be used if there is not enough RAM on the system. If
+    ``_cpu_chunks`` is ``None`` the chunk count is chosen so a single chunk's
+    estimated peak RAM stays under ``ram_fraction`` (default 50%) of total
+    system RAM.
+    """
+    logger.on_debug("Run: _run_inference_patches, You should only run this if you have limited RAM.")
+    import gc
+
+    from TPTBox.segmentation.nnUnet_utils.predictor import empty_cache
+
+    empty_cache(nnunet.device)
+    shape = input_nii[0].shape
+    split_axis = int(np.argmax(shape))
+    patch_size = nnunet.configuration_manager.patch_size
+    overlap = ceil(patch_size[split_axis] * (1 - nnunet.tile_step_size))
+
+    if _cpu_chunks is None:
+        num_classes = int(nnunet.label_manager.num_segmentation_heads)
+        total_mb = _get_total_ram_mb()
+        target_mb = total_mb * ram_fraction
+        _cpu_chunks = compute_cpu_chunks_for_ram(shape, split_axis, num_classes, len(input_nii), overlap, target_mb)
+        est_full_mb = estimate_peak_ram_mb(shape, num_classes, len(input_nii))
+        logger.print(
+            f"Auto _cpu_chunks={_cpu_chunks} "
+            f"(full-run peak ~{est_full_mb:.0f} MB, target {target_mb:.0f} MB = {ram_fraction * 100:.0f}% of {total_mb:.0f} MB RAM)"
+        )
+    _cpu_chunks = max(2, int(_cpu_chunks))
+    logger.print(f"{overlap=}", f"chunks={_cpu_chunks}")
+    ranges = _split_ranges(
+        shape[split_axis],
+        _cpu_chunks,
+        overlap,
+    )
+    logger.print(f"{ranges=}")
+    seg_chunks = []
+    for read_start, read_end, crop_start, crop_end in ranges:
+        chunk_inputs = []
+        for nii in input_nii:
+            sl = [slice(None)] * 3
+            sl[split_axis] = slice(read_start, read_end)
+            chunk_inputs.append(nii[tuple(sl)])
+        seg_chunk, _, _ = run_inference(chunk_inputs, nnunet, logits=False, logger=logger)
+        sl = [slice(None)] * 3
+        sl[split_axis] = slice(crop_start, crop_end)
+        seg_chunk = seg_chunk[tuple(sl)]
+        seg_chunks.append(seg_chunk)
+        del chunk_inputs
+        gc.collect()
+        empty_cache(nnunet.device)
+    seg_arr = np.concatenate([s.get_array() for s in seg_chunks], axis=split_axis)
+    seg_nii = input_nii[0].copy()
+    seg_nii.seg = True
+    return seg_nii.set_array_(seg_arr).set_dtype("smallest_uint")
+
+
 def run_inference(
     input_nii: str | NII | list[NII],
     predictor: nnUNetPredictor,
     reorient_PIR: bool = False,  # noqa: N803
     logits: bool = False,
+    logger=logger,
     verbose: bool = False,  # noqa: ARG001
 ) -> tuple[NII, NII | None, np.ndarray | None]:
     """Run nnU-Net inference on a single image or list of images (multi-channel).
@@ -161,6 +303,7 @@ def run_inference(
             passing it to the model.
         logits: If True, return raw softmax logits.  Currently not implemented and
             will raise ``NotImplementedError``.
+        logger: Logger used for progress and error output.
         verbose: Unused; reserved for future logging support.
 
     Raises:
@@ -193,10 +336,10 @@ def run_inference(
     try:
         img = np.vstack(img_arrs)
     except Exception:
-        print("could not stack images; shapes=", [a.shape for a in img_arrs])
+        logger.on_fail("could not stack images; shapes=", [a.shape for a in img_arrs])
         raise
     props = {"spacing": i.zoom[::-1]}  # PIR
-    out = predictor.predict_single_npy_array(img, props, save_or_return_probabilities=False)
+    out = predictor.predict_single_npy_array(img, props, save_or_return_probabilities=False, logger=logger)
     segmentation: np.ndarray = out  # type: ignore
     softmax_logits = None
     segmentation = np.transpose(segmentation, axes=segmentation.ndim - 1 - np.arange(segmentation.ndim))

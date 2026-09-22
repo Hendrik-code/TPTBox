@@ -3,6 +3,8 @@ from __future__ import annotations
 from copy import deepcopy
 from pathlib import Path
 
+import numpy as np
+
 ###### GLOBAL POI #####
 from typing_extensions import Self
 
@@ -35,7 +37,7 @@ class POI_Global(Abstract_POI):
         args = {}
         if level_one_info is not None:
             args["level_one_info"] = level_one_info
-        if level_one_info is not None:
+        if level_two_info is not None:
             args["level_two_info"] = level_two_info
         self.itk_coords = itk_coords
         _format = FORMAT_GLOBAL
@@ -50,8 +52,12 @@ class POI_Global(Abstract_POI):
         elif isinstance(input_poi, poi.POI):
             local_poi = input_poi.copy()
             global_points = poi.POI_Descriptor(definition=local_poi.centroids.definition)
-            for k1, k2, v in local_poi.items():
-                global_points[k1:k2] = local_poi.local_to_global(v, itk_coords)
+            items = list(local_poi.items())
+            if items:
+                # one batched affine matmul instead of a per-point local_to_global loop
+                arr = local_poi.local_to_global_arr(np.asarray([v for _, _, v in items]), itk_coords)
+                for (k1, k2, _), row in zip(items, arr.tolist()):
+                    global_points[k1:k2] = tuple(row)
             info = input_poi.info.copy()
             _format = input_poi.format
         else:
@@ -118,8 +124,9 @@ class POI_Global(Abstract_POI):
         p = poi.POI.load(ref)
         if isinstance(ref, poi.POI):
             return self.to_other(p)
-        elif isinstance(ref, Self):
+        elif isinstance(ref, POI_Global):  # `Self` is a typing form; isinstance() against it raises
             return self.to_cord_system(ref.itk_coords)
+        return p
 
     def to_global(self, itk_coords: bool | None = None) -> Self:
         """Return this object unchanged (already in global coordinates)."""
@@ -173,19 +180,33 @@ class POI_Global(Abstract_POI):
 
         Args:
             msk (Union[poi.POI, poi.NII]): The reference to the other coordinate system.
+            verbose (bool, optional): If True, take the per-point (non-batched) code path so individual
+                ``global_to_local`` calls can log. Defaults to False.
 
         Returns:
             poi.POI: The converted POI.
         """
         out = poi.POI_Descriptor(definition=self._get_centroids().definition)
-        for k1, k2, v in self.items():
+        items = list(self.items())
+        if items and not verbose:
+            # one batched inverse-affine matmul instead of a per-point global_to_local loop
+            arr = np.asarray([v for _, _, v in items], dtype=float)
             if self.itk_coords:
-                assert len(v) == 3, "n-d vec not implemented for n != 3"
-                v = (-v[0], -v[1], v[2])  # noqa: PLW2901
-            v_out = msk.global_to_local(v)
-            if verbose:
-                log.print(v, "-->", v_out)
-            out[k1, k2] = tuple(v_out)
+                assert arr.shape[1] == 3, "n-d vec not implemented for n != 3"
+                arr[:, 0] *= -1
+                arr[:, 1] *= -1
+            arr = msk.global_to_local_arr(arr)
+            for (k1, k2, _), row in zip(items, arr.tolist()):
+                out[k1, k2] = tuple(row)
+        else:
+            for k1, k2, v in items:
+                if self.itk_coords:
+                    assert len(v) == 3, "n-d vec not implemented for n != 3"
+                    v = (-v[0], -v[1], v[2])  # noqa: PLW2901
+                v_out = msk.global_to_local(v)
+                if verbose:
+                    log.print(v, "-->", v_out)
+                out[k1, k2] = tuple(v_out)
 
         return poi.POI(
             centroids=out,
@@ -261,6 +282,9 @@ class POI_Global(Abstract_POI):
                 grid before saving.
             verbose: Emit a save log message.  Defaults to ``True``.
         """
+        if Path(out_path).name.endswith("mrk.json"):
+            log.on_warning("use save_mrk to save .mrk.json files")
+            return self.save_mrk(out_path)
         return save_poi(
             self, out_path, make_parents, additional_info, save_hint=save_hint, resample_reference=resample_reference, verbose=verbose
         )

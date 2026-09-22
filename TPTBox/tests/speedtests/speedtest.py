@@ -54,6 +54,7 @@ def speed_test(
     functions: list[Callable],
     repeats: int = 20,
     assert_equal_function: Callable | None = None,
+    print_first_speed_output: bool = False,
     *args,
     **kwargs,
 ):
@@ -72,7 +73,7 @@ def speed_test(
             *args,
             functions=functions,
             assert_equal_function=assert_equal_function,
-            print_output=repeat_idx == 0,
+            print_output=repeat_idx == 0 if print_first_speed_output else False,
             **kwargs,
         )
         for k, v in time_measures.items():

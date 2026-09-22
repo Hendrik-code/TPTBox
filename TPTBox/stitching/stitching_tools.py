@@ -19,7 +19,7 @@ def stitching(
     bias_field: bool = False,
     kick_out_fully_integrated_images: bool = True,
     verbose: bool = True,
-    dtype: type = float,
+    dtype: type | str = float,
     match_histogram: bool = False,
     store_ramp: bool = False,
     ramp_path=None,
@@ -45,9 +45,13 @@ def stitching(
         kick_out_fully_integrated_images: If True, removes volumes that are
             fully contained within another volume before stitching.
         verbose: If True, logs the output path before stitching.
-        dtype: NumPy dtype for the output array.
+        dtype: NumPy dtype for the output array, or the string ``"auto"`` to
+            pick the smallest lossless dtype from the inputs' on-disk dtypes
+            (uint16/int16 for MR magnitude sources, float32 otherwise).
         match_histogram: If True, matches histograms between consecutive inputs.
         store_ramp: If True, also returns the per-volume blending weight array.
+        ramp_path: Optional explicit output path for the ramp NIfTI; forwarded to
+            :func:`stitching_raw`. Only used when ``store_ramp`` is True.
 
     Returns:
         A 2-tuple ``(stitched_nii, ramp_nii)`` as returned by
@@ -79,7 +83,7 @@ def _crop_borders(nii: NII, chunk_info: str, cut: dict[str, tuple[slice, slice, 
     return nii.reorient_().apply_crop_(cut[chunk_info]).reorient_(ori)
 
 
-def GNC_stitch_T2w(
+def NAKO_stitch_T2w(
     HWS: Image_Reference,  # noqa: N803
     BWS: Image_Reference,  # noqa: N803
     LWS: Image_Reference,  # noqa: N803
@@ -90,7 +94,10 @@ def GNC_stitch_T2w(
     #    "LWS": (slice(None), slice(48, 448), slice(None)),
     # },
 ) -> NII:
-    """Apply N4 bias correction to each chunk, stitch them, then apply N4 again.
+    """Stitch the three NAKO sagittal T2w spine stations into a single volume.
+
+    Applies N4 bias correction to each chunk, stitches them, then optionally applies
+    N4 again. The chunk names follow the NAKO acquisition protocol.
 
     Args:
         HWS (NII | str | Path): Cervical region
@@ -106,7 +113,7 @@ def GNC_stitch_T2w(
     chunks["LWS"]["nii"] = NII.load(LWS, seg=False).reorient_()
     # for k in chunks.keys():
     #    # chunks[k]["n4"] = _crop_borders(n4_bias(chunks[k]["nii"], spline_param=200)[0], k, cut)
-    #    # chunks[k]["n4"].apply_crop_slice_(cut[k])
+    #    # chunks[k]["n4"].apply_crop_(cut[k])
     # chunks_m = {k: chunks[k]["n4"] for k in chunks.keys()}
     # chunks_a = list([l.nii for l in chunks_m.values()])
     chunks_a = [a["nii"].nii for a in chunks.values()]
@@ -166,7 +173,7 @@ def n4_bias(
     mask[mask != 0] = 1
     mask_nii = nii.set_array(mask)
     mask_nii.seg = True
-    mask_nii.dilate_msk_(mm=3, verbose=False)
+    mask_nii.dilate_msk_(n_pixel=3, verbose=False)
     n4: NII = nii.n4_bias_field_correction(mask=from_nibabel(mask_nii.nii), spline_param=spline_param)
     if norm != -1:
         n4 *= norm / n4.max()

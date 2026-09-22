@@ -28,7 +28,6 @@ from TPTBox import (
     to_nii,
     to_nii_optional,
     v_idx2name,
-    v_idx_order,
 )
 from TPTBox.mesh3D.mesh_colors import _color_map_in_row, get_color_by_label
 
@@ -145,6 +144,7 @@ def sag_cor_curve_projection(
     Args:
         ctd_list: given Centroids
         img_data: given img_data
+        ctd_fallback: Fallback POI used if ``ctd_list`` has 3 or fewer points at ``curve_location`` to interpolate.
         cor_savgol_filter: If true, will perform the savgol filter also in coronal view
         curve_location: Location of the curve's centroids to be used.
 
@@ -162,8 +162,6 @@ def sag_cor_curve_projection(
     # Sagittal and coronal projections of a curved plane defined by centroids
     # Note: Will assume IPL orientation!
     # if x-direction (=S/I) is not fully incremental, a straight, not an interpolated plane will be returned
-    order = v_idx_order
-    order += [i for i in range(256) if i not in v_idx_order]
     # ctd_list.sorting_list = v_idx_order
     ctd_list.round_(3)
 
@@ -270,6 +268,27 @@ def curve_projected_slice(
     )
 
 
+def _mm_to_voxel_thickness(thick_mm, y_zoom: float) -> list[int]:
+    """Convert slab half-widths from millimetres to voxels (ceiling division).
+
+    Always call this with the *millimetre* values. Feeding the returned voxel
+    counts back in compounds the division once per call: with ``y_zoom < 1`` the
+    slab grows geometrically until ``int()`` raises ``OverflowError``, and with
+    ``y_zoom > 1`` it shrinks towards the 1-voxel floor below, so the projection
+    quietly uses a far thinner slab than the caller asked for.
+
+    Args:
+        thick_mm: Anterior/posterior slab half-widths in mm.
+        y_zoom: Voxel spacing along the anterior-posterior axis, in mm/voxel.
+
+    Returns:
+        The half-widths in voxels, at least 1 voxel each.
+    """
+    if not np.isfinite(y_zoom) or y_zoom <= 0:
+        y_zoom = 1.0
+    return [max(1, int(i // y_zoom) + int(i % y_zoom > 0)) for i in thick_mm]
+
+
 def curve_projected_mean(
     img_data: np.ndarray,
     zms: tuple[float, float, float],
@@ -304,7 +323,9 @@ def curve_projected_mean(
     cor_plane = np.zeros((shp[0], shp[2]))
     sag_plane = np.zeros((shp[0], shp[1]))
     y_zoom = zms[1]  # 0.9 = 1px = 0.9 mm # 10cm = 112px
-    thick = (*thick_t,)
+    # `thick_mm` stays in millimetres for the whole loop; the voxel counts go to a
+    # separate variable so the mm->voxel conversion is never applied to its own result.
+    thick_mm = (*thick_t,)
 
     for x in range(shp[0] - 1):
         if x < min(x_ctd):  # higher
@@ -315,12 +336,13 @@ def curve_projected_mean(
             y_ref = y_cord[x - min(x_ctd)]
 
         if 23 in ctd_list and x > int(ctd_list[23][1]):
-            thick = (100, 50)
+            thick_mm = (100, 50)
 
-        thick = [int(i // y_zoom) + int(i % y_zoom > 0) for i in thick]
+        thick = _mm_to_voxel_thickness(thick_mm, y_zoom)
         y_post_rel_to_border = y_ref + int(0.4 * (shp[1] - 1 - y_ref))  # one-third distance to border
         y_range_low = int(max(0, y_ref - thick[1]))  # sagittal left
         y_range_high = int(min(y_ref + thick[0], y_post_rel_to_border))  # sagittal right
+        y_range_high = max(y_range_high, y_range_low + 1)  # never hand np.nansum an empty axis
         cor_cut = img_data[x, y_range_low:y_range_high, :]
 
         plane_bool = np.zeros_like(cor_cut).astype(bool)
@@ -378,7 +400,10 @@ def curve_projected_mip(
     sag_plane = np.zeros((shp[0], shp[1]))
     sag_depth_plane = np.zeros((shp[0], shp[1]))
     y_zoom = zms[1]  # 0.9 = 1px = 0.9 mm # 10cm = 112px
-    thick = (*thick_t,)
+    # `thick_t` is in millimetres and never changes here, so convert once up front.
+    # (Converting inside the loop and assigning back to the same name divides the
+    # already-divided value once per slice - see _mm_to_voxel_thickness.)
+    thick = _mm_to_voxel_thickness(thick_t, y_zoom)
 
     for x in range(shp[0] - 1):
         if x < min(x_ctd):  # higher
@@ -389,18 +414,12 @@ def curve_projected_mip(
             y_ref = y_cord[x - min(x_ctd)]
 
         # if 23 in ctd_list and x > int(ctd_list[23][1]) and not make_colored_depth:
-        #    thick = (100, 50)
+        #    thick = _mm_to_voxel_thickness((100, 50), y_zoom)
 
-        # TODO set y_zoom for broken sample, see if it works
-        try:
-            thicke = [int(i // y_zoom) + int(i % y_zoom > 0) for i in thick]
-        except Exception:
-            print("thick infinity bug", y_zoom, thick_t, thick)
-            thicke = (*thick_t,)
-        thick = thicke
         y_post_rel_to_border = y_ref + int(0.4 * (shp[1] - 1 - y_ref))  # one-third distance to border
         y_range_low = int(max(0, y_ref - thick[1]))  # sagittal left
         y_range_high = int(min(y_ref + thick[0], y_post_rel_to_border))  # sagittal right
+        y_range_high = max(y_range_high, y_range_low + 1)  # never hand np.max an empty axis
         # print("range", y_range_low, y_range_high)
         cor_cut = img_data[x, y_range_low:y_range_high, :]
 
@@ -703,7 +722,7 @@ def plot_sag_centroids(
                     v[0] * zms[0],
                     c,
                     d,
-                    color=cmap(color - 1 % LABEL_MAX % cmap.N),
+                    color=cmap((color - 1) % LABEL_MAX % cmap.N),
                 )
             )
     if "text_sag" in ctd.info:
@@ -720,6 +739,8 @@ def plot_sag_centroids(
             elif len(x) == 2:
                 (text, a) = x
                 b = zms[0] * ctd[color, curve_location][0]
+            if isinstance(color, int):
+                color = get_color_by_label(color).rgb / 255  # noqa: PLW2901
             axs.text(
                 a,
                 b,
@@ -814,7 +835,7 @@ def plot_cor_centroids(
                     v[0] * zms[0],
                     c,
                     d,
-                    color=cmap(color - 1 % LABEL_MAX % cmap.N),
+                    color=cmap((color - 1) % LABEL_MAX % cmap.N),
                 )
             )
     if "text_cor" in ctd.info:
@@ -1063,15 +1084,29 @@ def create_snapshot(  # noqa: C901
     dpi=96,
     verbose: bool = False,
 ) -> None:
-    """Create virtual dx, sagittal, and coronal curved-planar CT snapshots with mask overlay.
+    """Render one or more :class:`Snapshot_Frame`s into a single figure and save it.
+
+    Each frame independently selects its views (sagittal / coronal / axial),
+    slice mode (regular slice, MIP, curve-projection, …), and overlay style;
+    this function only handles layout, common pre-processing (crop / reorient
+    / resample), and file I/O. The output file format is inferred from
+    ``snp_path``'s suffix (typically ``.png`` or ``.jpg``).
 
     Args:
-        snp_path (str): Path to the new jpg
-        frames (List[Snapshot_Frame]): List of Images
-        crop (bool): crop output to vertebral masks (seg-vert). Defaults to False.
-        check (bool): if true, check if snap is present and do not re-create. Defaults to False.
-        to_ax (Orientation): Sets the Orientation. Can be used for flipping the image or fixing false rotations of the original inputs.
-        dpi (int): Set the resolution.
+        snp_path (str | Path | list[str | Path]): Destination path, or list of paths
+            when several output files should share the same rendered figure
+            (useful for writing both a ``.png`` and a ``.jpg``).
+        frames (list[Snapshot_Frame]): One frame per row in the output figure.
+            ``None`` entries are silently skipped.
+        crop (bool): Crop each frame to the vertebra segmentation bounding box
+            before rendering. Defaults to False.
+        check (bool): If True and every ``snp_path`` already exists on disk,
+            return without re-rendering. Defaults to False.
+        to_ax (Orientation): Reorientation applied to every frame's image /
+            segmentation / POI before rendering. Use to flip axes or correct
+            rotated inputs. Defaults to ``("I", "P", "L")``.
+        dpi (int): Matplotlib DPI for the output figure. Defaults to 96.
+        verbose (bool, optional): If True, log the output path and progress. Defaults to False.
     """
     # Checks if snaps already exists, does nothing if true and check is true
     exist = all(Path(i).is_file() for i in snp_path) if isinstance(snp_path, list) else Path(snp_path).is_file()
@@ -1366,10 +1401,14 @@ def create_snapshot(  # noqa: C901
 
     if not isinstance(snp_path, list):
         snp_path = [str(snp_path)]
-    for path in snp_path:
-        fig.savefig(str(path))
-        print("[*] Snapshot saved:", path) if verbose else None
-    plt.close()
+    try:
+        for path in snp_path:
+            fig.savefig(str(path))
+            print("[*] Snapshot saved:", path) if verbose else None
+    finally:
+        # close THIS figure (bare plt.close() closes the current one, which may be another
+        # figure entirely) and do it even if savefig raises, so failures do not leak
+        plt.close(fig)
     return snp_path
 
 

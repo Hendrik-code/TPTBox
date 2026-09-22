@@ -20,10 +20,13 @@ from numpy.typing import NDArray
 from scipy.ndimage import (
     binary_erosion,
     center_of_mass,
+    convolve,
     distance_transform_edt,
     gaussian_filter,
     generate_binary_structure,
+    sobel,
 )
+from scipy.spatial.distance import cdist
 from skimage.measure import euler_number as _euler_number
 from skimage.measure import label as _label
 
@@ -34,6 +37,40 @@ UINT = TypeVar("UINT", bound=np.unsignedinteger[Any])
 INT = TypeVar("INT", bound=np.signedinteger[Any])
 UINTARRAY = NDArray[UINT]
 INTARRAY = Union[UINTARRAY, NDArray[INT]]
+
+
+def np_isin(arr: np.ndarray, labels, invert: bool = False) -> np.ndarray:
+    """Fast ``np.isin`` for non-negative integer label arrays via a boolean lookup table.
+
+    For unsigned-integer segmentation masks this is ~3-6x faster than ``np.isin`` when testing
+    membership in more than one label, because it replaces the general algorithm with a single
+    ``lut[arr]`` gather. Falls back to ``np.isin`` for non-unsigned dtypes, negative labels, or
+    very large label ranges; uses ``arr == label`` for the single-label case.
+
+    Args:
+        arr (np.ndarray): Input array.
+        labels: A label or iterable of labels to test membership against.
+        invert (bool, optional): If True, return the complement (equivalent to
+            ``np.isin(arr, labels, invert=True)``). Defaults to False.
+
+    Returns:
+        np.ndarray: Boolean mask, same shape as ``arr``.
+    """
+    if not isinstance(labels, (list, tuple, np.ndarray)):
+        labels = [labels]
+    if len(labels) == 0:
+        return np.ones(arr.shape, dtype=bool) if invert else np.zeros(arr.shape, dtype=bool)
+    if len(labels) == 1:
+        res = arr == labels[0]
+        return ~res if invert else res
+    if np.issubdtype(arr.dtype, np.unsignedinteger) and min(int(x) for x in labels) >= 0:
+        m = max(int(arr.max()), int(max(labels))) + 1
+        if m < 2**20:  # keep the lookup table small (same threshold as np_unique's bincount path)
+            lut = np.zeros(m, dtype=bool)
+            lut[np.asarray(labels)] = True
+            res = lut[arr]
+            return ~res if invert else res
+    return np.isin(arr, labels, invert=invert)
 
 
 def np_extract_label(
@@ -69,7 +106,7 @@ def np_extract_label(
 
     if isinstance(label, list):
         assert 0 not in label, "label 0 is not supported in list mode"
-        arr_msk = np.isin(arr, label)
+        arr_msk = np_isin(arr, label)
         arr[arr_msk] = to_label
         arr[~arr_msk] = 0
         return arr
@@ -125,10 +162,18 @@ def np_volume(arr: UINTARRAY, include_zero: bool = False) -> dict[int, int]:
     Returns:
         dict[int, int]: Mapping from label value to number of voxels with that label.
     """
-    if include_zero:
-        return {idx: i for idx, i in dict(enumerate(cc3dstatistics(arr, use_crop=False)["voxel_counts"])).items() if i > 0}
+    # np.bincount wins decisively when there are many labels (e.g. connected-component maps);
+    # cc3d statistics is faster for the few-label case typical of anatomical segmentations.
+    if int(arr.max()) > 256:
+        counts = np.bincount(arr.ravel())
     else:
-        return {idx: i for idx, i in dict(enumerate(cc3dstatistics(arr)["voxel_counts"])).items() if i > 0 and idx != 0}
+        try:
+            counts = cc3dstatistics(arr, use_crop=not include_zero)["voxel_counts"]
+        except ValueError:
+            counts = np.bincount(arr.ravel())
+    if include_zero:
+        return {idx: i for idx, i in enumerate(counts) if i > 0}
+    return {idx: i for idx, i in enumerate(counts) if i > 0 and idx != 0}
 
 
 def np_is_empty(arr: UINTARRAY | INTARRAY) -> bool:
@@ -178,7 +223,9 @@ def old_np_unique(arr: np.ndarray) -> list[int]:
             return [idx for idx, i in enumerate(cc3dstatistics(arr)["voxel_counts"]) if i > 0]
         except Exception:
             pass
-    return list(np.unique(arr))
+    # .tolist() yields native Python scalars; list() would leak numpy scalars, which are
+    # not JSON-serializable and differ from the ints the cc3d/bincount paths return.
+    return np.unique(arr).tolist()
 
 
 def np_unique(arr: np.ndarray) -> list[int]:
@@ -199,7 +246,7 @@ def np_unique(arr: np.ndarray) -> list[int]:
         max_val = int(arr.max())
         if max_val < 2**20:  # ~1M labels threshold — bincount stays fast
             counts = np.bincount(arr.ravel())
-            return list(np.where(counts > 0)[0])
+            return np.where(counts > 0)[0].tolist()
         # For sparse label spaces fall back to np.unique
     return old_np_unique(arr)
 
@@ -220,8 +267,8 @@ def np_unique_withoutzero(arr: UINTARRAY) -> list[int]:
             return []
         if max_val < 2**20:
             counts = np.bincount(arr.ravel())
-            return list(np.where(counts[1:] > 0)[0] + 1)
-    return [i for i in np.unique(arr) if i != 0]
+            return (np.where(counts[1:] > 0)[0] + 1).tolist()
+    return [i for i in np.unique(arr).tolist() if i != 0]
 
 
 def old_np_unique_withoutzero(arr: UINTARRAY) -> list[int]:
@@ -253,8 +300,8 @@ def np_center_of_mass(arr: UINTARRAY) -> dict[int, COORDINATE]:
     """
     stats = cc3dstatistics(arr, use_crop=False)
     # Does not use the other calls for speed reasons
-    unique = [idx for idx, i in enumerate(stats["voxel_counts"]) if i > 0 and idx != 0]
-    return {idx: v for idx, v in enumerate(stats["centroids"]) if idx in unique}
+    vc = stats["voxel_counts"]
+    return {idx: v for idx, v in enumerate(stats["centroids"]) if idx != 0 and vc[idx] > 0}
 
 
 def np_bounding_boxes(arr: UINTARRAY) -> dict[int, tuple[slice, slice, slice]]:
@@ -270,8 +317,96 @@ def np_bounding_boxes(arr: UINTARRAY) -> dict[int, tuple[slice, slice, slice]]:
     """
     stats = cc3dstatistics(arr)
     # Does not use the other calls for speed reasons
-    unique = [idx for idx, i in enumerate(stats["voxel_counts"]) if i > 0 and idx != 0]
-    return {idx: v for idx, v in enumerate(stats["bounding_boxes"]) if idx in unique}
+    vc = stats["voxel_counts"]
+    return {idx: v for idx, v in enumerate(stats["bounding_boxes"]) if idx != 0 and vc[idx] > 0}
+
+
+def np_slices_overlap(slice1: slice, slice2: slice) -> bool:
+    """Checks whether two ranges given as slices overlap or touch.
+
+    Borders count as overlapping, so ``slice(0, 5)`` and ``slice(5, 9)`` overlap.
+
+    Args:
+        slice1 (slice): First range; only ``start`` and ``stop`` are used.
+        slice2 (slice): Second range; only ``start`` and ``stop`` are used.
+
+    Returns:
+        bool: True if the two ranges intersect or touch at a border.
+    """
+    return slice1.start <= slice2.stop and slice2.start <= slice1.stop
+
+
+def np_filter_connected_components_by_bbox_chain(
+    arr: np.ndarray,
+    margin: Sequence[float] | float = 0.0,
+    extra_margin: float = 0.0,
+    extra_margin_axis: int | None = None,
+    connectivity: int = 3,
+) -> np.ndarray:
+    """Keeps only connected components whose bounding boxes chain onto the largest component.
+
+    Starting from the largest connected component, any other component whose (margin-grown)
+    bounding box overlaps the growing region on *every* axis is incorporated, and the process
+    repeats until nothing new is added. Everything else is dropped. This keeps a structure that
+    is fragmented into several pieces along its length while discarding unrelated blobs
+    elsewhere in the volume.
+
+    Args:
+        arr (np.ndarray): Input array. Treated as binary -- every non-zero voxel is foreground.
+        margin (Sequence[float] | float, optional): Bounding-box margin in voxels, either one
+            value for all axes or one per axis. Defaults to 0.0.
+        extra_margin (float, optional): Additional margin in voxels applied only along
+            ``extra_margin_axis``, to tolerate gaps along the structure's main direction.
+            Defaults to 0.0.
+        extra_margin_axis (int | None, optional): Axis that ``extra_margin`` applies to.
+            Required when ``extra_margin`` is non-zero. Defaults to None.
+        connectivity (int, optional): Connectivity used to find the components. Defaults to 3.
+
+    Returns:
+        np.ndarray: A copy of ``arr`` with every non-incorporated component zeroed out.
+    """
+    assert extra_margin == 0 or extra_margin_axis is not None, "extra_margin needs extra_margin_axis"
+    ndim = arr.ndim
+    margins = np.broadcast_to(np.asarray(margin, dtype=float), (ndim,))
+
+    cc, n = np_connected_components(arr != 0, connectivity=connectivity)
+    if n <= 1:
+        return arr.copy()
+
+    boxes = np_bounding_boxes(cc)
+    # Largest component first, so the chain starts from the anchor the caller expects.
+    volumes = np_volume(cc)
+    order = sorted(volumes, key=lambda k: volumes[k], reverse=True)
+
+    def grow(box):
+        return tuple(slice(floor(sl.start - margins[ax]), ceil(sl.stop + margins[ax])) for ax, sl in enumerate(box))
+
+    def widen(box):
+        if extra_margin_axis is None or extra_margin == 0:
+            return box
+        return tuple(
+            slice(floor(sl.start - extra_margin), ceil(sl.stop + extra_margin)) if ax == extra_margin_axis else sl
+            for ax, sl in enumerate(box)
+        )
+
+    anchor_label = order[0]
+    incorporated = [anchor_label]
+    region = [grow(boxes[anchor_label])]
+    changed = True
+    while changed:
+        changed = False
+        for k in [l for l in order if l not in incorporated]:
+            candidate = grow(boxes[k])
+            # The already-incorporated box gets the extra axial margin, so a gap along the
+            # structure's main direction does not break the chain.
+            if any(all(np_slices_overlap(w, c) for w, c in zip(widen(box), candidate)) for box in region):
+                region.append(candidate)
+                incorporated.append(k)
+                changed = True
+
+    out = arr.copy()
+    out[~np_isin(cc, incorporated)] = 0
+    return out
 
 
 def np_contacts(arr: UINTARRAY, connectivity: int) -> dict[tuple[int, int], int]:
@@ -383,14 +518,14 @@ def np_erode_msk_euclid(arr: np.ndarray, n_pixel: int = 3, use_crop=True, labels
     if use_crop:
         arr_bin = arr.copy()
         if labels is not None:
-            arr_bin[np.isin(arr_bin, labels, invert=True)] = 0
+            arr_bin[np_isin(arr_bin, labels, invert=True)] = 0
         crop = np_bbox_binary(arr_bin, px_dist=1 + n_pixel, raise_error=False)
         arrc = arr[crop]
     else:
         arrc = arr
         if labels is not None:
             arrc = arrc.copy()
-            arrc[np.isin(arrc, labels, invert=True)] = 0
+            arrc[np_isin(arrc, labels, invert=True)] = 0
 
     if mask is not None:
         mask = mask.copy()
@@ -426,19 +561,18 @@ def np_dilate_msk_euclid(arr: np.ndarray, n_pixel: int = 3, use_crop=True, label
 
     Assigns each newly covered voxel to the nearest existing label.
     """
+    arr_bin = arr.copy()
+    if labels is not None:
+        arr_bin[np_isin(arr_bin, labels, invert=True)] = 0
+
     if use_crop:
-        arr_bin = arr.copy()
-        if labels is not None:
-            arr_bin[np.isin(arr_bin, labels, invert=True)] = 0
         crop = np_bbox_binary(arr_bin, px_dist=1 + n_pixel, raise_error=False)
-        arrc = arr[crop]
+        # use the label-filtered array so `labels` is honoured here too, not just on the no-crop path
+        arrc = arr_bin[crop]
     else:
-        arrc = arr
-        if labels is not None:
-            arrc = arrc.copy()
-            arrc[np.isin(arr_bin, labels, invert=True)] = 0
+        arrc = arr_bin
     if mask is not None:
-        mask[mask != 0] = 1
+        mask = mask != 0  # do not mutate the caller's array
         if use_crop:
             mask = mask[crop]
     foreground = arrc > 0
@@ -471,7 +605,7 @@ def np_dilate_msk(
     connectivity: int = 3,
     use_crop: bool = True,
     mask: np.ndarray | None = None,
-    ignore_axis: None | int = None,
+    ignore_axis: int | None = None,
 ) -> np.ndarray:
     """Dilates the given array by the specified number of voxels (not including the zero label).
 
@@ -500,14 +634,14 @@ def np_dilate_msk(
     if use_crop:
         # try:
         arr_bin = arr.copy()
-        arr_bin[np.isin(arr_bin, labels, invert=True)] = 0
+        arr_bin[np_isin(arr_bin, labels, invert=True)] = 0
         crop = np_bbox_binary(arr_bin, px_dist=1 + n_pixel, raise_error=False)
         arrc = arr[crop]
     else:
         arrc = arr
 
     if mask is not None:
-        mask[mask != 0] = 1
+        mask = mask != 0  # do not mutate the caller's array
         if use_crop:
             mask = mask[crop]
     if ignore_axis is None:
@@ -521,8 +655,7 @@ def np_dilate_msk(
     out = arrc
     for _ in range(n_pixel):
         for i in labels:
-            data = out.copy()
-            data[i != data] = 0
+            data = out == i  # boolean mask; _binary_dilation casts to bool anyway, so this is exact and avoids a full copy
             if use_crop:
                 lcrop = np_bbox_binary(data, px_dist=2 + n_pixel, raise_error=False)
                 data = data[lcrop]
@@ -532,7 +665,8 @@ def np_dilate_msk(
                 oc = out[lcrop] == 0
                 out[lcrop][oc] = msk_ibe_data[oc] * i
                 if mask is not None:
-                    out[lcrop][mask == 0] = 0
+                    # `mask` follows the global crop; index it with the per-label crop to match `out[lcrop]`
+                    out[lcrop][mask[lcrop] == 0] = 0
             else:
                 out[out == 0] = msk_ibe_data[out == 0] * i
                 if mask is not None:
@@ -550,7 +684,7 @@ def np_erode_msk(
     use_crop: bool = True,
     connectivity: int = 3,
     border_value=0,
-    ignore_axis: None | int = None,
+    ignore_axis: int | None = None,
 ) -> np.ndarray:
     """Erodes the given array by the specified number of voxels.
 
@@ -575,7 +709,7 @@ def np_erode_msk(
     labels: list[int] = _to_labels(arr, label_ref)
 
     if use_crop:
-        crop = np_bbox_binary(np.isin(arr, labels, invert=False), px_dist=1 + n_pixel, raise_error=False)
+        crop = np_bbox_binary(np_isin(arr, labels, invert=False), px_dist=1 + n_pixel, raise_error=False)
         arrc = arr[crop]
     else:
         arrc = arr
@@ -626,9 +760,12 @@ def np_map_labels(arr: UINTARRAY, label_map: LABEL_MAP) -> np.ndarray:
     if len(k) == 0:
         return arr
 
-    max_value = max(arr.max(), *k, *v) + 1
+    max_value = int(max(arr.max(), *k, *v)) + 1
 
-    mapping_ar = np.arange(max_value, dtype=arr.dtype)
+    # The lookup table must be able to hold every mapping target. Building it in the input
+    # dtype silently wraps targets outside that range (uint8: 300 -> 44, -5 -> 251).
+    lut_dtype = np.result_type(arr.dtype, np.min_scalar_type(int(v.max())), np.min_scalar_type(int(v.min())))
+    mapping_ar = np.arange(max_value, dtype=lut_dtype)
     mapping_ar[k] = v
     return mapping_ar[arr]
 
@@ -686,6 +823,8 @@ def np_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 
     Args:
         img: input array
         px_dist: int | tuple[int]: dist (int): The amount of padding to be added to the cropped image. If int, will apply the same padding to each dim. Default value is 0.
+        raise_error (bool, optional): If True and ``img`` is empty, raise ``ValueError``. If False, return a full-image
+            slice tuple instead. Defaults to True.
 
     Returns:
         list of boundary coordinates as slices tuple
@@ -698,18 +837,28 @@ def np_bbox_binary(img: np.ndarray, px_dist: int | Sequence[int] | np.ndarray = 
 
     n = img.ndim
     shp = img.shape
+    if isinstance(px_dist, float):
+        px_dist = ceil(px_dist)
     if isinstance(px_dist, int):
-        px_dist = np.ones(n, dtype=np.uint8) * px_dist
+        px_dist = np.ones(n, dtype=int) * px_dist  # uint8 overflows for px_dist > 255
     assert len(px_dist) == n, f"dimension mismatch, got img shape {shp} and px_dist {px_dist}"
 
     bbox: list[float] = []
-    for ax in itertools.combinations(reversed(range(n)), n - 1):
-        nonzero = np.any(a=img, axis=ax)
-        bbox.extend(np.where(nonzero)[0][[0, -1]])  # type: ignore
+    if n == 3:
+        # 2 full passes instead of 3: two axis extents come from a shared 2D projection (cheap),
+        # only the third axis needs a second full reduction.
+        p = np.any(img, axis=2)
+        for nonzero in (np.any(p, axis=1), np.any(p, axis=0), np.any(img, axis=(0, 1))):
+            bbox.extend(np.where(nonzero)[0][[0, -1]])  # type: ignore
+    else:
+        for ax in itertools.combinations(reversed(range(n)), n - 1):
+            nonzero = np.any(a=img, axis=ax)
+            bbox.extend(np.where(nonzero)[0][[0, -1]])  # type: ignore
     out: tuple[slice, ...] = tuple(
         slice(
             max(bbox[i] - px_dist[i // 2], 0),
-            min(bbox[i + 1] + px_dist[i // 2], shp[i // 2]) + 1,
+            # clamp AFTER the +1, otherwise a bbox touching the far border yields stop == shape + 1
+            min(bbox[i + 1] + px_dist[i // 2] + 1, shp[i // 2]),
         )
         for i in range(0, len(bbox), 2)
     )
@@ -841,6 +990,270 @@ def np_point_coordinates(
     return surface_points
 
 
+def np_unit_vector(vector: np.ndarray) -> np.ndarray:
+    """Returns the unit vector of the input vector.
+
+    Args:
+        vector (np.ndarray): Any non-zero numeric array.
+
+    Returns:
+        np.ndarray: Array with the same direction as ``vector`` but unit length.
+    """
+    return vector / np.linalg.norm(vector)
+
+
+def np_angle_between(v1, v2, degrees: bool = False) -> float:
+    """Calculates the angle between two vectors.
+
+    Args:
+        v1: The first vector.
+        v2: The second vector.
+        degrees (bool, optional): Return the angle in degrees instead of radians. Defaults to False.
+
+    Returns:
+        float: The angle between ``v1`` and ``v2``.
+
+    Examples:
+        >>> np_angle_between((1, 0, 0), (0, 1, 0))
+        1.5707963267948966
+        >>> np_angle_between((1, 0, 0), (0, 1, 0), degrees=True)
+        90.0
+        >>> np_angle_between((1, 0, 0), (-1, 0, 0))
+        3.141592653589793
+    """
+    rad = np.arccos(np.clip(np.dot(np_unit_vector(v1), np_unit_vector(v2)), -1.0, 1.0))
+    return float(np.degrees(rad)) if degrees else float(rad)
+
+
+def np_index(arr: np.ndarray, entry) -> np.ndarray:
+    """Finds the rows of a point array that exactly equal a given point.
+
+    Args:
+        arr (np.ndarray): Array of shape ``(N, D)`` holding ``N`` points.
+        entry: The point to look for, broadcastable to shape ``(D,)``.
+
+    Returns:
+        np.ndarray: 1-D integer array with the indices of every matching row.
+        Empty if the point is not present.
+    """
+    arr = np.asarray(arr)
+    assert arr.ndim == 2, f"expected a (N, D) point array, got shape {arr.shape}"
+    return np.flatnonzero((arr == np.asarray(entry)).all(axis=1))
+
+
+def np_find_closest_point_index(point_arr: np.ndarray, point) -> int:
+    """Finds the index of the point in ``point_arr`` closest to ``point``.
+
+    For integer point arrays (i.e. voxel coordinates) an exact match is tried first, which is
+    the common case when the query already sits on the grid; only if that fails is the full
+    distance search run. ``scipy``'s compiled ``cdist`` is used for the search -- a hand-rolled
+    ``einsum`` over ``point_arr - point`` is roughly 2-6x slower because it materialises the
+    difference array.
+
+    Args:
+        point_arr (np.ndarray): Array of shape ``(N, D)`` holding the candidate points.
+        point: The query point, broadcastable to shape ``(D,)``.
+
+    Returns:
+        int: Index into ``point_arr`` of the nearest point. When several points are equally
+        close, the lowest index is returned.
+    """
+    arr = np.asarray(point_arr)
+    assert arr.ndim == 2, f"expected a (N, D) point array, got shape {arr.shape}"
+    assert len(arr) != 0, "cannot search an empty point array"
+    p = np.asarray(point)
+    if np.issubdtype(arr.dtype, np.integer):
+        # Only meaningful for grids; rounding a float query would silently snap it to integers.
+        matches = np_index(arr, np.round(p).astype(arr.dtype))
+        if len(matches) != 0:
+            return int(matches[0])
+    return int(np.argmin(cdist([p], arr)[0]))
+
+
+def np_raymarch_until_background(
+    arr: np.ndarray,
+    start_coord: Sequence[float] | np.ndarray,
+    direction_vector: np.ndarray,
+    step_size: float = 0.0625,
+    max_steps: int | None = 1000,
+    max_distance: float | None = None,
+    threshold: float = 0.5,
+    interpolator=None,
+) -> np.ndarray | None:
+    """Marches a ray from a point until it leaves a mask.
+
+    Takes fixed-size steps, sampling the mask with trilinear interpolation at each one, and stops
+    as soon as the interpolated value drops below ``threshold`` or the ray leaves the volume.
+
+    Unlike :func:`TPTBox.core.poi_fun.ray_casting.max_distance_ray_cast_convex`, which bisects and
+    therefore assumes the region is convex, this walks the ray step by step and so handles
+    concave and multi-lobed structures correctly -- at the cost of being slower.
+
+    Args:
+        arr (np.ndarray): The mask to march through. Non-zero is inside.
+        start_coord (Sequence[float] | np.ndarray): Voxel coordinate the ray starts at.
+        direction_vector (np.ndarray): Direction of the ray; normalised internally.
+        step_size (float, optional): Step length in voxels. Defaults to 0.0625 (1/16 of a voxel).
+        max_steps (int | None, optional): Give up after this many steps. Defaults to 1000.
+        max_distance (float | None, optional): Give up once this distance in voxels is covered.
+            Defaults to None. At least one of ``max_steps``/``max_distance`` must be set.
+        threshold (float, optional): Interpolated value below which the ray is considered to have
+            left the mask. Defaults to 0.5.
+        interpolator (RegularGridInterpolator | None, optional): Prebuilt interpolator over
+            ``arr``. Pass one when marching many rays through the same mask -- building it is
+            far more expensive than the march itself. Defaults to None (built internally).
+
+    Returns:
+        np.ndarray | None: The coordinate where the ray left the mask, or None if it was still
+        inside when the step/distance limit was reached.
+    """
+    assert max_steps is not None or max_distance is not None, "at least one of max_steps or max_distance must be set"
+    from scipy.interpolate import RegularGridInterpolator
+
+    start = np.asarray(start_coord, dtype=np.float64)
+    direction = np.asarray(direction_vector, dtype=np.float64)
+    direction = direction / (np.linalg.norm(direction) + 1e-10)
+    step_vector = direction * step_size
+
+    if interpolator is None:
+        interpolator = RegularGridInterpolator(
+            [np.arange(s, dtype=np.float64) for s in arr.shape], arr.astype(np.float64), bounds_error=False, fill_value=0.0
+        )
+
+    pos = start.copy()
+    steps = int(max_steps) if max_steps is not None else int(1e8)
+    for _ in range(steps):
+        if max_distance is not None and np.linalg.norm(pos - start) >= max_distance:
+            return None
+        if np.any(pos < 0) or np.any(pos >= arr.shape):
+            return pos
+        if interpolator(pos) < threshold:
+            return pos
+        pos = pos + step_vector
+    return None
+
+
+def np_label_interface_thickness(
+    arr: UINTARRAY,
+    label: int | Sequence[int],
+    other_label: int | Sequence[int],
+    zoom: Sequence[float] | None = None,
+    max_count_component: int | None = None,
+    sigma: float = 1.0,
+    step_size: float | None = None,
+    max_steps: int | None = 1000,
+    max_distance: float | None = None,
+) -> np.ndarray:
+    """Measures how thick a structure is where it meets another structure.
+
+    At every voxel of ``other_label`` that touches ``label``, a ray is marched from that voxel
+    along the inward surface normal until it exits ``label``. The distance travelled is the local
+    thickness of ``label`` at that point on the interface.
+
+    Args:
+        arr (UINTARRAY): 3-dimensional label array.
+        label (int | Sequence[int]): The structure whose thickness is measured.
+        other_label (int | Sequence[int]): The structure the measurement starts from.
+        zoom (Sequence[float] | None, optional): Voxel spacing in mm. When given, distances are
+            returned in millimetres and the default step size is derived from it; otherwise
+            distances are in voxels. Defaults to None.
+        max_count_component (int | None, optional): Keep only this many largest connected
+            components of ``label`` before measuring. Defaults to None (keep all).
+        sigma (float, optional): Smoothing applied before computing the normals. Defaults to 1.0.
+        step_size (float | None, optional): March step in voxels. Defaults to ``min(zoom)/16``
+            when ``zoom`` is given, else 1/16 of a voxel.
+        max_steps (int | None, optional): Step limit per ray. Defaults to 1000.
+        max_distance (float | None, optional): Distance limit per ray, in voxels. Defaults to None.
+
+    Returns:
+        np.ndarray: 1-D array with one thickness per interface voxel. Rays that hit a limit
+        without leaving ``label`` contribute ``np.nan``. Empty when the labels do not touch.
+    """
+    from scipy.interpolate import RegularGridInterpolator
+
+    assert arr.ndim == 3, arr.ndim
+    if step_size is None:
+        step_size = (min(zoom) / 16) if zoom is not None else 1 / 16
+
+    work = np.where(np_isin(arr, label) | np_isin(arr, other_label), arr, 0)
+    if max_count_component is not None:
+        kept = np_filter_connected_components(np_isin(work, label), largest_k_components=max_count_component, connectivity=1)
+        work = np.where(np_isin(work, other_label) | (kept != 0), work, 0)
+
+    coords, normals = np_compute_boundary_normals(work, other_label, label, sigma=sigma)
+    if len(coords) == 0:
+        return np.zeros(0, dtype=float)
+
+    # March through the measured structure plus the interface voxels themselves, so a ray starting
+    # on the interface begins inside the mask rather than immediately outside it.
+    march_mask = np_isin(work, label).astype(np.float64)
+    march_mask[tuple(coords.T)] = 1.0
+    interpolator = RegularGridInterpolator(
+        [np.arange(s, dtype=np.float64) for s in march_mask.shape], march_mask, bounds_error=False, fill_value=0.0
+    )
+
+    spacing = np.asarray(zoom, dtype=float) if zoom is not None else np.ones(3)
+    out = np.empty(len(coords), dtype=float)
+    for i, (coord, normal) in enumerate(zip(coords, normals)):
+        # np_compute_boundary_normals points into `other_label`; flip it to march into `label`.
+        end = np_raymarch_until_background(
+            march_mask,
+            coord,
+            -normal,
+            step_size=step_size,
+            max_steps=max_steps,
+            max_distance=max_distance,
+            interpolator=interpolator,
+        )
+        out[i] = np.nan if end is None else float(np.linalg.norm((end - coord) * spacing))
+    return out
+
+
+def np_compute_boundary_normals(
+    arr: UINTARRAY,
+    label: int | Sequence[int],
+    other_label: int | Sequence[int],
+    sigma: float = 1.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Computes per-voxel surface normals where one label touches another.
+
+    Voxels of ``label`` that share a face with ``other_label`` form the interface. The normal at
+    each of them is the gradient of a Gaussian-smoothed ``label`` mask, so it points *into*
+    ``label`` (the direction of increasing mask density); negate it to point outwards.
+
+    Unlike :func:`TPTBox.core.poi_fun.ray_casting.calculate_pca_normal_np`, which returns a single
+    principal axis for a whole segmentation, this returns a normal per interface voxel.
+
+    Args:
+        arr (UINTARRAY): 3-dimensional label array.
+        label (int | Sequence[int]): Label(s) whose interface voxels are returned.
+        other_label (int | Sequence[int]): Label(s) that ``label`` must touch to count as interface.
+        sigma (float, optional): Standard deviation of the Gaussian applied before the gradient.
+            Larger values give smoother, less noisy normals. Defaults to 1.0.
+
+    Returns:
+        tuple[np.ndarray, np.ndarray]: ``(coords, normals)``, both of shape ``(N, 3)``. ``coords``
+        are the integer voxel coordinates of the interface, ``normals`` the matching unit vectors.
+        Both are empty when the two labels do not touch.
+    """
+    assert arr.ndim == 3, arr.ndim
+    mask = np_isin(arr, label)
+    other = np_isin(arr, other_label)
+    # 6-connectivity kernel: the six face neighbours, so a purely diagonal contact does not count.
+    kernel = np.zeros((3, 3, 3), dtype=np.uint8)
+    kernel[1, 1, 0] = kernel[1, 1, 2] = 1
+    kernel[1, 0, 1] = kernel[1, 2, 1] = 1
+    kernel[0, 1, 1] = kernel[2, 1, 1] = 1
+    touching = mask & (convolve(other.astype(np.uint8), kernel, mode="constant") > 0)
+    coords = np.argwhere(touching)
+    if len(coords) == 0:
+        return coords, np.zeros((0, 3), dtype=float)
+    smoothed = gaussian_filter(mask.astype(float), sigma=sigma)
+    gradient = np.stack([sobel(smoothed, axis=a) for a in range(3)], axis=-1)
+    gradient /= np.linalg.norm(gradient, axis=-1, keepdims=True) + 1e-8
+    return coords, gradient[touching]
+
+
 def np_connected_components(
     arr: UINTARRAY,
     label_ref: LABEL_REFERENCE | None = None,
@@ -851,9 +1264,9 @@ def np_connected_components(
 
     Args:
         arr: input arr
+        label_ref (int | list[int] | None, optional): Labels the algorithm should be applied to. If None, applies on all labels found in ``arr``. Defaults to None.
         connectivity: in range [1,3]. For 2D images, 2 and 3 is the same.
         include_zero (bool): If true, will treat the background (0) as another label to calculate connected components from. Significantly slower! Defaults to False.
-        verbose: If true, will print out if the array does not have any CC
 
     Returns:
         arr_cc: UINTARRAY, N: number of cc
@@ -867,7 +1280,7 @@ def np_connected_components(
     labels: Sequence[int] = _to_labels(arr, label_ref)
     if include_zero:
         arr[arr == 0] = arr.max() + 1
-    arr[np.isin(arr, labels, invert=True)] = 0
+    arr[np_isin(arr, labels, invert=True)] = 0
     cc_map, n = _connected_components(arr, connectivity=connectivity, return_N=True)
     return cc_map, n
 
@@ -886,7 +1299,7 @@ def np_connected_components_per_label(
     Args:
         arr: input arr
         connectivity: in range [1,3]. For 2D images, 2 and 3 is the same.
-        labels (int | list[int] | None, optional): Labels that the connected components algorithm should be applied to. If none, applies on all labels found in arr. Defaults to None.
+        label_ref (int | list[int] | None, optional): Labels that the connected components algorithm should be applied to. If none, applies on all labels found in arr. Defaults to None.
         include_zero (bool): If true, will treat the background (0) as another label to calculate connected components from. Significantly slower! Defaults to False.
 
     Returns:
@@ -934,11 +1347,14 @@ def np_filter_connected_components(
 
     Args:
         arr (np.ndarray): input array
-        k (int | None): finds the k-largest components. If k is None, will find all connected components and still sort them by size
-        labels (int | list[int] | None, optional): Labels that the algorithm should be applied to. If none, applies on all labels found in arr. Defaults to None.
+        largest_k_components (int | None): finds the k-largest components. If None, will find all connected components and still sort them by size.
+        label_ref (int | list[int] | None, optional): Labels that the algorithm should be applied to. If none, applies on all labels found in arr. Defaults to None.
         connectivity: in range [1,3]. For 2D images, 2 and 3 is the same.
         return_original_labels (bool): If set to False, will label the components from 1 to k. Defaults to True
-        k_larges_global(bool): If true largest_k_components is filterd over all labels instead of each lable individualy
+        min_volume (float): Discard components whose voxel volume is below this threshold. Defaults to 0.
+        max_volume (float | None): Discard components whose voxel volume exceeds this threshold. Defaults to None (no upper cap).
+        removed_to_label (int): Label value assigned to voxels of discarded components. Defaults to 0.
+        k_larges_global (bool): If true largest_k_components is filterd over all labels instead of each lable individualy
     Returns:
         np.ndarray: array with the largest k connected components
     """
@@ -952,7 +1368,7 @@ def np_filter_connected_components(
 
     arr2 = arr.copy()
     labels: Sequence[int] = _to_labels(arr, label_ref)
-    arr2[np.isin(arr2, labels, invert=True)] = 0  # type:ignore
+    arr2[np_isin(arr2, labels, invert=True)] = 0  # type:ignore
 
     labels_out, n = _connected_components(arr2, connectivity=connectivity, return_N=True)
     largest_k_components_org = largest_k_components
@@ -966,7 +1382,9 @@ def np_filter_connected_components(
     largest_k_components = min(largest_k_components, len(label_volume_pairs))
     label_volume_pairs.sort(key=lambda x: x[1], reverse=True)
 
-    if len(labels) == 1 or label_volume_pairs == largest_k_components or largest_k_components_org is None or k_larges_global:
+    # `label_volume_pairs == largest_k_components` compared a list[tuple] to an int and was
+    # therefore always False, so this shortcut never fired when every component is kept.
+    if len(labels) == 1 or len(label_volume_pairs) == largest_k_components or largest_k_components_org is None or k_larges_global:
         preserve: list[int] = [x[0] for x in label_volume_pairs[:largest_k_components]]
     else:
         counter = dict.fromkeys(labels, 0)
@@ -997,6 +1415,299 @@ def np_filter_connected_components(
         arr[np.logical_and(labels_out != 0, arr == 0)] = removed_to_label
 
     return cc_out
+
+
+def np_connected_component_contact_map(part_a: np.ndarray, part_b: np.ndarray, connectivity: int = 3) -> UINTARRAY:
+    """Dilates two disjoint components until they touch and returns their contact map.
+
+    Both parts are grown one voxel at a time, alternating, until their dilations overlap.
+
+    Args:
+        part_a (np.ndarray): Binary mask of the first component.
+        part_b (np.ndarray): Binary mask of the second component.
+        connectivity (int, optional): Connectivity used for the dilation. Defaults to 3.
+
+    Returns:
+        UINTARRAY: Map with 0 = background, 1 = only ``part_a``'s dilation, 2 = only ``part_b``'s
+        dilation, 3 = the contact zone where the two dilations overlap.
+    """
+    # Dilate copies: np_dilate_msk works in place and returns its input, so dilating the
+    # caller's arrays would grow them too and the "two separated components" would smear.
+    a_dil = np_dilate_msk(part_a.copy().astype(np.uint8), n_pixel=1, connectivity=connectivity)
+    b_dil = np_dilate_msk(part_b.copy().astype(np.uint8), n_pixel=1, connectivity=connectivity)
+    contact = (a_dil + (b_dil * 2)).astype(np.uint8)
+    while 3 not in np_volume(contact):
+        a_dil = np_dilate_msk(a_dil, n_pixel=1, connectivity=connectivity)
+        contact = (a_dil + (b_dil * 2)).astype(np.uint8)
+        if 3 in np_volume(contact):
+            break
+        b_dil = np_dilate_msk(b_dil, n_pixel=1, connectivity=connectivity)
+        contact = (a_dil + (b_dil * 2)).astype(np.uint8)
+    return contact
+
+
+def _expand_seeds_to_mask(seeds: UINTARRAY, mask: np.ndarray) -> UINTARRAY:
+    """Assigns every voxel of ``mask`` the label of its nearest non-zero seed."""
+    unassigned = (mask != 0) & (seeds == 0)
+    if not unassigned.any():
+        return seeds
+    _, indices = distance_transform_edt(seeds == 0, return_indices=True)
+    out = seeds.copy()
+    out[unassigned] = seeds[tuple(indices[:, unassigned])]
+    return out
+
+
+def _split_cc_erosion(arr: np.ndarray, connectivity: int, max_iter: int, full_partition: bool) -> UINTARRAY:
+    """Erosion backend of :func:`np_split_connected_component`."""
+    check_connectivity = 3
+    vol = arr.copy().astype(np.uint8)
+    vol_old = vol.copy()
+    iterations = 0
+    while True:
+        # np_erode_msk mutates its input and returns the same object, so erode a copy. Without it
+        # `vol`, `vol_old` and `vol_erode` all alias one array after the first iteration and the
+        # "iteration before" needed by the wiped-out branch below is lost.
+        vol_erode = np_erode_msk(vol.copy(), n_pixel=1, connectivity=connectivity)
+        subreg_cc, subreg_cc_n = np_connected_components(vol_erode, connectivity=check_connectivity)
+        if subreg_cc_n > 1:
+            vol = subreg_cc
+            break
+        if subreg_cc_n == 0:
+            # Erosion wiped everything out; step back and grow the previous state into two parts.
+            vol_dilated = np_dilate_msk(vol.copy(), n_pixel=1, connectivity=connectivity, mask=vol.copy())
+            vol[vol_old != 0] = 2
+            vol[vol_dilated == 1] = 1
+            volume = np_volume(vol)
+            if 1 not in volume or 2 not in volume:
+                raise ValueError(f"cannot split volume into two parts after {iterations} iterations, got regions {volume}.")
+            while volume[1] / (volume[1] + volume[2]) < 0.5:
+                vol_dilated = np_dilate_msk(vol_dilated, n_pixel=1, connectivity=connectivity, mask=vol.copy())
+                vol[vol_dilated == 1] = 1
+                volume = np_volume(vol)
+                if 1 not in volume or 2 not in volume:
+                    raise ValueError("could not divide into two parts while re-growing the eroded volume.")
+            vol_1 = np_filter_connected_components(vol == 1, largest_k_components=1, connectivity=check_connectivity).astype(np.uint8)
+            vol_2 = np_filter_connected_components(vol == 2, largest_k_components=1, connectivity=check_connectivity).astype(np.uint8)
+            vol_2 *= 2
+            vol[vol == 1] = vol_1[vol == 1]
+            vol[vol == 2] = vol_2[vol == 2]
+            break
+        vol_old = vol
+        vol = vol_erode
+        iterations += 1
+        if iterations > max_iter:
+            raise ValueError(f"could not divide into two parts after max_iter={max_iter} erosions.")
+
+    if len(np_volume(vol)) != 2:
+        vol = np_filter_connected_components(vol, largest_k_components=2, connectivity=check_connectivity, return_original_labels=False)
+    part_a = vol == 1
+    part_b = vol == 2
+    if part_a.sum() == 0 or part_b.sum() == 0:
+        raise ValueError("one of the two split parts is empty.")
+    out = (part_a.astype(np.uint8) + part_b.astype(np.uint8) * 2).astype(np.uint8)
+    # Erosion only ever recovers the two cores; grow them back over the voxels the erosion ate so
+    # the result partitions the input, matching what the mincut backend returns.
+    return _expand_seeds_to_mask(out, arr) if full_partition else out
+
+
+def _split_cc_mincut(  # noqa: C901
+    arr: np.ndarray,
+    connectivity: int,
+    separator: np.ndarray | None,
+    structure,
+    min_volume: int | None,
+    max_cut: float | None,
+    max_ignore: int | None,
+    zoom: Sequence[float] | None,
+    add_diagonal_edges: bool,
+) -> UINTARRAY:
+    """Min-cut/max-flow backend of :func:`np_split_connected_component`."""
+    try:
+        import networkx as nx
+    except ImportError as e:  # pragma: no cover - depends on the environment
+        raise ImportError("the 'mincut' method needs networkx; install it with `pip install networkx`.") from e
+
+    cc_connectivity = 6 if connectivity == 1 else (18 if connectivity == 2 else 26)
+    vol = arr != 0
+    _, n = _connected_components(vol, connectivity=cc_connectivity, return_N=True)
+    if n != 1:
+        raise ValueError(f"volume separates into {n} parts at connectivity={connectivity}; it must be a single component.")
+
+    structures = [structure] if isinstance(structure, np.ndarray) else structure
+    vol_erode = vol
+    iterations = 0
+    max_errors = 0
+    cc_erode = None
+    while True:
+        struct_now = structures[iterations % len(structures)] if structures is not None else None
+        if separator is not None:
+            separator = _binary_dilation(separator, struct_now)
+            vol_erode = np.where(separator, 0, vol)
+        else:
+            vol_erode = _binary_erosion(vol_erode, struct_now)
+        cc_erode, n = _connected_components(vol_erode, connectivity=cc_connectivity, return_N=True)
+        iterations += 1
+        if n > 1:
+            if max_ignore is not None:
+                values, counts = np.unique(cc_erode, return_counts=True)
+                max_errors = sum(c for v, c in zip(values, counts) if v > 0 and c <= max_ignore)
+                keep = [v for v, c in zip(values, counts) if v > 0 and c > max_ignore]
+                n = len(keep)
+                if n > 2:
+                    break
+                if n == 2:
+                    relabeled = np.zeros(cc_erode.shape, dtype=cc_erode.dtype)
+                    relabeled[cc_erode == keep[0]] = 1
+                    relabeled[cc_erode == keep[1]] = 2
+                    cc_erode = relabeled
+                    break
+            else:
+                break
+        if n == 0:
+            raise ValueError(f"cannot split volume into two parts after {iterations} iterations, erosion emptied it.")
+        if iterations > 100:
+            raise ValueError("could not split the volume into two parts within 100 erosions.")
+    if n > 2:
+        raise ValueError(f"erosion produced {n} components after {iterations} iterations, expected 2.")
+
+    source_mask = cc_erode == 1
+    sink_mask = cc_erode == 2
+    boundary = vol ^ vol_erode
+
+    for name, mask in (("source", source_mask), ("sink", sink_mask)):
+        if min_volume is not None and mask.sum() < min_volume:
+            raise ValueError(f"after erosion the {name} part has volume {mask.sum()}, below min_volume={min_volume}.")
+
+    if zoom is None:
+        voxel_dim = np.ones(3)
+        capacity_end = 1000.0
+    else:
+        voxel_dim = np.asarray(zoom, dtype=float)
+        capacity_end = float(np.prod(voxel_dim) / np.min(voxel_dim) * 1000)
+
+    source_dil = _binary_dilation(source_mask, struct_now)
+    sink_dil = _binary_dilation(sink_mask, struct_now)
+    to_source = np.argwhere(source_dil & boundary)
+    to_sink = np.argwhere(sink_dil & boundary)
+    if len(to_source) == 0 or len(to_sink) == 0:
+        raise ValueError("no connection between the separated parts and the remaining voxels.")
+
+    graph = nx.Graph()
+
+    def add_edges(points, diff1, diff2, capacity):
+        graph.add_edges_from(zip(map(tuple, points + diff1), map(tuple, points + diff2)), capacity=capacity)
+
+    for x, y, z in itertools.product([0, 1], repeat=3):
+        vec = np.array([x, y, z])
+        xe, ye, ze = np.array(boundary.shape) - vec
+        overlap = boundary[x:, y:, z:] & boundary[:xe, :ye, :ze]
+        if x + y + z == 1:
+            add_edges(np.argwhere(overlap), [0, 0, 0], [x, y, z], float(np.prod(voxel_dim[vec == 0])))
+        elif x + y + z == 2 and add_diagonal_edges:
+            # Diagonal in two dimensions, extruded along the third.
+            capacity = float(voxel_dim[vec == 0][0] * np.linalg.norm(voxel_dim[vec == 1]))
+            add_edges(np.argwhere(overlap), [0, 0, 0], [x, y, z], capacity)
+            if x == 1:
+                add_edges(np.argwhere(boundary[:xe, y:, z:] & boundary[x:, :ye, :ze]), [x, 0, 0], [0, y, z], capacity)
+            else:
+                add_edges(np.argwhere(boundary[x:, :ye, z:] & boundary[:xe, y:, :ze]), [0, y, 0], [x, 0, z], capacity)
+
+    graph.add_edges_from([((x, y, z), "t") for x, y, z in to_sink], capacity=capacity_end)
+    graph.add_edges_from([("s", (x, y, z)) for x, y, z in to_source], capacity=capacity_end)
+    if not nx.has_path(graph, "s", "t"):
+        raise ValueError("no path exists between the two parts in the adjacency graph.")
+
+    cut_value, (source_side, sink_side) = nx.minimum_cut(graph, "s", "t")
+    if max_cut is not None and cut_value > max_cut:
+        raise ValueError(f"cut size is {cut_value}, above the allowed max_cut={max_cut}.")
+    source_side = set(source_side) - {"s"}
+    sink_side = set(sink_side) - {"t"}
+    if len(source_side) == 0 or len(sink_side) == 0:
+        raise ValueError("one side of the cut is empty.")
+
+    out = cc_erode.astype(np.uint8)
+    out[tuple(np.asarray(list(source_side)).reshape([-1, 3]).transpose())] = 1
+    out[tuple(np.asarray(list(sink_side)).reshape([-1, 3]).transpose())] = 2
+    lost = int(abs((out > 0).sum() - vol.sum()))
+    if lost > max_errors:
+        raise ValueError(f"lost {lost} voxels while splitting, but only {max_errors} are allowed.")
+    return out
+
+
+def np_split_connected_component(
+    arr: np.ndarray,
+    method: str = "erosion",
+    connectivity: int = 3,
+    max_iter: int = 10,
+    full_partition: bool = True,
+    separator: np.ndarray | None = None,
+    structure: np.ndarray | Sequence[np.ndarray] | None = None,
+    min_volume: int | None = None,
+    max_cut: float | None = None,
+    max_ignore: int | None = 6,
+    zoom: Sequence[float] | None = None,
+    add_diagonal_edges: bool = False,
+) -> UINTARRAY:
+    """Splits one connected component into two spatially separate parts.
+
+    For a mask that is a single connected component but should be two things -- two merged
+    vertebral bodies, say -- this finds the separation. Two backends are available:
+
+    * ``"erosion"``: erode until the component breaks apart, then re-grow both halves. Fast and
+      dependency-free, but the cut follows the erosion front rather than any optimality criterion.
+    * ``"mincut"``: erode only until two seeds appear, then find the minimal separating surface
+      between them by min-cut/max-flow over the voxel adjacency graph, with edge capacities taken
+      from ``zoom`` so anisotropic voxels are weighted correctly. Needs ``networkx`` and is
+      considerably slower, but the cut is minimal-area rather than incidental.
+
+    Args:
+        arr (np.ndarray): Binary (or labeled) array holding exactly one connected component.
+        method (str, optional): ``"erosion"`` or ``"mincut"``. Defaults to ``"erosion"``.
+        connectivity (int, optional): Connectivity for the morphology and component labelling
+            (1 = faces, 2 = +edges, 3 = +corners). Defaults to 3.
+        max_iter (int, optional): Erosion backend only -- maximum erosion iterations. Defaults to 10.
+        full_partition (bool, optional): Erosion backend only -- grow the two eroded cores back over
+            the voxels the erosion removed, so the result covers all of ``arr``. Set False to get
+            just the eroded seeds, which is what you want when fitting a separating plane to them.
+            Defaults to True.
+        separator (np.ndarray | None, optional): Min-cut backend only -- if given, this mask is
+            dilated into the volume instead of eroding the volume itself. Defaults to None.
+        structure (np.ndarray | Sequence[np.ndarray] | None, optional): Min-cut backend only --
+            structuring element(s) to erode with; a sequence is cycled through. Defaults to None.
+        min_volume (int | None, optional): Min-cut backend only -- reject the split if either seed
+            is smaller than this. Defaults to None.
+        max_cut (float | None, optional): Min-cut backend only -- reject the split if the cut
+            exceeds this cost. Defaults to None.
+        max_ignore (int | None, optional): Min-cut backend only -- components at or below this
+            size are treated as noise and their voxels are allowed to be lost. Defaults to 6.
+        zoom (Sequence[float] | None, optional): Min-cut backend only -- voxel spacing used to
+            weight the graph edges. Defaults to None (isotropic).
+        add_diagonal_edges (bool, optional): Min-cut backend only -- also connect diagonal
+            neighbours in the adjacency graph. Defaults to False.
+
+    Returns:
+        UINTARRAY: Array with 0 = background, 1 = first part, 2 = second part.
+
+    Raises:
+        ValueError: If the volume cannot be split into exactly two non-empty parts, or if a
+            sanity limit (``min_volume``, ``max_cut``, ``max_ignore``) is exceeded.
+        ImportError: If ``method="mincut"`` and ``networkx`` is not installed.
+    """
+    if method == "erosion":
+        return _split_cc_erosion(arr, connectivity=connectivity, max_iter=max_iter, full_partition=full_partition)
+    if method == "mincut":
+        return _split_cc_mincut(
+            arr,
+            connectivity=connectivity,
+            separator=separator,
+            structure=structure,
+            min_volume=min_volume,
+            max_cut=max_cut,
+            max_ignore=max_ignore,
+            zoom=zoom,
+            add_diagonal_edges=add_diagonal_edges,
+        )
+    raise ValueError(f"unknown method {method!r}, expected 'erosion' or 'mincut'.")
 
 
 def np_get_connected_components_center_of_mass(
@@ -1099,8 +1810,10 @@ def np_fill_holes(
 
     Args:
         arr (np.ndarray): Input segmentation array
-        labels (int | list[int] | None, optional): Labels that the hole-filling should be applied to. If none, applies on all labels found in arr. Defaults to None.
+        label_ref (int | list[int] | None, optional): Labels that the hole-filling should be applied to. If none, applies on all labels found in arr. Defaults to None.
         slice_wise_dim (int | None, optional): If the input is 3D, the specified dimension here cna be used for 2D slice-wise filling. Defaults to None.
+        use_crop (bool, optional): If True, crop to the label's bounding box before filling — significantly faster for sparse volumes. Defaults to True.
+        pbar (bool, optional): If True, wrap the per-label loop with a tqdm progress bar. Defaults to False.
 
     Returns:
         np.ndarray: The array with holes filled
@@ -1177,13 +1890,19 @@ def np_smooth_gaussian_labelwise(
     Args:
         arr (UINTARRAY): Input Segmentation Mask Array
         label_to_smooth (list[int] | int): Which labels to smooth in the mask. Every other label will be untouched
+        label_weights (dict[int, float] | None, optional): Per-label multiplicative weight applied to each label's
+            probability map before the argmax step. Labels not in the dict get weight 1.0. Defaults to no weighting.
         sigma (float, optional): Sigma of the gaussian blur. Defaults to 3.0.
         radius (int, optional): Radius of the gaussian blur. Defaults to 6.
         truncate (int, optional): Truncate of the gaussian blur. Defaults to 4.
         boundary_mode (str, optional): Boundary Mode of the gaussian blur. Defaults to "nearest".
         dilate_prior (int, optional): Dilate this many voxels before starting the gaussian blur algorithm. Defaults to 0.
         dilate_connectivity (int, optional): Connectivity of the dilation process, if applied. Defaults to 3.
+        dilate_channelwise (bool, optional): If True, dilate each label's binary mask independently instead of dilating
+            the joint segmentation. Defaults to False.
         smooth_background (bool, optional): If true, will also smooth the background. If False, the background voxels stay the same and the segmentation cannot add voxels. Defaults to True.
+        background_threshold (float | None, optional): Optional threshold used to build the background probability
+            map when ``smooth_background=False``. Defaults to None (auto).
 
     Returns:
         UINTARRAY: The resulting smoothed array of the segmentation (with the same labels as the input)
@@ -1246,7 +1965,10 @@ def np_smooth_gaussian_labelwise(
     seg_arr_s = seg_arr_smoothed.copy()
 
     if background_threshold is not None:
-        seg_arr_smoothed[seg_arr_smoothed < background_threshold] = len(sem_labels_plus_background) - 1  # background label
+        # Threshold the winning *confidence*, not the argmax index: seg_arr_smoothed holds
+        # label indices, so comparing it to a probability threshold zeroed out whichever
+        # labels happened to sort below it.
+        seg_arr_smoothed[arr_stack.max(axis=0) < background_threshold] = len(sem_labels_plus_background) - 1  # background label
 
     for idx, l in enumerate(sem_labels_plus_background):
         seg_arr_s[seg_arr_smoothed == idx] = l
@@ -1460,9 +2182,8 @@ def np_calc_overlapping_labels(
     """Calculates the pairs of labels that are overlapping in at least one voxel (fast).
 
     Args:
-        prediction_arr (np.ndarray): Numpy array containing the prediction labels.
         reference_arr (np.ndarray): Numpy array containing the reference labels.
-        ref_labels (list[int]): List of unique reference labels.
+        prediction_arr (np.ndarray): Numpy array containing the prediction labels.
 
     Returns:
         list[tuple[int, int]]: List of tuples of labels that overlap in at least one voxel
@@ -1508,6 +2229,7 @@ def np_fill_holes_global_with_majority_voting(arr: UINTARRAY, connectivity: int 
         arr (UINTARRAY): input array
         connectivity (int, optional): connectivity of connected components of the holes. Defaults to 3.
         inplace (bool, optional): Defaults to False.
+        verbose (bool, optional): Currently unused; reserved for future progress reporting. Defaults to False.
 
     Returns:
         arr: Array with all global holes filled
@@ -1549,9 +2271,10 @@ def np_map_labels_based_on_majority_label_mask_overlap(
     Args:
         arr (UINTARRAY): input array to be relabeled
         label_mask (np.ndarray): the mask from which to pull the target labels.
-        labels (int | list[int] | None, optional): Which labels in the input to process. Defaults to None.
-        dilate_pixel (int, optional): If true, will dilate the input to calculate the overlap. Defaults to 1.
+        label_ref (int | list[int] | None, optional): Which labels in the input to process. Defaults to None.
+        dilate_pixel (int, optional): If > 0, dilate the input by this many voxels before computing overlap. Defaults to 1.
         inplace (bool, optional): Defaults to False.
+        no_match_label (int, optional): Label assigned when a component has no overlap with any label in ``label_mask``. Defaults to 0.
 
     Returns:
         arr: input array with all labels in labels relabeled
@@ -1585,14 +2308,17 @@ def _pad_to_parameters(
     origin_shape: list[int] | tuple[int, int, int],
     target_shape: list[int] | tuple[int, int, int],
 ):
-    """Returns the parameter to pad the input to the target shape.
+    """Compute the (padding, crop) parameters that reshape ``origin_shape`` to ``target_shape``.
 
     Args:
-        arr (np.ndarray): input array
-        target_shape (list[int] | tuple[int,int,int]): target shape
+        origin_shape (list[int] | tuple[int, int, int]): The current array shape.
+        target_shape (list[int] | tuple[int, int, int]): Desired output shape.
 
     Returns:
-        np.ndarray: padded array
+        Tuple of (padding, crop, requires_crop) where ``padding`` is a list of
+        ``(before, after)`` pad widths per axis, ``crop`` is a list of ``slice``
+        objects to apply after padding, and ``requires_crop`` indicates whether
+        any crop slice is non-trivial.
     """
     padding = []
     crop = []

@@ -181,8 +181,8 @@ class TestNII(unittest.TestCase):
             nii = NII(None)
             nii.map_labels({1: 2})
 
-    # Test that the compute_crop_slice method returns the correct crop slice for the image.
-    def test_compute_crop_slice(self):
+    # Test that the compute_crop method returns the correct crop slice for the image.
+    def test_compute_crop(self):
         # Create a test image
         arr = np.zeros((100, 100, 100))
         s = (slice(5, 95), slice(5, 95), slice(5, 95))
@@ -212,8 +212,8 @@ class TestNII(unittest.TestCase):
         expected_data = np.array([[[0, 10, 10, 0], [0, 20, 20, 0], [0, 30, 30, 0], [0, 0, 0, 0]]], dtype=np.uint16)
         assert np.array_equal(mapped_mask.get_seg_array(), expected_data)
 
-    # Test that the apply_crop_slice method correctly applies the crop slice to the image.
-    def test_apply_crop_slice(self):
+    # Test that the apply_crop method correctly applies the crop slice to the image.
+    def test_apply_crop(self):
         # Create a test image
         image = NII(Nifti1Image(np.zeros((100, 100, 100)), np.eye(4)), seg=True)
 

@@ -11,6 +11,7 @@ import numpy as np
 from typing_extensions import NotRequired
 
 from TPTBox.core.poi_fun.poi_abstract import _GROUP_NAME_KEY, label_name_dict
+from TPTBox.core.internal.nii_help import save_json
 from TPTBox.logger.log_file import log
 from TPTBox.mesh3D.mesh_colors import RGB_Color, get_color_by_label
 
@@ -396,8 +397,6 @@ def get_desc(self: POI_Global, region: int, subregion: int) -> tuple[str, str, s
     or the level-one-info enum name.
 
     Args:
-        self: The ``POI_Global`` instance providing ``info``,
-            ``level_one_info``, and ``level_two_info``.
         region: Region (vertebra) integer label.
         subregion: Subregion integer label.
 
@@ -536,7 +535,7 @@ def _save_mrk(
                     display=_get_display_dict(
                         display,
                         selectedColor=_get_markup_color(
-                            {"color": color}, region, subregion, split_by_region=split_by_subregion, split_by_subregion=split_by_subregion
+                            {"color": color}, region, subregion, split_by_region=split_by_region, split_by_subregion=split_by_subregion
                         ),
                         **addendum,
                     ),
@@ -549,8 +548,5 @@ def _save_mrk(
         "@schema": "https://raw.githubusercontent.com/slicer/slicer/master/Modules/Loadable/Markups/Resources/Schema/markups-schema-v1.0.3.json#",
         "markups": markups,
     }
-    # print(markups[-1].get("display"))
-    filepath.unlink(missing_ok=True)
-    with open(filepath, "w") as f:
-        json.dump(mrk_data, f, indent=2)
+    save_json(filepath, mrk_data, indent=2)
     log.on_save(f"Saved .mrk.json to {filepath}")

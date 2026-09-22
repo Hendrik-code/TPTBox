@@ -7,6 +7,7 @@ import tempfile
 import zipfile
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 from pathlib import Path
 
 import dicom2nifti
@@ -24,30 +25,71 @@ from pydicom.dataset import FileDataset
 from TPTBox import BIDS_FILE, Log_Type, Print_Logger
 from TPTBox.core.compat import zip_strict
 from TPTBox.core.dicom.dicom_header_to_keys import extract_keys_from_json
+
+# _add_grid_info_to_json lives in nii_help (it needs no DICOM library at all), so that
+# BIDS_FILE.get_grid_info() does not drag pydicom/dicom2nifti in. Re-exported for compat.
+from TPTBox.core.internal.nii_help import _add_grid_info_to_json
 from TPTBox.core.nii_wrapper import NII
 
 sys.path.append(str(Path(__file__).parent))
 
-from TPTBox.core.dicom.dicom2nii_utils import get_json_from_dicom, load_json, save_json, test_name_conflict
+import string
+
+from TPTBox.core.dicom.dicom2nii_utils import get_json_from_dicom, load_json, save_json, secure_save_json, test_name_conflict
 
 logger = Print_Logger()
 
 
-def _inc_key(keys: dict, inc: int = 1) -> None:
-    """Increment the sequence key inside *keys* by *inc*."""
-    k = "sequ"
-    if k not in keys:
-        keys[k] = 0
-    try:
-        v = int(keys[k])
-        keys[k] = str(v + int(inc))
-    except Exception:
+def _next_letter_suffix(s: str, inc: int = 1) -> str:
+    """Increment a letter suffix: a -> b, z -> aa, aa -> ab."""
+    alphabet = string.ascii_lowercase
+    # Convert to a number (base 26, 1-indexed)
+    n = 0
+    for c in s:
+        n = n * 26 + (ord(c) - ord("a") + 1)
+    n += inc
+    # Convert back to letters
+    result = []
+    while n > 0:
+        n -= 1
+        result.append(alphabet[n % 26])
+        n //= 26
+    return "".join(reversed(result))
+
+
+def _inc_key(keys: dict, inc: int = 1, k: str = "sequ", path_exists: Callable[[dict], bool] | None = None) -> None:
+    """Increment the sequence key inside *keys* by appending letter suffixes.
+
+    When ``path_exists`` is given, keep incrementing until it returns ``False`` — i.e.
+    until the filename generated from *keys* no longer collides with an existing file
+    on disk. This guarantees the caller never receives keys that would produce a
+    duplicate filename.
+    """
+
+    def _step() -> None:
+        if k not in keys:
+            keys[k] = "0"
+        value = str(keys[k])
         try:
-            a, b = str(keys[k]).rsplit("-", maxsplit=2)
-        except Exception:
-            a = keys[k]
-            b = 0
-        keys[k] = a + "-" + str(int(b) + int(inc))
+            # Pure number: 100 -> 100-a
+            int(value)
+            keys[k] = f"{value}-a"
+            return  # noqa: TRY300
+        except ValueError:
+            pass
+
+        try:
+            base, suffix = value.rsplit("-", maxsplit=1)
+            if suffix.isalpha():
+                keys[k] = f"{base}-{_next_letter_suffix(suffix, inc)}"
+            else:
+                keys[k] = f"{base}-a"
+        except ValueError:
+            keys[k] = f"{value}-a"
+
+    _step()
+    while path_exists is not None and path_exists(keys):
+        _step()
 
 
 def _generate_bids_path(
@@ -56,7 +98,7 @@ def _generate_bids_path(
     """Generate a BIDS-compatible file path for NIfTI outputs based on extracted keys from DICOM headers.
 
     Args:
-        nifti_dir (str | Path): Directory where the NIfTI file will be stored.
+        dataset_nifti_dir (str | Path): Root dataset directory where the NIfTI file will be stored.
         keys (dict): Dictionary containing metadata keys extracted from DICOM headers.
         mri_format (str): The format or sequence type of the MRI (e.g., T1, T2).
         simp_json (dict): JSON dictionary with extracted DICOM information to avoid file naming conflicts.
@@ -80,10 +122,17 @@ def _generate_bids_path(
         ses,  # Session, if exist
     )
     args = {"file_type": "json", "parent": parent, "make_parent": True, "additional_folder": mri_format, "bids_format": mri_format}
-    fname = BIDS_FILE(Path(p, "sub-000_ct.nii.gz"), dataset_nifti_dir).get_changed_bids(**args, info=keys, non_strict_mode=True)
-    while test_name_conflict(simp_json, fname.file["json"]):
-        _inc_key(keys)
-        fname = BIDS_FILE(Path(p, "sub-000_ct.nii.gz"), dataset_nifti_dir).get_changed_bids(**args, info=keys, non_strict_mode=True)
+
+    def _make_fname(k: dict):
+        return BIDS_FILE(Path(p, "sub-000_ct.nii.gz"), dataset_nifti_dir).get_changed_bids(**args, info=k, non_strict_mode=True)
+
+    fname = _make_fname(keys)
+    # If a file already sits at this path, check whether its content matches ours
+    # (ignoring the "grid" key). Same content → reuse the existing filename.
+    # Different content → let _inc_key find a fresh, non-colliding filename.
+    if test_name_conflict(simp_json, fname.file["json"]):
+        _inc_key(keys, path_exists=lambda k: Path(_make_fname(k).file["json"]).exists())
+        fname = _make_fname(keys)
     return fname.file["json"], fname
 
 
@@ -507,37 +556,180 @@ def _from_dicom_to_nii(
 
     if add_grid:
         _add_grid_info_to_json(nii_path, json_file_name)
+        # Multi-echo Philips DIXON (magnitude/phase) arrives as a 4-D NIfTI.
+        # Split it into per-echo 3-D files with `-eco<i>` appended to `part`.
+        if json_bids.get("part") in ("magnitude", "phase"):
+            _split_multi_echo_dixon(Path(nii_path), Path(json_file_name), dcm_data_l)
     return nii_path if add_grid else None
 
 
-def _add_grid_info_to_json(nii_path: Path | str, simp_json: Path | str, force_update: bool = False, add: bool = True) -> dict:
-    """Append grid metadata (shape, spacing, orientation, affine) to a sidecar JSON file.
+def _split_multi_echo_dixon(nii_path: Path, json_path: Path, dcm_data_l) -> list[Path] | None:
+    """Split a 4-D multi-echo DIXON (magnitude/phase) NIfTI into per-echo 3-D files.
+
+    A no-op unless the NIfTI on disk is 4-D. Per-echo outputs are named
+    ``..._part-<part>-eco<i>_<mod>.nii.gz`` for ``i = 0..N-1`` (ascending
+    echo). Per-echo TEs are taken from the source DICOM headers (grouped by
+    ``EchoNumbers`` in ascending order) and written into each per-echo
+    sidecar JSON as ``EchoTime`` (with ``EchoNumbers`` set to the 1-based
+    echo index). The 4-D file and its sidecar are removed on success.
 
     Args:
-        nii_path: Path to the NIfTI file from which grid info is read.
-        simp_json: Path to the JSON sidecar file to update.
-        force_update: Re-compute and overwrite existing grid info when ``True``.
-        add: Write the updated dictionary back to disk when ``True``.
+        nii_path: Path to the just-written 4-D NIfTI.
+        json_path: Path to its sidecar JSON.
+        dcm_data_l: The source DICOM datasets that produced *nii_path*.
 
     Returns:
-        The updated JSON dictionary including the ``"grid"`` key.
+        List of per-echo NIfTI paths on success, or ``None`` when the input
+        was not 4-D / the split could not be performed.
     """
-    json_dict = load_json(simp_json) if Path(simp_json).exists() else {}
-    if "grid" in json_dict and not force_update:
-        return json_dict
-    print("Read Grid info", Path(simp_json).exists(), "grid" in json_dict)
+    if not Path(nii_path).exists():
+        return None
     nii = NII.load(nii_path, False)
-    gird = {
-        "shape": nii.shape,
-        "spacing": nii.spacing,
-        "orientation": nii.orientation,
-        "rotation": nii.rotation.reshape(-1).tolist(),
-        "origin": nii.origin,
-        "dims": nii.get_num_dims(),
-    }
-    json_dict["grid"] = gird
-    save_json(json_dict, simp_json, override=add)
-    return json_dict
+    if nii.get_num_dims() != 4:
+        return None
+    n_echo = nii.shape[-1]
+
+    # Ascending (EchoNumbers -> EchoTime) from the source DICOMs. Classic
+    # Philips single-frame series carry both tags on every file.
+    te_by_echo: dict[int, float] = {}
+    if isinstance(dcm_data_l, list):
+        for d in dcm_data_l:
+            try:
+                en = int(getattr(d, "EchoNumbers", 0) or 0)
+                te = float(getattr(d, "EchoTime", 0.0) or 0.0)
+            except Exception:  # noqa: BLE001
+                continue
+            if en > 0:
+                te_by_echo.setdefault(en, te)
+    tes: list[float | None] = [te_by_echo[k] for k in sorted(te_by_echo)] if te_by_echo else []
+    if len(tes) != n_echo:
+        if len(tes) != 0:
+            logger.on_warning(
+                f"Multi-echo DIXON split: {n_echo} volumes but {len(tes)} unique EchoNumbers "
+                f"in DICOM; falling back to axis order without per-echo TE."
+            )
+        tes = [None] * n_echo  # type: ignore[list-item]
+
+    parent_json = load_json(json_path) if Path(json_path).exists() else {}
+    frames = nii.split_4D_image_to_3D()
+    out_paths: list[Path] = []
+    for i, (frame, te) in enumerate(zip(frames, tes)):
+        new_nii = _with_echo_suffix(nii_path, i)
+        new_json = _with_echo_suffix(json_path, i)
+        frame.save(new_nii)
+        j = dict(parent_json)
+        j.pop("grid", None)
+        if te is not None:
+            j["EchoTime"] = te
+        j["EchoNumbers"] = i + 1
+        secure_save_json(new_json, j, indent=4)
+        _add_grid_info_to_json(new_nii, new_json)
+        out_paths.append(new_nii)
+
+    # Only delete the 4-D originals once every per-echo file is on disk.
+    if all(p.exists() for p in out_paths):
+        for p in (Path(nii_path), Path(json_path)):
+            try:
+                p.unlink()
+            except FileNotFoundError:
+                pass
+    return out_paths
+
+
+def _with_echo_suffix(p: Path, eco_index: int) -> Path:
+    """Insert ``-eco<i>`` into the ``part`` BIDS entity of a NIfTI/JSON filename.
+
+    ``sub-X_..._part-magnitude_dixon.nii.gz`` → ``..._part-magnitude-eco0_dixon.nii.gz``.
+    Falls back to appending before the extension when no ``_part-`` entity is present.
+    """
+    name = p.name
+    import re
+
+    m = re.search(r"_part-([^_]+)_", name)
+    if m:
+        old = m.group(0)
+        new = f"_part-{m.group(1)}-eco{eco_index}_"
+        name = name.replace(old, new, 1)
+    else:
+        for ext in (".nii.gz", ".json"):
+            if name.endswith(ext):
+                name = f"{name[: -len(ext)]}-eco{eco_index}{ext}"
+                break
+    return p.with_name(name)
+
+
+_EXTRACT_CACHE_DIR = ".extract_cache"
+
+
+def _folder_fingerprint(folder: Path) -> tuple[int, str] | None:
+    """Cheap folder identity: (file count, sha1 of sorted (relpath, size) list).
+
+    No DICOM headers are read — only ``os.stat`` on each file. Returns
+    ``None`` if the folder can't be scanned. Used by
+    :func:`extract_dicom_folder`'s fast-skip path.
+    """
+    import hashlib
+    import json as _json
+
+    try:
+        entries: list[tuple[str, int]] = []
+        for p in sorted(folder.rglob("*")):
+            if p.is_file():
+                try:
+                    size = p.stat().st_size
+                except OSError:
+                    continue
+                entries.append((str(p.relative_to(folder)), size))
+        payload = _json.dumps(entries, separators=(",", ":")).encode()
+        return len(entries), hashlib.sha1(payload).hexdigest()  # noqa: S324
+    except OSError:
+        return None
+
+
+def _extract_marker_path(source_folder: Path, dataset_path_out: Path) -> Path:
+    """Path of the fast-skip marker for a source folder, kept under the OUTPUT dataset.
+
+    Using the dataset root instead of the source tree means we never write
+    into the input DICOMs (which may be read-only or on removable media).
+    """
+    import hashlib
+
+    key = hashlib.sha1(str(source_folder.resolve()).encode()).hexdigest()  # noqa: S324
+    return dataset_path_out / _EXTRACT_CACHE_DIR / f"{key}.json"
+
+
+def _is_already_extracted(source_folder: Path, dataset_path_out: Path) -> bool:
+    """True when the source folder was extracted before and its file list is unchanged."""
+    import json as _json
+
+    marker = _extract_marker_path(source_folder, dataset_path_out)
+    if not marker.is_file():
+        return False
+    try:
+        prev = _json.loads(marker.read_text())
+    except (OSError, ValueError):
+        return False
+    fp = _folder_fingerprint(source_folder)
+    if fp is None:
+        return False
+    count, h = fp
+    return prev.get("count") == count and prev.get("hash") == h
+
+
+def _write_extract_marker(source_folder: Path, dataset_path_out: Path) -> None:
+    """Record the current file-list fingerprint for the source folder."""
+    import json as _json
+
+    fp = _folder_fingerprint(source_folder)
+    if fp is None:
+        return
+    count, h = fp
+    marker = _extract_marker_path(source_folder, dataset_path_out)
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(_json.dumps({"source": str(source_folder), "count": count, "hash": h}))
+    except OSError:
+        pass  # writing the marker is best-effort; missing it just disables the fast-path
 
 
 def _find_all_files(dcm_dirs: Path | list[Path], verbose=False):
@@ -755,6 +947,8 @@ def extract_dicom_folder(
     skip_localizer=True,
     parent: str = "rawdata",
     censor_list: list | None = None,
+    skip_already_extracted: bool = True,
+    force_rescan: bool = False,
 ) -> dict:
     """Extract DICOM files from a directory or list of directories, convert them to NIfTI format, and store the output.
 
@@ -766,7 +960,26 @@ def extract_dicom_folder(
         verbose (bool, optional): Whether to print detailed log information. Defaults to True.
         parts_mapping (dict, optional): A dictionary mapping DICOM part identifiers to specific descriptions (e.g., "f" -> "fat").
                                         Used for categorizing DICOM series. Defaults to a predefined mapping. The parts tag is only generated if the ImageType causes an image split.
+        map_series_description_to_file_format (dict | Callable | None, optional): Overrides the default mapping from
+            SeriesDescription to output ``mri_format``. Defaults to the built-in mapping.
+        validate_slicecount (bool, optional): Enable ``dicom2nifti`` slice-count validation. Defaults to True.
+        validate_orientation (bool, optional): Enable ``dicom2nifti`` orientation validation. Defaults to True.
+        validate_orthogonal (bool, optional): Enable ``dicom2nifti`` orthogonality validation. Defaults to False.
+        validate_slice_increment (bool, optional): Enable ``dicom2nifti`` slice-increment validation. Defaults to True.
         n_cpu (int, optional): Number of CPU cores to use for parallel processing. Defaults to 1 (sequential).
+        override_subject_name (Callable[[dict, Path], str] | None, optional): Callable receiving the parsed DICOM
+            header dict and file path; returns the subject id to use in the BIDS output. Defaults to None.
+        skip_localizer (bool, optional): If True, skip series identified as scanner localisers. Defaults to True.
+        parent (str, optional): Parent folder inside ``dataset_path_out`` under which subjects are written
+            (typically ``"rawdata"``). Defaults to ``"rawdata"``.
+        censor_list (list | None, optional): List of series keys to skip entirely. Defaults to an empty list.
+        skip_already_extracted (bool, optional): If True, use a per-source-folder marker under
+            ``dataset_path_out/.extract_cache/`` to skip folders whose file listing (relative
+            paths + sizes) is unchanged since the last successful extraction. No DICOM headers
+            are read for a skipped folder — great for re-runs that only need to pick up newly
+            added subjects. Defaults to True.
+        force_rescan (bool, optional): If True, bypass the fast-skip marker and re-read every
+            DICOM. Defaults to False.
 
     Returns:
         dict: A dictionary with keys representing DICOM series and values as paths to the generated NIfTI files.
@@ -787,6 +1000,18 @@ def extract_dicom_folder(
         dicom_path = p
 
         if str(dicom_path).endswith(".pkl"):
+            continue
+        # Fast-skip: identical file listing since last successful extraction
+        # → no DICOM headers read for this folder. Zips are excluded because
+        # their inner file list isn't visible without unpacking.
+        if (
+            skip_already_extracted
+            and not force_rescan
+            and not str(dicom_path).endswith(".zip")
+            and Path(dicom_path).is_dir()
+            and _is_already_extracted(Path(dicom_path), Path(dataset_path_out))
+        ):
+            logger.print(f"Skip {dicom_path} (already extracted; fingerprint matches)", verbose=verbose)
             continue
         temp_dir = None
         try:
@@ -835,6 +1060,15 @@ def extract_dicom_folder(
                         logger.on_warning("NotImplementedError:", e)
                     except Exception:
                         logger.print_error()
+
+            # Record the fingerprint only when the whole folder went through
+            # without an exception AND the source is a real directory (not a
+            # zip mount that's about to disappear). Errors above are caught
+            # per-series so this fires even if individual series were skipped
+            # (e.g. localizers) — but not if `_read_dicom_files` itself raised
+            # (that path lands in the outer `finally` without reaching here).
+            if skip_already_extracted and temp_dir is None and Path(dicom_path).is_dir():
+                _write_extract_marker(Path(dicom_path), Path(dataset_path_out))
 
         finally:
             if temp_dir is not None:

@@ -10,12 +10,16 @@ from batchgenerators.utilities.file_and_folder_operations import load_json, save
 from nnunetv2.utilities.label_handling.label_handling import LabelManager
 from tqdm import tqdm
 
+from TPTBox import Print_Logger
 from TPTBox.segmentation.nnUnet_utils.plans_handler import ConfigurationManager, PlansManager
 
+logger = Print_Logger()
 SAFETY_FACTOR = 0.5  # only use 50% of VRAM
 
 
-def _argmax_with_gpu_fallback(predicted_logits: torch.Tensor | np.ndarray, device: torch.device, chunk_size: int = 64) -> np.ndarray:
+def _argmax_with_gpu_fallback(
+    predicted_logits: torch.Tensor | np.ndarray, device: torch.device, chunk_size: int = 64, logger=logger
+) -> np.ndarray:
     """Computes argmax(0).
 
     Tiered argmax:
@@ -28,8 +32,10 @@ def _argmax_with_gpu_fallback(predicted_logits: torch.Tensor | np.ndarray, devic
     empty_cache(device)
 
     def _get_free_vram(device: torch.device) -> int:
+        """Return free VRAM in bytes, or 0 when the device has none to report."""
+        if device is None or device.type != "cuda":
+            return 0
         try:
-            """Returns free VRAM in bytes."""
             free, _ = torch.cuda.mem_get_info(device)
             return int(free * SAFETY_FACTOR)
         except Exception:
@@ -68,23 +74,29 @@ def _argmax_with_gpu_fallback(predicted_logits: torch.Tensor | np.ndarray, devic
 
     t = _to_cpu_tensor(predicted_logits)
 
-    if device is None or not torch.cuda.is_available():
+    # Dispatch on the *requested* device, not merely on CUDA availability: an
+    # explicit device="cpu" on a machine that happens to have a GPU must still
+    # take the CPU path (torch.cuda.mem_get_info would reject the argument).
+    if isinstance(device, str):
+        device = torch.device(device)
+    _accel = device is not None and ((device.type == "cuda" and torch.cuda.is_available()) or device.type == "mps")
+    if not _accel:
         return _chunked_argmax_cpu(t)
 
     full_bytes = _array_bytes(t.shape)
     free_vram = _get_free_vram(device)
 
-    print(f"[argmax] array: {full_bytes / 1e6:.1f} MB, VRAM: {free_vram / 1e6:.1f} MB")
+    logger.on_debug(f"[argmax] array: {full_bytes / 1e6:.1f} MB, VRAM: {free_vram / 1e6:.1f} MB")
 
     # Tier 1: full GPU
     if full_bytes <= free_vram or device.type == "mps":
         try:
             return torch.argmax(t.to(device), dim=0).cpu().numpy().astype(np.int16)
         except torch.cuda.OutOfMemoryError:
-            print("[argmax] full GPU OOM despite estimate, trying chunked GPU")
+            logger.on_fail("[argmax] full GPU OOM despite estimate, trying chunked GPU")
             empty_cache(device)
         except Exception as e:
-            print(e)
+            logger.on_fail(e)
             empty_cache(device)
 
     for i in range(10):
@@ -93,25 +105,27 @@ def _argmax_with_gpu_fallback(predicted_logits: torch.Tensor | np.ndarray, devic
         if chunk_bytes <= free_vram:
             chunk_size = max(int(chunk_size / 2**i), 1)
             break
-    print(f"[argmax] array chunk: {chunk_bytes / 1e6:.1f} MB, VRAM: {free_vram / 1e6:.1f} MB, {chunk_size=}")
+    logger.on_debug(f"[argmax] array chunk: {chunk_bytes / 1e6:.1f} MB, VRAM: {free_vram / 1e6:.1f} MB, {chunk_size=}")
 
     # Tier 2: chunked GPU
     if chunk_bytes <= free_vram:
-        print("[argmax] using chunked GPU")
+        logger.on_log("[argmax] using chunked GPU")
         try:
             return _chunked_argmax_gpu(t, device)
         except torch.cuda.OutOfMemoryError:
-            print("[argmax] chunked GPU OOM despite estimate, falling back to CPU")
+            logger.on_fail("[argmax] chunked GPU OOM despite estimate, falling back to CPU")
             empty_cache(device)
     else:
-        print("[argmax] chunk too large for VRAM, falling back to CPU")
+        logger.on_debug("[argmax] chunk too large for VRAM, falling back to CPU")
 
     # Tier 3: chunked CPU
     return _chunked_argmax_cpu(t)
 
 
 @torch.inference_mode()
-def convert_probabilities_to_segmentation(self, predicted_probabilities: np.ndarray | torch.Tensor, device, chunk_size=64) -> np.ndarray:
+def convert_probabilities_to_segmentation(
+    self, predicted_probabilities: np.ndarray | torch.Tensor, device, chunk_size=64, logger=logger
+) -> np.ndarray:
     """Assumes that inference_nonlinearity was already applied!
 
     predicted_probabilities has to have shape (c, x, y(, z)) where c is the number of classes/regions
@@ -143,7 +157,7 @@ def convert_probabilities_to_segmentation(self, predicted_probabilities: np.ndar
             segmentation = segmentation.cpu().numpy()
     else:
         # Issensee is no longer right when saying "numpy is faster than torch" newer torch versions no longer have this issue, on GPU we even get a 20x improvment. :facepalm:
-        segmentation = _argmax_with_gpu_fallback(predicted_probabilities, device, chunk_size=chunk_size)
+        segmentation = _argmax_with_gpu_fallback(predicted_probabilities, device, chunk_size=chunk_size, logger=logger)
 
     return segmentation
 
@@ -157,6 +171,7 @@ def convert_predicted_logits_to_segmentation_with_correct_shape(
     return_probabilities: bool = False,
     num_threads_torch: int = 8,
     device=None,
+    logger=logger,
 ) -> np.ndarray:
     """Revert all preprocessing steps and return a segmentation in the original image space.
 
@@ -178,6 +193,8 @@ def convert_predicted_logits_to_segmentation_with_correct_shape(
         return_probabilities: Reserved for future use. Raises
             :class:`NotImplementedError` if ``True``.
         num_threads_torch: Number of threads used by PyTorch during resampling.
+        device: Torch device on which the argmax runs; ``None`` uses the tensor's current device.
+        logger: Logger used for progress messages from the argmax GPU-fallback path.
 
     Returns:
         Integer segmentation array with dtype ``np.uint8`` or ``np.uint16``
@@ -203,7 +220,7 @@ def convert_predicted_logits_to_segmentation_with_correct_shape(
         # Softmax does not change when we use argmax in the next step
         predicted_logits = label_manager.apply_inference_nonlin(predicted_logits)
     # segmentation: np.ndarray = label_manager.convert_probabilities_to_segmentation(predicted_logits)  # type: ignore
-    segmentation: np.ndarray = convert_probabilities_to_segmentation(label_manager, predicted_logits, device)
+    segmentation: np.ndarray = convert_probabilities_to_segmentation(label_manager, predicted_logits, device, logger=logger)
     segmentation = segmentation.astype(np.uint8 if len(label_manager.foreground_labels) < 255 else np.uint16)
     del predicted_logits
     # put segmentation in bbox (revert cropping)
@@ -217,7 +234,7 @@ def convert_predicted_logits_to_segmentation_with_correct_shape(
 
     # revert transpose
     segmentation = segmentation.transpose(plans_manager.transpose_backward)
-    print(segmentation.shape)
+    logger.print(segmentation.shape)
     # if return_probabilities:
     #    raise NotImplementedError()
     #    # revert cropping

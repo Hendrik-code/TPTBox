@@ -246,8 +246,9 @@ def new_loss_terms(config: dict[str, Any]) -> dict[str, Module]:
     r"""Instantiate terms of registration loss.
 
     Args:
-        config: Preparsed configuration of loss terms.
-        target_tree: Target vessel centerline tree.
+        config: Preparsed configuration mapping ``key`` to loss dict with
+            ``"name"`` and any per-loss keyword arguments. ``"weight"`` is
+            stripped and handled elsewhere.
 
     Returns:
         Mapping from channel or loss name to loss module instance.
