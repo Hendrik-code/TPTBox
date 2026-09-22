@@ -751,6 +751,8 @@ def compute_max_cobb_angle(
         assert b is not None
         apex_v = (a + b) / 2
         for i in vertebrae_list[vertebrae_list.index(Vertebra_Instance(from_vert)) : vertebrae_list.index(Vertebra_Instance(to_vert)) + 1]:
+            if i.value not in poi.keys_region():
+                continue
             try:
                 a = _get_norm(poi, i, vert_id2_mv, Location.Vertebra_Direction_Right, 1)
                 if a is None:
