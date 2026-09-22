@@ -82,13 +82,13 @@ from TPTBox.core.poi_fun.vector_fields import (
 vec_fields = poi.info.setdefault(POI_INFO_VECTOR_FIELDS_KEY, [])
 if "my_vector_field" not in vec_fields:
     vec_fields.append("my_vector_field")
-poi.info["my_vector_field"] = {"L1": (0.09, -0.99, -0.02), ...}
+poi.info["my_vector_field"] = {"L1": (0.09, -0.99, -0.02)}  # ...
 
 # Scalar per-vertebra metadata (key-remapped by map_labels only):
 lbl_fields = poi.info.setdefault(POI_INFO_LABEL_KEYED_FIELDS_KEY, [])
 if "my_scalar_field" not in lbl_fields:
     lbl_fields.append("my_scalar_field")
-poi.info["my_scalar_field"] = {"L1": 3.14, ...}
+poi.info["my_scalar_field"] = {"L1": 3.14}  # ...
 ```
 
 **Assigning names (`info["label_name"]`):**

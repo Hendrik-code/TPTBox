@@ -761,8 +761,18 @@ def loop_over_repaired_nako(
             q.filter_format("mevibe")
             # q.filter("sequ", "me1")
             mevibe_fams = list(q.loop_dict(key_addendum=["mod", "part", "desc"]))
-            # Drop derivative-only families that don't carry the raw echo images.
-            mevibe_fams = [f for f in mevibe_fams if "mevibe_part-eco0-opp1" in f]
+            # Drop derivative-only families and incomplete acquisitions: get_corrected_mevibe
+            # unconditionally indexes all six echoes, so a family missing any of them would crash.
+            _echo_keys = [f"mevibe_part-{k}" for k in ("eco0-opp1", "eco1-pip1", "eco2-opp2", "eco3-in1", "eco4-pop1", "eco5-arb1")]
+            _kept = []
+            for f in mevibe_fams:
+                missing = [k for k in _echo_keys if k not in f]
+                if missing:
+                    if "mevibe_part-eco0-opp1" in f:
+                        log.on_warning(f"sub-{sub}: incomplete mevibe family {f.family_id!r} (missing {missing}); skipping")
+                    continue
+                _kept.append(f)
+            mevibe_fams = _kept
             if len(mevibe_fams) > 1:
                 labels = [str(f.get("mevibe_part-eco0-opp1", f)) for f in mevibe_fams]
                 cached_pick = _cached_pick(cache.get(sub, "mevibe_fam"))
