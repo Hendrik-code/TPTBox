@@ -303,9 +303,7 @@ def extract_keys_from_json(  # noqa: C901
         series_description = _get("SeriesDescription", "mr").lower()
         if series_description == "mr":
             series_description = _get("SequenceName", "mr").lower()
-        print(
-            f"SeriesDescription: '{series_description}', ImageType: {image_type}, ProtocolName: '{_get('ProtocolName', '')}'"
-        )
+        print(f"SeriesDescription: '{series_description}', ImageType: {image_type}, ProtocolName: '{_get('ProtocolName', '')}'")
         modality = _get("Modality", "mr").lower()
 
         mri_format = None
