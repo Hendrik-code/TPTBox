@@ -1031,11 +1031,7 @@ def extract_dicom_folder(
         # → no DICOM headers read for this source. Folders fingerprint their
         # rglob'd file list; zips fingerprint (size, mtime_ns) of the archive
         # itself (see `_source_fingerprint`).
-        if (
-            skip_already_extracted
-            and not force_rescan
-            and _is_already_extracted(Path(dicom_path), Path(dataset_path_out))
-        ):
+        if skip_already_extracted and not force_rescan and _is_already_extracted(Path(dicom_path), Path(dataset_path_out)):
             logger.print(f"Skip {dicom_path} (already extracted; fingerprint matches)", verbose=verbose)
             continue
         # Track the original source path so the marker below is keyed to the

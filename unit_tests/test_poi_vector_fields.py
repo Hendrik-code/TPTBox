@@ -269,16 +269,44 @@ class Test_LabelName_LegacyMigration(unittest.TestCase):
     """
 
     _ATLAS_FLAT: ClassVar[dict[str, str]] = {
-        "(1, 1)": "TGT", "(1, 2)": "FHC", "(1, 3)": "FNC", "(1, 4)": "FAAP",
-        "(2, 1)": "FLCD", "(2, 2)": "FMCD", "(2, 3)": "FLCP", "(2, 4)": "FMCP",
-        "(2, 5)": "FNP", "(2, 6)": "FADP", "(2, 7)": "TGPP", "(2, 8)": "TGCP",
-        "(2, 9)": "FMCPC", "(2, 10)": "FLCPC", "(2, 11)": "TRMP", "(2, 12)": "TRLP",
-        "(3, 1)": "TLCL", "(3, 2)": "TMCM", "(3, 3)": "TKC", "(3, 4)": "TLCA",
-        "(3, 5)": "TLCP", "(3, 6)": "TMCA", "(3, 7)": "TMCP", "(3, 8)": "TTP",
-        "(3, 9)": "TAAP", "(3, 10)": "TMIT", "(3, 11)": "TLIT",
-        "(4, 1)": "FLM", "(4, 2)": "TMM", "(4, 3)": "TAC", "(4, 4)": "TADP",
-        "(5, 1)": "PPP", "(5, 2)": "PDP", "(5, 3)": "PMP", "(5, 4)": "PLP",
-        "(5, 5)": "PRPP", "(5, 6)": "PRDP", "(5, 7)": "PRHP",
+        "(1, 1)": "TGT",
+        "(1, 2)": "FHC",
+        "(1, 3)": "FNC",
+        "(1, 4)": "FAAP",
+        "(2, 1)": "FLCD",
+        "(2, 2)": "FMCD",
+        "(2, 3)": "FLCP",
+        "(2, 4)": "FMCP",
+        "(2, 5)": "FNP",
+        "(2, 6)": "FADP",
+        "(2, 7)": "TGPP",
+        "(2, 8)": "TGCP",
+        "(2, 9)": "FMCPC",
+        "(2, 10)": "FLCPC",
+        "(2, 11)": "TRMP",
+        "(2, 12)": "TRLP",
+        "(3, 1)": "TLCL",
+        "(3, 2)": "TMCM",
+        "(3, 3)": "TKC",
+        "(3, 4)": "TLCA",
+        "(3, 5)": "TLCP",
+        "(3, 6)": "TMCA",
+        "(3, 7)": "TMCP",
+        "(3, 8)": "TTP",
+        "(3, 9)": "TAAP",
+        "(3, 10)": "TMIT",
+        "(3, 11)": "TLIT",
+        "(4, 1)": "FLM",
+        "(4, 2)": "TMM",
+        "(4, 3)": "TAC",
+        "(4, 4)": "TADP",
+        "(5, 1)": "PPP",
+        "(5, 2)": "PDP",
+        "(5, 3)": "PMP",
+        "(5, 4)": "PLP",
+        "(5, 5)": "PRPP",
+        "(5, 6)": "PRDP",
+        "(5, 7)": "PRHP",
     }
 
     def test_normalize_label_name_migrates_flat_atlas(self):
@@ -376,7 +404,8 @@ class Test_LabelName_LegacyMigration(unittest.TestCase):
 class Test_LabelName_Accessors(unittest.TestCase):
     """`set_label_name` / `set_level_one_name` write into ``info['label_name']``
     and get read back by ``label_name`` / ``level_one_name`` and by the
-    Slicer/mkr exporter."""
+    Slicer/mkr exporter.
+    """
 
     def _poi_with_enums(self) -> POI:
         from TPTBox.core.vert_constants import Location, Vertebra_Instance

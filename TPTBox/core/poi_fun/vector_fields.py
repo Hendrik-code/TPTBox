@@ -107,7 +107,7 @@ def _remap_vector_field_keys_inplace(info: dict, region_map: dict | None, subreg
     Keys may be integer labels or ``Vertebra_Instance``-name strings; both
     are matched against the int-keyed maps. No-op if there is nothing to do.
     """
-    from TPTBox.core.poi_fun.poi_abstract import LABEL_NAME, _GROUP_NAME_KEY, label_name_dict
+    from TPTBox.core.poi_fun.poi_abstract import _GROUP_NAME_KEY, LABEL_NAME, label_name_dict
 
     if not region_map and not subregion_map:
         return

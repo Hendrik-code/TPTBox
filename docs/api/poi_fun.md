@@ -99,11 +99,11 @@ Use the accessors on `Abstract_POI` (available on both `POI` and `POI_Global`)
 instead of writing the dict directly:
 
 ```python
-poi.set_label_name(region=2, subregion=10, name="FLCPC")   # per-point label
-poi.set_level_one_name(region=2, name="Femur")             # region group name
+poi.set_label_name(region=2, subregion=10, name="FLCPC")  # per-point label
+poi.set_level_one_name(region=2, name="Femur")  # region group name
 
-poi.label_name(2, 10)      # -> "FLCPC"
-poi.level_one_name(2)      # -> "Femur"
+poi.label_name(2, 10)  # -> "FLCPC"
+poi.level_one_name(2)  # -> "Femur"
 ```
 
 `region` / `subregion` accept `int`, numeric string, or `Enum` members. A

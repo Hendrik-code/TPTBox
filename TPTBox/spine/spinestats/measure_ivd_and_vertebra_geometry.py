@@ -197,9 +197,7 @@ def measure_ivd_and_vertebra_geometry(
             raw = _compute_directional_heights_widths(vert, poi, label, step_size_mm=step_size_mm, raw=raw)
             # 3. normalized T2 signal
             if t2w_arr is not None:
-                raw = _compute_t2_signal_ratio(
-                    t2w_arr, vert, label, spinal_canal_signal, spinal_canal_signal_old, raw=raw, erode=erode
-                )
+                raw = _compute_t2_signal_ratio(t2w_arr, vert, label, spinal_canal_signal, spinal_canal_signal_old, raw=raw, erode=erode)
             results[label] = _result_from_info(info)
         except Exception as e:
             results[label] = _nan_result(error=str(e))
@@ -459,9 +457,7 @@ def _batched_ray_segments(mesh: trimesh.Trimesh, ray_direction: np.ndarray, orig
     """
     n = origins.shape[0]
     directions = np.broadcast_to(ray_direction, (n, 3))
-    locations, index_ray, _ = mesh.ray.intersects_location(
-        ray_origins=origins, ray_directions=directions, multiple_hits=True
-    )
+    locations, index_ray, _ = mesh.ray.intersects_location(ray_origins=origins, ray_directions=directions, multiple_hits=True)
     lengths = np.zeros(n)
     first_pts = np.zeros((n, 3))
     last_pts = np.zeros((n, 3))
@@ -484,7 +480,9 @@ def _batched_ray_segments(mesh: trimesh.Trimesh, ray_direction: np.ndarray, orig
     return lengths, first_pts, last_pts
 
 
-def _grid_origins(base: np.ndarray, v1: np.ndarray, v2: np.ndarray, xs: np.ndarray, ys: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def _grid_origins(
+    base: np.ndarray, v1: np.ndarray, v2: np.ndarray, xs: np.ndarray, ys: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return (origins, flat_x, flat_y) for a 2D grid of ray origins in the (v1, v2) plane."""
     grid_x, grid_y = np.meshgrid(xs, ys, indexing="ij")
     flat_x = grid_x.ravel()
