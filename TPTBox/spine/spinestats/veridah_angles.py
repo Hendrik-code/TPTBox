@@ -97,7 +97,7 @@ def _compute_k_variant(poi: POI, k: int, project_2D: bool = False) -> dict[str, 
     if not relabeled.centroids:
         return {"lumbar_lordosis": None}
     full = compute_lordosis_and_kyphosis(relabeled, project_2D=project_2D)
-    return {"lumbar_lordosis": full.get("lumbar_lordosis")}
+    return {"lumbar_lordosis": full.get("lumbar_lordosis"), "lumbar_lordosis_apex": full.get("lumbar_lordosis_apex")}
 
 
 def _veridah_region_map(veridah_json_path: Path) -> dict[int, int] | None:

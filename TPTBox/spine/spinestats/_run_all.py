@@ -39,7 +39,18 @@ logger = Print_Logger()
 #   2 -- endplate-plane based lordosis / kyphosis (average of the two flanking
 #        endplates at each disc), S1 sacrum-endplate landmarks, and correct
 #        cranio-caudal ordering for the T13 annotation label.
-CURRENT_VERSION = 2
+#   3 -- endplate-plane based cobb (chain-closed, matches lordosis convention),
+#        C2 excluded from Cobb search (starts at C3), non-overlapping multi-cobb
+#        curves, anatomic (not numeric) vertebra ordering in
+#        ``compute_angel_between_two_points_`` so T13 pairs measure the right
+#        endplates, and per-curve apex vertebra keys in ``curv``
+#        (``{cervical_lordosis,thoracic_kyphosis,lumbar_lordosis}_apex``).
+CURRENT_VERSION = 3
+# Highest ``CURRENT_VERSION`` bump that required *new POI landmarks*. Stat files
+# older than this were written before those landmarks existed, so the sibling
+# POI buffer must be rebuilt (not just the angle keys). Bumps that only change
+# how numbers are derived from an unchanged POI set do not update this.
+POI_INVALIDATING_VERSION = 2
 
 # Top-level keys we require inside a finished json before we consider a
 # subject "done" and skip recomputation. cobb/curv are optional and only
@@ -162,14 +173,14 @@ def _poi_is_stale_wrt_stat(stat_path: Path, loaded_stat: dict) -> bool:
     """Return True when the POI buffer sitting next to ``stat_path`` should be rebuilt.
 
     Staleness is derived from the stat json's ``_provenance.version``: whenever
-    that reads < :data:`ANGLES_VERSION`, the sibling POI buffer is treated as
-    outdated (v1 stat + v1 POI travelled together). ``loaded_stat`` is the
-    already-loaded stat dict — pass ``{}`` if none exists (then nothing is stale
-    since there's no v1 marker to invalidate against).
+    that reads < :data:`POI_INVALIDATING_VERSION`, the sibling POI buffer is
+    treated as outdated (older stat + older POI travelled together).
+    ``loaded_stat`` is the already-loaded stat dict — pass ``{}`` if none exists
+    (then nothing is stale since there's no version marker to invalidate against).
     """
     if not stat_path.exists() or not loaded_stat:
         return False
-    return _stat_version(loaded_stat) < CURRENT_VERSION
+    return _stat_version(loaded_stat) < POI_INVALIDATING_VERSION
 
 
 def _is_cache_valid(json_path: Path, seg_files: list[Path], required_keys: tuple[str, ...]) -> tuple[bool, dict | None]:
@@ -391,7 +402,7 @@ def run_all(
         # invalidating the expensive body-composition / VBQ / muscle_fat / torso
         # blocks that don't depend on the endplate-based lordosis fix.
         _cur_ver = _stat_version(out)
-        if _cur_ver < 2:
+        if _cur_ver < CURRENT_VERSION:
             logger.on_warning("version bump", _cur_ver, "->", CURRENT_VERSION, ": recomputing angle keys")
             for _k in (
                 "cobb",
@@ -1059,7 +1070,7 @@ if __name__ == "__main__":
     try:
         if test:
             subjects = loop_over_repaired_nako(test=True)
-            total = 15
+            total = 10
             aggregate = False
         elif aggregate:
             subjects = loop_over_repaired_nako(test=False, sort=aggregate)
