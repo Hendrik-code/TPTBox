@@ -464,15 +464,25 @@ def _auto_output_dtype(niis: list[nib.nifti1.Nifti1Image]) -> type:
     """Pick the smallest lossless output dtype from the inputs' on-disk dtypes.
 
     Reads only the NIfTI headers — no pixel data is loaded. If every input is
-    integer-typed, returns the widest integer dtype that covers them all;
-    otherwise falls back to float32. This lets the stitcher store magnitude
-    MR outputs as uint16 (or int16) when the source already fit in 16 bits,
-    halving the on-disk and downstream RAM footprint versus float64.
+    integer-typed AND has a trivial slope/inter (so the raw storage range is
+    the true value range), returns the widest integer dtype that covers them
+    all; otherwise falls back to float32. This lets the stitcher store
+    magnitude MR outputs as uint16 (or int16) when the source already fit in
+    16 bits, halving the on-disk and downstream RAM footprint versus float64.
     """
     dtypes = [np.dtype(nii.get_data_dtype()) for nii in niis]
-    if all(np.issubdtype(d, np.integer) for d in dtypes):
-        return max(dtypes, key=lambda d: d.itemsize).type  # e.g. np.uint16
-    return np.float32
+    if not all(np.issubdtype(d, np.integer) for d in dtypes):
+        return np.float32
+    for nii in niis:
+        slope = getattr(nii.dataobj, "slope", 1.0)
+        inter = getattr(nii.dataobj, "inter", 0.0)
+        if slope is None or inter is None:
+            return np.float32
+        if not (np.isfinite(slope) and np.isfinite(inter)):
+            return np.float32
+        if float(slope) != 1.0 or float(inter) != 0.0:
+            return np.float32
+    return max(dtypes, key=lambda d: d.itemsize).type  # e.g. np.uint16
 
 
 def main(  # noqa: C901
@@ -481,7 +491,7 @@ def main(  # noqa: C901
     match_histogram: bool = False,
     store_ramp: bool = False,
     verbose: bool = False,
-    min_value: float = 0,
+    min_value: float | None = None,
     bias_field: bool = True,
     crop_to_bias_field: bool = False,
     crop_empty: bool = False,
@@ -517,8 +527,16 @@ def main(  # noqa: C901
         store_ramp: If True, also saves the per-volume blend weights as a 4-D
             NIfTI alongside the stitched output.
         verbose: If True, prints progress messages to stdout.
-        min_value: Background value (0 for MRI, -1024 for CT). Voxels at or
-            below this value are replaced by it in the output.
+        min_value: Background fill used as ``cval`` when resampling each chunk
+            into the target space, and — when explicitly set — a hard floor
+            applied to the stitched output. Pass ``0`` for MR, ``-1024`` for
+            CT. Default ``None``: use ``0`` internally as the background /
+            NaN-fill and only apply a hard floor when the output dtype cannot
+            represent negatives (unsigned integer types), which prevents
+            negative-to-huge-positive wraparound on the cast. Explicit values
+            (segmentations force ``0``, CT callers pass ``-1024``) are always
+            enforced; ``None`` lets signed / float outputs keep legitimate
+            negative signal (Philips-scaled fat-fraction, phase, B0 offsets).
         bias_field: If True, applies N4 bias-field correction to each input
             before stitching. Forced to False for segmentations.
         crop_to_bias_field: If True, crops each bias-corrected volume to the
@@ -554,6 +572,7 @@ def main(  # noqa: C901
         min_value = 0
         match_histogram = False
         histogram = None
+    _bg_value: float = 0.0 if min_value is None else float(min_value)
     if len(images) == 0 or len(images) == 1:
         print("!!! Need at least two images (-i ...nii.gz ...nii.gz) to stitch!!!\n Got " + str(images))
         return None, None
@@ -564,8 +583,20 @@ def main(  # noqa: C901
     for f_name in images:
         if isinstance(f_name, (Path, str)):
             print("Load ", f_name, Path(f_name)) if verbose else None
-            # Load Nii
-            nii: nib.nifti1.Nifti1Image = nib.load(f_name)  # type: ignore
+            # Load NII
+            try:
+                from TPTBox.core.nii_wrapper import to_nii as _to_nii_load
+
+                _nii_wrap = _to_nii_load(Path(f_name))
+                _arr_corrected = _nii_wrap.get_array()
+                nii = nib.Nifti1Image(_arr_corrected, _nii_wrap.affine)
+                nii.set_data_dtype(_arr_corrected.dtype)
+                try:
+                    nii.header.set_slope_inter(1.0, 0.0)
+                except Exception:  # noqa: BLE001
+                    pass
+            except Exception:  # noqa: BLE001
+                nii: nib.nifti1.Nifti1Image = nib.load(f_name)  # type: ignore
 
         else:
             nii = f_name
@@ -589,7 +620,7 @@ def main(  # noqa: C901
                 image = get_array(nii)
 
                 matched = match_histograms(image.astype(float), reference.astype(float))
-                matched[matched <= min_value] = min_value
+                matched[matched <= _bg_value] = _bg_value
                 nii = set_array(nii, matched)
 
         niis.append(nii)
@@ -617,11 +648,12 @@ def main(  # noqa: C901
         dtype = dtype2
     else:
         # Auto-detect the output dtype from the input headers when the caller
-        # asked for "auto". Blending math still runs in float; only the final
-        # cast at save time uses the picked dtype (e.g. uint16 for magnitude MR).
+        # asked for "auto". Blending math runs in float32 (was float64) —
+        # halves peak RAM of target_list/occupancy_list on large stitched
+        # volumes; the final cast at save time uses `dtype` (uint16 etc.).
         if isinstance(dtype, str) and dtype == "auto":
             dtype = _auto_output_dtype(niis)
-        dtype2 = float
+        dtype2 = np.float32
     nii_out = get_max_affine_and_shape(corners_current, affines, min_spacing=min_spacing, dtype=dtype2, verbose=verbose)
     target_list = []
     occupancy_list = []
@@ -629,10 +661,10 @@ def main(  # noqa: C901
     print("### resample to new space ###") if verbose else None
     for i, nii in enumerate(niis, 1):
         print(f"{i:2}/{len(niis):2} resampled", end="\r") if verbose else None
-        nii_new = nip.resample_from_to(nii, nii_out, 0 if is_segmentation else 3, mode="constant", cval=min_value)
+        nii_new = nip.resample_from_to(nii, nii_out, 0 if is_segmentation else 3, mode="constant", cval=_bg_value)
         arr_new = get_array(nii_new)
         if not is_segmentation and np.issubdtype(arr_new.dtype, np.floating):
-            np.nan_to_num(arr_new, copy=False, nan=min_value, posinf=min_value, neginf=min_value)
+            np.nan_to_num(arr_new, copy=False, nan=_bg_value, posinf=_bg_value, neginf=_bg_value)
         target_list.append(arr_new)
         b = nib.Nifti1Image(np.ones(nii.shape, dtype=np.float32), affine=nii.affine)  # type: ignore
         b = nip.resample_from_to(b, nii_new, 0, cval=0, mode="constant")
@@ -649,22 +681,50 @@ def main(  # noqa: C901
     # inside the ramp loop for pairs that don't touch. `_occupancy_bbox`
     # returns None for an empty occupancy — treated as "no overlap possible".
     bboxes = [_occupancy_bbox(occ) for occ in occupancy_list]
+    grid_shape_arr = np.asarray(occupancy_list[0].shape, dtype=np.int64)
+    # Padding around the joint AABB: `ramp_edge_min_value` so binary_opening's
+    # erode+dilate at the crop boundary yields the same result as on the full
+    # volume; +1 slack for the distance transform.
+    _ramp_pad = max(int(ramp_edge_min_value), 1) + 1
     # ramp stitching
     combinations = list(itertools.combinations(range(len(target_list)), 2))
+    _ramp_done = 0
+    _ramp_skipped_aabb = 0
+    _ramp_skipped_no_voxel_overlap = 0
     for idx, item in enumerate(combinations, 1):
         print(f"{idx:2}/{len(combinations):2} ramp stitching", end="\r") if verbose else None
         # Skip disjoint pairs before touching the full-volume arrays.
         if not _aabb_overlaps(bboxes[item[0]], bboxes[item[1]]):
+            _ramp_skipped_aabb += 1
             continue
+        # Work on the union-AABB sub-volume of the two chunks. Outside the
+        # union `arr_i / sum_` equals the original `arr_i_full` (there,
+        # overlap = 0, arr_i_ = binary mask of arr_i and the "other" mask
+        # is 0, so sum_ = arr_i_ and arr_i / sum_ = arr_i). And chunk i's
+        # occupancy support is fully contained in bboxes[i] ⊆ union, so
+        # writing the result back only at the sub-slice is functionally
+        # identical to the previous full-volume compute — but the ramp's
+        # peak RAM drops from ~full-volume to ~union-AABB size (typically
+        # 2 adjacent chunks tall).
+        lo_i, hi_i = bboxes[item[0]]
+        lo_j, hi_j = bboxes[item[1]]
+        lo = np.maximum(np.minimum(lo_i, lo_j) - _ramp_pad, 0)
+        hi = np.minimum(np.maximum(hi_i, hi_j) + _ramp_pad, grid_shape_arr - 1)
+        sub = (
+            slice(int(lo[0]), int(hi[0]) + 1),
+            slice(int(lo[1]), int(hi[1]) + 1),
+            slice(int(lo[2]), int(hi[2]) + 1),
+        )
         # TODO fix intersection with more than two occupancies
         arr_1_full = occupancy_list[item[0]]
         arr_2_full = occupancy_list[item[1]]
         ###
         structure = np.ones((ramp_edge_min_value, ramp_edge_min_value, ramp_edge_min_value), dtype=bool)
-        arr_1: np.ndarray = arr_1_full.copy()
-        arr_2: np.ndarray = arr_2_full.copy()
+        arr_1: np.ndarray = arr_1_full[sub].astype(np.float32, copy=True)
+        arr_2: np.ndarray = arr_2_full[sub].astype(np.float32, copy=True)
         overlap = (arr_1 * arr_2) > 0.0
         if overlap.sum() > 0:
+            _ramp_done += 1
             arr_1_ = (arr_1 > 0.0).astype(np.float32) - overlap
             arr_2_ = (arr_2 > 0.0).astype(np.float32) - overlap
             if ramp_edge_min_value == 0:
@@ -680,28 +740,32 @@ def main(  # noqa: C901
             arr_2_[overlap] = arr_2[overlap]
             sum_ = arr_1_ + arr_2_
             sum_[sum_ == 0] = 1.0
-            arr_1_full = arr_1 / sum_
-            arr_2_full = arr_2 / sum_
-            if arr_1_full.max() != 1:
+            arr_1_sub = arr_1 / sum_
+            arr_2_sub = arr_2 / sum_
+            # Chunk i's occupancy is fully contained inside bboxes[i] ⊆ sub,
+            # so the sub-array max equals the volume-wide max.
+            max_1 = float(arr_1_sub.max())
+            max_2 = float(arr_2_sub.max())
+            if max_1 != 1:
                 import warnings
 
                 warnings.warn(
-                    str((arr_1_full.min(), arr_1_full.max())) + " the image in fully incorporated insight of an other " + str(images),
+                    str((float(arr_1_sub.min()), max_1)) + " the image in fully incorporated insight of an other " + str(images),
                     stacklevel=4,
                 )
                 if kick_out_fully_integrated_images:
                     images.pop(item[0])
 
-            elif arr_2_full.max() != 1:
+            elif max_2 != 1:
                 import warnings
 
                 warnings.warn(
-                    str((arr_2_full.min(), arr_2_full.max())) + " the image in fully incorporated insight of an other " + str(images),
+                    str((float(arr_2_sub.min()), max_2)) + " the image in fully incorporated insight of an other " + str(images),
                     stacklevel=4,
                 )
                 if kick_out_fully_integrated_images:
                     images.pop(item[1])
-            if (arr_1_full.max() != 1 or arr_2_full.max() != 1) and kick_out_fully_integrated_images:
+            if (max_1 != 1 or max_2 != 1) and kick_out_fully_integrated_images:
                 print("kick_out_fully_integrated_images")
 
                 print(images)
@@ -721,20 +785,45 @@ def main(  # noqa: C901
                     kick_out_fully_integrated_images,
                     save,
                 )
-            # assert arr_1_full.max() == 1, (arr_1_full.min(), arr_1_full.max())
-            # assert arr_2_full.max() == 1, (arr_2_full.min(), arr_2_full.max())
-            occupancy_list[item[0]] = arr_1_full
-            occupancy_list[item[1]] = arr_2_full
+            arr_1_full[sub] = arr_1_sub.astype(arr_1_full.dtype, copy=False)
+            arr_2_full[sub] = arr_2_sub.astype(arr_2_full.dtype, copy=False)
         else:
+            _ramp_skipped_no_voxel_overlap += 1
             continue
-    occupancy_arr = np.stack(occupancy_list)
+    if verbose:
+        print(
+            f"\nramp summary: {_ramp_done} computed, "
+            f"{_ramp_skipped_aabb} skipped (disjoint AABB), "
+            f"{_ramp_skipped_no_voxel_overlap} skipped (no voxel overlap) "
+            f"of {len(combinations)} pairs"
+        )
+    # Aggregate: in-place accumulate `t * occupancy` per chunk instead of
+    # `np.stack(target_list) * np.stack(occupancy_list)` which would peak at
+    # ~2 × N × volume of temporary float arrays.
+    target_arr = np.zeros(target_list[0].shape, dtype=dtype2)
     if is_segmentation:
-        occupancy_arr = np.round(occupancy_arr)  # TODO assuming only two intersecting regions
-    target_arr = np.stack(target_list) * occupancy_arr
-    if is_segmentation:
-        target_arr = target_arr.astype(dtype2)
-    target_arr = target_arr.sum(0)
-    target_arr[target_arr <= min_value] = min_value
+        for t, o in zip(target_list, occupancy_list):
+            target_arr += (t * np.round(o)).astype(dtype2)  # TODO assuming only two intersecting regions
+    else:
+        for t, o in zip(target_list, occupancy_list):
+            target_arr += t * o
+    # Hard-floor policy:
+    #   * If the caller passed `min_value` explicitly (segmentations force 0,
+    #     CT typically passes -1024), always apply that floor.
+    #   * If `min_value is None` (the default), only apply a floor when the
+    #     output dtype cannot represent negatives (unsigned integer types) —
+    #     otherwise negative-to-huge-positive wraparound would silently corrupt
+    #     the save. Signed/float outputs keep legitimate negative signal
+    #     (Philips-scaled fat-fraction, phase, B0 offsets).
+    _floor: float | None
+    if min_value is not None:
+        _floor = float(min_value)
+    elif np.issubdtype(np.dtype(dtype), np.unsignedinteger):
+        _floor = 0.0
+    else:
+        _floor = None
+    if _floor is not None:
+        target_arr[target_arr <= _floor] = _floor
     print("\n### Save ###") if verbose else None
     if output is not None:
         output = str(output)
@@ -748,9 +837,22 @@ def main(  # noqa: C901
     if bias_field:
         nii_out = n4_bias_field_correction(nii_out)
     if crop_empty:
-        nii_occ = set_array(nii_out, occupancy_arr)
-        ex_slice = compute_crop_slice(nii_occ)
-        nii_out = nii_out.slicer[ex_slice]
+        # Crop to the union of per-chunk occupancy AABBs. The previous path
+        # went through compute_crop_slice on a 4-D (N, X, Y, Z) stack, which
+        # sliced the wrong axes when applied to 3-D nii_out; deriving the
+        # crop directly from `bboxes` is both cheaper and correct.
+        valid_bboxes = [b for b in bboxes if b is not None]
+        if valid_bboxes:
+            lo = np.stack([b[0] for b in valid_bboxes]).min(axis=0)
+            hi = np.stack([b[1] for b in valid_bboxes]).max(axis=0)
+            ex_slice = (
+                slice(int(lo[0]), int(hi[0]) + 1),
+                slice(int(lo[1]), int(hi[1]) + 1),
+                slice(int(lo[2]), int(hi[2]) + 1),
+            )
+            nii_out = nii_out.slicer[ex_slice]
+        else:
+            ex_slice = ()
     else:
         ex_slice = ()
 
