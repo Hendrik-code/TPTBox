@@ -1,16 +1,44 @@
 from __future__ import annotations
 
+import contextlib
 import itertools
+import warnings
+from functools import cache
 from pathlib import Path
 
-import nibabel as nib
-import nibabel.processing as nip
 import numpy as np
 from nibabel.affines import apply_affine
-from nibabel.nifti1 import Nifti1Image
 from scipy.ndimage import binary_opening, distance_transform_edt
 from scipy.spatial import ConvexHull
 from skimage.exposure import match_histograms
+
+from TPTBox.core.nii_wrapper import NII, to_nii
+from TPTBox.core.np_utils import np_bbox_binary
+from TPTBox.logger import Print_Logger
+
+logger = Print_Logger()
+
+
+@contextlib.contextmanager
+def _suppress_dtype_warning():
+    """Silence the "Loaded NIfTY: incorrect dtype detected" ``UserWarning``.
+
+    ``NII._check_if_nifty_is_lying_about_its_dtype`` (nii_wrapper.py, three
+    ``warnings.warn`` sites around line 151/163/172) fires this warning
+    during ``_unpack`` whenever the on-disk dtype doesn't match the array's
+    actual range — typical for Philips-scaled magnitude MR arriving as
+    ``int16`` with a large ``scl_slope``. The stitching pipeline handles
+    that case explicitly (rebuilds a scale-1 image with the widened dtype
+    in ``main``'s loading loop), so the warning is noise here — but we
+    only suppress it for the current call's stack, not globally.
+    """
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"Loaded NIfTY: incorrect dtype detected.*",
+            category=UserWarning,
+        )
+        yield
 
 
 def get_rotation_and_spacing_from_affine(affine: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -72,69 +100,23 @@ def get_all_corner_points(affine: np.ndarray, shape: tuple[int, ...]) -> np.ndar
     return apply_affine(affine, lst)
 
 
-def get_array(nii: Nifti1Image) -> np.ndarray:
-    """Extract the voxel data from a NIfTI image as a writable NumPy array.
-
-    Args:
-        nii: Source NIfTI image.
-
-    Returns:
-        A copy of the image data array with the original dtype preserved.
-    """
-    return np.asanyarray(nii.dataobj, dtype=nii.dataobj.dtype).copy()  # type: ignore
-
-
-def set_array(nii: Nifti1Image, arr: np.ndarray) -> Nifti1Image:
-    """Return a new NIfTI image with the given array, preserving header and affine.
-
-    If the dtype of ``arr`` differs from the existing image, the header dtype is
-    updated accordingly.
-
-    Args:
-        nii: Source NIfTI image whose header and affine are reused.
-        arr: Replacement voxel data array.
-
-    Returns:
-        A new :class:`Nifti1Image` backed by ``arr``.
-    """
-    if nii.dataobj.dtype == arr.dtype:  # type: ignore
-        nii = Nifti1Image(arr, nii.affine, nii.header)
-    else:
-        nii = Nifti1Image(get_array(nii), nii.affine, nii.header)
-        nii.set_data_dtype(arr.dtype)
-        nii = Nifti1Image(arr, nii.affine, nii.header)
-    return nii
-
-
-def argmin(lst: list) -> int:
-    """Return the index of the minimum element in a list.
-
-    Args:
-        lst: Input list of comparable elements.
-
-    Returns:
-        Zero-based index of the smallest element.
-    """
-    return lst.index(min(lst))
-
-
 def _occupancy_bbox(occ: np.ndarray) -> tuple[np.ndarray, np.ndarray] | None:
     """Axis-aligned bounding box (min, max inclusive) of the nonzero region of `occ`.
 
-    Uses three 1-D `np.any` reductions rather than `np.where`, so cost is O(N)
-    with cache-friendly access. Returns ``None`` for an all-zero occupancy.
+    Thin wrapper around :func:`TPTBox.core.np_utils.np_bbox_binary` (which
+    shares a 2-D projection between two of the three axis reductions for 3-D
+    inputs, so ~2× faster than three independent ``np.any`` reductions). The
+    slice tuple is repacked as ``(lo, hi)`` int64 arrays because the ramp
+    math further down works on plain vectors, and ``None`` is returned for
+    an all-zero occupancy so ``_aabb_overlaps`` can treat it as "no overlap
+    possible".
     """
-    mask = occ > 0
-    axes = mask.ndim
-    lo = np.empty(axes, dtype=np.int64)
-    hi = np.empty(axes, dtype=np.int64)
-    for ax in range(axes):
-        collapsed = np.any(mask, axis=tuple(i for i in range(axes) if i != ax))
-        idx = np.flatnonzero(collapsed)
-        if idx.size == 0:
-            return None
-        lo[ax] = idx[0]
-        hi[ax] = idx[-1]
+    try:
+        slices = np_bbox_binary(occ > 0)
+    except ValueError:
+        return None
+    lo = np.array([s.start for s in slices], dtype=np.int64)
+    hi = np.array([s.stop - 1 for s in slices], dtype=np.int64)
     return lo, hi
 
 
@@ -153,7 +135,7 @@ def get_max_affine_and_shape(
     min_spacing: float | None = None,
     dtype: type = float,
     verbose: bool = False,
-) -> Nifti1Image:
+) -> NII:
     """Determine the optimal output affine and shape that encloses all input volumes.
 
     Iterates over all input affines and selects the rotation that minimises the
@@ -170,7 +152,7 @@ def get_max_affine_and_shape(
             rotation to stdout.
 
     Returns:
-        A zeroed :class:`Nifti1Image` with the computed affine and shape, ready
+        A zeroed :class:`NII` with the computed affine and shape, ready
         to be used as a resampling target.
 
     Raises:
@@ -219,269 +201,94 @@ def get_max_affine_and_shape(
         new_spacing = np.maximum(min_spacing, new_spacing)
 
     shape: np.ndarray = np.ceil(min_shape / new_spacing)
-    print("Choose the following spacing:", new_spacing) if verbose else None
-    print(f"Output shape is {shape}, which utilizes {min_possible_volume / min_volume * 100:.1f} % of all voxels.") if verbose else None
-    affine = get_ras_affine(min_rotation, new_spacing, origen[0])
-    print("The new origin is ", np.round(affine[:3, 3], 2)) if verbose else None
-    print("The optimal rotation came from file number ", opt_id, " ", np.round(min_rotation.reshape(-1), 2)) if verbose else None
-    return nib.Nifti1Image(np.zeros(shape.astype(int), dtype=dtype), affine)  # type: ignore
-
-
-def compute_crop_slice(nii: Nifti1Image, minimum: float = 0, dist: int = 0) -> tuple[slice, slice, slice]:
-    """Compute the tight 3-D crop slice that removes empty space from a NIfTI volume.
-
-    A voxel is considered "filled" when its value is strictly greater than
-    ``minimum``.  The returned slice tuple can be applied via ``nii.slicer``
-    to crop the image.
-
-    Args:
-        nii: Input NIfTI image whose bounding box is computed.
-        minimum: Background threshold. Voxels above this value delimit the crop
-            (0 for MRI, -1024 for CT).
-        dist: Padding in millimetres added on every side of the crop. Converted
-            to voxels using the image's zooms.
-
-    Returns:
-        A 3-tuple of ``slice`` objects to apply along the (X, Y, Z) axes.
-
-    Raises:
-        ValueError: If no voxels exceed ``minimum`` (crop would be empty).
-    """
-    shp = nii.shape
-    zms = nii.header.get_zooms()  # type: ignore
-    d = np.around(dist / np.asarray(zms)).astype(int)
-    array = get_array(nii)  # + minimum
-    msk_bin = np.zeros(array.shape, dtype=bool)
-    # bool_arr[array<minimum] = 0
-    msk_bin[array > minimum] = 1
-    # msk_bin = np.asanyarray(bool_arr, dtype=bool)
-    msk_bin[np.isnan(msk_bin)] = 0
-    cor_msk = np.where(msk_bin > 0)
-    if cor_msk[0].shape[0] == 0:
-        raise ValueError("Array would be reduced to zero size")
-    c_min = [cor_msk[0].min(), cor_msk[1].min(), cor_msk[2].min()]
-    c_max = [cor_msk[0].max(), cor_msk[1].max(), cor_msk[2].max()]
-    x0 = max(0, c_min[0] - d[0])
-    y0 = max(0, c_min[1] - d[1])
-    z0 = max(0, c_min[2] - d[2])
-    x1 = min(shp[0], c_max[0] + d[0])
-    y1 = min(shp[1], c_max[1] + d[1])
-    z1 = min(shp[2], c_max[2] + d[2])
-    ex_slice = (slice(x0, x1 + 1), slice(y0, y1 + 1), slice(z0, z1 + 1))
-    return ex_slice
-
-
-def dilate_msk(msk_i_data: np.ndarray, mm: int = 5, connectivity: int = 3) -> np.ndarray:
-    """Dilate each label in a segmentation mask by a fixed number of voxels.
-
-    Args:
-        msk_i_data: Integer-valued 3-D segmentation array. Label 0 is background.
-        mm: Number of dilation iterations to apply per label.
-        connectivity: Structuring-element connectivity (1 = face-connected,
-            3 = fully-connected including diagonals).
-
-    Returns:
-        A dilated ``uint8`` array of the same shape as ``msk_i_data``.
-    """
-    from scipy.ndimage import binary_dilation, generate_binary_structure
-
-    struct = generate_binary_structure(3, connectivity)
-    out = msk_i_data.copy() * 0
-    for i in np.unique(msk_i_data):
-        if i == 0:
-            continue
-        data = msk_i_data.copy()
-        data[i != data] = 0
-        msk_ibe_data = binary_dilation(data, structure=struct, iterations=mm)
-        out[out == 0] = msk_ibe_data[out == 0]
-    return out.astype(np.uint8)
-
-
-def n4_bias_field_correction(
-    nib: Nifti1Image,
-    mask: np.ndarray | None = None,
-    threshold: int = 60,
-    shrink_factor: int = 4,
-    convergence: dict | None = None,
-    spline_param: int = 150,
-    verbose: bool = False,
-    weight_mask: np.ndarray | None = None,
-    crop: bool = False,
-) -> Nifti1Image:
-    """Apply N4 bias-field correction to a NIfTI image using ANTsPy.
-
-    A binary mask is derived automatically from voxels above ``threshold``
-    and dilated by 3 voxels before correction is applied.
-
-    Args:
-        nib: Input NIfTI image to correct.
-        mask: Optional pre-computed binary mask passed to ANTsPy. Overridden
-            when ``threshold != 0``.
-        threshold: Voxel intensity threshold for automatic mask generation.
-            Set to 0 to disable automatic masking.
-        shrink_factor: Image downsampling factor used inside ANTsPy to
-            speed up computation.
-        convergence: ANTsPy convergence dict with keys ``"iters"`` and
-            ``"tol"``. Defaults to ``{"iters": [50, 50, 50, 50], "tol": 1e-7}``.
-        spline_param: B-spline control point spacing for the bias field model.
-        verbose: If True, ANTsPy prints progress information.
-        weight_mask: Optional spatial weight mask passed to ANTsPy.
-        crop: If True, crops the corrected image to the region where the bias
-            field differed from the input.
-
-    Returns:
-        The bias-field-corrected NIfTI image.
-
-    Raises:
-        ModuleNotFoundError: If ``antspyx`` is not installed.
-    """
-    try:
-        import ants
-        import ants.utils.bias_correction as bc  # pip install antspyx==0.4.2
-        from ants.utils.convert_nibabel import from_nibabel, to_nibabel
-
-    except ModuleNotFoundError as err:
-        raise ModuleNotFoundError("n4 bias field correction uses ants install it with pip install antspyx==0.4.2") from err
-        # 5.3 or higher
-        import ants
-        import ants.ops.bias_correction as bc  # pip install antspyx
-
-        # TODO add conversion and remove this
-
-        def from_nibabel(nib_image):
-            """Converts a given Nifti image into an ANTsPy image.
-
-            Parameters
-            ----------
-                nib_image: nibabel Nifti1Image
-
-            Returns:
-            -------
-                ants_image: ANTsImage
-            """
-            ndim = nib_image.ndim
-
-            if ndim < 3:
-                print("Dimensionality is less than 3.")
-                return None
-
-            q_form = nib_image.get_qform()
-            spacing = nib_image.header["pixdim"][1 : ndim + 1]
-
-            origin = np.zeros(ndim)
-            origin[:3] = q_form[:3, 3]
-
-            direction = np.diag(np.ones(ndim))
-            direction[:3, :3] = q_form[:3, :3] / spacing[:3]
-
-            ants_img = ants.from_numpy(data=nib_image.get_fdata(), origin=origin.tolist(), spacing=spacing.tolist(), direction=direction)
-
-            return ants_img
-
-        def to_nibabel(img: ants.core.ants_image.ANTsImage):
-            try:
-                from nibabel.nifti1 import Nifti1Image
-            except ModuleNotFoundError as e:
-                raise ModuleNotFoundError(
-                    "Could not import nibabel, for conversion to nibabel. Install nibabel with pip install nibabel"
-                ) from e
-            affine = get_ras_affine(rotation=img.direction, spacing=img.spacing, origin=img.origin)
-            return Nifti1Image(img.numpy(), affine, nib.header)
-
-    if convergence is None:
-        convergence = {"iters": [50, 50, 50, 50], "tol": 1e-07}
-    input_ants = from_nibabel(nib)
-
-    if threshold != 0:
-        mask = get_array(nib)
-        mask[mask < threshold] = 0
-        mask[mask != 0] = 1
-        mask = mask.astype(np.uint8)
-        mask = dilate_msk(mask, mm=3)
-        mask = from_nibabel(set_array(nib, mask))
-
-    out = bc.n4_bias_field_correction(
-        input_ants,
-        mask=mask,
-        shrink_factor=shrink_factor,
-        convergence=convergence,
-        spline_param=spline_param,
+    logger.on_neutral("Choose the following spacing:", new_spacing, verbose=verbose)
+    logger.on_neutral(
+        f"Output shape is {shape}, which utilizes {min_possible_volume / min_volume * 100:.1f} % of all voxels.",
         verbose=verbose,
-        weight_mask=weight_mask,
     )
-    out_nib = to_nibabel(out)
-    if crop:
-        # Crop to regions that had a normalization applied. Removes a lot of dead space
-        dif = to_nibabel(input_ants - out)
-        da = get_array(dif)
-        da[da != 0] = 1
-        dif = set_array(dif, da)
-        ex_slice = compute_crop_slice(dif)
-        out_nib = out_nib.slicer[ex_slice]
-
-    return out_nib
-
-
-buffer_references = {}
+    affine = get_ras_affine(min_rotation, new_spacing, origen[0])
+    logger.on_neutral("The new origin is ", np.round(affine[:3, 3], 2), verbose=verbose)
+    logger.on_neutral(
+        "The optimal rotation came from file number ",
+        opt_id,
+        " ",
+        np.round(min_rotation.reshape(-1), 2),
+        verbose=verbose,
+    )
+    return NII((np.zeros(shape.astype(int), dtype=dtype), affine, None))  # type: ignore
 
 
-def buffer_reference(path: str | Path, bias_field: bool, crop: bool = False) -> np.ndarray | Nifti1Image:
+@cache
+def buffer_reference(path: str | Path, bias_field: bool, crop: bool = False) -> NII:
     """Load (and optionally bias-correct) a NIfTI file, caching the result.
 
-    Subsequent calls with the same ``path`` return the cached result without
-    re-reading or re-correcting the file.
+    Subsequent calls with the same ``(path, bias_field, crop)`` return the
+    cached NII without re-reading or re-correcting the file. Caching by all
+    three arguments (rather than just ``path`` as the previous module-level
+    dict did) means a call with ``crop=True`` no longer poisons a later call
+    with ``crop=False`` for the same path. ``lru_cache`` is also thread-safe,
+    so this is safe under a ``ThreadPoolExecutor``-based dispatcher.
 
     Args:
         path: File path of the NIfTI image.
         bias_field: If True, applies N4 bias-field correction before caching.
-        crop: Passed to :func:`n4_bias_field_correction` when ``bias_field`` is True.
+        crop: Passed to :meth:`NII.n4_bias_field_correction` when ``bias_field``
+            is True.
 
     Returns:
-        The image data array (if ``bias_field`` is False) or the corrected
-        :class:`Nifti1Image` (if ``bias_field`` is True).
+        The loaded (and optionally bias-corrected) :class:`NII`.
     """
-    if path in buffer_references:
-        return buffer_references[path]
-    reference = n4_bias_field_correction(nib.load(path), crop) if bias_field else get_array(nib.load(path))  # type: ignore
-    buffer_references[path] = reference
+    reference = NII.load(path, False)
+    if bias_field:
+        reference = reference.n4_bias_field_correction(crop=crop)
     return reference
 
 
-type_mapping = {
-    "float": float,
-    "uint8": np.uint8,
-    "uint16": np.uint16,
-    "uint32": np.uint32,
-    "uint64": np.uint64,
-    "int8": np.int8,
-    "int16": np.int16,
-    "int32": np.int32,
-    "int64": np.int64,
-}
-
-
-def _auto_output_dtype(niis: list[nib.nifti1.Nifti1Image]) -> type:
+def _auto_output_dtype(niis: list[NII]) -> type:
     """Pick the smallest lossless output dtype from the inputs' on-disk dtypes.
 
     Reads only the NIfTI headers — no pixel data is loaded. If every input is
-    integer-typed, returns the widest integer dtype that covers them all;
-    otherwise falls back to float32. This lets the stitcher store magnitude
-    MR outputs as uint16 (or int16) when the source already fit in 16 bits,
-    halving the on-disk and downstream RAM footprint versus float64.
+    integer-typed AND has a trivial slope/inter (so the raw storage range is
+    the true value range), returns the widest integer dtype that covers them
+    all; otherwise falls back to float32. This lets the stitcher store
+    magnitude MR outputs as uint16 (or int16) when the source already fit in
+    16 bits, halving the on-disk and downstream RAM footprint versus float64.
+
+    The slope check is load-bearing: Philips exports the axial VIBE-DIXON as
+    ``int16`` with a large ``scl_slope`` (~641 or ~2260) so the raw bytes span
+    the signed range but ``fdata = raw * slope`` reaches ~1e6. Returning
+    ``int16`` (or ``uint32`` after `_check_if_nifty_is_lying_about_its_dtype`
+    widens the array) and casting the blended float back to it wraps values
+    outside the target range into garbage — the stitched output ends up as a
+    static-noise pattern or an unexpectedly wide dtype (e.g. ``uint32`` for
+    the 6-echo mDIX magnitudes). When ANY input has slope != 1 or inter != 0
+    we bail to float32 so the accumulator's true range survives the save.
+    ``dataobj.slope`` / ``dataobj.inter`` on the underlying ``Nifti1Image``
+    give the ORIGINAL header values (before NII's dtype-widening pass), which
+    is what we need for this decision.
     """
-    dtypes = [np.dtype(nii.get_data_dtype()) for nii in niis]
-    if all(np.issubdtype(d, np.integer) for d in dtypes):
-        return max(dtypes, key=lambda d: d.itemsize).type  # e.g. np.uint16
-    return np.float32
+    dtypes = [np.dtype(nii.dtype) for nii in niis]
+    if not all(np.issubdtype(d, np.integer) for d in dtypes):
+        return np.float32
+    for nii in niis:
+        slope = getattr(nii.nii.dataobj, "slope", 1.0)
+        inter = getattr(nii.nii.dataobj, "inter", 0.0)
+        if slope is None or inter is None:
+            return np.float32
+        if not (np.isfinite(slope) and np.isfinite(inter)):
+            return np.float32
+        if float(slope) != 1.0 or float(inter) != 0.0:
+            return np.float32
+    return max(dtypes, key=lambda d: d.itemsize).type  # e.g. np.uint16
 
 
 def main(  # noqa: C901
-    images: list[str] | list[Path] | list[nib.nifti1.Nifti1Image],
+    images: list[str] | list[Path] | list[NII],
     output: str | None,
     match_histogram: bool = False,
     store_ramp: bool = False,
     verbose: bool = False,
-    min_value: float = 0,
+    min_value: float | None = None,
     bias_field: bool = True,
     crop_to_bias_field: bool = False,
     crop_empty: bool = False,
@@ -493,7 +300,7 @@ def main(  # noqa: C901
     dtype: type | str = float,
     save: bool = True,
     ramp_path=None,
-) -> tuple[Nifti1Image | None, Nifti1Image | None]:
+) -> tuple[NII | None, NII | None]:
     """Stitch multiple overlapping NIfTI volumes into a single output volume.
 
     The algorithm:
@@ -507,8 +314,8 @@ def main(  # noqa: C901
     5. Combines all resampled volumes with those weights and saves the result.
 
     Args:
-        images: Input volumes as file paths or pre-loaded :class:`Nifti1Image`
-            objects. At least two are required.
+        images: Input volumes as file paths or pre-loaded :class:`NII` (or
+            :class:`Nifti1Image`) objects. At least two are required.
         output: Output file path (``".nii.gz"`` extension is appended if
             absent). If None the result is returned without writing to disk
             (``save`` must also be False).
@@ -517,8 +324,16 @@ def main(  # noqa: C901
         store_ramp: If True, also saves the per-volume blend weights as a 4-D
             NIfTI alongside the stitched output.
         verbose: If True, prints progress messages to stdout.
-        min_value: Background value (0 for MRI, -1024 for CT). Voxels at or
-            below this value are replaced by it in the output.
+        min_value: Background fill used as ``cval`` when resampling each chunk
+            into the target space, and — when explicitly set — a hard floor
+            applied to the stitched output. Pass ``0`` for MR, ``-1024`` for
+            CT. Default ``None``: use ``0`` internally as the background /
+            NaN-fill and only apply a hard floor when the output dtype cannot
+            represent negatives (unsigned integer types), which prevents
+            negative-to-huge-positive wraparound on the cast. Explicit values
+            (segmentations force ``0``, CT callers pass ``-1024``) are always
+            enforced; ``None`` lets signed / float outputs keep legitimate
+            negative signal (Philips-scaled fat-fraction, phase, B0 offsets).
         bias_field: If True, applies N4 bias-field correction to each input
             before stitching. Forced to False for segmentations.
         crop_to_bias_field: If True, crops each bias-corrected volume to the
@@ -547,6 +362,55 @@ def main(  # noqa: C901
         unless ``store_ramp`` is True. Returns ``(None, None)`` when fewer
         than two images are supplied.
     """
+    # Suppress `_check_if_nifty_is_lying_about_its_dtype` UserWarnings for
+    # the whole main() call — stitching handles the "dtype mismatches
+    # actual range" case explicitly, and the warning is just noise here.
+    # See `_suppress_dtype_warning` for scope / rationale.
+    with _suppress_dtype_warning():
+        return _main(
+            images,
+            output,
+            match_histogram,
+            store_ramp,
+            verbose,
+            min_value,
+            bias_field,
+            crop_to_bias_field,
+            crop_empty,
+            histogram,
+            ramp_edge_min_value,
+            min_spacing,
+            kick_out_fully_integrated_images,
+            is_segmentation,
+            dtype,
+            save,
+            ramp_path,
+        )
+
+
+def _main(  # noqa: C901
+    images: list[str] | list[Path] | list[NII],
+    output: str | None,
+    match_histogram: bool = False,
+    store_ramp: bool = False,
+    verbose: bool = False,
+    min_value: float | None = None,
+    bias_field: bool = True,
+    crop_to_bias_field: bool = False,
+    crop_empty: bool = False,
+    histogram: str | None = None,
+    ramp_edge_min_value: int = 5,
+    min_spacing: int | None = None,
+    kick_out_fully_integrated_images: bool = False,
+    is_segmentation: bool = False,
+    dtype: type | str = float,
+    save: bool = True,
+    ramp_path=None,
+) -> tuple[NII | None, NII | None]:
+    """Body of :func:`main`, split out for dtype-warning context wrapping.
+
+    Split out so :func:`main` can wrap it in the dtype-warning suppression context.
+    """
     np.set_printoptions(precision=2, floatmode="fixed")
     if is_segmentation:
         bias_field = False
@@ -554,43 +418,46 @@ def main(  # noqa: C901
         min_value = 0
         match_histogram = False
         histogram = None
+    _bg_value: float = 0.0 if min_value is None else float(min_value)
     if len(images) == 0 or len(images) == 1:
-        print("!!! Need at least two images (-i ...nii.gz ...nii.gz) to stitch!!!\n Got " + str(images))
+        logger.on_fail("Need at least two images (-i ...nii.gz ...nii.gz) to stitch. Got:", images)
         return None, None
     corners = []
     affines = []
-    niis: list[nib.nifti1.Nifti1Image] = []
-    print("### loading ###") if verbose else None
+    niis: list[NII] = []
+    logger.on_log("### loading ###", verbose=verbose)
     for f_name in images:
         if isinstance(f_name, (Path, str)):
-            print("Load ", f_name, Path(f_name)) if verbose else None
-            # Load Nii
-            nii: nib.nifti1.Nifti1Image = nib.load(f_name)  # type: ignore
-
-        else:
+            logger.on_neutral("Load ", f_name, Path(f_name), verbose=verbose)
+            # Load NII
+            nii = to_nii(Path(f_name), seg=is_segmentation)
+        elif isinstance(f_name, (NII)):
             nii = f_name
+            nii.seg = is_segmentation
+        else:
+            nii = NII(f_name, seg=is_segmentation)
         if bias_field:
-            nii = n4_bias_field_correction(nii, crop=crop_to_bias_field)
+            nii = nii.n4_bias_field_correction(crop=crop_to_bias_field)
         ## Histogram equalization.
         if match_histogram:
             if histogram is None:
                 if len(niis) == 0:
                     reference = None
                 else:
-                    print("Histogram equalization with previous file") if verbose else None
-                    reference = get_array(niis[-1])
+                    logger.on_neutral("Histogram equalization with previous file", verbose=verbose)
+                    reference = niis[-1].get_array()
             elif histogram.isdigit():
-                print("Histogram equalization", images[int(histogram)]) if verbose else None
+                logger.on_neutral("Histogram equalization", images[int(histogram)], verbose=verbose)
                 reference = buffer_reference(images[int(histogram)], bias_field=bias_field, crop=crop_to_bias_field)  # type: ignore
             else:
-                print("Histogram equalization with file", histogram) if verbose else None
+                logger.on_neutral("Histogram equalization with file", histogram, verbose=verbose)
                 reference = buffer_reference(histogram, bias_field=bias_field, crop=crop_to_bias_field)  # type: ignore
             if reference is not None:
-                image = get_array(nii)
+                image = nii.get_array()
 
                 matched = match_histograms(image.astype(float), reference.astype(float))
-                matched[matched <= min_value] = min_value
-                nii = set_array(nii, matched)
+                matched[matched <= _bg_value] = _bg_value
+                nii = nii.set_array(matched)
 
         niis.append(nii)
         # Get affine and points for minimum enclosing Rectangle calculation
@@ -603,9 +470,9 @@ def main(  # noqa: C901
     corners_current = np.concatenate(corners, axis=0)
 
     # compute output shape and affine
-    print("### compute output shape and affine ###") if verbose else None
+    logger.on_log("### compute output shape and affine ###", verbose=verbose)
     if is_segmentation:
-        max_value = max([x.get_fdata().max() for x in niis])
+        max_value = max([x.max() for x in niis])
         if max_value < 256:
             dtype2 = np.uint8
         elif max_value < 256 * 256:
@@ -617,54 +484,83 @@ def main(  # noqa: C901
         dtype = dtype2
     else:
         # Auto-detect the output dtype from the input headers when the caller
-        # asked for "auto". Blending math still runs in float; only the final
-        # cast at save time uses the picked dtype (e.g. uint16 for magnitude MR).
+        # asked for "auto". Blending math runs in float32 (was float64) —
+        # halves peak RAM of target_list/occupancy_list on large stitched
+        # volumes; the final cast at save time uses `dtype` (uint16 etc.).
         if isinstance(dtype, str) and dtype == "auto":
             dtype = _auto_output_dtype(niis)
-        dtype2 = float
+        dtype2 = np.float32
     nii_out = get_max_affine_and_shape(corners_current, affines, min_spacing=min_spacing, dtype=dtype2, verbose=verbose)
     target_list = []
     occupancy_list = []
     # get resampled arrays and occupancy
-    print("### resample to new space ###") if verbose else None
+    logger.on_log("### resample to new space ###", verbose=verbose)
     for i, nii in enumerate(niis, 1):
-        print(f"{i:2}/{len(niis):2} resampled", end="\r") if verbose else None
-        nii_new = nip.resample_from_to(nii, nii_out, 0 if is_segmentation else 3, mode="constant", cval=min_value)
-        arr_new = get_array(nii_new)
+        logger.on_neutral(f"{i:2}/{len(niis):2} resampled", end="\r", verbose=verbose)
+        nii_new = nii.resample_from_to(nii_out, order=0 if is_segmentation else 3, mode="constant", c_val=_bg_value, verbose=False)
+        arr_new = nii_new.get_array()
         if not is_segmentation and np.issubdtype(arr_new.dtype, np.floating):
-            np.nan_to_num(arr_new, copy=False, nan=min_value, posinf=min_value, neginf=min_value)
+            np.nan_to_num(arr_new, copy=False, nan=_bg_value, posinf=_bg_value, neginf=_bg_value)
         target_list.append(arr_new)
-        b = nib.Nifti1Image(np.ones(nii.shape, dtype=np.float32), affine=nii.affine)  # type: ignore
-        b = nip.resample_from_to(b, nii_new, 0, cval=0, mode="constant")
+        b = NII((np.ones(nii.shape, dtype=np.float32), nii.affine, None))  # type: ignore
+        b = b.resample_from_to(nii_new, order=0, c_val=0, mode="constant", verbose=False)
         if is_segmentation:
             x = arr_new > 0
-            occupancy_list.append((get_array(b) * x.astype(np.int8)).astype(np.float32))  # Keep segmentation if other is 0
+            occupancy_list.append((b.get_array() * x.astype(np.int8)).astype(np.float32))  # Keep segmentation if other is 0
 
         else:
-            occupancy_list.append(get_array(b).astype(np.float32))
+            occupancy_list.append(b.get_array().astype(np.float32))
 
-    print("\n### ramp stitching ###") if verbose else None
+    logger.on_log("\n### ramp stitching ###", verbose=verbose)
     # Per-chunk axis-aligned bounding box in target-space voxel coords.
     # Precomputing once avoids the O(N_chunks^2) full-volume copy + multiply
     # inside the ramp loop for pairs that don't touch. `_occupancy_bbox`
     # returns None for an empty occupancy — treated as "no overlap possible".
     bboxes = [_occupancy_bbox(occ) for occ in occupancy_list]
+    grid_shape_arr = np.asarray(occupancy_list[0].shape, dtype=np.int64)
+    # Padding around the joint AABB: `ramp_edge_min_value` so binary_opening's
+    # erode+dilate at the crop boundary yields the same result as on the full
+    # volume; +1 slack for the distance transform.
+    _ramp_pad = max(int(ramp_edge_min_value), 1) + 1
     # ramp stitching
     combinations = list(itertools.combinations(range(len(target_list)), 2))
+    _ramp_done = 0
+    _ramp_skipped_aabb = 0
+    _ramp_skipped_no_voxel_overlap = 0
     for idx, item in enumerate(combinations, 1):
-        print(f"{idx:2}/{len(combinations):2} ramp stitching", end="\r") if verbose else None
+        logger.on_neutral(f"{idx:2}/{len(combinations):2} ramp stitching", end="\r", verbose=verbose)
         # Skip disjoint pairs before touching the full-volume arrays.
         if not _aabb_overlaps(bboxes[item[0]], bboxes[item[1]]):
+            _ramp_skipped_aabb += 1
             continue
+        # Work on the union-AABB sub-volume of the two chunks. Outside the
+        # union `arr_i / sum_` equals the original `arr_i_full` (there,
+        # overlap = 0, arr_i_ = binary mask of arr_i and the "other" mask
+        # is 0, so sum_ = arr_i_ and arr_i / sum_ = arr_i). And chunk i's
+        # occupancy support is fully contained in bboxes[i] ⊆ union, so
+        # writing the result back only at the sub-slice is functionally
+        # identical to the previous full-volume compute — but the ramp's
+        # peak RAM drops from ~full-volume to ~union-AABB size (typically
+        # 2 adjacent chunks tall).
+        lo_i, hi_i = bboxes[item[0]]
+        lo_j, hi_j = bboxes[item[1]]
+        lo = np.maximum(np.minimum(lo_i, lo_j) - _ramp_pad, 0)
+        hi = np.minimum(np.maximum(hi_i, hi_j) + _ramp_pad, grid_shape_arr - 1)
+        sub = (
+            slice(int(lo[0]), int(hi[0]) + 1),
+            slice(int(lo[1]), int(hi[1]) + 1),
+            slice(int(lo[2]), int(hi[2]) + 1),
+        )
         # TODO fix intersection with more than two occupancies
         arr_1_full = occupancy_list[item[0]]
         arr_2_full = occupancy_list[item[1]]
         ###
         structure = np.ones((ramp_edge_min_value, ramp_edge_min_value, ramp_edge_min_value), dtype=bool)
-        arr_1: np.ndarray = arr_1_full.copy()
-        arr_2: np.ndarray = arr_2_full.copy()
+        arr_1: np.ndarray = arr_1_full[sub].astype(np.float32, copy=True)
+        arr_2: np.ndarray = arr_2_full[sub].astype(np.float32, copy=True)
         overlap = (arr_1 * arr_2) > 0.0
         if overlap.sum() > 0:
+            _ramp_done += 1
             arr_1_ = (arr_1 > 0.0).astype(np.float32) - overlap
             arr_2_ = (arr_2 > 0.0).astype(np.float32) - overlap
             if ramp_edge_min_value == 0:
@@ -680,62 +576,98 @@ def main(  # noqa: C901
             arr_2_[overlap] = arr_2[overlap]
             sum_ = arr_1_ + arr_2_
             sum_[sum_ == 0] = 1.0
-            arr_1_full = arr_1 / sum_
-            arr_2_full = arr_2 / sum_
-            if arr_1_full.max() != 1:
+            arr_1_sub = arr_1 / sum_
+            arr_2_sub = arr_2 / sum_
+            # Chunk i's occupancy is fully contained inside bboxes[i] ⊆ sub,
+            # so the sub-array max equals the volume-wide max.
+            max_1 = float(arr_1_sub.max())
+            max_2 = float(arr_2_sub.max())
+            if max_1 != 1:
                 import warnings
 
                 warnings.warn(
-                    str((arr_1_full.min(), arr_1_full.max())) + " the image in fully incorporated insight of an other " + str(images),
+                    str((float(arr_1_sub.min()), max_1)) + " the image in fully incorporated insight of an other " + str(images),
                     stacklevel=4,
                 )
                 if kick_out_fully_integrated_images:
                     images.pop(item[0])
 
-            elif arr_2_full.max() != 1:
+            elif max_2 != 1:
                 import warnings
 
                 warnings.warn(
-                    str((arr_2_full.min(), arr_2_full.max())) + " the image in fully incorporated insight of an other " + str(images),
+                    str((float(arr_2_sub.min()), max_2)) + " the image in fully incorporated insight of an other " + str(images),
                     stacklevel=4,
                 )
                 if kick_out_fully_integrated_images:
                     images.pop(item[1])
-            if (arr_1_full.max() != 1 or arr_2_full.max() != 1) and kick_out_fully_integrated_images:
-                print("kick_out_fully_integrated_images")
-
-                print(images)
+            if (max_1 != 1 or max_2 != 1) and kick_out_fully_integrated_images:
+                logger.on_warning("kick_out_fully_integrated_images")
+                logger.on_warning(images)
+                # Pass EVERY argument by keyword — the positional form used
+                # to silently drop `is_segmentation`, `dtype`, `ramp_path` and
+                # shift `save` onto `is_segmentation`, which flipped the
+                # recursion into the segmentation code path and produced an
+                # unexpected uint dtype for what was actually magnitude MR.
                 return main(
-                    images,
-                    output,
-                    match_histogram,
-                    store_ramp,
-                    verbose,
-                    min_value,
-                    bias_field,
-                    crop_to_bias_field,
-                    crop_empty,
-                    histogram,
-                    ramp_edge_min_value,
-                    min_spacing,
-                    kick_out_fully_integrated_images,
-                    save,
+                    images=images,
+                    output=output,
+                    match_histogram=match_histogram,
+                    store_ramp=store_ramp,
+                    verbose=verbose,
+                    min_value=min_value,
+                    bias_field=bias_field,
+                    crop_to_bias_field=crop_to_bias_field,
+                    crop_empty=crop_empty,
+                    histogram=histogram,
+                    ramp_edge_min_value=ramp_edge_min_value,
+                    min_spacing=min_spacing,
+                    kick_out_fully_integrated_images=kick_out_fully_integrated_images,
+                    is_segmentation=is_segmentation,
+                    dtype=dtype,
+                    save=save,
+                    ramp_path=ramp_path,
                 )
-            # assert arr_1_full.max() == 1, (arr_1_full.min(), arr_1_full.max())
-            # assert arr_2_full.max() == 1, (arr_2_full.min(), arr_2_full.max())
-            occupancy_list[item[0]] = arr_1_full
-            occupancy_list[item[1]] = arr_2_full
+            arr_1_full[sub] = arr_1_sub.astype(arr_1_full.dtype, copy=False)
+            arr_2_full[sub] = arr_2_sub.astype(arr_2_full.dtype, copy=False)
         else:
+            _ramp_skipped_no_voxel_overlap += 1
             continue
-    occupancy_arr = np.stack(occupancy_list)
+    logger.on_neutral(
+        f"\nramp summary: {_ramp_done} computed, "
+        f"{_ramp_skipped_aabb} skipped (disjoint AABB), "
+        f"{_ramp_skipped_no_voxel_overlap} skipped (no voxel overlap) "
+        f"of {len(combinations)} pairs",
+        verbose=verbose,
+    )
+    # Aggregate: in-place accumulate `t * occupancy` per chunk instead of
+    # `np.stack(target_list) * np.stack(occupancy_list)` which would peak at
+    # ~2 * N * volume of temporary float arrays.
+    target_arr = np.zeros(target_list[0].shape, dtype=dtype2)
     if is_segmentation:
-        occupancy_arr = np.round(occupancy_arr)  # TODO assuming only two intersecting regions
-    target_arr = np.stack(target_list) * occupancy_arr
-    if is_segmentation:
-        target_arr = target_arr.astype(dtype2)
-    target_arr = target_arr.sum(0)
-    target_arr[target_arr <= min_value] = min_value
-    print("\n### Save ###") if verbose else None
+        for t, o in zip(target_list, occupancy_list):
+            target_arr += (t * np.round(o)).astype(dtype2)  # TODO assuming only two intersecting regions
+    else:
+        for t, o in zip(target_list, occupancy_list):
+            target_arr += t * o
+    # Hard-floor policy:
+    #   * If the caller passed `min_value` explicitly (segmentations force 0,
+    #     CT typically passes -1024), always apply that floor.
+    #   * If `min_value is None` (the default), only apply a floor when the
+    #     output dtype cannot represent negatives (unsigned integer types) —
+    #     otherwise negative-to-huge-positive wraparound would silently corrupt
+    #     the save. Signed/float outputs keep legitimate negative signal
+    #     (Philips-scaled fat-fraction, phase, B0 offsets).
+    _floor: float | None
+    if min_value is not None:
+        _floor = float(min_value)
+    elif np.issubdtype(np.dtype(dtype), np.unsignedinteger):
+        _floor = 0.0
+    else:
+        _floor = None
+    if _floor is not None:
+        target_arr[target_arr <= _floor] = _floor
+    logger.on_log("\n### Save ###", verbose=verbose)
     if output is not None:
         output = str(output)
         if not output.endswith(".nii.gz"):
@@ -743,36 +675,54 @@ def main(  # noqa: C901
         if "/" not in output and "\\" not in output:
             assert isinstance(images[0], (str, Path)), "automatic path fetching only possible if images are strings or Path, not objects"
             output = str(Path(Path(images[0]).parent, output))
-    dtype = type_mapping.get(dtype, dtype)  # type: ignore
-    nii_out = set_array(nii_out, target_arr.astype(dtype))
+    # Accept a string dtype name ("uint8", "float", …) from the CLI argparse
+    # path. `np.dtype(...)` covers every alias `type_mapping` used to define
+    # explicitly. Non-string dtypes (types picked by `_auto_output_dtype` or
+    # passed in directly) pass through unchanged.
+    if isinstance(dtype, str):
+        dtype = np.dtype(dtype).type
+    nii_out = nii_out.set_array(target_arr.astype(dtype))
     if bias_field:
-        nii_out = n4_bias_field_correction(nii_out)
+        nii_out = nii_out.n4_bias_field_correction()
     if crop_empty:
-        nii_occ = set_array(nii_out, occupancy_arr)
-        ex_slice = compute_crop_slice(nii_occ)
-        nii_out = nii_out.slicer[ex_slice]
+        # Crop to the union of per-chunk occupancy AABBs. The previous path
+        # went through compute_crop_slice on a 4-D (N, X, Y, Z) stack, which
+        # sliced the wrong axes when applied to 3-D nii_out; deriving the
+        # crop directly from `bboxes` is both cheaper and correct.
+        valid_bboxes = [b for b in bboxes if b is not None]
+        if valid_bboxes:
+            lo = np.stack([b[0] for b in valid_bboxes]).min(axis=0)
+            hi = np.stack([b[1] for b in valid_bboxes]).max(axis=0)
+            ex_slice = (
+                slice(int(lo[0]), int(hi[0]) + 1),
+                slice(int(lo[1]), int(hi[1]) + 1),
+                slice(int(lo[2]), int(hi[2]) + 1),
+            )
+            nii_out = nii_out[ex_slice]
+        else:
+            ex_slice = ()
     else:
         ex_slice = ()
 
-    nii_out.set_data_dtype(dtype)
+    nii_out.set_dtype_(dtype)
 
     if save:
-        nib.save(nii_out, output)  # type: ignore
-        print("Saved ", output) if verbose else None
+        nii_out.save(output)  # type: ignore
+        logger.on_save("Saved ", output, verbose=verbose)
 
     if store_ramp:
         occupancy_arr = np.stack(occupancy_list, -1)
         if crop_empty:
             occupancy_arr = occupancy_arr[ex_slice]
         assert output is not None
-        nii_occ = set_array(nii_out, occupancy_arr)
-        nii_occ.set_data_dtype(np.int8)
+        nii_occ = nii_out.set_array(occupancy_arr)
+        nii_occ.set_dtype_(np.int8)
         output = output.replace(".nii.gz", "_ramps.nii.gz").replace("_msk_", "_") if ramp_path is None else ramp_path
         if save:
-            nib.save(nii_occ, output)  # type: ignore
-            print("Saved ", output) if verbose else None
+            nii_occ.save(output)  # type: ignore
+            logger.on_save("Saved ", output, verbose=verbose)
         return nii_out, nii_occ
-    print("\n### Finished ###") if verbose else None
+    logger.on_ok("\n### Finished ###", verbose=verbose)
     return nii_out, None
 
 
