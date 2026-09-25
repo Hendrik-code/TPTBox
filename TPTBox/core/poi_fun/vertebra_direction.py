@@ -147,15 +147,26 @@ def calc_orientation_of_vertebra_PIR(
         if last_vert == 20:
             last_vert = None
             break
-    max_vert_key = max(vert_keys)
+    # Only pre-sacral vertebrae influence the "next free label" search — S1 (and higher)
+    # may be present in poi_iso via `calc_endplate_points_` (Sacrum_Endplate landmark),
+    # but their label must NOT be counted here, otherwise spline anchors would land at
+    # labels 27/28 and get promoted to phantom vertebrae by the downstream
+    # `poi_iso.extract_subregion(source_subreg_point_id)` loop (which would then write
+    # spurious direction POIs at those labels and fool `_get_last_thoracic` into
+    # returning T13 / COCC).
+    presacral_keys = [k for k in vert_keys if k < Vertebra_Instance.S1.value]
+    max_vert_key = max(presacral_keys) if presacral_keys else max(vert_keys)
+    anchor_labels: set[int] = set()
     if (Vertebra_Instance.S1.value, Location.Vertebral_Body_Endplate_Superior.value) in poi_iso:
         poi_iso[max_vert_key + 1, spline_subreg_point_id] = poi_iso[
             (Vertebra_Instance.S1.value, Location.Vertebral_Body_Endplate_Superior.value)
         ]
         max_vert_key += 1
+        anchor_labels.add(max_vert_key)
     if last_vert is not None and (last_vert, Location.Vertebral_Body_Endplate_Inferior.value) in poi_iso:
         poi_iso[max_vert_key + 1, spline_subreg_point_id] = poi_iso[(last_vert, Location.Vertebral_Body_Endplate_Inferior.value)]
         max_vert_key += 1
+        anchor_labels.add(max_vert_key)
     #####
     # spline:
     body_spline, body_spline_der = poi_iso.fit_spline(location=spline_subreg_point_id, vertebra=True)
@@ -184,6 +195,10 @@ def calc_orientation_of_vertebra_PIR(
     fill_back = out.copy() if do_fill_back else None
     # Draw a plain with the up_vector an cut it with intersection_target
     for reg_label, _, cords in poi_iso.extract_subregion(source_subreg_point_id).items():
+        # Spline-anchor labels (added above to influence the spline fit) must not be
+        # processed here — they'd otherwise get written back to `ret` as pseudo-vertebrae.
+        if reg_label in anchor_labels:
+            continue
         # calculate_normal_vector
         if reg_label in down_vector:
             normal_vector_down = down_vector[reg_label]
@@ -222,7 +237,15 @@ def calc_orientation_of_vertebra_PIR(
         arr = subreg_sar.set_array(fill_back).reorient(poi.orientation).rescale_(poi.zoom).get_array()
         fill_back_nii.set_array_(arr)
 
-    ret = calc_centroids(subreg_iso.set_array(out), second_stage=subreg_id, extend_to=poi_iso.copy(), inplace=True)
+    # Strip spline anchors from the working POI before extending: they were only
+    # needed to influence `fit_spline` above, and must not leak into the returned POI
+    # as pseudo-vertebrae (they'd otherwise show up as phantom regions labelled 25/26
+    # / 27/28, fooling `_get_last_thoracic` etc. into treating them as real).
+    poi_iso_clean = poi_iso.copy()
+    for _a in anchor_labels:
+        if (_a, spline_subreg_point_id.value) in poi_iso_clean:
+            del poi_iso_clean.centroids[_a, spline_subreg_point_id.value]
+    ret = calc_centroids(subreg_iso.set_array(out), second_stage=subreg_id, extend_to=poi_iso_clean, inplace=True)
 
     poi._vert_orientation_pir = {}
     if save_normals_in_info:
