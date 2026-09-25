@@ -407,8 +407,9 @@ def _main(  # noqa: C901
     save: bool = True,
     ramp_path=None,
 ) -> tuple[NII | None, NII | None]:
-    """Body of :func:`main`, split out so :func:`main` can wrap it in the
-    dtype-warning suppression context.
+    """Body of :func:`main`, split out for dtype-warning context wrapping.
+
+    Split out so :func:`main` can wrap it in the dtype-warning suppression context.
     """
     np.set_printoptions(precision=2, floatmode="fixed")
     if is_segmentation:
@@ -641,7 +642,7 @@ def _main(  # noqa: C901
     )
     # Aggregate: in-place accumulate `t * occupancy` per chunk instead of
     # `np.stack(target_list) * np.stack(occupancy_list)` which would peak at
-    # ~2 × N × volume of temporary float arrays.
+    # ~2 * N * volume of temporary float arrays.
     target_arr = np.zeros(target_list[0].shape, dtype=dtype2)
     if is_segmentation:
         for t, o in zip(target_list, occupancy_list):
