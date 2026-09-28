@@ -1056,9 +1056,9 @@ if __name__ == "__main__":
     os.nice(20)
     OUT_FOLDER = Path("/DATA/NAS/ongoing_projects/robert/test/NAKO-stats")
     OUT_FOLDER.mkdir(parents=True, exist_ok=True)
-    N_CPUS = 1  # set >1 to parallelize
+    N_CPUS = 20  # set >1 to parallelize
     OVERRIDE = False
-    aggregate = False
+    aggregate = True
     do_not_update = False
     test = False
     collector: ExcelCollector | None = None
@@ -1095,7 +1095,7 @@ if __name__ == "__main__":
             from itertools import islice
 
             with ProcessPoolExecutor(max_workers=N_CPUS, max_tasks_per_child=100) as ex:
-                batch_size = 100
+                batch_size = 500
                 l = tqdm(total=total)
                 while True:
                     gc.collect()

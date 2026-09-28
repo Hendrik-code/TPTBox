@@ -445,7 +445,7 @@ def calc_endplate_points_(
 
     # Location.Sacrum_Endplate,
     endplate_nii = spine.extract_label(Location.Sacrum_Endplate)  # vert *
-    endplate_nii = endplate_nii.apply_crop(endplate_nii.compute_crop(0, 2, raise_error=False))
+    endplate_nii = endplate_nii.apply_crop(endplate_nii.compute_crop(0, 3, raise_error=False))
     if endplate_nii.max() > 0:
         c = endplate_nii.dilate_msk(2).get_connected_components()
         if c.max() != 1:
