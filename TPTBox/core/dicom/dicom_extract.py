@@ -413,6 +413,16 @@ def _extract_nii_from_dicom(dicom_out_path, nii_path):
                     return False
             except Exception as e:
                 logger.on_debug("Multi-Frame DICOM did not work:", e)
+            # Multi-echo Philips DIXON (e.g. mDIX quant): N slices × M echoes at
+            # the same ImagePositionPatient. dicom2nifti's own stack detector
+            # collapses to N/2 fake groups of 2 slices, then fails inside
+            # `four_d_to_nifti → create_affine` with `NOT_A_VOLUME`. Convert
+            # per-echo to 3-D and stack into a 4-D NIfTI ourselves; the
+            # downstream `_split_multi_echo_dixon` will then split it into
+            # per-echo `-eco<i>` files.
+            if _dicoms_are_multi_echo(dicom_out_path) and _convert_multi_echo_dicoms_to_4d(dicom_out_path, nii_path):
+                logger.print("Save ", nii_path, Log_Type.SAVE)
+                return True
             ## The PDF dicom lands here
             convert_dicom.dicom_array_to_nifti(dicom_out_path, nii_path, True)
         else:
@@ -644,6 +654,85 @@ def _from_dicom_to_nii(
         # `dixon_mapping` or `parts_mapping`.
         _split_multi_echo_dixon(Path(nii_path), Path(json_file_name), dcm_data_l)
     return nii_path if add_grid else None
+
+
+def _dicoms_are_multi_echo(dcm_list) -> bool:
+    """True when ``dcm_list`` carries slices from more than one ``EchoNumbers`` value."""
+    if not isinstance(dcm_list, list) or len(dcm_list) < 2:
+        return False
+    seen: set[int] = set()
+    for d in dcm_list:
+        try:
+            en = int(getattr(d, "EchoNumbers", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if en > 0:
+            seen.add(en)
+            if len(seen) > 1:
+                return True
+    return False
+
+
+def _convert_multi_echo_dicoms_to_4d(dcm_list: list, nii_path: str | Path) -> bool:
+    """Convert a multi-echo DICOM list to a 4-D NIfTI (echoes on axis 3).
+
+    Per-echo buckets are converted separately with ``dicom2nifti`` (each is a
+    normal 3-D stack with no repeated ImagePositionPatient), then stacked along
+    a new fourth axis in ascending ``EchoNumbers``. Written to *nii_path*. The
+    caller's post-processing (``_split_multi_echo_dixon``) then splits the 4-D
+    file into per-echo ``-eco<i>`` files.
+
+    Returns True on success, False if any per-echo conversion fails or the
+    per-echo grids don't match.
+    """
+    per_echo: dict[int, list] = {}
+    for d in dcm_list:
+        try:
+            en = int(getattr(d, "EchoNumbers", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if en > 0:
+            per_echo.setdefault(en, []).append(d)
+    if len(per_echo) < 2:
+        return False
+
+    nii_path = Path(nii_path)
+    tmp_dir = Path(tempfile.mkdtemp(prefix=f"{nii_path.stem}.echoes.", dir=str(nii_path.parent)))
+    try:
+        arrays: list[np.ndarray] = []
+        ref_affine: np.ndarray | None = None
+        ref_header = None
+        ref_shape: tuple | None = None
+        for en in sorted(per_echo):
+            tmp_out = tmp_dir / f"echo{en}.nii.gz"
+            try:
+                convert_dicom.dicom_array_to_nifti(per_echo[en], str(tmp_out), True)
+            except Exception as e:  # noqa: BLE001
+                logger.on_warning(f"multi-echo split: per-echo conversion failed for EchoNumbers={en}: {type(e).__name__}: {e}")
+                return False
+            if not tmp_out.exists():
+                logger.on_warning(f"multi-echo split: per-echo NIfTI missing for EchoNumbers={en}")
+                return False
+            n = nib.load(str(tmp_out))
+            arr = np.asanyarray(n.dataobj, dtype=n.get_data_dtype())
+            if ref_affine is None:
+                ref_affine = n.affine
+                ref_header = n.header
+                ref_shape = arr.shape
+            elif arr.shape != ref_shape or not np.allclose(n.affine, ref_affine, atol=1e-3):
+                logger.on_warning(
+                    f"multi-echo split: grid mismatch between echoes (echo {en}: shape={arr.shape}); "
+                    f"aborting per-echo stack."
+                )
+                return False
+            arrays.append(arr)
+        stacked = np.stack(arrays, axis=-1)
+        out_img = nib.Nifti1Image(stacked, ref_affine, ref_header)
+        out_img.set_data_dtype(arrays[0].dtype)
+        out_img.to_filename(str(nii_path))
+        return True
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 def _split_multi_echo_dixon(nii_path: Path, json_path: Path, dcm_data_l) -> list[Path] | None:
