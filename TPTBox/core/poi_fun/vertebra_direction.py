@@ -252,6 +252,10 @@ def calc_orientation_of_vertebra_PIR(
         poi.info["vert_orientation_PIR"] = poi._vert_orientation_pir
     # calc posterior vector and the crossproduct
     for vert_id, normal_down in down_vector.items():
+        # Missing plane/source POIs at this level (e.g. sacrum without a spinal-canal
+        # intersection) are legitimate — skip silently instead of logging a failure.
+        if (vert_id, subreg_id.value) not in ret or (vert_id, source_subreg_point_id.value) not in ret:
+            continue
         try:
             # get two points and compute the direction:
             a = np.array(ret[vert_id : subreg_id.value]) - 1
