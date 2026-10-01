@@ -3,12 +3,14 @@
 </h1><br>
 
 
-[![PyPI version tptbox](https://badge.fury.io/py/tptbox.svg)](https://pypi.python.org/pypi/tptbox/)
-[![Python Versions](https://img.shields.io/pypi/pyversions/tptbox)](https://pypi.org/project/tptbox/)
+[![DOI](https://img.shields.io/badge/DOI-10.1016%2Fj.softx.2026.103055-B31B1B)](https://doi.org/10.1016/j.softx.2026.103055)
 [![Stable Version](https://img.shields.io/pypi/v/tptbox?label=stable)](https://pypi.python.org/pypi/tptbox/)
+[![Python Versions](https://img.shields.io/pypi/pyversions/tptbox)](https://pypi.org/project/tptbox/)
+[![Downloads](https://img.shields.io/pepy/dt/tptbox?label=downloads)](https://pepy.tech/project/tptbox)
 [![tests](https://github.com/Hendrik-code/TPTBox/actions/workflows/tests.yml/badge.svg)](https://github.com/Hendrik-code/TPTBox/actions/workflows/tests.yml)
 [![codecov](https://codecov.io/gh/Hendrik-code/TPTBox/graph/badge.svg?token=A7FWUKO9Y4)](https://codecov.io/gh/Hendrik-code/TPTBox)
 [![Documentation](https://readthedocs.org/projects/tptbox/badge/?version=latest)](https://tptbox.readthedocs.io/en/latest/)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 <p align="center">
@@ -19,6 +21,24 @@
 
 
 The Torso Processing ToolBox (TPTBox) is a multi-functional package to handle any sort of bids-conform dataset (CT, MRI, ...)
+
+## Publication
+
+This is the official repository of "TPTBox: Extensive torso processing toolbox for simple and automatic analysis of CT and MR imaging"
+
+If you use this toolbox, please cite our publication: https://doi.org/10.1016/j.softx.2026.103055
+```
+@article{MollerGraf2026TPTBox,
+  title = {TPTBox: Extensive torso processing toolbox for simple and automatic analysis of CT and MR imaging},
+  journal = {SoftwareX},
+  pages = {103055},
+  year = {2026},
+  issn = {2352-7110},
+  doi = {https://doi.org/10.1016/j.softx.2026.103055},
+  url = {https://www.sciencedirect.com/science/article/pii/S2352711026005467},
+  author = {Hendrik Möller and Robert Graf and Tanja Lerchl and Daniel Rueckert and Jan S. Kirschke},
+}
+```
 
 ## Features
 
@@ -114,69 +134,3 @@ Each sub-package has its own README with API tables and examples. Click on the n
 | [`mesh3D`](https://tptbox.readthedocs.io/en/latest/modules/mesh3d/) | 3D surface mesh generation and rendering from segmentation volumes |
 | [`stitching`](https://tptbox.readthedocs.io/en/latest/modules/stitching/) | Multi-station NIfTI stitching for whole-body or long-spine acquisitions |
 | [`logger`](https://tptbox.readthedocs.io/en/latest/modules/logger/) | Structured, consistent logging for medical image processing pipelines |
-
-
-
-# Publications
-
-An incomplete list of publications that actively used TPTBox:
-
-1. **Denoising diffusion-based MRI to CT image translation enables automated spinal segmentation**; Graf, Robert;
-Schmitt, Joachim; Schlaeger, Sarah; Möller, Hendrik Kristian; Sideri-Lampretsa, Vasiliki; Sekuboyina, Anjany; Krieg, Sandro Manuel;
-Wiestler, Benedikt; Menze, Bjoern; Rueckert, Daniel; Kirschke, Jan; **European Radiology Experimental, 2023**
-
-2. **Modeling the acquisition shift between axial and sagittal MRI for di usion super-resolution to enable axial spine segmentation**; Graf, Robert; Möller, Hendrik; McGinnis, Julian; Rühling, Sebastian; Weihrauch, Maren; Atad, Matan; Shit,
-Suprosanna; Menze, Bjoern; Mühlau, Mark; Paetzold, Johannes C.; Rueckert, Daniel; Kirschke, Jan S.; **Proceedings of Machine Learning Research, 2024**
-
-3. **Detecting unforeseen data properties with diffusion autoencoder embeddings using spine MRI data**; Graf, Robert; Hunecke, Florian; Pohl, Soeren; Atad, Matan; Möller, Hendrik; Starck, Sophie; Kröncke, Thomas; Bette, Stefanie; Bamberg,
-Fabian; Pischon, Tobias; Niendorf, Thoralf; Schmidt, Carsten; Paetzold, Johannes C.; Rueckert, Daniel; Kirschke, Jan S.; **International Conference on Medical Image Computing and Computer-Assisted Intervention (MICCAI), 2024**
-
-4. **SPINEPS—automatic whole spine segmentation of T2-weighted MR images using a two-phase approach to multi-class semantic and instance segmentation**; Möller, Hendrik; Graf, Robert; Schmitt, Joachim; Keinert-Weth, Benjamin;
-Schön, Hanna; Atad, Matan; Sekuboyina, Anjany; Streckenbach, Felix; Kofler, Florian;
-Kroencke, Thomas; Bette, Stefanie; Willich, Stefan N.; Keil, Thomas; Niendorf, Thoralf;
-Pischon, Tobias; Endemann, Beate; Menze, Bjoern; Rueckert, Daniel; Kirschke, Jan S.;
-**European Radiology, 2025**
-
-5. **VIBESegmentator: full body MRI segmentation for the NAKO and UK Biobank**;
-Graf, Robert; Platzek, Paul; Riedel, Evamaria Olga; Ramschütz, Constanze; Starck, Sophie; Möller, Hendrik K.; Atad, Matan; Völzke,
-Henry; Bülow, Robin; Schmidt, Carsten Oliver; Rüdebusch, Julia; Jung, Matthias; Reisert, Marco; Weiss, Jakob; Lö ler, Maximilian T.;
-Bamberg, Fabian; Wiestler, Benedikt; Paetzold, Johannes C.; Rueckert, Daniel; Kirschke, Jan S.; **European Radiology, 2025**
-
-6. **Generating synthetic high-resolution spinal STIR and T1w images from T2w FSE and low-resolution axial Dixon**; Graf, Robert; Platzek, Paul-Sören; Riedel, Evamaria Olga; Kim, Su Hwan; Lenhart, Nicolas; Ramschütz, Constanze; Paprottka,
-Karolin Johanna; Kertels, Olivia Ruriko; Möller, Hendrik Kristian; Atad, Matan; Bülow, Robin; Werner, Nicole; Völzke, Henry; Schmidt,
-Carsten Oliver; Wiestler, Benedikt; Paetzold, Johannes C.; Rueckert, Daniel; Kirschke, Jan S.; **European Radiology, 2025**
-
-7. **MAGO-SP: detection and correction of water-fat swaps in magnitude-only VIBE MRI**;
-Graf, Robert; Möller, Hendrik; Starck, Sophie; Atad, Matan; Braun, Philipp; Stelter, Jonathan; Peters, Annette; Krist, Lilian; Willich,
-Stefan N.; Völzke, Henry; Bülow, Robin; Pischon, Tobias; Niendorf, Thoralf; Paetzold, Johannes C.; Karampinos, Dimitrios; Rueckert,
-Daniel; Kirschke, Jan S.; **International Conference on Medical Image Computing and Computer-Assisted Intervention (MICCAI), 2025**
-
-8. **Automated Thoracolumbar Stump Rib Detection and Analysis in a Large CT Cohort**;
-Möller, Hendrik; Dima, Alina; Keinert-Weth, Benjamin; Graf, Robert; Atad, Matan; Paetzold,
-Johannes; Jungmann, Friederike; Braren, Rickmer; Kofler, Florian; Menze, Bjoern; Rueckert,
-Daniel; Kirschke, Jan S.; Schön, Hanna; **MDPI AI, 2026**
-
-9. **PARASIDE: An automatic paranasal sinus segmentation and structure analysis tool for magnetic resonance imaging**; Möller, Hendrik;
-Krautschick, Lukas; Graf, Robert; Atad, Matan; Busch, Chia-Jung; Beule, Achim Georg;
-Scharf, Christian; Kaderali, Lars; Menze, Bjoern; Rueckert, Daniel; Kirschke, Jan S.;
-Paperlein, Fabian; **Computers in Biology and Medicine, 2026**
-
-10. **One Sequence to Segment Them All: Efficient Data Augmentation for CT and MRI Cross-Domain 3D Spine Segmentation;** Molinier,
-Nathan*; Möller, Hendrik*; Dagonneau, Thomas; Curto-Vilalta, Anna; Graf, Robert; Atad,
-Matan; Rueckert, Daniel; Kirschke, Jan S.; Cohen-Adad, Julien; **International Conference on
-Medical Image Computing and Computer-Assisted Intervention (MICCAI) , 2026**
-
-11. **VERIDAH: Solving Enumeration Anomaly Aware Vertebra
-Labeling across Imaging Sequences;** Möller, Hendrik; Schön, Hanna; Graf, Robert;
-Atad, Matan; Molinier, Nathan; Sekuboyina, Anjany; Budai, Bettina; Bamberg, Fabian;
-Ringhof, Steffen; Schlett, Christopher; Pischon, Tobias; Niendorf, Thoralf; Decker, Josua;
-Weber, Marc-André; Menze, Bjoern; Rueckert, Daniel; Kirschke, Jan S.; **European
-Radiology (under review), 2026**
-
-12. **Rule-based key-point extraction for MR-guided biomechanical digital twins of the spine**; Graf, Robert; Lerchl,
-Tanja; Nispel, Kati; Möller, Hendrik; Atad, Matan; McGinnis, Julian; Watrinet, Julius Maria; Paetzold, Johannes C.; Rueckert, Daniel;
-Kirschke, Jan S.; **International Workshop on Digital Twin for Healthcare (DT4H), 2025**
-
-13. **VERPEX: Anatomical Landmark Extraction on 3D Vertebrae exploiting Segmentation Masks**; Möller, Hendrik; Wang, Alissa Yuxuan; Graf, Robert;
-Nispel, Kati; Atad, Matan; Menze, Bjoern; Rueckert, Daniel; Kirschke, Jan S.; Lerchl, Tanja;
-**International Workshop on Digital Twin for Healthcare (DT4H), 2026**
