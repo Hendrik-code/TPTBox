@@ -637,11 +637,16 @@ class Abstract_POI:
                 poi_new[region:subreg] = value
             new_values = poi_new
         if new_values is None:
+            # No mapping happened (all input maps were empty) -> info stays as is.
             return self if inplace else self.copy()
+
+        from TPTBox.core.poi_fun.vector_fields import _remap_vector_field_keys_inplace
+
+        target = self if inplace else self.copy(centroids=new_values)
         if inplace:
             self.centroids = new_values
-            return self
-        return self.copy(centroids=new_values)
+        _remap_vector_field_keys_inplace(target.info, label_map_region_, label_map_subregion_)
+        return target
 
     def map_labels_(
         self,

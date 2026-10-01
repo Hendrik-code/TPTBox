@@ -45,6 +45,16 @@ from TPTBox.logger import Log_Type
 
 ### CURRENT TYPE DEFINITIONS
 C = TypeVar("C", bound="POI")
+
+# Direction-vector auto-transform helpers live in poi_fun.vector_fields.
+# Re-exported here for backwards compatibility with existing callers.
+from TPTBox.core.poi_fun.vector_fields import (  # noqa: E402
+    POI_INFO_VECTOR_FIELDS_KEY,
+    _remap_vector_field_keys_inplace,
+    _rotate_direction_vectors_inplace,
+    _transform_direction_vectors_inplace,
+)
+
 POI_Reference = Union[
     bids_files.BIDS_FILE,
     Path,
@@ -527,8 +537,11 @@ class POI(Abstract_POI, Has_Grid):
             self.shape = shape
             self.origin = origin
             self.rotation = rotation
+            _transform_direction_vectors_inplace(self.info, trans)
             return self
-        return self.copy(orientation=axcodes_to, centroids=points, zoom=zoom, shape=shape, origin=origin, rotation=rotation)
+        new_poi = self.copy(orientation=axcodes_to, centroids=points, zoom=zoom, shape=shape, origin=origin, rotation=rotation)
+        _transform_direction_vectors_inplace(new_poi.info, trans)
+        return new_poi
 
     def reorient_(self, axcodes_to: AX_CODES = ("P", "I", "R"), decimals=3, verbose: logging = False, _shape=None) -> Self:
         """In-place variant of :meth:`reorient`."""
@@ -536,6 +549,11 @@ class POI(Abstract_POI, Has_Grid):
 
     def rescale(self, voxel_spacing: ZOOMS = (1, 1, 1), decimals=ROUNDING_LVL, verbose: logging = True, inplace=False) -> Self:
         """Rescale the POI coordinates to a new voxel spacing in the current x-y-z-orientation.
+
+        Direction-vector fields registered under ``info[POI_INFO_VECTOR_FIELDS_KEY]``
+        are left untouched: they are assumed to live in mm-space aligned with the
+        current voxel axes (see :func:`_transform_direction_vectors_inplace`), and
+        a spacing change relabels axes without rotating them.
 
         Args:
             voxel_spacing (tuple[float, float, float], optional): New voxel spacing in millimeters. Defaults to (1, 1, 1).
@@ -617,7 +635,11 @@ class POI(Abstract_POI, Has_Grid):
         )
 
     def resample_from_to(self, ref: Has_Grid) -> POI:
-        """Resample this POI to the grid of another image by converting to global and back.
+        """Resample this POI to the voxel grid of ``ref``.
+
+        Registered direction-vector fields (see :data:`POI_INFO_VECTOR_FIELDS_KEY`)
+        are rotated by ``R_ref^T @ R_self`` so their components stay aligned with
+        the target grid's axes.
 
         Args:
             ref (Has_Grid): Target image grid (any object providing affine/orientation info).
@@ -625,7 +647,9 @@ class POI(Abstract_POI, Has_Grid):
         Returns:
             POI: A new POI in the voxel space of ``ref``.
         """
-        return self.to_global().to_other(ref)
+        out = self.to_global().to_other(ref)
+        _rotate_direction_vectors_inplace(out.info, self.rotation, getattr(ref, "rotation", None))
+        return out
 
     def resample_from_to_(self, ref: Has_Grid) -> Self:
         """In-place variant of :meth:`resample_from_to`."""
@@ -1377,6 +1401,9 @@ def calc_centroids(
             ctd_list[first_stage, int(i)] = out_coord
         else:
             ctd_list[int(i), second_stage] = out_coord
+    if extend_to is not None:
+        args.setdefault("level_one_info", extend_to.level_one_info)
+        args.setdefault("level_two_info", extend_to.level_two_info)
     return POI(ctd_list, **msk_nii._extract_affine(), **args)
 
 

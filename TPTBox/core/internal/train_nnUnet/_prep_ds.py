@@ -39,10 +39,12 @@ def set_up_dataset(
         "nnUNetTrainer",
         "nnUNetTrainerNoMirroring",
         "nnUNetTrainerDA5",
+        "nnUNetTrainerDAExt",
         "nnUNetTrainerDAExtGPU",
+        "nnUNetTrainerDAExtHybrid",
     ]
     | None = None,
-    AUGLAB_PARAMS_GPU_JSON="transform_params_gpu_default01-23.json",
+    SMAUGLAB_PARAMS_GPU_JSON="transform_params_gpu.json",
     ignore=False,
     num_input=1,
     base="/DATA/NAS/FASTDATA/robert/nnUNet",
@@ -72,7 +74,7 @@ def set_up_dataset(
         **setting,
     }
     if nn_trainier == "nnUNetTrainerDAExtGPU":
-        data["AUGLAB_PARAMS_GPU_JSON"] = AUGLAB_PARAMS_GPU_JSON
+        data["SMAUGLAB_PARAMS_GPU_JSON"] = SMAUGLAB_PARAMS_GPU_JSON
     if turn_on_mirroring:
         data["turn_on_mirroring"] = turn_on_mirroring
     if turn_on_data_aug_5:
