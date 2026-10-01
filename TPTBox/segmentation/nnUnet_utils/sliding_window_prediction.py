@@ -40,7 +40,7 @@ def compute_gaussian(
 def compute_steps_for_sliding_window(image_size: tuple[int, ...], tile_size: tuple[int, ...], tile_step_size: float) -> list[list[int]]:
     """Compute per-dimension step start indices for a sliding-window inference pass over an image."""
     assert [i >= j for i, j in zip(image_size, tile_size)], "image size must be as large or larger than patch_size"
-    assert 0 < tile_step_size <= 1, "step_size must be larger than 0 and smaller or equal to 1"
+    assert 0 < tile_step_size <= 1, f"step_size must be larger than 0 and smaller or equal to 1, but is {tile_step_size}"
 
     # our step width is patch_size*step_size at most, but can be narrower. For example if we have image size of
     # 110, patch size of 64 and step_size of 0.5, then we want to make 3 steps starting at coordinate 0, 23, 46
