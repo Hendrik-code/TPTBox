@@ -45,7 +45,11 @@ dixon_mapping = {
 }
 dixon_mapping = {**dixon_mapping, **{v: v for v in dixon_mapping.values()}}
 map_series_description_to_file_format_default = {
-    ".*t2w?_tse.*": "T2w",
+    ".*h2d.*": "T2haste",
+    ".*tse2d1-4.*": "T1w",
+    ".*tser2d.*": "T2w",
+    # ".*tse2d1_4.*": "T1w",
+    # ".*_tse.*": "T2w",
     "t2w?_fse.*": "T2w",
     ".*t1w?_tse.*": "T1w",
     ".*t1w?_vibe_tra.*": "vibe",
@@ -297,6 +301,9 @@ def extract_keys_from_json(  # noqa: C901
             keys["ce"] = "ContrastAgent"
         # GET MRI FORMAT
         series_description = _get("SeriesDescription", "mr").lower()
+        if series_description == "mr":
+            series_description = _get("SequenceName", "mr").lower()
+        print(f"SeriesDescription: '{series_description}', ImageType: {image_type}, ProtocolName: '{_get('ProtocolName', '')}'")
         modality = _get("Modality", "mr").lower()
 
         mri_format = None
