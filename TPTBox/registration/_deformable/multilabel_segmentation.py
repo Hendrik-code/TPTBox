@@ -10,8 +10,10 @@ from TPTBox.core.poi import calc_centroids
 from TPTBox.core.poi_fun.poi_global import POI_Global
 from TPTBox.registration._deformable.deformable_reg import Deformable_Registration
 from TPTBox.registration._ridged_intensity.affine_deepali import Tether_Seg
-from TPTBox.registration._ridged_points.deepali_point_registration import Deepali_Point_Registration
-from TPTBox.registration._ridged_points.point_registration import Point_Registration
+from TPTBox.registration._ridged_points.deepali_point_registration import (
+    Deepali_Point_Registration as Point_Registration,
+)
+# from TPTBox.registration._ridged_points.point_registration import Point_Registration
 
 _NIIOrPOI = TypeVar("_NIIOrPOI", NII, POI)
 
@@ -45,7 +47,9 @@ def _flip_r_axis(x: _NIIOrPOI) -> _NIIOrPOI:
         A new object of the same type with the R-axis reversed.
     """
     if isinstance(x, POI_Global):
-        raise TypeError("_flip_r_axis: POI_Global has no shape/axis; resample to a voxel grid first.")
+        raise TypeError(
+            "_flip_r_axis: POI_Global has no shape/axis; resample to a voxel grid first."
+        )
     axis = x.get_axis("R")
     if isinstance(x, NII):
         slicer = _r_axis_slicer(axis)
@@ -171,12 +175,20 @@ class Template_Registration:
             if poi_target_cms is not None:
                 poi_target_cms = _flip_r_axis(poi_target_cms)
         if poi_target_cms is None:
-            x = target_seg.extract_label(cms_ids, keep_label=True) if cms_ids else target_seg
+            x = (
+                target_seg.extract_label(cms_ids, keep_label=True)
+                if cms_ids
+                else target_seg
+            )
             poi_target = calc_centroids(x, second_stage=40, bar=True)  # TODO REMOVE
         else:
             poi_target = poi_target_cms.resample_from_to(target_seg)
         if poi_cms is None:
-            x = atlas_seg.extract_label(cms_ids, keep_label=True) if cms_ids else atlas_seg
+            x = (
+                atlas_seg.extract_label(cms_ids, keep_label=True)
+                if cms_ids
+                else atlas_seg
+            )
             poi_cms = calc_centroids(x, second_stage=40, bar=True)
         if not poi_cms.assert_affine(atlas_seg, raise_error=False):
             poi_cms = poi_cms.resample_from_to(atlas_seg)
@@ -191,7 +203,11 @@ class Template_Registration:
             resize_param: tuple | None = None
             target_tmp = target_seg
 
-            atlas_seg_ = atlas_seg.apply_pad(((1, 1), (1, 1), (1, 1))) if atlas_seg.is_segmentation_in_border() else atlas_seg
+            atlas_seg_ = (
+                atlas_seg.apply_pad(((1, 1), (1, 1), (1, 1)))
+                if atlas_seg.is_segmentation_in_border()
+                else atlas_seg
+            )
 
             for i in range(_max_iter):
                 if resize_mode == "crop":
@@ -200,7 +216,9 @@ class Template_Registration:
 
                     # --- try crop first ---
                     t_crop = target_seg.compute_crop(0, crop_pad_size)
-                    cropped = target_seg.apply_crop(t_crop).apply_pad(crop_pad_size - 50 // 4)
+                    cropped = target_seg.apply_crop(t_crop).apply_pad(
+                        crop_pad_size - 50 // 4
+                    )
 
                     if any(c < o for c, o in zip(cropped.shape, target_seg.shape)):
                         resize_mode = "crop"
@@ -224,7 +242,11 @@ class Template_Registration:
                 poi_target = poi_target.resample_from_to(target_tmp)
 
                 if poi_cms is None:
-                    x = atlas_seg_.extract_label(cms_ids, keep_label=True) if cms_ids else atlas_seg_
+                    x = (
+                        atlas_seg_.extract_label(cms_ids, keep_label=True)
+                        if cms_ids
+                        else atlas_seg_
+                    )
                     poi_cms = calc_centroids(x, second_stage=40, bar=True)
 
                 if not poi_cms.assert_affine(atlas_seg_, raise_error=False):
@@ -242,26 +264,46 @@ class Template_Registration:
             # --- FINAL STEP: apply once to original target ---
             if resize_mode == "crop":
                 target_seg = target_seg.apply_crop(resize_param)
-                target_img = target_img.apply_crop(resize_param) if target_img is not None else None
+                target_img = (
+                    target_img.apply_crop(resize_param)
+                    if target_img is not None
+                    else None
+                )
             elif resize_mode == "pad":
                 target_seg = target_seg.apply_pad(resize_param)
-                target_img = target_img.apply_pad(resize_param) if target_img is not None else None
+                target_img = (
+                    target_img.apply_pad(resize_param)
+                    if target_img is not None
+                    else None
+                )
 
-        self.reg_point = Point_Registration(poi_target.resample_from_to(target_seg), poi_cms.resample_from_to(atlas_seg))
+        self.reg_point = Point_Registration(
+            poi_target.resample_from_to(target_seg), poi_cms.resample_from_to(atlas_seg)
+        )
         atlas_reg = self.reg_point.transform_nii(atlas_seg, c_val=0)
-        atlas_img_reg = self.reg_point.transform_nii(atlas_img) if atlas_img is not None else None
+        atlas_img_reg = (
+            self.reg_point.transform_nii(atlas_img) if atlas_img is not None else None
+        )
 
         if crop:
             self.crop = (target_seg + atlas_reg).compute_crop(0, 5)
             target_seg = target_seg.apply_crop(self.crop)
-            target_img = target_img.apply_crop(self.crop) if target_img is not None else None
+            target_img = (
+                target_img.apply_crop(self.crop) if target_img is not None else None
+            )
             atlas_reg = atlas_reg.apply_crop(self.crop)
-            atlas_img_reg = atlas_img_reg.apply_crop(self.crop) if atlas_img_reg is not None else None
+            atlas_img_reg = (
+                atlas_img_reg.apply_crop(self.crop)
+                if atlas_img_reg is not None
+                else None
+            )
         else:
             self.crop = None
 
         self.target_grid = target_seg.to_gird()
-        target_seg, atlas_reg, target_img, atlas_img_reg = change_after_point_reg(target_seg, atlas_reg, target_img, atlas_img_reg)
+        target_seg, atlas_reg, target_img, atlas_img_reg = change_after_point_reg(
+            target_seg, atlas_reg, target_img, atlas_img_reg
+        )
         self.reg_deform = Deformable_Registration(
             target_seg if target_img is None else target_img,
             atlas_reg if atlas_img_reg is None else atlas_img_reg,
@@ -350,7 +392,12 @@ class Template_Registration:
 
         return self
 
-    def transform_nii(self, nii_atlas: NII, allow_only_same_grid_as_moving: bool = True, only_rigid=False) -> NII:
+    def transform_nii(
+        self,
+        nii_atlas: NII,
+        allow_only_same_grid_as_moving: bool = True,
+        only_rigid=False,
+    ) -> NII:
         """Apply both rigid and deformable registration to a NII image.
 
         Args:
@@ -363,7 +410,9 @@ class Template_Registration:
         Returns:
             Transformed ``NII`` aligned with the original target image space.
         """
-        nii_atlas = self.reg_point.transform_nii(nii_atlas, allow_only_same_grid_as_moving=allow_only_same_grid_as_moving)
+        nii_atlas = self.reg_point.transform_nii(
+            nii_atlas, allow_only_same_grid_as_moving=allow_only_same_grid_as_moving
+        )
         if only_rigid:
             return nii_atlas
 
@@ -427,7 +476,9 @@ class Template_Registration:
         #    poi = poi.apply_crop_inverse(self.crop)
 
         # --- inverse rigid point registration ---
-        poi = self.reg_point.transform_poi_inverse(poi, allow_only_same_grid_as_moving=False)
+        poi = self.reg_point.transform_poi_inverse(
+            poi, allow_only_same_grid_as_moving=False
+        )
 
         # --- back to atlas grid ---
         poi = poi.resample_from_to(self.atlas_org)
@@ -543,18 +594,28 @@ class Template_Registration2:
             self.reg_point = pre_registration
         else:
             if poi_target_cms is None:
-                x_seg = target_seg.extract_label(cms_ids, keep_label=True) if cms_ids else target_seg
+                x_seg = (
+                    target_seg.extract_label(cms_ids, keep_label=True)
+                    if cms_ids
+                    else target_seg
+                )
                 poi_target = calc_centroids(x_seg, second_stage=40, bar=True)
             else:
                 poi_target = poi_target_cms.resample_from_to(target_seg)
             if poi_cms is None:
-                x_seg = atlas_seg.extract_label(cms_ids, keep_label=True) if cms_ids else atlas_seg
+                x_seg = (
+                    atlas_seg.extract_label(cms_ids, keep_label=True)
+                    if cms_ids
+                    else atlas_seg
+                )
                 poi_cms_local = calc_centroids(x_seg, second_stage=40, bar=True)
             else:
                 poi_cms_local = poi_cms
             if not poi_cms_local.assert_affine(atlas_seg, raise_error=False):
                 poi_cms_local = poi_cms_local.resample_from_to(atlas_seg)
-            self.reg_point = Deepali_Point_Registration(poi_target, poi_cms_local, verbose=False, ddevice=ddevice, gpu=gpu)
+            self.reg_point = Deepali_Point_Registration(
+                poi_target, poi_cms_local, verbose=False, ddevice=ddevice, gpu=gpu
+            )
 
         # --- optional crop -----------------------------------------------------------
         # Unlike Template_Registration we do NOT pre-resample the atlas: the rigid
@@ -575,11 +636,23 @@ class Template_Registration2:
         # on their native grids using same_space=False. We still let the deformable
         # registration warm-start from the rigid transform by applying the rigid to
         # the atlas *only for loss evaluation via the deformable pyramid*.
-        atlas_moved_seg = self.reg_point.transform_nii(atlas_seg, allow_only_same_grid_as_moving=False)
-        atlas_moved_img = self.reg_point.transform_nii(atlas_img, allow_only_same_grid_as_moving=False) if atlas_img is not None else None
+        atlas_moved_seg = self.reg_point.transform_nii(
+            atlas_seg, allow_only_same_grid_as_moving=False
+        )
+        atlas_moved_img = (
+            self.reg_point.transform_nii(
+                atlas_img, allow_only_same_grid_as_moving=False
+            )
+            if atlas_img is not None
+            else None
+        )
         if crop:
             atlas_moved_seg = atlas_moved_seg.apply_crop(self.crop)
-            atlas_moved_img = atlas_moved_img.apply_crop(self.crop) if atlas_moved_img is not None else None
+            atlas_moved_img = (
+                atlas_moved_img.apply_crop(self.crop)
+                if atlas_moved_img is not None
+                else None
+            )
 
         self.reg_deform = Deformable_Registration(
             target_seg if target_img is None else target_img,
@@ -622,12 +695,16 @@ class Template_Registration2:
             pickle.dump(self.get_dump(), w)
 
     @classmethod
-    def load(cls, path: str | Path, gpu: int = 0, ddevice: DEVICES = "cuda") -> Template_Registration2:
+    def load(
+        cls, path: str | Path, gpu: int = 0, ddevice: DEVICES = "cuda"
+    ) -> Template_Registration2:
         with open(path, "rb") as w:
             return cls.load_(pickle.load(w), gpu=gpu, ddevice=ddevice)
 
     @classmethod
-    def load_(cls, w: tuple, gpu: int = 0, ddevice: DEVICES = "cuda") -> Template_Registration2:
+    def load_(
+        cls, w: tuple, gpu: int = 0, ddevice: DEVICES = "cuda"
+    ) -> Template_Registration2:
         version, t0, t1, x = w
         assert version == 1, f"Version mismatch {version=}"
         self = cls.__new__(cls)
@@ -643,9 +720,16 @@ class Template_Registration2:
         return self
 
     # ------------------------------------------------------------------------- warping
-    def transform_nii(self, nii_atlas: NII, allow_only_same_grid_as_moving: bool = True, only_rigid: bool = False) -> NII:
+    def transform_nii(
+        self,
+        nii_atlas: NII,
+        allow_only_same_grid_as_moving: bool = True,
+        only_rigid: bool = False,
+    ) -> NII:
         """Warp an atlas NII into the target space (rigid + deformable)."""
-        nii_atlas = self.reg_point.transform_nii(nii_atlas, allow_only_same_grid_as_moving=allow_only_same_grid_as_moving)
+        nii_atlas = self.reg_point.transform_nii(
+            nii_atlas, allow_only_same_grid_as_moving=allow_only_same_grid_as_moving
+        )
         if only_rigid:
             return nii_atlas
         if self.crop is not None:
@@ -679,6 +763,8 @@ class Template_Registration2:
         poi = poi.resample_from_to(self.target_grid)
         reg_deform_inv = self.reg_deform.inverse()
         poi = reg_deform_inv.transform_poi(poi)
-        poi = self.reg_point.transform_poi_inverse(poi, allow_only_same_grid_as_moving=False)
+        poi = self.reg_point.transform_poi_inverse(
+            poi, allow_only_same_grid_as_moving=False
+        )
         poi = poi.resample_from_to(self.atlas_org)
         return poi
