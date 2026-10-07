@@ -413,7 +413,7 @@ def _extract_nii_from_dicom(dicom_out_path, nii_path):
                     return False
             except Exception as e:
                 logger.on_debug("Multi-Frame DICOM did not work:", e)
-            # Multi-echo Philips DIXON (e.g. mDIX quant): N slices × M echoes at
+            # Multi-echo Philips DIXON (e.g. mDIX quant): N slices x M echoes at
             # the same ImagePositionPatient. dicom2nifti's own stack detector
             # collapses to N/2 fake groups of 2 slices, then fails inside
             # `four_d_to_nifti → create_affine` with `NOT_A_VOLUME`. Convert
@@ -721,8 +721,7 @@ def _convert_multi_echo_dicoms_to_4d(dcm_list: list, nii_path: str | Path) -> bo
                 ref_shape = arr.shape
             elif arr.shape != ref_shape or not np.allclose(n.affine, ref_affine, atol=1e-3):
                 logger.on_warning(
-                    f"multi-echo split: grid mismatch between echoes (echo {en}: shape={arr.shape}); "
-                    f"aborting per-echo stack."
+                    f"multi-echo split: grid mismatch between echoes (echo {en}: shape={arr.shape}); aborting per-echo stack."
                 )
                 return False
             arrays.append(arr)
