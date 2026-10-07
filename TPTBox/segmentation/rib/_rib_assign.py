@@ -13,12 +13,9 @@ supported public entry point. They are not re-exported from the package.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from enum import Enum
-from functools import partial
 
 import numpy as np
 from tqdm import tqdm
@@ -405,7 +402,7 @@ def assign_ribs_to_vert_segmentation(
     logger.on_debug(f"{rib_inst.unique()=}")
     # Merge rib assignments back into the original vert / sem segmentations
     # without disturbing existing (non-rib) labels. Skip unmatched CCs (sentinel error_value=255).
-    matched = (rib_inst != 0) & (rib_inst != error_value)
+    matched = np.logical_and((rib_inst != 0), (rib_inst != error_value))
     vert_seg[matched] = rib_inst[matched]
 
     sem_seg[rib_seg != 0] = rib_seg.map_labels({left_id: Location.Rib_Left.value, right_id: Location.Rib_Right.value})[rib_seg != 0]  # type: ignore

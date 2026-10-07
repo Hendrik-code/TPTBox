@@ -1042,10 +1042,42 @@ def is_hard_linked(sub: str) -> bool:
     return _hard_link_done_marker(str(sub)).exists()
 
 
+def _stale_hardlink_targets(srcs: dict[str, Path], new_path: Path) -> list[Path]:
+    """Return targets that exist on disk but no longer share an inode with their source.
+
+    A hardlink pair shares an inode (``os.path.samefile``); a stale target either points at
+    a previous inode (source was rewritten, not overwritten in place) or at a different
+    source entirely (e.g. flipped between ``dataset-nako`` and ``rawdata-corrected``).
+    Callers unlink the returned paths before re-running ``bf.symlink_files``.
+    """
+    base = str(new_path)[: -len(".nii.gz")]
+    stale: list[Path] = []
+    for ext, src in srcs.items():
+        t = Path(base + "." + ext)
+        if not t.exists():
+            continue
+        try:
+            if not t.samefile(Path(src)):
+                stale.append(t)
+        except OSError:
+            stale.append(t)
+    return stale
+
+
 def hard_link(
     d: dict,
     dataset="/DATA/NAS/datasets_processed/NAKO/dataset-nako/",
+    refresh_stale: bool = False,
 ):
+    """Materialize a subject's file dict into ``dataset-nako-canonical`` via hardlinks.
+
+    When ``refresh_stale=True`` every already-linked target is checked against its
+    current source with :func:`os.path.samefile`. Mismatches (source was rewritten,
+    or the ``subj_dict`` slot flipped between ``dataset-nako`` and
+    ``rawdata-corrected``) are unlinked and re-linked so ``-canonical`` matches
+    the current state. Default is ``False`` — cheaper, but stale references
+    survive between runs.
+    """
     subj = d.pop("id")
     d.pop("dataset")
     log.on_log(subj)
@@ -1062,7 +1094,14 @@ def hard_link(
             info={"ses": "baseline"},
             dataset_path="/DATA/NAS/datasets_processed/NAKO/dataset-nako-canonical",
         )
-        if not new_path.exists():
+        stale: list[Path] = []
+        if refresh_stale and new_path.exists():
+            srcs_t2w = {ext: Path(src) for ext, src in bf.file.items() if Path(src).exists()}
+            stale = _stale_hardlink_targets(srcs_t2w, new_path)
+            for t in stale:
+                t.unlink()
+                print("Refreshing stale hardlink:", t)
+        if stale or not new_path.exists():
             new_path.parent.mkdir(parents=True, exist_ok=True)
             bf.symlink_files(new_path, hard_link=True)  # exist_ok=True,
             print("Hard linked:", new_path)
@@ -1138,7 +1177,11 @@ def hard_link(
             # Compute the real target paths (per extension) and skip if all already exist.
             base = str(new_path)[: -len(".nii.gz")]
             targets = {ext: Path(base + "." + ext) for ext in srcs}
-            if all(t.exists() for t in targets.values()):
+            stale = _stale_hardlink_targets(srcs, new_path) if refresh_stale else []
+            for t in stale:
+                t.unlink()
+                print("Refreshing stale hardlink:", t)
+            if not stale and all(t.exists() for t in targets.values()):
                 continue
             new_path.parent.mkdir(parents=True, exist_ok=True)
             # Temporarily restrict bf.file to just the sources we want linked, then restore.
@@ -1288,9 +1331,6 @@ def _restitch_vibe_water_fat(
     result: dict[str, Path] = {}
     for part in ("water", "fat"):
         out_path = out_dir / f"sub-{sub}_sequ-stitched_acq-ax_part-{part}_desc-{tag}_vibe.nii.gz"
-        if out_path.exists():
-            result[part] = out_path
-            continue
         images: list[Path] = []
         for c in chunks_sorted:
             if c in corrected_set:
@@ -1301,23 +1341,59 @@ def _restitch_vibe_water_fat(
             p = raw_dir / f"sub-{sub}_acq-ax_chunk-{c}_part-{part}_vibe.nii.gz"
             if p.exists():
                 images.append(p)
-        if len(images) < 2:
-            log.on_warning(f"sub-{sub} part-{part}: only {len(images)} chunk(s) available; cannot stitch")
-            continue
-        try:
-            _stitching_fn(
-                [str(p) for p in images],
-                str(out_path),
-                is_seg=False,
-                bias_field=False,
-                verbose=False,
-                verbose_stitching=False,
-            )
-        except Exception as e:  # noqa: BLE001
-            log.on_warning(f"sub-{sub} part-{part}: stitching failed: {type(e).__name__}: {e}")
-            continue
+        # Re-stitch when a chunk (corrected or raw) is newer than the cached output;
+        # covers the case where nako_export regenerated a corrected chunk in place.
+        needs_stitch = True
+        if out_path.exists() and images:
+            out_mtime = out_path.stat().st_mtime
+            if all(p.stat().st_mtime <= out_mtime for p in images):
+                needs_stitch = False
+        _delete_stale_corrected_stitches(out_dir, sub, part, keep=out_path)
+        if needs_stitch:
+            if len(images) < 2:
+                log.on_warning(f"sub-{sub} part-{part}: only {len(images)} chunk(s) available; cannot stitch")
+                continue
+            try:
+                _stitching_fn(
+                    [str(p) for p in images],
+                    str(out_path),
+                    is_seg=False,
+                    bias_field=False,
+                    verbose=False,
+                    verbose_stitching=False,
+                )
+            except Exception as e:  # noqa: BLE001
+                log.on_warning(f"sub-{sub} part-{part}: stitching failed: {type(e).__name__}: {e}")
+                continue
         result[part] = out_path
     return result
+
+
+def _delete_stale_corrected_stitches(out_dir: Path, sub: str, part: str, keep: Path) -> None:
+    """Remove older ``desc-corrected*`` re-stitches whose tag no longer matches ``keep``.
+
+    Called after resolving the current tag: whenever a new set of corrected chunks
+    yields a different ``desc-{tag}`` filename, the file(s) written for the previous
+    set are no longer reachable through the index and must not shadow later runs.
+    """
+    keep_resolved = keep.resolve() if keep.exists() else keep
+    pattern = f"sub-{sub}_sequ-stitched_acq-ax_part-{part}_desc-corrected*_vibe.nii.gz"
+    for stale in out_dir.glob(pattern):
+        if stale.exists() and stale.resolve() == keep_resolved:
+            continue
+        try:
+            stale.unlink()
+        except OSError as e:
+            log.on_warning(f"sub-{sub} part-{part}: could not delete stale {stale.name}: {e}")
+            continue
+        base = stale.name[: -len(".nii.gz")]
+        for sidecar in stale.parent.glob(base + ".*"):
+            if sidecar.name == stale.name:
+                continue
+            try:
+                sidecar.unlink()
+            except OSError:
+                pass
 
 
 def _corrected_bids_file(path: Path, dataset_root: Path) -> BIDS_FILE:
@@ -1587,6 +1663,15 @@ if __name__ == "__main__":
         f"(defaults to {_VIBE_MISMATCH_SNAP_DIR}) unless one already exists there. "
         "Pass '' to disable.",
     )
+    parser.add_argument(
+        "--no-refresh-stale",
+        dest="refresh_stale",
+        action="store_false",
+        help="Disable per-target samefile check. When set, subjects already flagged .hardlink_done are "
+        "skipped and existing targets in -canonical are never re-linked, even if the source flipped "
+        "between dataset-nako and rawdata-corrected or was rewritten with a new inode.",
+    )
+    parser.set_defaults(refresh_stale=True)
     args = parser.parse_args()
     test = False
 
@@ -1598,10 +1683,11 @@ if __name__ == "__main__":
         precompute_grid_info_parallel(num_workers=args.workers, test=test)
     else:
         corrected = load_corrected_index()
+        skip = None if args.refresh_stale else is_hard_linked
         for d in loop_over_repaired_nako(
             test=test,
             corrected_index=corrected,
-            skip_subject=is_hard_linked,
+            skip_subject=skip,
             vibe_mismatch_snap_dir=args.vibe_mismatch_snaps or None,
         ):
-            hard_link(d)
+            hard_link(d, refresh_stale=args.refresh_stale)

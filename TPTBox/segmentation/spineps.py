@@ -49,7 +49,9 @@ def get_outpaths_spineps(
 
     if not isinstance(file_path, BIDS_FILE):
         file_path = Path(file_path)
-        file_path = BIDS_FILE(file_path, file_path.parent if dataset is None else dataset)
+        file_path = BIDS_FILE(
+            file_path, file_path.parent if dataset is None else dataset
+        )
     output_paths = output_paths_from_input(
         file_path,
         derivative_name,
@@ -74,7 +76,7 @@ def run_spineps(
     save_debug_data: bool = False,
     verbose: bool = False,
     save_raw: bool = False,
-    ignore_compatibility_issues: bool = False,
+    ignore_compatibility_issues: bool = True,
     use_cpu: bool = False,
     **args,
 ) -> dict[
@@ -124,8 +126,9 @@ def run_spineps(
     Returns:
         The output paths dictionary returned by SPINEPS' ``process_img_nii``.
     """
-    from spineps import get_instance_model, get_semantic_model
     from spineps.get_models import get_actual_model
+
+    from spineps import get_instance_model, get_semantic_model
 
     try:
         from spineps import process_img_nii as segment_image
@@ -137,13 +140,17 @@ def run_spineps(
         from spineps.get_models import get_labeling_model
 
         if model_labeling is not None:
-            label = {"model_labeling": get_labeling_model(model_labeling, use_cpu=use_cpu)}
+            label = {
+                "model_labeling": get_labeling_model(model_labeling, use_cpu=use_cpu)
+            }
     except Exception:
         pass  # TODO remove when spineps has officially adopted labeling
 
     if not isinstance(file_path, BIDS_FILE):
         file_path = Path(file_path)
-        file_path = BIDS_FILE(file_path, file_path.parent if dataset is None else dataset)
+        file_path = BIDS_FILE(
+            file_path, file_path.parent if dataset is None else dataset
+        )
     elif dataset is not None:
         file_path.dataset = dataset
     if isinstance(model_semantic, Path):
@@ -235,7 +242,9 @@ def _run_spineps_internal(
         image_nii.apply_crop_(crop)
         logger.print(f"Cropped down to {image_nii.shape}", verbose=verbose)
     if proc_pad_size > 0:
-        image_nii = image_nii.pad_to(tuple(image_nii.shape[i] + (2 * proc_pad_size) for i in range(3)))
+        image_nii = image_nii.pad_to(
+            tuple(image_nii.shape[i] + (2 * proc_pad_size) for i in range(3))
+        )
         # arr = image_nii.get_array()
         # arr = np.pad(arr, proc_pad_size, mode="edge")
         # image_nii.set_array_(arr)
@@ -256,7 +265,9 @@ def _run_spineps_internal(
     if proc_fillholes:
         for i in seg_nii.unique():
             seg_nii.fill_holes_(labels=i, verbose=verbose)  # inferior direction (axial)
-    orig_img_nii.assert_affine(shape=seg_nii.shape, orientation=seg_nii.orientation, zoom=seg_nii.zoom)
+    orig_img_nii.assert_affine(
+        shape=seg_nii.shape, orientation=seg_nii.orientation, zoom=seg_nii.zoom
+    )
     # seg_nii.reorient(ori, verbose=verbose)
     seg_nii.affine = orig_img_nii.affine
     seg_nii.origin = orig_img_nii.origin
@@ -304,12 +315,13 @@ def _run_spineps_vert(
     Returns:
         A tuple of (cleaned_semantic_NII, cleaned_vertebra_NII, raw_vertebra_NII).
     """
+    from spineps.get_models import get_actual_model
+
     from spineps import (
         get_instance_model,
         phase_postprocess_combined,
         predict_instance_mask,
     )
-    from spineps.get_models import get_actual_model
 
     if isinstance(model_instance, Path):
         model_instance = get_actual_model(model_instance, use_cpu=use_cpu)
