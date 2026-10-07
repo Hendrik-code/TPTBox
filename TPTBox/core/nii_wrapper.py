@@ -2564,7 +2564,8 @@ class NII(NII_Math):
         to_world: bool = True,
         include_normals: bool = False,
         number_path=False,
-        _crop = True
+        _crop = True,
+        _raise_error=False
     ) -> Mesh:
         """Convert a binary segmentation label into an STL surface mesh using marching cubes.
 
@@ -2618,7 +2619,13 @@ class NII(NII_Math):
         seg = self.extract_label(label)
         # Prepare binary mask
         if _crop and to_world: # this speed up the stl generation
-            crop = seg.compute_crop(0,1)
+            try:
+                crop = seg.compute_crop(0,1)
+            except ValueError:
+                log.on_fail(f"to_stl: empty segmentation. {label=}; Nothing will be saved")
+                if _raise_error:
+                    raise
+                return None # type: ignore
             seg = seg.apply_crop(crop)
         seg_arr = np.pad(seg.clamp(0, 1).get_array(), 1)
         # Marching cubes (voxel coordinates)
@@ -2633,7 +2640,7 @@ class NII(NII_Math):
             verts += np.array([b.start for b in bb])
         # Convert to world coordinates using affine
         if to_world:
-            affine = self.affine  # (4, 4)
+            affine = seg.affine  # (4, 4)
             verts_h = np.c_[verts, np.ones(len(verts))]  # homogeneous coords
             verts = (affine @ verts_h.T).T[:, :3]
 
