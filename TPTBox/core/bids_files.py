@@ -243,10 +243,10 @@ def Buffered_BIDS_Global_info(
                 print("[ ] Dose not exist:", (folder), f"{' ':20}") if verbose else None
                 continue
             if (folder / buffer_name).exists():
-                import datetime
+                import datetime as dt
 
-                file_mod_time = datetime.datetime.fromtimestamp(os.path.getmtime(folder / buffer_name))
-                today = datetime.datetime.today()
+                file_mod_time = dt.datetime.fromtimestamp(os.path.getmtime(folder / buffer_name))
+                today = dt.datetime.today()
 
                 age = today - file_mod_time
                 if age.days >= int(max_age_days):
