@@ -454,7 +454,8 @@ class NII(NII_Math):
                 nii2 = Nifti1Image(arr_for_nib, self.affine, self.header)
                 nii2.set_data_dtype(safe_dtype)
                 nii = Nifti1Image(arr_for_nib, nii2.affine, nii2.header)  # type: ignore
-            if all(a is None for a in self.header.get_slope_inter()):
+            c = self.get_c_val()
+            if all(a is None for a in self.header.get_slope_inter()) and not np.isnan(c):
                 nii.header.set_slope_inter(1,self.get_c_val()) # type: ignore
             #if self.header is not None:
             #    self.header.set_sform(self.affine, code=1)
@@ -949,18 +950,6 @@ class NII(NII_Math):
         assert crop_x == shp_x and crop_y == shp_y and crop_z == shp_z
         return self.set_array(arr_cropped, inplace=inplace)
         #return self.apply_crop(crop_slices, inplace=inplace)
-
-    def apply_crop_slice(self, *args, **qargs) -> Self:
-        """Deprecated alias for `apply_crop`."""
-        import warnings
-        warnings.warn("apply_crop_slice id deprecated use apply_crop instead",stacklevel=5) #TODO remove in version 1.0
-        return self.apply_crop(*args,**qargs)
-
-    def apply_crop_slice_(self, *args, **qargs) -> Self:
-        """Deprecated alias for `apply_crop_`."""
-        import warnings
-        warnings.warn("apply_crop_slice_ id deprecated use apply_crop_ instead",stacklevel=5) #TODO remove in version 1.0
-        return self.apply_crop_(*args,**qargs)
 
     def apply_crop(self,ex_slice:tuple[slice,slice,slice]|Sequence[slice]|None , inplace=False) -> Self:
         """Crop the NIfTI volume by a per-axis slice tuple (thin wrapper around ``nibabel``'s ``.slicer``).
@@ -1572,7 +1561,7 @@ class NII(NII_Math):
             import ants
         except Exception:
             log.print_error()
-            log.on_fail("run 'pip install antspyx' to install hf-deepali")
+            log.on_fail("this function needs antspyx: run 'pip install antspyx'")
             raise
         try:
             from ants.utils.convert_nibabel import from_nibabel

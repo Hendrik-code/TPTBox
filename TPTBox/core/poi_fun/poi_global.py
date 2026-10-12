@@ -208,7 +208,14 @@ class POI_Global(Abstract_POI):
                     log.print(v, "-->", v_out)
                 out[k1, k2] = tuple(v_out)
 
-        return poi.POI(centroids=out, **msk._extract_affine(), info=self.info, format=self.format)
+        return poi.POI(
+            centroids=out,
+            **msk._extract_affine(),
+            info=self.info,
+            format=self.format,
+            level_one_info=self.level_one_info,
+            level_two_info=self.level_two_info,
+        )
 
     def copy(self, centroids: POI_Descriptor | None = None) -> Self:
         """Return a deep copy of this ``POI_Global``.
@@ -276,7 +283,7 @@ class POI_Global(Abstract_POI):
             verbose: Emit a save log message.  Defaults to ``True``.
         """
         if Path(out_path).name.endswith("mrk.json"):
-            logging.on_warning("use save_mrk to save .mrk.json files")
+            log.on_warning("use save_mrk to save .mrk.json files")
             return self.save_mrk(out_path)
         return save_poi(
             self, out_path, make_parents, additional_info, save_hint=save_hint, resample_reference=resample_reference, verbose=verbose

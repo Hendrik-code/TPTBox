@@ -32,8 +32,10 @@ def _argmax_with_gpu_fallback(
     empty_cache(device)
 
     def _get_free_vram(device: torch.device) -> int:
+        """Return free VRAM in bytes, or 0 when the device has none to report."""
+        if device is None or device.type != "cuda":
+            return 0
         try:
-            """Returns free VRAM in bytes."""
             free, _ = torch.cuda.mem_get_info(device)
             return int(free * SAFETY_FACTOR)
         except Exception:
@@ -72,7 +74,13 @@ def _argmax_with_gpu_fallback(
 
     t = _to_cpu_tensor(predicted_logits)
 
-    if device is None or not torch.cuda.is_available():
+    # Dispatch on the *requested* device, not merely on CUDA availability: an
+    # explicit device="cpu" on a machine that happens to have a GPU must still
+    # take the CPU path (torch.cuda.mem_get_info would reject the argument).
+    if isinstance(device, str):
+        device = torch.device(device)
+    _accel = device is not None and ((device.type == "cuda" and torch.cuda.is_available()) or device.type == "mps")
+    if not _accel:
         return _chunked_argmax_cpu(t)
 
     full_bytes = _array_bytes(t.shape)

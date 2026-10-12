@@ -268,6 +268,27 @@ def curve_projected_slice(
     )
 
 
+def _mm_to_voxel_thickness(thick_mm, y_zoom: float) -> list[int]:
+    """Convert slab half-widths from millimetres to voxels (ceiling division).
+
+    Always call this with the *millimetre* values. Feeding the returned voxel
+    counts back in compounds the division once per call: with ``y_zoom < 1`` the
+    slab grows geometrically until ``int()`` raises ``OverflowError``, and with
+    ``y_zoom > 1`` it shrinks towards the 1-voxel floor below, so the projection
+    quietly uses a far thinner slab than the caller asked for.
+
+    Args:
+        thick_mm: Anterior/posterior slab half-widths in mm.
+        y_zoom: Voxel spacing along the anterior-posterior axis, in mm/voxel.
+
+    Returns:
+        The half-widths in voxels, at least 1 voxel each.
+    """
+    if not np.isfinite(y_zoom) or y_zoom <= 0:
+        y_zoom = 1.0
+    return [max(1, int(i // y_zoom) + int(i % y_zoom > 0)) for i in thick_mm]
+
+
 def curve_projected_mean(
     img_data: np.ndarray,
     zms: tuple[float, float, float],
@@ -302,7 +323,9 @@ def curve_projected_mean(
     cor_plane = np.zeros((shp[0], shp[2]))
     sag_plane = np.zeros((shp[0], shp[1]))
     y_zoom = zms[1]  # 0.9 = 1px = 0.9 mm # 10cm = 112px
-    thick = (*thick_t,)
+    # `thick_mm` stays in millimetres for the whole loop; the voxel counts go to a
+    # separate variable so the mm->voxel conversion is never applied to its own result.
+    thick_mm = (*thick_t,)
 
     for x in range(shp[0] - 1):
         if x < min(x_ctd):  # higher
@@ -313,12 +336,13 @@ def curve_projected_mean(
             y_ref = y_cord[x - min(x_ctd)]
 
         if 23 in ctd_list and x > int(ctd_list[23][1]):
-            thick = (100, 50)
+            thick_mm = (100, 50)
 
-        thick = [int(i // y_zoom) + int(i % y_zoom > 0) for i in thick]
+        thick = _mm_to_voxel_thickness(thick_mm, y_zoom)
         y_post_rel_to_border = y_ref + int(0.4 * (shp[1] - 1 - y_ref))  # one-third distance to border
         y_range_low = int(max(0, y_ref - thick[1]))  # sagittal left
         y_range_high = int(min(y_ref + thick[0], y_post_rel_to_border))  # sagittal right
+        y_range_high = max(y_range_high, y_range_low + 1)  # never hand np.nansum an empty axis
         cor_cut = img_data[x, y_range_low:y_range_high, :]
 
         plane_bool = np.zeros_like(cor_cut).astype(bool)
@@ -376,7 +400,10 @@ def curve_projected_mip(
     sag_plane = np.zeros((shp[0], shp[1]))
     sag_depth_plane = np.zeros((shp[0], shp[1]))
     y_zoom = zms[1]  # 0.9 = 1px = 0.9 mm # 10cm = 112px
-    thick = (*thick_t,)
+    # `thick_t` is in millimetres and never changes here, so convert once up front.
+    # (Converting inside the loop and assigning back to the same name divides the
+    # already-divided value once per slice - see _mm_to_voxel_thickness.)
+    thick = _mm_to_voxel_thickness(thick_t, y_zoom)
 
     for x in range(shp[0] - 1):
         if x < min(x_ctd):  # higher
@@ -387,18 +414,12 @@ def curve_projected_mip(
             y_ref = y_cord[x - min(x_ctd)]
 
         # if 23 in ctd_list and x > int(ctd_list[23][1]) and not make_colored_depth:
-        #    thick = (100, 50)
+        #    thick = _mm_to_voxel_thickness((100, 50), y_zoom)
 
-        # TODO set y_zoom for broken sample, see if it works
-        try:
-            thicke = [int(i // y_zoom) + int(i % y_zoom > 0) for i in thick]
-        except Exception:
-            print("thick infinity bug", y_zoom, thick_t, thick)
-            thicke = (*thick_t,)
-        thick = thicke
         y_post_rel_to_border = y_ref + int(0.4 * (shp[1] - 1 - y_ref))  # one-third distance to border
         y_range_low = int(max(0, y_ref - thick[1]))  # sagittal left
         y_range_high = int(min(y_ref + thick[0], y_post_rel_to_border))  # sagittal right
+        y_range_high = max(y_range_high, y_range_low + 1)  # never hand np.max an empty axis
         # print("range", y_range_low, y_range_high)
         cor_cut = img_data[x, y_range_low:y_range_high, :]
 

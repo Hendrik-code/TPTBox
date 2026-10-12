@@ -86,7 +86,7 @@ VibeSeg_map = {
 
 defaults = {
     100: {"memory_base": 5500, "memory_factor": 25},
-    12: {"memory_base": 7000, "memory_factor": 200},
+    12: {"memory_base": 7000, "memory_factor": 200, "no_squash": True},
 }
 
 

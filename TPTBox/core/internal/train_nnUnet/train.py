@@ -50,6 +50,7 @@ class Config:
     )  # default=["2d", "3d_fullres", "3d_lowres","3d_cascade_fullres"],
     num_processes: tuple[int] = (4,)  # [32] # [8, 4, 8]
     verbose = False
+    nnUNetTrainer: str = "nnUNetTrainer"  # noqa: N815
 
     @property
     def plans(self) -> str:
@@ -285,7 +286,7 @@ class NNUNetRunner:
             dataset_name_or_id=self.cfg.dataset_folder,
             configuration="3d_fullres",
             fold=fold,
-            trainer_class_name="nnUNetTrainer",
+            trainer_class_name=self.cfg.nnUNetTrainer,
             plans_identifier=self.cfg.plans,
             num_iterations_per_epoch=self.cfg.num_iterations_per_epoch,
             num_epochs=self.cfg.num_epochs,
@@ -338,6 +339,7 @@ class NNUNetRunner:
         ds = self._load_dataset_json()
 
         self.cfg.overwrite_target_spacing = ds.get("spacing", self.cfg.overwrite_target_spacing)
+        self.cfg.nnUNetTrainer = ds.get("nnUNetTrainer", self.cfg.nnUNetTrainer)
 
         self._preprocess()
 

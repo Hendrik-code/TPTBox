@@ -1434,7 +1434,7 @@ class BIDS_FILE:
             A :class:`~TPTBox.core.nii_poi_abstract.Grid` instance, or
             ``None`` if no NIfTI file is present.
         """
-        from TPTBox.core.dicom.dicom_extract import _add_grid_info_to_json
+        from TPTBox.core.internal.nii_help import _add_grid_info_to_json
         from TPTBox.core.nii_poi_abstract import Grid
 
         nii_file = self.get_nii_file()
