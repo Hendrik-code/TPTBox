@@ -3031,7 +3031,7 @@ class NII(NII_Math):
             arr[part] += offset
         return self.set_array(arr, inplace=inplace)
 
-    def split_label_at_cumulative_volume_fraction(
+    def partition_segmentation_by_volume(
         self,
         labels: LABEL_REFERENCE = None,
         axis: DIRECTIONS | int = "P",
@@ -3062,7 +3062,7 @@ class NII(NII_Math):
             NII: The segmentation with the split-off part relabeled to ``label + offset``.
 
         Examples:
-            >>> ethmoid.split_label_at_cumulative_volume_fraction([7, 8], "P", 1 / 3)  # doctest: +SKIP
+            >>> ethmoid.partition_segmentation_by_volume([7, 8], "P", 1 / 3)  # doctest: +SKIP
             # posterior third of labels 7 and 8 becomes 107 and 108
         """
         assert 0 <= fraction <= 1, f"fraction has to be in [0,1], got {fraction}"
@@ -3079,7 +3079,7 @@ class NII(NII_Math):
         region = slice(n - taken, None) if forward else slice(None, taken)
         return self._split_label_at_index(arr, selected, ax, region, offset, inplace)
 
-    def split_label_at_center_of_mass(
+    def partition_segmentation_by_center_of_mass(
         self,
         labels: LABEL_REFERENCE = None,
         axis: DIRECTIONS | int = "L",
@@ -3111,7 +3111,7 @@ class NII(NII_Math):
             NII: The segmentation with the split-off part relabeled to ``label + offset``.
 
         Examples:
-            >>> ethmoid.split_label_at_center_of_mass([7, 15], "L")  # doctest: +SKIP
+            >>> ethmoid.partition_segmentation_by_center_of_mass([7, 15], "L")  # doctest: +SKIP
             # left half of labels 7 and 15 becomes 107 and 115
         """
         ax, forward = self._split_axis(axis)
