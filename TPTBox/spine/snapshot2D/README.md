@@ -11,20 +11,24 @@ maximum intensity projections (MIPs), and segmentation overlays.
 |---|---|---|
 | `create_snapshot` | `snapshot_modular.py` | Main entry point — renders a list of `Snapshot_Frame` objects to a PNG |
 | `Snapshot_Frame` | `snapshot_modular.py` | Configuration for one image panel (image, overlay, view direction, …) |
-| `Plane` | `snapshot_modular.py` | Enum: `Plane.axial`, `Plane.sagittal`, `Plane.coronal` |
-| `to_image_nii` | `snapshot_modular.py` | Convert a NIfTI slice to a matplotlib-ready RGB array |
+| `Visualization_Type` | `snapshot_modular.py` | Enum selecting how a frame is rendered: `Slice`, `Maximum_Intensity`, `Mean_Intensity`, … |
 | Pre-built templates | `snapshot_templates.py` | Ready-to-use snapshot configurations for common spine workflows |
 
 ## Example
 
 ```python
-from TPTBox.spine.snapshot2D.snapshot_modular import Snapshot_Frame, create_snapshot, Plane
+from TPTBox import to_nii
+from TPTBox.spine.snapshot2D import Snapshot_Frame, create_snapshot
 
+ct = to_nii("ct.nii.gz")
+seg = to_nii("seg.nii.gz", seg=True)
+
+# The views are boolean flags on the frame, and the output path comes first.
 frames = [
-    Snapshot_Frame(image=ct, segmentation=seg, mode="CT", plane=Plane.sagittal),
-    Snapshot_Frame(image=ct, mode="CT", plane=Plane.axial),
+    Snapshot_Frame(image=ct, segmentation=seg, mode="CT", sagittal=True),
+    Snapshot_Frame(image=ct, mode="CT", sagittal=False, axial=True),
 ]
-create_snapshot(frames, to="output.png")
+create_snapshot("output.png", frames)
 ```
 
 More extensive:

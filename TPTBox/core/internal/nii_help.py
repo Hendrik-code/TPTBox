@@ -329,3 +329,61 @@ def _resample_from_to(
     if post_cast is not None:
         data = data.astype(post_cast, copy=False)
     return data, to_affine, from_img.header
+
+
+def _add_grid_info_to_json(nii_path: Path | str, simp_json: Path | str, force_update: bool = False, add: bool = True) -> dict:
+    """Append grid metadata (shape, spacing, orientation, affine) to a sidecar JSON file.
+
+    This lives here rather than next to the DICOM converters because it needs no
+    DICOM library at all - only ``NII`` and the JSON helpers. It used to sit in
+    ``TPTBox.core.dicom.dicom_extract``, which made the fully public
+    ``BIDS_FILE.get_grid_info()`` drag in ``pydicom`` and ``dicom2nifti`` for
+    users who never touched DICOM data.
+
+    Args:
+        nii_path: Path to the NIfTI file from which grid info is read.
+        simp_json: Path to the JSON sidecar file to update.
+        force_update: Re-compute and overwrite existing grid info when ``True``.
+        add: Write the updated dictionary back to disk when ``True``.
+
+    Returns:
+        The updated JSON dictionary including the ``"grid"`` key.
+    """
+    from datetime import datetime
+
+    from TPTBox.core.nii_wrapper import NII
+
+    nii_path = Path(nii_path)
+    simp_json = Path(simp_json)
+
+    # Always preserve the existing JSON contents (DICOM metadata written by save_json).
+    # The mtime comparison is only used to short-circuit re-computing the grid when the
+    # sidecar is already up to date; it must NOT decide whether to keep the DICOM keys.
+    json_dict: dict = {}
+    if simp_json.exists():
+        with open(simp_json, encoding="utf-8") as f:
+            json_dict = json.load(f)
+    json_up_to_date = (
+        simp_json.exists()
+        and nii_path.exists()
+        and datetime.fromtimestamp(simp_json.stat().st_mtime) > datetime.fromtimestamp(nii_path.stat().st_mtime)
+    )
+    if "grid" in json_dict and not force_update and json_up_to_date:
+        return json_dict
+    nii = NII.load(nii_path, False)
+    json_dict["grid"] = {
+        "shape": nii.shape,
+        "spacing": nii.spacing,
+        "orientation": nii.orientation,
+        "rotation": nii.rotation.reshape(-1).tolist(),
+        "origin": nii.origin,
+        "dims": nii.get_num_dims(),
+    }
+    # Matches the previous `save_json(..., override=add)` semantics: write when
+    # `add` is set, or whenever the sidecar does not exist yet.
+    if add or not simp_json.exists():
+        from TPTBox.logger import Print_Logger
+
+        Print_Logger().on_save("save json with grid info", simp_json)
+        save_json(simp_json, json_dict, indent=4)
+    return json_dict

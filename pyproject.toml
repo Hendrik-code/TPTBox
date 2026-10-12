@@ -44,6 +44,36 @@ scikit-image = [
   { version = ">=0.24", python = ">=3.11" }
 ]
 
+# --- OPTIONAL EXTRAS -------------------------------------------------------
+# Declared here so `pip install "TPTBox[dicom]"` resolves them, but marked
+# optional so a plain install stays light. The matching sub-packages
+# (TPTBox.core.dicom, TPTBox.segmentation) import successfully without these
+# and only raise - naming the extra - when an entry point is actually called.
+pydicom = { version = "*", optional = true }
+dicom2nifti = { version = "*", optional = true }
+torch = { version = "*", optional = true }
+# Mirror SPINEPS' own constraint so `TPTBox[seg]` and `spineps` can co-install.
+# nnunetv2 2.8+ requires Python >=3.10, so 3.9 stays on the last release supporting it.
+# TPTBox.segmentation.nnUnet_utils is a self-contained fork: it builds its own
+# PlansManager from the checkpoint's plans.json and never instantiates nnU-Net's,
+# so it is not tied to a particular nnU-Net plans layout.
+nnunetv2 = [
+  { version = "==2.4.2", python = "<3.10", optional = true },
+  { version = ">=2.8,<3.0", python = ">=3.10", optional = true },
+]
+acvl-utils = { version = "*", optional = true }
+batchgenerators = { version = "*", optional = true }
+# Distribution is `hf-deepali`; the import name is `deepali`. Do NOT shorten it -
+# a bare `deepali` on PyPI is an unrelated project.
+hf-deepali = { version = "*", optional = true }
+
+# `spineps` is deliberately absent: it depends on TPTBox itself, so declaring it
+# here would be a circular dependency. It stays a documented `pip install spineps`.
+[tool.poetry.extras]
+dicom = ["pydicom", "dicom2nifti"]
+seg = ["torch", "nnunetv2", "acvl-utils", "batchgenerators"]
+reg = ["torch", "hf-deepali"]
+
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8.1.1"
 # vtk 9.7.0 dropped cp39 wheels (and publishes no requires-python metadata,

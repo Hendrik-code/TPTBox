@@ -14,6 +14,7 @@ from TPTBox.core.vert_constants import Full_Body_Instance, Lower_Body
 text_file_is_left_leg = True
 file_text = "/DATA/NAS/tools/TPTBox/examples/atlas_poi_transfer_leg/010__left.txt"
 segmentation_path = "/DATA/NAS/datasets_processed/CT_fullbody/dataset-watrinet/source/Dataset001_all/0001/bone.nii.gz"
+ct_path = "/DATA/NAS/datasets_processed/CT_fullbody/dataset-watrinet/source/Dataset001_all/0001/ct.nii.gz"
 out_folder = Path("/DATA/NAS/datasets_processed/CT_fullbody/dataset-watrinet/atlas2")
 atlas_id = 1
 ##########################################
@@ -31,9 +32,10 @@ if not text_file_is_left_leg:
 assert text_file_is_left_leg, "Not implement: Flip NII and POI"
 # Prep atlas
 atlas_path = out_folder / f"atlas{atlas_id:03}.nii.gz"
+ct_atlas_path = out_folder / f"atlas{atlas_id:03}_ct.nii.gz"  # cropped CT saved next to the atlas
 atlas_cms_poi_path = out_folder / f"atlas{atlas_id:03}_cms_poi.json"  # Center of mass
 atlas_poi_path = out_folder / f"atlas{atlas_id:03}_poi.json"
-prep_Atlas(seg, atlas_path, atlas_cms_poi_path, text_file_is_left_leg)
+prep_Atlas(seg, ct_path, atlas_path, ct_atlas_path, atlas_cms_poi_path, atlas_left=text_file_is_left_leg)
 
 
 poi = parse_coordinates_to_poi(file_text, True).to_other(seg) if ".txt" in file_text else POI.load(file_text).resample_from_to(seg)

@@ -5,10 +5,13 @@ import pickle
 from copy import deepcopy
 from datetime import date
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
-import pydicom
 from tqdm import tqdm
+
+if TYPE_CHECKING:
+    import pydicom
 
 from TPTBox import BIDS_FILE, NII, BIDS_Global_info, Print_Logger
 from TPTBox.core.internal.nii_help import save_json as secure_save_json
@@ -253,6 +256,8 @@ def get_json_from_dicom(data: list[pydicom.FileDataset] | pydicom.FileDataset) -
 
 def _get_json_from_dicom(py_dict: dict):
     """Rearrange a pydicom ``to_json_dict`` output into a JSON-serialisable form."""
+    import pydicom  # only this helper actually needs the library at runtime
+
     data1 = {}
     for key, value in py_dict.items():
         try:

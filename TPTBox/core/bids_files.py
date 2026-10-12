@@ -243,10 +243,10 @@ def Buffered_BIDS_Global_info(
                 print("[ ] Dose not exist:", (folder), f"{' ':20}") if verbose else None
                 continue
             if (folder / buffer_name).exists():
-                import datetime
+                import datetime as dt
 
-                file_mod_time = datetime.datetime.fromtimestamp(os.path.getmtime(folder / buffer_name))
-                today = datetime.datetime.today()
+                file_mod_time = dt.datetime.fromtimestamp(os.path.getmtime(folder / buffer_name))
+                today = dt.datetime.today()
 
                 age = today - file_mod_time
                 if age.days >= int(max_age_days):
@@ -1434,7 +1434,7 @@ class BIDS_FILE:
             A :class:`~TPTBox.core.nii_poi_abstract.Grid` instance, or
             ``None`` if no NIfTI file is present.
         """
-        from TPTBox.core.dicom.dicom_extract import _add_grid_info_to_json
+        from TPTBox.core.internal.nii_help import _add_grid_info_to_json
         from TPTBox.core.nii_poi_abstract import Grid
 
         nii_file = self.get_nii_file()
