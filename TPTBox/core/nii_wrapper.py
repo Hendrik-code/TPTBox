@@ -58,6 +58,7 @@ from TPTBox.core.np_utils import (
     np_unique,
     np_unique_withoutzero,
     np_volume,
+    np_voronoi_labels,
 )
 from TPTBox.core.vert_constants import (
     AFFINE,
@@ -1807,6 +1808,59 @@ class NII(NII_Math):
     def dilate_msk_(self, n_pixel: int = 5, labels: LABEL_REFERENCE = None, connectivity: int = 3, mask: Self | None = None, verbose: logging = True, use_crop=True, ignore_direction: DIRECTIONS | int | None = None) -> Self:
         """In-place variant of `dilate_msk`."""
         return self.dilate_msk(n_pixel=n_pixel, labels=labels, connectivity=connectivity, mask=mask, inplace=True, verbose=verbose,use_crop=use_crop,ignore_direction=ignore_direction)
+
+    def voronoi_labels(self, labels: LABEL_REFERENCE = None, max_distance: float | None = None, use_mm: bool = True, signed_background: bool = True, tie_to_zero: bool = True, inplace=False, verbose: logging = True) -> Self:
+        """Assigns every voxel the label of the nearest labelled region (a Voronoi partition).
+
+        Args:
+            labels (LABEL_REFERENCE, optional): Labels to partition by. Everything else is treated as
+                background. Defaults to None (all labels present in the segmentation).
+            max_distance (float | None, optional): Leave background voxels further than this from any
+                region at 0. In mm when `use_mm` is True, else in voxels. Defaults to None (no limit).
+            use_mm (bool, optional): If True, distances are measured in mm using this image's voxel
+                spacing, so the partition is correct on anisotropic images. If False, voxels are
+                treated as isotropic. Defaults to True.
+            signed_background (bool, optional): If True, voxels filled in from the background get the
+                negated label of their region, so the input mask stays recoverable as `out > 0`. The
+                returned NII then has a signed dtype. Defaults to True.
+            tie_to_zero (bool, optional): If True, voxels equidistant to two different regions are set
+                to 0 instead of being assigned to one of them. Defaults to True.
+            inplace (bool, optional): Whether to modify this NII in place or return a new object.
+                Defaults to False.
+            verbose (bool, optional): Whether to print a message. Defaults to True.
+
+        Returns:
+            NII: The partition, signed when `signed_background` is set.
+
+        Notes:
+            Runtime is independent of the number of labels (one Euclidean feature transform for the
+            whole volume), unlike `dilate_msk`.
+            Set `signed_background=False, tie_to_zero=False` and a `max_distance` for a plain,
+            unsigned expansion of the labels (`np_expand_labels`).
+
+        Examples:
+            >>> nii.voronoi_labels(max_distance=10)  # doctest: +SKIP
+            # every voxel within 1 cm of a labelled region takes its label
+        """
+        assert self.seg
+        log.print("voronoi labels", end="\r", verbose=verbose)
+        out = np_voronoi_labels(
+            self.get_seg_array(),
+            label_ref=labels,
+            max_distance=max_distance,
+            zoom=self.zoom if use_mm else None,
+            signed_background=signed_background,
+            tie_to_zero=tie_to_zero,
+        )
+        if not signed_background:
+            # keep the image dtype; the negated labels of a signed partition would not fit an unsigned one
+            out = out.astype(self.dtype)
+        log.print("Voronoi partition of", len(np_unique_withoutzero(np.abs(out))), "labels", verbose=verbose)
+        return self.set_array(out, inplace=inplace)
+
+    def voronoi_labels_(self, labels: LABEL_REFERENCE = None, max_distance: float | None = None, use_mm: bool = True, signed_background: bool = True, tie_to_zero: bool = True, verbose: logging = True) -> Self:
+        """In-place variant of `voronoi_labels`."""
+        return self.voronoi_labels(labels=labels, max_distance=max_distance, use_mm=use_mm, signed_background=signed_background, tie_to_zero=tie_to_zero, inplace=True, verbose=verbose)
 
 
     def fill_holes(self, labels: LABEL_REFERENCE = None, slice_wise_dim: int|str | None = None, verbose:logging=False, inplace=False,use_crop=True) -> Self:  # noqa: ARG002
