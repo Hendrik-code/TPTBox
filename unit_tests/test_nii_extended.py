@@ -606,5 +606,150 @@ class Test_label_interface_thickness_nii(unittest.TestCase):
         self.assertTrue(np.allclose(nii.label_interface_thickness(1, 2), expected, equal_nan=True))
 
 
+class Test_partition_segmentation(unittest.TestCase):
+    def _two_slabs(self) -> NII:
+        """Label 1 fills index 0-9 along axis 0, label 2 fills 10-19; 100 voxels per slice."""
+        arr = np.zeros((20, 10, 10), dtype=np.uint8)
+        arr[0:10] = 1
+        arr[10:20] = 2
+        return _make_nii(arr)
+
+    def test_fraction_splits_off_the_axis_most_part(self):
+        # RAS: axis 0 points to R, so the R-most quarter of the 2000 voxels is the last 5 slices
+        out = self._two_slabs().partition_segmentation_by_volume(None, "R", 0.25).volumes()
+        self.assertEqual(dict(out), {1: 1000, 2: 500, 102: 500})
+
+    def test_fraction_is_by_volume_not_by_extent(self):
+        arr = np.zeros((20, 10, 10), dtype=np.uint8)
+        arr[0:16, 0:2] = 1  # thin: 20 voxels per slice
+        arr[16:20] = 1  # thick: 100 voxels per slice
+        # 70% of the 720 voxels is reached after the 4 thick slices plus 6 thin ones,
+        # i.e. 10 of 20 slices - taking 70% of the extent would give 14
+        out = _make_nii(arr).partition_segmentation_by_volume(1, 0, 0.7).volumes()
+        self.assertEqual(out[101], 400 + 20 * 6)
+
+    def test_fraction_only_touches_the_requested_labels(self):
+        out = self._two_slabs().partition_segmentation_by_volume(1, "R", 0.5).volumes()
+        self.assertEqual(dict(out), {1: 500, 101: 500, 2: 1000})
+
+    def test_fraction_bounds(self):
+        nii = self._two_slabs()
+        self.assertEqual(dict(nii.partition_segmentation_by_volume(None, 0, 0.0).volumes()), {1: 1000, 2: 1000})
+        self.assertEqual(dict(nii.partition_segmentation_by_volume(None, 0, 1.0).volumes()), {101: 1000, 102: 1000})
+        with self.assertRaises(AssertionError):
+            nii.partition_segmentation_by_volume(None, 0, 1.5)
+
+    def test_center_of_mass_halves_a_label(self):
+        # label 2 spans 10..19, center of mass 14.5 -> plane at 14 (rint rounds .5 to even)
+        out = self._two_slabs().partition_segmentation_by_center_of_mass(2, 0).volumes()
+        self.assertEqual(dict(out), {1: 1000, 2: 400, 102: 600})
+
+    def test_center_of_mass_is_orientation_independent(self):
+        nii = self._two_slabs()
+        ref = nii.partition_segmentation_by_center_of_mass(None, "R")
+        for ori in [("L", "A", "S"), ("A", "R", "S"), ("I", "P", "L"), ("S", "L", "P")]:
+            got = nii.reorient(ori).partition_segmentation_by_center_of_mass(None, "R").reorient(nii.orientation)
+            self.assertTrue(np.array_equal(got.get_seg_array(), ref.get_seg_array()), ori)
+
+    def test_fraction_is_orientation_independent(self):
+        nii = self._two_slabs()
+        ref = nii.partition_segmentation_by_volume(None, "P", 1 / 3)
+        for ori in [("L", "A", "S"), ("A", "R", "S"), ("I", "P", "L"), ("S", "L", "P")]:
+            got = nii.reorient(ori).partition_segmentation_by_volume(None, "P", 1 / 3).reorient(nii.orientation)
+            self.assertTrue(np.array_equal(got.get_seg_array(), ref.get_seg_array()), ori)
+
+    def test_missing_label_is_a_no_op(self):
+        nii = self._two_slabs()
+        for out in (nii.partition_segmentation_by_center_of_mass(5, 0), nii.partition_segmentation_by_volume(5, 0, 0.5)):
+            self.assertTrue(np.array_equal(out.get_seg_array(), nii.get_seg_array()))
+
+    def test_dtype_is_promoted_when_the_offset_overflows(self):
+        out = self._two_slabs().partition_segmentation_by_center_of_mass(None, 0, offset=1000)
+        self.assertEqual(dict(out.volumes()), {1: 1000, 1002: 1000})
+
+    def test_works_in_2d(self):
+        arr = np.zeros((10, 10), dtype=np.uint8)
+        arr[:, 0:6] = 3
+        out = _make_nii(arr).partition_segmentation_by_center_of_mass(3, 1, offset=10).volumes()
+        self.assertEqual(dict(out), {3: 20, 13: 40})
+
+    def test_inplace(self):
+        nii = self._two_slabs()
+        out = nii.partition_segmentation_by_center_of_mass(None, 0, inplace=True)
+        self.assertIs(out, nii)
+        self.assertIn(102, nii.volumes())
+
+    def test_ethmoid_style_pipeline(self):
+        """The motivating use case: posterior third, then left/right of the remaining front."""
+        arr = np.zeros((30, 25, 24), dtype=np.uint8)
+        arr[5:25, 5:20, 3:12] = 7
+        arr[5:25, 5:20, 12:21] = 8
+        seg = _make_nii(arr).reorient_(("P", "I", "R"))
+        out = seg.partition_segmentation_by_volume([7, 8], "P", 1 / 3, 100)
+        out = out.partition_segmentation_by_center_of_mass([7], "R", 200).partition_segmentation_by_center_of_mass([8], "R", 200)
+        vols = out.volumes()
+        self.assertEqual(set(vols), {7, 8, 107, 108, 207, 208})
+        # the posterior third of each label, and the front split into two halves
+        self.assertEqual(vols[107] + vols[7] + vols[207], 20 * 15 * 9)
+        self.assertAlmostEqual(vols[107] / (20 * 15 * 9), 1 / 3, places=2)
+
+
+class Test_voronoi_labels_nii(unittest.TestCase):
+    @staticmethod
+    def _two_points(zoom=(1.0, 1.0, 1.0)) -> NII:
+        arr = np.zeros((5, 1, 1), dtype=np.uint8)
+        arr[0] = 1
+        arr[4] = 2
+        return _make_nii(arr, zoom=zoom)
+
+    def test_signed_partition_and_tie(self):
+        out = self._two_points().voronoi_labels(verbose=False)
+        self.assertEqual(out.get_seg_array().ravel().tolist(), [1, -1, 0, -2, 2])
+        self.assertTrue(np.issubdtype(out.dtype, np.signedinteger))
+
+    def test_input_mask_is_recoverable(self):
+        nii = self._two_points()
+        out = nii.voronoi_labels(verbose=False)
+        np.testing.assert_array_equal((out.get_seg_array() > 0) * out.get_seg_array(), nii.get_seg_array())
+
+    def test_unsigned_keeps_the_image_dtype(self):
+        nii = self._two_points()
+        out = nii.voronoi_labels(signed_background=False, tie_to_zero=False, verbose=False)
+        self.assertEqual(out.dtype, nii.dtype)
+        self.assertEqual(out.get_seg_array().ravel().tolist(), [1, 1, 1, 2, 2])
+
+    def test_use_mm_scales_max_distance_with_zoom(self):
+        arr = np.zeros((11, 1, 1), dtype=np.uint8)
+        arr[0] = 1
+        nii = _make_nii(arr, zoom=(2.0, 1.0, 1.0))
+        in_mm = nii.voronoi_labels(max_distance=3, signed_background=False, verbose=False)
+        in_vox = nii.voronoi_labels(max_distance=3, use_mm=False, signed_background=False, verbose=False)
+        self.assertEqual(int(np.count_nonzero(in_mm.get_seg_array())), 2)
+        self.assertEqual(int(np.count_nonzero(in_vox.get_seg_array())), 4)
+
+    def test_labels_treats_the_rest_as_background(self):
+        out = self._two_points().voronoi_labels(labels=1, verbose=False)
+        self.assertEqual(out.get_seg_array().ravel().tolist(), [1, -1, -1, -1, -1])
+
+    def test_grid_is_preserved(self):
+        nii = self._two_points(zoom=(2.0, 1.0, 0.5))
+        out = nii.voronoi_labels(verbose=False)
+        self.assertTrue(out.assert_affine(nii, raise_error=False))
+        self.assertEqual(out.shape, nii.shape)
+
+    def test_inplace_variant(self):
+        nii = self._two_points()
+        out = nii.voronoi_labels_(verbose=False)
+        self.assertIs(out, nii)
+        self.assertEqual(nii.get_seg_array().ravel().tolist(), [1, -1, 0, -2, 2])
+
+    def test_matches_the_array_level_function(self):
+        from TPTBox.core.np_utils import np_voronoi_labels
+
+        nii = self._two_points(zoom=(1.5, 1.0, 1.0))
+        expected = np_voronoi_labels(nii.get_seg_array(), zoom=nii.zoom)
+        np.testing.assert_array_equal(nii.voronoi_labels(verbose=False).get_seg_array(), expected)
+
+
 if __name__ == "__main__":
     unittest.main()
