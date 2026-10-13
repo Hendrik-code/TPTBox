@@ -8,6 +8,8 @@ objects and `NII` segmentations.
 | Module | Description |
 |---|---|
 | `angles.py` | Cobb angle, cervical lordosis, thoracic kyphosis, lumbar lordosis |
+| `curvature.py` | Extended curvature metrics: SVA, coronal balance, wedge angles, segmental endplate angles, axial rotation, spline-based curvature profile, multi-curve Cobb |
+| `pelvic_parameters.py` | Pelvic Incidence / Pelvic Tilt / Sacral Slope / PI-LL mismatch from the fullbody-POI json |
 | `measure_ivd_and_vertebra_geometry.py` | Per-structure geometry (heights, widths, x1–x6) and T2 signal ratio for vertebrae and IVDs |
 | `torso_vat_sat.py` | VBQ score, body composition CSA, muscle fat infiltration, torso VAT/SAT/muscle volumes; also `peak_centered_mean` |
 | `vertebra_anatomical_widths.py` | Anatomical distances per vertebra (IVD height, body height, LR/AP widths) stored on `POI.info` |
@@ -55,13 +57,20 @@ not on the Python API. A standalone copy of this reference lives at
 
 | Key | Source function | What it covers |
 |---|---|---|
-| `ivd_geometry` | `measure_ivd_and_vertebra_geometry(..., structure_label=100)` | intervertebral discs |
-| `vert_geometry` | `measure_ivd_and_vertebra_geometry(..., structure_label=50)` | vertebral bodies |
+| `ivd_geometry` | `measure_ivd_and_vertebra_geometry(..., structure_label=100)` | intervertebral discs (now also carries wedge angles/indices per label) |
+| `vert_geometry` | `measure_ivd_and_vertebra_geometry(..., structure_label=50)` | vertebral bodies (now also carries wedge angles/indices per label) |
 | `VBQ_score` | `VBQ_score` | vertebral bone quality (T2 signal ratio) |
 | `body_composition_score` | `body_composition_score` | axial CSA per tissue at chosen vertebral levels |
 | `muscle_fat_infiltration` | `muscle_fat_infiltration` | Dixon fat-fraction based muscle-quality metrics |
 | `torso_vat_sat_muscle_mass` | `torso_vat_sat_muscle_mass` | whole-torso VAT / SAT / muscle volume |
 | `cobb`, `curv` | `plot_cobb_and_lordosis_and_kyphosis` | only when called with `cobb=True` |
+| `sva` | `curvature.compute_sva` | Sagittal Vertical Axis (mm) |
+| `coronal_balance` | `curvature.compute_coronal_balance` | Coronal Balance (mm) |
+| `axial_rotation` | `curvature.compute_axial_rotation` | per-vertebra axial rotation angle |
+| `segmental_endplate_angles` | `curvature.compute_segmental_endplate_angles` | inter-vertebral wedge (disc) angle |
+| `curvature_profile` | `curvature.compute_curvature_profile` | spline-based arc/chord/κ profile with apex positions |
+| `multi_cobb` | `curvature.compute_multi_cobb` | multi-curve Cobb detection from coronal spline projection |
+| `pelvic_parameters` | `pelvic_parameters.compute_pelvic_parameters` | PI / PT / SS + PI-LL mismatch in multiple variants |
 
 Distance metrics from `vertebra_anatomical_widths.compute_all_distances`
 are not currently written into the json by `run_all`; they live on the
@@ -302,6 +311,132 @@ Implementation notes:
   Values can be `None` if the required vertebrae are missing from the
   POI.
 
+## Extended curvature metrics (`curvature.py`)
+
+Everything below is written into the json by `run_all` when
+`need_curvature=True` (default). All angles are in **degrees**, lengths
+in **millimetres**. On missing landmarks the corresponding entry
+contains `None` values plus an `error` message; the pipeline never
+raises for these.
+
+### `sva` — Sagittal Vertical Axis
+
+Signed horizontal offset in the sagittal plane between the top vertebra
+(default C7) and a base reference. Positive = top vertebra is anterior
+of the base (typical adult).
+
+- `sva_mm` — the offset in mm
+- `top_vertebra`, `base_vertebra`, `base_landmark` — which vertebrae /
+  landmark were used (falls back S1 → L5 → L4 if the earlier is
+  missing)
+- `top_pi_coords`, `base_pi_coords` — (P, I) coordinates of the two
+  points in the internal POI orientation, for QC
+
+**Caveat:** measured on supine MRI. Standing SVA is typically 0-50 mm
+larger; comparisons to Schwab-style thresholds derived from standing
+radiographs are only approximate.
+
+### `coronal_balance`
+
+Signed horizontal offset in the coronal plane between the top vertebra
+(C7) and the base vertebra R coordinate (CSVL proxy). Positive = top
+vertebra is right of CSVL.
+
+- `coronal_balance_mm`
+- `top_vertebra`, `base_vertebra`
+- `top_r_coord`, `base_r_coord`
+
+### `axial_rotation`
+
+`dict[vertebra_name, degrees]` (e.g. `"L1": -3.5`). Signed angle in the
+axial plane between `Vertebra_Direction_Right` and the image right
+axis. Positive = rotation towards the patient's left.
+
+### `segmental_endplate_angles`
+
+`dict["<upper>-<lower>", degrees]`. Signed sagittal-plane angle between
+the inferior endplate direction of the upper vertebra and the inferior
+endplate direction of the lower vertebra. Positive = anterior opening
+(typical lordotic disc).
+
+### `curvature_profile`
+
+Spline fit through the `Vertebra_Corpus` centroids (uses
+`POI.fit_spline`, cubic B-spline). Reports:
+
+- `arc_length_mm`, `chord_length_mm`, `tortuosity` (arc/chord)
+- `curvature_max_1_per_mm`, `curvature_mean_1_per_mm` — |κ| in 3D
+- `curvature_sagittal_max_1_per_mm`, `curvature_coronal_max_1_per_mm`
+  — |κ| in the two 2D projections
+- `apices`, `sagittal_apices`, `coronal_apices` — each a list of up to
+  6 dicts `{arc_mm, kappa_1_per_mm}` ordered by arc position
+
+### `multi_cobb`
+
+Automatic multi-curve Cobb detection from the coronal spline
+projection. Sign changes of the signed curvature are treated as
+inflection points; between each pair of consecutive inflections one
+Cobb angle is reported.
+
+- `curves`: list of `{arc_start_mm, arc_end_mm, apex_arc_mm, length_mm,
+  cobb_deg, handedness}` (handedness = `"right"` or `"left"`)
+- `max_cobb_deg`: maximum |Cobb| across all detected curves
+
+### Wedge metrics on vert_geometry / ivd_geometry
+
+`compute_wedge_metrics` merges four extra fields **into each label's
+entry** of `vert_geometry` and `ivd_geometry` (so they automatically
+flow into `per_vertebra.xlsx` / `per_ivd.xlsx`):
+
+- `sagittal_wedge_deg` — `atan((x1 − x2) / x6)`, positive = anterior taller
+- `coronal_wedge_deg` — `atan((x3 − x4) / x5)`, positive = right taller
+- `sagittal_wedge_index` — `(x1 − x2) / mean(x1, x2)`, unitless
+- `coronal_wedge_index` — `(x3 − x4) / mean(x3, x4)`, unitless
+
+Genant-style fracture screening: a `sagittal_wedge_index` below about
+`-0.4` corresponds to > 40 % anterior height loss.
+
+## Pelvic parameters (`pelvic_parameters.py`)
+
+Written under the `pelvic_parameters` key when a fullbody-POI json is
+available under
+`<dataset>/derivatives-fullbody-poi/{pfx}/{sub}/vibe/sub-{sub}_..._seg-fullbody_poi.json`.
+
+Two variants are always computed side by side so they can be compared
+in QC. The `poi_ap` variant is expected to be the canonical one; the
+`poi_ala` variant uses a laterally-averaged reference that in most
+subjects deviates enough to serve as a robustness check.
+
+Each variant reports:
+
+- `pi_deg` (Pelvic Incidence, unsigned; anatomical constant)
+- `pt_deg` (Pelvic Tilt, signed; positive = sacrum posterior of hip axis)
+- `ss_deg` (Sacral Slope, unsigned; endplate tilt from horizontal)
+- `pi_ll_mismatch_deg` (`pi_deg − lumbar_lordosis`, using the pipeline's
+  supine LL). `None` if LL is missing.
+- `hip_center_mm`, `s1_endplate_center_mm` — the two 3D points used, for QC
+
+Relationship: **PI = PT + SS** (up to sign convention). If the two
+sides disagree by more than a fraction of a degree the landmarks are
+inconsistent.
+
+**Limitations** (in `pelvic_parameters.py` module docstring):
+
+1. **Supine vs. standing.** Metrics are derived from supine MRI.
+   Standing SS is typically ~10-15° larger, standing PT ~10-15° smaller
+   than the same subject supine. **PI is anatomical** and comparable
+   across positions. PI-LL uses the supine LL and is therefore not
+   directly comparable to Schwab thresholds derived from standing images.
+2. The S1 upper endplate is reconstructed from two point landmarks
+   (`Sacral_Crest_S1` posterior + `Anterior_Longitudinal_Medial`
+   anterior for `poi_ap`); the ligament attachment can drift inferior
+   with age / degeneration and bias the endplate normal.
+3. The bi-femoral axis uses the atlas-registered `PELVIS_CENTER`
+   landmark that lives under `femur_right` / `femur_left` in the
+   fullbody-POI json.
+4. No axial pelvic obliquity correction: the sagittal plane is world
+   `(y, z)`. In practice supine subjects are close to aligned.
+
 ---
 
 ## `vertebra_anatomical_widths.py`
@@ -333,15 +468,22 @@ Implementation notes:
 ## Excel collector
 
 `ExcelCollector` in `_run_all.py` runs a background process that turns
-each finished json into two rolling Excel files in a configurable
+each finished json into three rolling Excel files in a configurable
 folder:
 
 - `per_subject.xlsx` — one row per subject with every scalar top-level
   metric flattened to dotted keys
   (e.g. `VBQ_score.VBQ_L1-L4`, `torso_vat_sat_muscle_mass.VAT`).
-- `per_vertebra.xlsx` — one row per (subject, label), populated from
-  `vert_geometry` and `ivd_geometry`. The `source` column indicates
-  which of the two sections the row came from.
+  `ivd_geometry` and `vert_geometry` are excluded here.
+- `per_vertebra.xlsx` — one row per (subject, label) from
+  `vert_geometry` (vertebra bodies).
+- `per_ivd.xlsx` — one row per (subject, label) from `ivd_geometry`
+  (intervertebral discs).
+
+The vertebra and IVD tables were split so that the full NAKO cohort
+stays under Excel's per-sheet row limit (1 048 576 rows). A single
+combined table would exceed that once the cohort passes ~23 k subjects
+with ~23 labels per section.
 
 Usage:
 
