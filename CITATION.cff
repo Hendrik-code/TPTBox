@@ -1,0 +1,62 @@
+cff-version: 1.2.0
+title: "TPTBox: Torso Processing ToolBox"
+message: "If you use this software, please cite both the software and the accompanying paper (see preferred-citation)."
+type: software
+authors:
+  - family-names: "Möller"
+    given-names: "Hendrik"
+    email: "hendrik.moeller@tum.de"
+    affiliation: "Technical University of Munich"
+  - family-names: "Graf"
+    given-names: "Robert"
+    email: "robert.graf@tum.de"
+    affiliation: "Technical University of Munich"
+  - family-names: "Lerchl"
+    given-names: "Tanja"
+    affiliation: "Technical University of Munich"
+  - family-names: "Rueckert"
+    given-names: "Daniel"
+    affiliation: "Technical University of Munich"
+  - family-names: "Kirschke"
+    given-names: "Jan S."
+    affiliation: "Technical University of Munich"
+repository-code: "https://github.com/Hendrik-code/TPTBox"
+url: "https://tptbox.readthedocs.io"
+abstract: >-
+  The Torso Processing ToolBox (TPTBox) is a Python package for processing
+  BIDS-compliant medical imaging datasets (CT, MRI), with a focus on torso and
+  spine analysis. It provides NIfTI I/O, reorientation and resampling, Points of
+  Interest computation for vertebrae, 2D and 3D snapshots, registration,
+  stitching, and segmentation integrations.
+keywords:
+  - medical imaging
+  - BIDS
+  - NIfTI
+  - spine
+  - segmentation
+  - registration
+  - computed tomography
+  - magnetic resonance imaging
+license: Apache-2.0
+version: 1.0.0
+date-released: "2026-09-07"
+preferred-citation:
+  type: article
+  title: "TPTBox: Extensive torso processing toolbox for simple and automatic analysis of CT and MR imaging"
+  authors:
+    - family-names: "Möller"
+      given-names: "Hendrik"
+    - family-names: "Graf"
+      given-names: "Robert"
+    - family-names: "Lerchl"
+      given-names: "Tanja"
+    - family-names: "Rueckert"
+      given-names: "Daniel"
+    - family-names: "Kirschke"
+      given-names: "Jan S."
+  journal: "SoftwareX"
+  year: 2026
+  start: 103055
+  issn: "2352-7110"
+  doi: "10.1016/j.softx.2026.103055"
+  url: "https://www.sciencedirect.com/science/article/pii/S2352711026005467"
