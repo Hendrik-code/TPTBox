@@ -68,6 +68,42 @@ map_series_description_to_file_format_default = {
     ".*mp?ra?ge?.*": "MPR",
     ".*mip.*": "MIP",
     "b0map": "b0map",
+    # Specific quantitative / specialised patterns MUST come before the greedy
+    # ``.*t2.*`` / ``.*t1.*`` catch-alls below — otherwise "T2 STAR" / "T1 MAP"
+    # get misclassified as plain T2w / T1w on the first-match win.
+    ".*mp2rage.*": "MP2RAG",
+    ".*t2\\s*star.*": "T2star",
+    r".*t2\*.*": "T2star",
+    ".*r2\\s*star.*": "R2star",
+    r".*r2\*.*": "R2star",
+    ".*swi.*": "SWI",
+    ".*t1\\s*map.*": "T1map",
+    ".*t2star\\s*map.*": "T2starmap",
+    ".*t2\\s*map.*": "T2map",
+    # Multi-echo VIBE / DIXON — NAKO Siemens ``ME_vibe_fatquant_*`` and the
+    # generic ``mevibe``/``fatquant``/``fatfrac``/``pdff`` labels. Placed before
+    # ``.*mdix.*`` so the multi-echo classification wins where both apply.
+    ".*me[_\\s]?vibe.*": "mevibe",
+    ".*mevibe.*": "mevibe",
+    ".*fatquant.*": "mevibe",
+    ".*fatfrac.*": "dixon",
+    ".*pdff.*": "dixon",
+    ".*ideal.*": "dixon",  # GE's Dixon variant
+    # Philips-specific localizers / reference scans that the existing "pilot"
+    # / "scout" entries above don't catch.
+    ".*survey.*": "localizer",
+    ".*ref\\s*scan.*": "localizer",
+    ".*smartexam.*": "localizer",
+    # Philips ``3DI_MC_HR`` = 3D-Inflow Motion-Corrected High-Resolution
+    # (TOF-MRA MIP projections; ImageType carries ``PROJECTION IMAGE``).
+    # Placed before the generic angio/tof rules below because the raw
+    # ``3di_mc_hr`` string contains neither "tof" nor "angio".
+    ".*3di[_-]?mc.*": "TOF",
+    # Post-contrast dynamic MR (KM = Kontrastmittel). Requires all three
+    # tokens so a generic ``dyn`` doesn't over-match.
+    ".*dyn.*post.*km.*": "DCE",
+    # German ``Halsgefäße`` neck-vessel angiography.
+    ".*halsgef.*": "angio",
     ".*t2.*": "T2w",
     ".*t1.*": "T1w",
     ".*dixon.*": "dixon",
@@ -82,6 +118,7 @@ map_series_description_to_file_format_default = {
     ".*sub.*": "subtraction",
     ".*dynamik.*": "DCE",
     ".*mdix.*": "dixon",
+    ".*mdixon.*": "dixon",
     ".*s3d.*": "s3D",
     ".*flip37.*": "s3D",
     ".*trak.*": "PWI",
@@ -102,6 +139,85 @@ map_series_description_to_file_format_default = {
     re.escape("?") + "*": "mr",
     ".*": "mr",
 }
+
+
+def _single_echo_for_plane(dicoms: list[pydicom.FileDataset]) -> list[pydicom.FileDataset]:
+    """Return a DICOM subset with one echo per slice position for plane detection.
+
+    Multi-echo Philips DIXON (e.g. "mDIX quant") exports N slice positions × M
+    echos into a single DICOM sub-group. The M copies at each `ImagePositionPatient`
+    collapse the slice axis to ≈0 in `dicom2nifti.common.create_affine`, so after
+    clamping by `hires_threshold` every zoom is ~1 and the series is misdetected
+    as isotropic. Keep only the smallest `EchoNumbers` value so each spatial
+    position is represented once. No-op when the tag is absent or constant.
+    """
+    en_values = set()
+    for d in dicoms:
+        try:
+            en = int(getattr(d, "EchoNumbers", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if en > 0:
+            en_values.add(en)
+    if len(en_values) <= 1:
+        return dicoms
+    keep = min(en_values)
+    return [d for d in dicoms if int(getattr(d, "EchoNumbers", 0) or 0) == keep]
+
+
+def _apply_view_keys(keys: dict, get: Callable) -> None:
+    """Populate `acq` / `part` from DICOM ViewPosition + Laterality tags.
+
+    Used by the 2D-modality fallback in :func:`extract_keys_from_json`. Without
+    this, MG series with four views (R-CC, L-CC, R-MLO, L-MLO), radiographs
+    with AP / PA / LAT projections, and ophthalmic photos of both eyes would
+    all collapse onto the same BIDS filename and clobber each other.
+
+    Convention chosen (matching this codebase's flexible ``acq`` usage):
+
+    * ``ViewPosition`` (e.g. ``CC``, ``MLO``, ``AP``, ``PA``, ``LAT``) →
+      lowercased into ``acq``. Only overwrites the existing ``acq`` when the
+      plane-detector returned ``None`` or ``"iso"``, both of which are
+      meaningless for single-slice imagery.
+    * ``ImageLaterality`` / ``Laterality`` (``L`` / ``R``, or ophthalmic
+      ``OS`` / ``OD`` → mapped to ``L`` / ``R``) → ``part``, only when
+      ``part`` is not already set by the DIXON / ImageType branches above.
+    """
+    view = get("ViewPosition")
+    if view:
+        view_clean = str(view).lower().strip("-.")
+        if view_clean and keys.get("acq") in (None, "iso"):
+            keys["acq"] = view_clean
+    laterality = get("ImageLaterality") or get("Laterality")
+    if laterality:
+        lat = str(laterality).upper()
+        # Ophthalmic (OS = oculus sinister = left, OD = oculus dexter = right)
+        # normalises to the same L/R vocabulary that radiography uses.
+        lat = {"OS": "L", "OD": "R"}.get(lat, lat)
+        if lat in {"L", "R", "B"} and keys.get("part") is None:
+            keys["part"] = lat.lower()
+
+
+def _apply_bodypart_key(keys: dict, get: Callable) -> None:
+    """Populate ``desc`` from DICOM ``BodyPartExamined`` when nothing else has set it.
+
+    ``BodyPartExamined`` (0018,0015) is a semi-standardised free-text tag with
+    common values like ``ABDOMEN``, ``PELVIS``, ``ABDOMENPELVIS``, ``CHEST``,
+    ``HEAD``, ``NECK``, ``SPINE``, ``KNEE``, ``HIP``, ``BREAST``. It is the
+    main discriminator when a single session contains scans of several body
+    regions and the ``SeriesDescription`` is not informative — typical for
+    plain radiography, ultrasound, nuclear medicine, and RT objects. Only
+    written when ``keys['desc']`` is empty, so an earlier branch that already
+    assigned ``desc`` (e.g. the SR / report path) wins.
+    """
+    if keys.get("desc") is not None:
+        return
+    body = get("BodyPartExamined")
+    if not body:
+        return
+    val = str(body).lower().strip("-.")
+    if val:
+        keys["desc"] = val
 
 
 def get_plane_dicom(dicoms: list[pydicom.FileDataset] | NII, hires_threshold: float = 0.8) -> str | None:
@@ -126,7 +242,7 @@ def get_plane_dicom(dicoms: list[pydicom.FileDataset] | NII, hires_threshold: fl
     if isinstance(dicoms, NII):
         return dicoms.get_plane(res_threshold=hires_threshold)
     try:
-        sorted_dicoms = common.sort_dicoms(dicoms)
+        sorted_dicoms = common.sort_dicoms(_single_echo_for_plane(dicoms))
         affine, _ = common.create_affine(sorted_dicoms)
         plane_dict = {"S": "ax", "I": "ax", "L": "sag", "R": "sag", "A": "cor", "P": "cor"}
         axc = np.array(nio.aff2axcodes(affine))
@@ -149,7 +265,23 @@ def get_plane_dicom(dicoms: list[pydicom.FileDataset] | NII, hires_threshold: fl
         else:
             plane = "iso"
         return plane  # noqa: TRY300
-    except Exception:
+    except (AttributeError, IndexError, KeyError, TypeError):
+        # Not usable image geometry: non-imaging DICOMs legally lack
+        # `ImagePositionPatient` / `ImageOrientationPatient` (AttributeError),
+        # empty lists trip `create_affine` on `dicoms[0]` (IndexError), and
+        # callers that hand in dicts or other pydicom-shaped-but-not-really
+        # objects raise KeyError / TypeError. All of these mean "no plane to
+        # compute" — return None silently instead of surfacing the noise.
+        return None
+    except Exception as e:  # noqa: BLE001
+        # Log so a downstream `acq-None` filename can be traced back to its cause,
+        # instead of the plane-detection silently swallowing every failure.
+        try:
+            from TPTBox import Print_Logger
+
+            Print_Logger().on_warning(f"get_plane_dicom: plane detection failed ({type(e).__name__}: {e}); returning None.")
+        except Exception:  # noqa: BLE001
+            pass
         return None
 
 
@@ -216,18 +348,35 @@ def extract_keys_from_json(  # noqa: C901
 
     #### NAKO FIXED ####
     if "StudyDescription" in simp_json and "nako" in _get("StudyDescription", "").lower():
-        keys["sub"] = _get("PatientID", "unnamed").split("_")[0]
-        series_description = _get("SeriesDescription", "unnamed")
+        # Read PatientID directly from simp_json — `_get` rewrites `_` to `-`,
+        # which would destroy the `<sub>_<sescode>` split we need below.
+        pid_raw = str(simp_json.get("PatientID", "unnamed")).strip()
+        sub_part, _sep, ses_part = pid_raw.partition("_")
+        keys["sub"] = re.sub(r'[<>:"/\\|?*\x00-\x1F\s]', "", sub_part) or "unnamed"
+        # NAKO encodes the exam wave as a suffix on PatientID:
+        # `<sub>_30` = U1 Baseline, `<sub>_60` = U2 Follow-up. The main NAKO
+        # baseline export has no suffix; leave `ses` untouched there so the
+        # existing `use_session` (StudyDate) fallback in _get_paths still wins.
+        if session and ses_part:
+            _nako_ses_map = {"30": "baseline", "60": "followup"}
+            ses_clean = re.sub(r'[<>:"/\\|?*\x00-\x1F\s]', "", ses_part)
+            keys["ses"] = _nako_ses_map.get(ses_clean, ses_clean)
+        # Raw values for pattern matching — `_get` rewrites `_`→`-`, which
+        # would break every `T2_TSE` / `3D_GRE_TRA` / `T1_3D_SAG` check below
+        # and the `ProtocolName.split("_")` chunk derivation.
+        series_description = str(simp_json.get("SeriesDescription", "unnamed"))
+        protocol_name = str(simp_json.get("ProtocolName", "unnamed"))
+        sequ = simp_json.get("SeriesNumber")
         """Determine the MRI format based on the series description."""
         if "T2_TSE" in series_description:
-            return "T2w", {"acq": "sag", "chunk": series_description.split("_")[-1], "sequ": simp_json["SeriesNumber"], **keys}, ".nii.gz"
+            return "T2w", {"acq": "sag", "chunk": series_description.rsplit("_", maxsplit=1)[-1], "sequ": sequ, **keys}, ".nii.gz"
         elif "3D_GRE_TRA" in series_description:
             return (
                 "vibe",
                 {
                     "acq": "ax",
-                    "part": dixon_mapping[series_description.split("_")[-1].lower()],
-                    "chunk": _get("ProtocolName", "unnamed").split("_")[-1],
+                    "part": dixon_mapping[series_description.rsplit("_", maxsplit=1)[-1].lower()],
+                    "chunk": protocol_name.rsplit("_", maxsplit=1)[-1],
                     **keys,
                 },
                 ".nii.gz",
@@ -235,9 +384,17 @@ def extract_keys_from_json(  # noqa: C901
         elif "ME_vibe" in series_description:
             return (
                 "mevibe",
-                {"acq": "ax", "part": dixon_mapping[series_description.split("_")[-1].lower()], "sequ": simp_json["SeriesNumber"], **keys},
+                {"acq": "ax", "part": dixon_mapping[series_description.rsplit("_", maxsplit=1)[-1].lower()], "sequ": sequ, **keys},
                 ".nii.gz",
             )
+        elif "T1_3D_SAG" in series_description:
+            # NAKO-1157 head T1 — plain sagittal ND and the MPR-Tra reformat.
+            acq = "tra" if "MPR_Tra" in series_description else "sag"
+            return "T1w", {"acq": acq, "sequ": sequ, **keys}, ".nii.gz"
+        elif "FLAIR" in series_description:
+            # NAKO-1157 head FLAIR (2D transverse).
+            acq = "tra" if "TRA" in series_description else "sag"
+            return "FLAIR", {"acq": acq, "sequ": sequ, **keys}, ".nii.gz"
         elif "PD" in series_description:
             return "pd", {"acq": "iso", **keys}, ".nii.gz"
         elif "T2_HASTE" in series_description:
@@ -270,9 +427,9 @@ def extract_keys_from_json(  # noqa: C901
         if session:
             keys["ses"] = _get("StudyDate", keys.get("ses"))
         if isinstance(dcm_data_l, (str, Path, NII)):
-            keys["acq"] = to_nii(dcm_data_l).get_plane(1)
+            keys["acq"] = to_nii(dcm_data_l).get_plane(0.8)
         else:
-            keys["acq"] = get_plane_dicom(dcm_data_l, 1)
+            keys["acq"] = get_plane_dicom(dcm_data_l, 0.8)
         keys["part"] = dixon_mapping.get(_get("ProtocolName", "NO-PART").split("_")[-1])
 
         sequ = _get("SeriesNumber", None)
@@ -317,9 +474,19 @@ def extract_keys_from_json(  # noqa: C901
         found = False
         if modality == "ct":
             mri_format = "ct"
+            _apply_bodypart_key(keys, _get)
         elif modality.lower() == "pt":
             mri_format = "pet"
+            _apply_bodypart_key(keys, _get)
         elif modality == "xa":  # Angiography
+            # Helper / non-imaging XA payload: SECONDARY captures, referenced-
+            # image thumbnails, and exam-protocol screenshots have modality XA
+            # but no diagnostic pixel volume. Route to `xa-helper` so
+            # `_DEFAULT_SKIP_FORMATS` drops them at the caller instead of
+            # cluttering the output with unusable derivations.
+            if any(t in image_type for t in ("SECONDARY", "REFIMAGE", "EXAM PROTOCOL")):
+                mri_format = "xa-helper"
+                return mri_format, keys, ".nii.gz"
             biplane = False
             if "BIPLANE A" in image_type or "SINGLE A" in image_type:
                 keys["acq"] = "A"
@@ -349,6 +516,17 @@ def extract_keys_from_json(  # noqa: C901
                 mri_format = "DSA"
             else:
                 mri_format = "XA"
+            # Manufacturer-agnostic ImageType fallbacks — override the plain
+            # `XA` fallback with more specific labels when the header
+            # unambiguously says so. `ORIGINAL` runs are live fluoro; a
+            # `DERIVED PRIMARY` subtracted plane is a DSA. Keeps the
+            # SeriesDescription-string checks above as first-pass and only
+            # kicks in when they didn't resolve past `XA`.
+            if mri_format == "XA":
+                if "ORIGINAL" in image_type:
+                    mri_format = "fluroscopy"
+                elif "DERIVED" in image_type and "PRIMARY" in image_type:
+                    mri_format = "DSA"
         elif modality == "mr":
             for key, mri_format_new in map_series_description_to_file_format.items():
                 regex = re.compile(key)
@@ -370,13 +548,104 @@ def extract_keys_from_json(  # noqa: C901
                     " km " in series_description.lower() or series_description.startswith("km") or series_description.endswith("km")
                 ) and keys.get("ce") is None:
                     keys["ce"] = "ContrastAgent"
+            # 2D projections (Philips MIP views of a TOF-MRA source volume,
+            # or any DICOM tagged with `PROJECTION IMAGE` in ImageType). Same
+            # SeriesDescription as the 3D source volume, but the pixel data
+            # is a MIP. Route these to the `MIP` format so the 3D recons keep
+            # `TOF` / `angio` labels and the MIPs live under `sub-*/ses-*/MIP/`.
+            if any("PROJECTION" in str(t).upper() for t in image_type):
+                mri_format = "MIP"
         elif modality.lower() == "pdf":
             return "report", keys, ".pdf"
         elif modality.lower() == "sr":
             keys["desc"] = _get("SeriesDescription", None)
             return "report", keys, ".txt"
+        # Non-imaging metadata DICOMs: Presentation State, Key Object Selection,
+        # Registration, Fiducials, Real World Value Map, Plan, Slide Stainer.
+        # Also physiological waveforms (RESP, HD, ECG, EPS) and ophthalmic
+        # measurements (AR, KER, LEN, VA, OPV, OPM) — none of these carry a
+        # NIfTI-shaped pixel volume. Route them through the same `.txt` report
+        # path as SR so the caller neither writes an empty NIfTI nor crashes
+        # in `_add_grid_info_to_json` on a file that was never produced.
+        elif modality.lower() in {
+            "pr",
+            "ko",
+            "reg",
+            "fid",
+            "rwv",
+            "plan",
+            "stain",
+            "resp",
+            "hd",
+            "ecg",
+            "eps",
+            "ar",
+            "ker",
+            "len",
+            "va",
+            "opv",
+            "opm",
+        }:
+            keys["desc"] = _get("SeriesDescription", None)
+            return modality.lower(), keys, ".txt"
+        # Sensible defaults for the remaining common imaging modalities so we can
+        # keep converting instead of raising on every non-CT/PET/MR/XA series.
+        # Format names mirror BIDS conventions where they exist and fall back to
+        # the lowercased DICOM modality tag otherwise (e.g. `us`, `nm`, `sc`).
+        # For 2D modalities we also lift the DICOM ViewPosition / Laterality tags
+        # into `acq`, otherwise files that only differ by view (R-CC vs L-CC vs
+        # R-MLO vs L-MLO for MG, AP vs PA vs LAT for DX/CR) would all collapse
+        # to the same BIDS name.
+        elif modality.lower() in {"cr", "dx", "rg", "px", "io", "mg"}:
+            # 2D X-ray family: computed / digital radiography, general radiographic,
+            # panoramic, intra-oral, mammography. Kept under one `xray` bucket.
+            mri_format = "xray"
+            _apply_view_keys(keys, _get)
+            _apply_bodypart_key(keys, _get)
+        elif modality.lower() == "us":
+            mri_format = "us"  # ultrasound
+            _apply_view_keys(keys, _get)
+            _apply_bodypart_key(keys, _get)
+        elif modality.lower() == "nm":
+            mri_format = "nm"  # nuclear medicine (planar/SPECT)
+            # Radiopharmaceutical (tracer) is the useful discriminator for NM —
+            # e.g. FDG, PSMA, DOTATATE. When present, surface it as `ce`.
+            tracer = _get("Radiopharmaceutical")
+            if tracer and keys.get("ce") is None:
+                keys["ce"] = tracer
+            _apply_bodypart_key(keys, _get)
+        elif modality.lower() == "sc":
+            mri_format = "sc"  # secondary capture (screenshots, derived stills)
+            _apply_bodypart_key(keys, _get)
+        elif modality.lower() in {"op", "xc"}:
+            mri_format = "photo"  # ophthalmic / external photography
+            # Ophthalmic photos: OS = left eye, OD = right eye → same L/R signal
+            # as radiography Laterality; reuse the same helper.
+            _apply_view_keys(keys, _get)
+            _apply_bodypart_key(keys, _get)
+        elif modality.lower() == "es":
+            mri_format = "endoscopy"
+            _apply_bodypart_key(keys, _get)
+        elif modality.lower() in {"rtimage", "rtstruct", "rtdose", "rtplan"}:
+            mri_format = modality.lower()  # radiotherapy objects
+            _apply_bodypart_key(keys, _get)
+        elif modality.lower() == "ot":
+            mri_format = "ot"  # explicit "Other" modality
+            _apply_bodypart_key(keys, _get)
         else:
-            raise NotImplementedError(f"modality='{modality}', ({modalities.get(modality.upper(), 'Non Standard Modality key')})")
+            # Unknown modality — warn once and fall back to a mri_format derived
+            # from the modality tag so extraction can still complete. Callers
+            # that really need to reject unknown modalities can inspect the
+            # returned mri_format.
+            from TPTBox import Print_Logger
+
+            Print_Logger().on_warning(
+                f"extract_keys_from_json: unhandled modality={modality!r} "
+                f"({modalities.get(modality.upper(), 'Non Standard Modality key')}); "
+                "falling back to modality tag as mri_format."
+            )
+            mri_format = str(modality).lower() or "mr"
+            _apply_bodypart_key(keys, _get)
 
             # ".*sub.*t1.*": "subtraktion",
         # "subtraktion.*t1.*": "subtraktion",
