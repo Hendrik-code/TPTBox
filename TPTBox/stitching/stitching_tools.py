@@ -23,6 +23,7 @@ def stitching(
     match_histogram: bool = False,
     store_ramp: bool = False,
     ramp_path=None,
+    min_value: float | None = None,
 ) -> tuple:
     """Stitch a list of BIDS/NII volumes into a single output NIfTI file.
 
@@ -37,8 +38,18 @@ def stitching(
             :class:`BIDS_FILE` is provided, the ``"nii.gz"`` file path is used.
         is_seg: If True, treats the inputs as segmentation images (disables
             bias field and histogram matching, uses integer dtypes).
-        is_ct: If True, sets the background ``min_value`` to ``-1024`` (CT
-            air) instead of ``0`` (MRI).
+        is_ct: If True and ``min_value`` was not passed explicitly, sets the
+            background ``min_value`` to ``-1024`` (CT air).
+        min_value: Explicit background/floor for :func:`stitching_raw`.
+            ``None`` (the default, and what non-CT MR normally uses) lets the
+            stitcher only apply a hard floor when the output dtype cannot
+            represent negatives (unsigned int), so quantitative maps
+            (fat-fraction, phase, B0) keep their legitimate negatives. Pass
+            ``0`` to floor the output at 0 — the right choice for magnitude
+            MR (in/out-phase, water, fat, per-echo magnitude), where the
+            cubic-spline resample can leave small negative ringing artefacts
+            that a downstream network wasn't trained on. Overrides ``is_ct``
+            when both are given.
         verbose_stitching: If True, forwards verbose output from the low-level
             stitching routine.
         bias_field: If True, applies N4 bias-field correction to each input.
@@ -66,7 +77,7 @@ def stitching(
         match_histogram=match_histogram,
         store_ramp=store_ramp,
         verbose=verbose_stitching,
-        min_value=-1024 if is_ct else 0,
+        min_value=(min_value if min_value is not None else (-1024 if is_ct else None)),
         bias_field=bias_field,
         kick_out_fully_integrated_images=kick_out_fully_integrated_images,
         is_segmentation=is_seg,

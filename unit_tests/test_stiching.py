@@ -120,7 +120,7 @@ class TestStitchingFunction(unittest.TestCase):
             self.assertTrue(output.exists(), output)
             output.unlink(missing_ok=True)
         # Assertions
-        self.assertIsInstance(result, nib.Nifti1Image)  # Check if result is a Nifti1Image instance
+        self.assertIsInstance(result, NII)  # Check the result is a NII (post-migration return type)
         # Add more assertions based on your requirements
 
     def test_stitching2(self):

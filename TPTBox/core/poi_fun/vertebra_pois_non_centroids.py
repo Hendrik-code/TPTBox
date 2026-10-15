@@ -365,7 +365,12 @@ def compute_non_centroid_pois(  # noqa: C901
 
         log.on_text("Compute Vertebra Endplate DIRECTIONS", verbose=verbose)
         sub_regions = poi.keys_subregion()
-        if any(a.value not in sub_regions for a in endplate[:2]):  # skip if all exists
+        # Also (re)run when S1 is present in the segmentation but its Sacrum_Endplate-derived
+        # superior-endplate landmark is not in the POI yet -- otherwise the sacrum block inside
+        # calc_endplate_points_ never gets a chance to populate poi.info["angle_superior_endplate"]["S1"].
+        s1 = Vertebra_Instance.S1.value
+        sacrum_endplate_missing = s1 in _vert_ids and (s1, Location.Vertebral_Body_Endplate_Superior.value) not in poi
+        if any(a.value not in sub_regions for a in endplate[:2]) or sacrum_endplate_missing:  # skip if all exists
             poi, *_ = calc_endplate_points_(poi, vert, subreg, _vert_ids=_vert_ids, log=log)
     ### STEP 1 Vert Direction###
     if Location.Vertebra_Direction_Inferior in locations:

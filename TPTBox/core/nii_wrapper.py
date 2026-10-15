@@ -1000,7 +1000,7 @@ class NII(NII_Math):
             s = s.apply_crop(tuple(crop),inplace=inplace)
         return s.apply_pad(padding,inplace=inplace,mode=mode)
 
-    def apply_pad(self, padd: Sequence[tuple[int | None, int | None]] | int | None, mode: MODES = "constant", inplace=False, verbose: logging = True,) -> Self:
+    def apply_pad(self, padd: Sequence[tuple[int | None, int | None]] | int | None, mode: MODES = "constant", inplace=False, verbose: logging = True, c_val: float | None = None) -> Self:
         """Pads the image with explicit per-axis ``(before, after)`` amounts.
 
         The affine is updated so that the world-space origin is preserved (i.e. the
@@ -1065,7 +1065,7 @@ class NII(NII_Math):
 
         args = {}
         if mode == "constant":
-            args["constant_values"] = self.get_c_val()
+            args["constant_values"] = self.get_c_val(c_val)
 
         if mode == "nearest":
             mode = "edge"
@@ -1250,7 +1250,7 @@ class NII(NII_Math):
                 pad_after = dst_shape - shift - src_shape
                 pad = tuple((int(b), int(a)) for b, a in zip(pad_before, pad_after))
                 try:
-                    ret = s.apply_pad(pad,mode=mode,inplace=inplace,verbose=verbose)
+                    ret = s.apply_pad(pad,mode=mode,inplace=inplace,verbose=verbose,c_val=c_val)
                     valid = ret.assert_affine(mapping,raise_error=False,origin_tolerance=0.0001,error_tolerance=0.0001,shape_tolerance=0)
                     if valid:
                         log.print(f"resample_from_to only needs padding/cropping {pad}",verbose=verbose)
@@ -1264,7 +1264,7 @@ class NII(NII_Math):
         log.print(f"resample_from_to: {self} to {mapping}",verbose=verbose)
         if order is None:
             order = 0 if self.seg else 3
-        nii = _resample_from_to(self, mapping,order=order, mode=mode,align_corners=align_corners, out_dtype=out_dtype)
+        nii = _resample_from_to(self, mapping,order=order, mode=mode,align_corners=align_corners, out_dtype=out_dtype, c_val=c_val)
 
 
         if inplace:
@@ -2618,7 +2618,8 @@ class NII(NII_Math):
         to_world: bool = True,
         include_normals: bool = False,
         number_path=False,
-        _crop = True
+        _crop = True,
+        _raise_error=False
     ) -> Mesh:
         """Convert a binary segmentation label into an STL surface mesh using marching cubes.
 
@@ -2672,7 +2673,13 @@ class NII(NII_Math):
         seg = self.extract_label(label)
         # Prepare binary mask
         if _crop and to_world: # this speed up the stl generation
-            crop = seg.compute_crop(0,1)
+            try:
+                crop = seg.compute_crop(0,1)
+            except ValueError:
+                log.on_fail(f"to_stl: empty segmentation. {label=}; Nothing will be saved")
+                if _raise_error:
+                    raise
+                return None # type: ignore
             seg = seg.apply_crop(crop)
         seg_arr = np.pad(seg.clamp(0, 1).get_array(), 1)
         # Marching cubes (voxel coordinates)
@@ -2687,7 +2694,7 @@ class NII(NII_Math):
             verts += np.array([b.start for b in bb])
         # Convert to world coordinates using affine
         if to_world:
-            affine = self.affine  # (4, 4)
+            affine = seg.affine  # (4, 4)
             verts_h = np.c_[verts, np.ones(len(verts))]  # homogeneous coords
             verts = (affine @ verts_h.T).T[:, :3]
 
