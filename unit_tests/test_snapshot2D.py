@@ -8,6 +8,7 @@ covers the slab projection functions.
 
 from __future__ import annotations
 
+import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
@@ -21,6 +22,10 @@ import nibabel as nib  # noqa: E402
 import numpy as np  # noqa: E402
 
 from TPTBox import NII, Location  # noqa: E402
+
+# `create_snapshot` imports torch for a frame with `denoise_threshold` set, which the
+# mip_shot template does - so that one template needs torch even though it is optional.
+HAS_TORCH = importlib.util.find_spec("torch") is not None
 from TPTBox.spine.snapshot2D.snapshot_modular import (  # noqa: E402
     Snapshot_Frame,
     create_snapshot,
@@ -250,6 +255,7 @@ class TestSnapshotTemplates(unittest.TestCase):
             mri_snapshot(self.ct, self.vert, self.poi, self.subreg, out_path=out)
             self.assertTrue(out.exists())
 
+    @unittest.skipUnless(HAS_TORCH, "mip_shot sets denoise_threshold, which makes create_snapshot import torch")
     def test_mip_shot_template(self):
         from TPTBox.spine.snapshot2D.snapshot_templates import mip_shot  # noqa: PLC0415
 
