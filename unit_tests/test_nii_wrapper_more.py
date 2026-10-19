@@ -9,6 +9,7 @@ reference, and the reflected/in-place arithmetic operators.
 
 from __future__ import annotations
 
+import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
@@ -18,6 +19,10 @@ import numpy as np
 
 from TPTBox import NII
 from TPTBox.core.nii_poi_abstract import Grid
+
+# `numpy-stl` is a declared dependency, but guard anyway so a partially installed
+# environment skips instead of erroring (same pattern as unit_tests/test_mesh3D.py).
+HAS_STL = importlib.util.find_spec("stl") is not None
 
 
 def _nii(arr: np.ndarray, seg: bool = True, zoom=(1.0, 1.0, 1.0), origin=(0.0, 0.0, 0.0)) -> NII:
@@ -428,6 +433,7 @@ class TestMathMixin(unittest.TestCase):
                 np.testing.assert_allclose(nii.get_array(), expected)
 
 
+@unittest.skipUnless(HAS_STL, "numpy-stl not installed")
 class TestMeshExport(unittest.TestCase):
     def test_to_stl_writes_a_mesh_for_one_label(self):
         arr = np.zeros((12, 12, 12), dtype=np.uint8)

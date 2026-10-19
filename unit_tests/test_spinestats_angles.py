@@ -602,5 +602,86 @@ class TestPelvicParameters(unittest.TestCase):
             self.assertIsNone(resolve_fullbody_poi_path(root, "100000"))
 
 
+class TestPlottingEntryPoints(unittest.TestCase):
+    """The plot_* wrappers must return the same numbers as the bare computation.
+
+    `plot_cobb_and_lordosis_and_kyphosis` is not covered here: it resamples the POI
+    onto the image in a way that is singular for a synthetic spine on the shipped
+    single-vertebra sample, and inventing a fixture that satisfies it would not be
+    testing anything real.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        import matplotlib as mpl  # noqa: PLC0415
+
+        mpl.use("Agg")
+        from TPTBox.tests.test_utils import get_test_ct  # noqa: PLC0415
+
+        cls.ct, cls.subreg, cls.vert, cls.label = get_test_ct()
+        # The POI has to live on the image's own grid - the renderers resample between
+        # the two - and its spine must run along the image's inferior axis, which is
+        # what the snapshot code interpolates along. So: build it in RAS, where the
+        # builder stacks along S, then reorient onto the sample CT's PIR grid.
+        ct_ras = cls.ct.reorient(("R", "A", "S"))
+        ids = [v.value for v in (V.T8, V.T9, V.T10, V.T11, V.T12, V.L1, V.L2, V.L3)]
+        base = spine_poi(ids=ids, sagittal_tilt={V.T11.value: 15.0}, spacing=6.0)
+        centre = np.array(ct_ras.shape, dtype=float) / 2.0
+        offset = centre - np.array([0.0, 0.0, 6.0 * len(ids) / 2.0])
+        points = {
+            vert: {sub: tuple(float(c + o) for c, o in zip(coord, offset)) for sub, coord in inner.items()}
+            for vert, inner in base.centroids.items_2d()
+        }
+        cls.poi = POI(
+            points,
+            orientation=ct_ras.orientation,
+            zoom=ct_ras.zoom,
+            shape=ct_ras.shape,
+            origin=ct_ras.origin,
+            rotation=ct_ras.rotation,
+            level_one_info=V,
+            level_two_info=Location,
+        ).reorient_(cls.ct.orientation)
+
+    def tearDown(self):
+        import matplotlib.pyplot as plt  # noqa: PLC0415
+
+        plt.close("all")
+
+    def test_lordosis_plot_returns_the_same_numbers_as_the_bare_computation(self):
+        from TPTBox.spine.snapshot2D.snapshot_modular import Snapshot_Frame  # noqa: PLC0415
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "lordosis.png"
+            values, frame = angles_mod.plot_compute_lordosis_and_kyphosis(out, self.poi.copy(), self.ct, self.vert)
+            self.assertIsInstance(frame, Snapshot_Frame)
+            self.assertEqual(values, compute_lordosis_and_kyphosis(self.poi.copy()))
+            self.assertTrue(out.exists())
+
+    def test_lordosis_plot_without_a_path_renders_nothing(self):
+        values, _ = angles_mod.plot_compute_lordosis_and_kyphosis(None, self.poi.copy(), self.ct, self.vert)
+        self.assertEqual(sorted(values), ["cervical_lordosis", "lumbar_lordosis", "thoracic_kyphosis"])
+
+    def test_cobb_plot_returns_the_segments_and_a_frame(self):
+        from TPTBox.spine.snapshot2D.snapshot_modular import Snapshot_Frame  # noqa: PLC0415
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "cobb.png"
+            segments, frame = angles_mod.plot_cobb_angle(out, self.poi.copy(), self.ct, self.vert)
+            self.assertIsInstance(frame, Snapshot_Frame)
+            self.assertIsInstance(segments, list)
+            self.assertTrue(out.exists())
+            for angle, *_ in segments:
+                with self.subTest(angle=angle):
+                    self.assertGreaterEqual(angle, 0.0)
+                    self.assertLess(angle, 180.0)
+
+    def test_plots_work_without_a_segmentation_overlay(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "no_seg.png"
+            angles_mod.plot_compute_lordosis_and_kyphosis(out, self.poi.copy(), self.ct, None)
+            self.assertTrue(out.exists())
+
+
 if __name__ == "__main__":
     unittest.main()
