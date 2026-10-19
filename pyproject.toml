@@ -26,6 +26,11 @@ scikit-learn = "*"
 pynrrd = "*"
 requests = "*"
 trimesh = "*"
+# trimesh's ray engine does its broad phase through rtree, which trimesh itself only
+# declares under its `easy` extra. Without it every mesh ray cast raises
+# ModuleNotFoundError, which takes out spine.spinestats.measure_ivd_and_vertebra_geometry
+# and spinestats.poi_fun.endplates.
+rtree = "*"
 numpy-stl = "*"
 
 # --- OLD STACK (Python < 3.11)
