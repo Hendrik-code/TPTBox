@@ -337,9 +337,12 @@ class TestBidsFilePaths(_DatasetTestCase):
         self.assertEqual(dict(ct.loop_keys()), ct.info)
         self.assertTrue(ct.exists())
 
+    def _rel(self, path) -> str:
+        return Path(path).relative_to(self.ds).as_posix()
+
     def test_get_changed_path_variants(self):
         ct = self.ct_file()
-        rel = lambda p: str(Path(p).relative_to(self.ds))  # noqa: E731
+        rel = self._rel
         cases = {
             rel(ct.get_changed_path()): "derivatives/sub-001/ses-20210101/sub-001_ses-20210101_sequ-301_ct.nii.gz",
             rel(ct.get_changed_path(bids_format="msk", info={"seg": "subreg"})): (
