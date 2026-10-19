@@ -177,20 +177,27 @@ def measure_ivd_and_vertebra_geometry(
     )
     if instance_labels is None:
         instance_labels = [int(i) for i in vert.unique() if i > structure_label and i < structure_label + 100]
+
+    # Precompute the spinal-canal reference signal once (was recomputed for every label).
+    if t2w is not None:
+        t2w_arr, spinal_canal_signal, spinal_canal_signal_old = _compute_spinal_canal_reference(t2w, vert, spine, erode=erode)
+    else:
+        t2w_arr = None
+        spinal_canal_signal = np.nan
+        spinal_canal_signal_old = np.nan
+
     for label in instance_labels:
         if label == 26:
             continue
         try:
             raw = {}
-            # Isolate the current structure (disc or vertebra).
-            structure_mask = vert.extract_label(label)
             # 1. volume, central height, mean diameter
             info, raw = _compute_basic_geometry(vert, poi, label, step_size_mm=2, raw=raw, structure_label=structure_label)
             # 2. x1-x6 directional heights/widths
-            raw = _compute_directional_heights_widths(vert, structure_mask * spine, poi, label, step_size_mm=step_size_mm, raw=raw)
+            raw = _compute_directional_heights_widths(vert, poi, label, step_size_mm=step_size_mm, raw=raw)
             # 3. normalized T2 signal
-            if t2w is not None:
-                raw = _compute_t2_signal_ratio(t2w, vert, spine, label, raw=raw, erode=erode)
+            if t2w_arr is not None:
+                raw = _compute_t2_signal_ratio(t2w_arr, vert, label, spinal_canal_signal, spinal_canal_signal_old, raw=raw, erode=erode)
             results[label] = _result_from_info(info)
         except Exception as e:
             results[label] = _nan_result(error=str(e))
@@ -440,6 +447,50 @@ def _swap(a, b):
     return b, a
 
 
+def _batched_ray_segments(mesh: trimesh.Trimesh, ray_direction: np.ndarray, origins: np.ndarray):
+    """Cast a batch of parallel rays through ``mesh`` and return per-ray segment lengths and endpoints.
+
+    trimesh's ``intersects_location`` accepts arrays of origins/directions and processes them in one
+    C call, which is dramatically faster than looping in Python. Rays that miss return length 0 and
+    zero-vector endpoints. Endpoints are the first and last locations trimesh returns for each ray
+    (matches the single-ray behaviour of :func:`_segment_length`).
+    """
+    n = origins.shape[0]
+    directions = np.broadcast_to(ray_direction, (n, 3))
+    locations, index_ray, _ = mesh.ray.intersects_location(ray_origins=origins, ray_directions=directions, multiple_hits=True)
+    lengths = np.zeros(n)
+    first_pts = np.zeros((n, 3))
+    last_pts = np.zeros((n, 3))
+    if len(index_ray) == 0:
+        return lengths, first_pts, last_pts
+    order = np.argsort(index_ray, kind="stable")
+    idx_sorted = index_ray[order]
+    loc_sorted = locations[order]
+    change = np.empty(len(idx_sorted), dtype=bool)
+    change[0] = True
+    change[1:] = idx_sorted[1:] != idx_sorted[:-1]
+    first_pos = np.flatnonzero(change)
+    last_pos = np.empty_like(first_pos)
+    last_pos[:-1] = first_pos[1:] - 1
+    last_pos[-1] = len(idx_sorted) - 1
+    ray_ids = idx_sorted[first_pos]
+    first_pts[ray_ids] = loc_sorted[first_pos]
+    last_pts[ray_ids] = loc_sorted[last_pos]
+    lengths[ray_ids] = np.linalg.norm(first_pts[ray_ids] - last_pts[ray_ids], axis=1)
+    return lengths, first_pts, last_pts
+
+
+def _grid_origins(
+    base: np.ndarray, v1: np.ndarray, v2: np.ndarray, xs: np.ndarray, ys: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return (origins, flat_x, flat_y) for a 2D grid of ray origins in the (v1, v2) plane."""
+    grid_x, grid_y = np.meshgrid(xs, ys, indexing="ij")
+    flat_x = grid_x.ravel()
+    flat_y = grid_y.ravel()
+    origins = base[None, :] + flat_x[:, None] * v1[None, :] + flat_y[:, None] * v2[None, :]
+    return origins, flat_x, flat_y
+
+
 # ---------------------------------------------------------------------------
 # Mesh + orientation extraction (shared between IVD and vertebra mode)
 # ---------------------------------------------------------------------------
@@ -469,8 +520,19 @@ def _get_mesh_and_directions(nii: NII, poi: POI | None, label: int, raw: dict, r
         (surface mesh, (up, dir_1, dir_2) direction vectors, binary segmentation)
     """
     voxel_size = nii.zoom
-    nii = nii.apply_crop(nii.compute_crop(dist=1))
-    segmentation = nii.extract_label(label)
+    # Whole-spine crop (kept as-is): tightening to the label's own bbox changes the array shape
+    # passed to marching_cubes, which changes the vertex/face emission order. trimesh's ray
+    # backend uses that order to return intersection locations, and _segment_length picks
+    # ``locs[0]`` and ``locs[-1]`` -- so a different order silently changes x1-x6 for
+    # non-convex intersections (mostly vertebrae). Reuse the crop across labels via ``raw``.
+    nii_cropped = raw.get("nii_cropped")
+    if nii_cropped is None:
+        nii_cropped = nii.apply_crop(nii.compute_crop(dist=1))
+        raw["nii_cropped"] = nii_cropped
+    segmentation = raw.get("label_mask")
+    if segmentation is None:
+        segmentation = nii_cropped.extract_label(label)
+        raw["label_mask"] = segmentation
     arr = segmentation.get_array()
 
     if label < 100:
@@ -483,13 +545,11 @@ def _get_mesh_and_directions(nii: NII, poi: POI | None, label: int, raw: dict, r
         post /= norm(post)
         right /= norm(right)
         if label == 2:
-            up = _pca_principal_axes(arr, voxel_size, up_axis=nii.get_axis("S"))[0]
+            up = _pca_principal_axes(arr, voxel_size, up_axis=nii_cropped.get_axis("S"))[0]
         direction_vectors = (up, post, right)
     else:
-        up_axis = nii.get_axis("S") if label < 100 else -1
-        direction_vectors = (
-            raw["direction_vectors"] if "direction_vectors" in raw else _pca_principal_axes(arr, voxel_size, up_axis=up_axis)
-        )
+        cached = raw.get("direction_vectors")
+        direction_vectors = cached if cached is not None else _pca_principal_axes(arr, voxel_size, up_axis=-1)
 
     mesh = raw["mesh"] if "mesh" in raw and not recompute_mesh else _segmentation_to_surface_mesh(arr, voxel_size)
     raw["mesh"] = mesh
@@ -575,18 +635,17 @@ def _compute_basic_geometry(
     # ------------------------------------------------------------------
     if "list_heights" not in raw or len(raw["list_heights"]) == 0:
         mesh, direction_vectors, _ = _get_mesh_and_directions(nii, poi, label, raw)
-
+        up_vector, v1, v2 = direction_vectors
         search_radius = int(info.mean_diameter)
-        sampled_heights = []
-
-        for x in range(-search_radius, search_radius, step_size_mm):
-            for y in range(-search_radius, search_radius, step_size_mm):
-                intersections = _intersect_ray_from_dirs(direction_vectors, mesh, x, y)
-                height = _segment_length(intersections)
-                if height > 0:
-                    sampled_heights.append(height)
-
-        raw["list_heights"] = sampled_heights
+        if search_radius > 0:
+            xs = np.arange(-search_radius, search_radius, step_size_mm)
+            ys = np.arange(-search_radius, search_radius, step_size_mm)
+            base = mesh.center_mass - up_vector * 1000
+            origins, _, _ = _grid_origins(base, v1, v2, xs, ys)
+            lengths, _, _ = _batched_ray_segments(mesh, up_vector, origins)
+            raw["list_heights"] = lengths[lengths > 0].tolist()
+        else:
+            raw["list_heights"] = []
 
     info._update_height_statistics(raw["list_heights"])
 
@@ -600,17 +659,15 @@ def _local_max_height(mesh, direction_vectors, around_point, search_diameter, st
     mesh edge and under-measure; sampling a small patch around the point
     and taking the max is more robust.
     """
-    sampled_heights = []
+    up_vector, v1, v2 = direction_vectors
     d = int(search_diameter / step_size_mm)
-    for xi in range(-d, d):
-        x = xi * step_size_mm
-        for yi in range(-d, d):
-            y = yi * step_size_mm
-            intersections = _intersect_ray_from_dirs(direction_vectors, mesh, x, y, around_point)
-            height = _segment_length(intersections)
-            if height != 0:
-                sampled_heights.append(height)
-    return np.max(sampled_heights)
+    xs = np.arange(-d, d) * step_size_mm
+    ys = np.arange(-d, d) * step_size_mm
+    base = np.asarray(around_point) - up_vector * 1000
+    origins, _, _ = _grid_origins(base, v1, v2, xs, ys)
+    lengths, _, _ = _batched_ray_segments(mesh, up_vector, origins)
+    lengths = lengths[lengths > 0]
+    return float(np.max(lengths))
 
 
 def _max_diameter_in_plane(ray_vector, v1, v2, mesh, diameter: float = 30, step_size_mm: float = 2.0):
@@ -629,25 +686,18 @@ def _max_diameter_in_plane(ray_vector, v1, v2, mesh, diameter: float = 30, step_
         (max_width, point_1, point_2, grid_x, grid_y) for the widest ray found.
     """
     d = ceil(diameter / step_size_mm)
-    best_width = 0
-    out = (0.0, None, None, 0.0, 0.0)
-    for xi in range(-d, d):
-        x = xi * step_size_mm
-        for yi in range(-d, d):
-            y = yi * step_size_mm
-            intersections = _intersect_ray(ray_vector, v1, v2, mesh, x, y)
-            width = _segment_length(intersections)
-            if width == 0:
-                continue
-            p1 = intersections[0]
-            p2 = intersections[-1]
-            if best_width < width:
-                best_width = width
-                out = (width, p1.round(2), p2.round(2), x, y)
-    return out
+    xs = np.arange(-d, d) * step_size_mm
+    ys = np.arange(-d, d) * step_size_mm
+    base = mesh.center_mass - ray_vector * 1000
+    origins, flat_x, flat_y = _grid_origins(base, v1, v2, xs, ys)
+    lengths, first_pts, last_pts = _batched_ray_segments(mesh, ray_vector, origins)
+    if lengths.size == 0 or lengths.max() == 0:
+        return 0.0, None, None, 0.0, 0.0
+    k = int(np.argmax(lengths))
+    return float(lengths[k]), first_pts[k].round(2), last_pts[k].round(2), float(flat_x[k]), float(flat_y[k])
 
 
-def _compute_directional_heights_widths(nii: NII, subreg: NII, poi, label: int = 123, step_size_mm: float = 0.5, raw: dict | None = None):  # noqa: ARG001
+def _compute_directional_heights_widths(nii: NII, poi, label: int = 123, step_size_mm: float = 0.5, raw: dict | None = None):
     """Compute the x1-x6 directional heights and widths for one structure (stage 2).
 
     How it's computed
@@ -675,7 +725,8 @@ def _compute_directional_heights_widths(nii: NII, subreg: NII, poi, label: int =
     if info.x_values:
         return raw
     try:
-        mesh, direction_vectors, _ = _get_mesh_and_directions(nii, poi, label, raw, recompute_mesh=True)
+        # Reuse the mesh built in stage 1 (previously rebuilt here for no reason).
+        mesh, direction_vectors, _ = _get_mesh_and_directions(nii, poi, label, raw)
         up = direction_vectors[0]
         center = np.asarray(poi[label % 100, Location.Vertebra_Corpus], dtype=float)
 
@@ -724,13 +775,43 @@ def _compute_directional_heights_widths(nii: NII, subreg: NII, poi, label: int =
     return raw
 
 
-def _compute_t2_signal_ratio(
+def _compute_spinal_canal_reference(
     t2w_nii: NII,
     nii: NII,
     subregs: NII,
-    label: int = 123,
+    erode: int = 1,
+    spinal_bins: int = 64,
+    spinal_peak_frac_height: float = 0.5,
+) -> tuple[np.ndarray, float, float]:
+    """Prepare the shared T2 array and spinal-canal reference signals once per subject.
+
+    The spinal canal (subregion 61) is the same for every structure, so
+    eroding it and reducing its intensity to a scalar used to be repeated
+    for every label; now it is done once and reused.
+
+    Returns:
+    -------
+    tuple[np.ndarray, float, float]
+        (t2w_array, spinal_canal_signal_peak, spinal_canal_signal_mean)
+    """
+    if t2w_nii.shape != nii.shape:
+        t2w_nii.resample_from_to_(nii, verbose=False)
+    spinal_mask = subregs.extract_label(61).erode_msk(erode, connectivity=1, verbose=False)
+    t2w_arr = t2w_nii.get_array()
+    spinal_vals = t2w_arr[spinal_mask.get_array().astype(bool)]
+    spinal_canal_signal_old = float(np.mean(spinal_vals)) if spinal_vals.size > 0 else np.nan
+    spinal_canal_signal = peak_centered_mean(spinal_vals, bins=spinal_bins, peak_frac_height=spinal_peak_frac_height)
+    return t2w_arr, spinal_canal_signal, spinal_canal_signal_old
+
+
+def _compute_t2_signal_ratio(
+    t2w_arr: np.ndarray,
+    nii: NII,
+    label: int,
+    spinal_canal_signal: float,
+    spinal_canal_signal_old: float,
     raw: dict | None = None,
-    erode=1,
+    erode: int = 1,
     spinal_bins: int = 64,
     spinal_peak_frac_height: float = 0.5,
 ):
@@ -739,9 +820,9 @@ def _compute_t2_signal_ratio(
     How it's computed
     ------------------
     The mean T2 intensity inside the (slightly eroded, to avoid partial-volume
-    edge voxels) structure mask is divided by the mean T2 intensity in the
-    spinal canal (subregion label 61, also eroded). The spinal canal is used
-    as an internal reference to normalize away scanner/sequence-dependent
+    edge voxels) structure mask is divided by the precomputed mean T2 intensity
+    in the spinal canal (subregion label 61, also eroded). The spinal canal is
+    used as an internal reference to normalize away scanner/sequence-dependent
     intensity scaling.
 
     The spinal canal segmentation may contain darker structures such as
@@ -765,22 +846,13 @@ def _compute_t2_signal_ratio(
     info: _StructureMeasurements = raw["info"]
     if info.signal_values:
         return raw
-    if t2w_nii.shape != nii.shape:
-        t2w_nii.resample_from_to_(nii, verbose=False)
     structure_mask = nii.extract_label(label)
     eroded_mask = structure_mask.erode_msk(erode, connectivity=1, verbose=False)
     structure_mask = eroded_mask if eroded_mask.sum() != 0 else structure_mask
-    spinal_mask = subregs.extract_label(61).erode_msk(erode, connectivity=1, verbose=False)
-
-    t2w_arr = t2w_nii.get_array()
     structure_vals = t2w_arr[structure_mask.get_array().astype(bool)]
-    spinal_vals = t2w_arr[spinal_mask.get_array().astype(bool)]
 
     structure_signal_old = float(np.mean(structure_vals)) if structure_vals.size > 0 else np.nan
-    spinal_canal_signal_old = float(np.mean(spinal_vals)) if spinal_vals.size > 0 else np.nan
-
     structure_signal = peak_centered_mean(structure_vals, bins=spinal_bins, peak_frac_height=spinal_peak_frac_height)
-    spinal_canal_signal = peak_centered_mean(spinal_vals, bins=spinal_bins, peak_frac_height=spinal_peak_frac_height)
 
     info.signal = structure_signal / spinal_canal_signal
     info.structure_signal = structure_signal
