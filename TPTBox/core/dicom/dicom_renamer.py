@@ -487,6 +487,7 @@ def _leftover_move_plan(
     scan_root: Path,
     subject_map: dict[str, str],
     parent: str | None,
+    already_planned: set[Path] | None = None,
 ) -> list[tuple[Path, Path]]:
     """Compute (src, dst) moves for files left behind after the JSON pass.
 
@@ -498,6 +499,11 @@ def _leftover_move_plan(
     (matched by ``sequ-<N>``) so BIDS stem-linkage stays intact. Files that
     can't be twinned drop at the session level of the new subject folder as
     a safe fallback.
+
+    ``already_planned`` holds the sources Pass 1 has lined up. In a real run those
+    files are gone from disk by the time this runs, but under ``dry_run`` they are
+    all still there, and without this filter every one of them would be reported a
+    second time with the fallback destination.
     """
     del parent  # kept for signature symmetry; scan_root already resolves it
     moves: list[tuple[Path, Path]] = []
@@ -570,6 +576,8 @@ def _leftover_move_plan(
                 new_name = src.name.replace(f"sub-{old_sub}", f"sub-{new_sub}", 1)
                 dst = new_dir / rel.parent / new_name
             if src == dst or dst.exists():
+                continue
+            if already_planned and src in already_planned:
                 continue
             moves.append((src, dst))
     return moves
@@ -688,7 +696,7 @@ def rerun_bids_naming(
     # Pass 2 — sweep orphan companions (.bval / .bvec / _ADC.nii.gz / other
     # non-sidecar files) that Pass 1 didn't see because their JSON already
     # moved on a previous run or they never had one.
-    leftover = _leftover_move_plan(scan_root, subject_map, parent_norm)
+    leftover = _leftover_move_plan(scan_root, subject_map, parent_norm, already_planned={src for src, _ in all_moves})
     for src, dst in leftover:
         if verbose:
             logger.on_neutral(f"{'[dry]' if dry_run else '[lft]'} {src.relative_to(dataset_root)}  ->  {dst.relative_to(dataset_root)}")
