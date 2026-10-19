@@ -298,8 +298,61 @@ exclude_lines = [
     "if TYPE_CHECKING: ",
     "raise "
 ]
+# Curated: every entry here is code a unit test cannot legitimately reach. Anything
+# that is merely awkward to test is NOT listed - it gets a test instead. The PR that
+# introduced this list reports the coverage number both with and without it.
 omit = [
+    # Hand-run micro-benchmarks. The filenames do not match pytest's `test_*.py`, so
+    # they are measured but never executed.
     "TPTBox/tests/speedtests/*",
+
+    # --- Vendored nnU-Net inference internals -------------------------------------
+    # Carried from upstream nnU-Net with no TPTBox-specific logic; reachable only with
+    # real weights on a GPU. TPTBox's own entry point around them,
+    # nnUnet_utils/inference_api.py, is deliberately NOT omitted and is tested with a
+    # mock at the model boundary.
+    "TPTBox/segmentation/nnUnet_utils/predictor.py",
+    "TPTBox/segmentation/nnUnet_utils/plans_handler.py",
+    "TPTBox/segmentation/nnUnet_utils/export_prediction.py",
+    "TPTBox/segmentation/nnUnet_utils/default_preprocessor.py",
+    "TPTBox/segmentation/nnUnet_utils/data_iterators.py",
+    "TPTBox/segmentation/nnUnet_utils/get_network_from_plans.py",
+    "TPTBox/segmentation/nnUnet_utils/sliding_window_prediction.py",
+    # GPU memory probing: shells out to nvidia-smi in a measurement loop.
+    "TPTBox/segmentation/nnUnet_utils/estimate_nnunet_memory.py",
+
+    # --- nnU-Net training drivers --------------------------------------------------
+    # Need a populated nnUNet_raw / nnUNet_preprocessed tree and a GPU.
+    "TPTBox/core/internal/train_nnUnet/*",
+
+    # --- Permanently unimportable --------------------------------------------------
+    # Both import `nipy`, which is not a declared dependency of this package (or
+    # installable on current Python). test_docs_examples.py already special-cases
+    # script_ax2sag for the same reason.
+    "TPTBox/registration/script_ax2sag.py",
+    "TPTBox/registration/_ridged_intensity/register.py",
+
+    # --- Dead vendored deepali optimisation engine ---------------------------------
+    # An adapted copy of deepali's own registration engine. It imports `yaml`, which is
+    # not declared either, and nothing in the public API reaches it: the package is
+    # referenced only by deformable_reg_old.py and grid_search.py, which are themselves
+    # unreferenced. Candidate for deletion rather than coverage.
+    "TPTBox/registration/_deformable/_deepali/*",
+    "TPTBox/registration/_deformable/deformable_reg_old.py",
+    "TPTBox/registration/_deformable/grid_search.py",
+    "TPTBox/registration/_deformable/_grid_search_vert.py",
+
+    # --- NAKO dataset pipelines ----------------------------------------------------
+    # Interactive input() prompts, hard-coded /DATA/NAS dataset roots, process pools
+    # over a private dataset, and pandas/Excel reporting over a finished run.
+    "TPTBox/spine/spinestats/_load_nako_wh.py",
+    "TPTBox/spine/spinestats/_load_nako.py",
+    "TPTBox/spine/spinestats/_run_all.py",
+    "TPTBox/spine/spinestats/_qc_report.py",
+
+    # --- One-off repair script -----------------------------------------------------
+    # Walks a real dataset and rewrites pickles in place.
+    "TPTBox/core/dicom/fix_brocken.py",
 ]
 [tool.ruff.format]
 # Like Black, use double quotes for strings.

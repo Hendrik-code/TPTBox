@@ -51,3 +51,53 @@ jobs:
       uses: codecov/codecov-action@v4
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
+        flags: light
+
+  build-full-coverage:
+    # The matrix above installs only the dev group, so every module behind torch /
+    # nnunetv2 / hf-deepali is a hard zero there however well it is tested. This job
+    # installs those on CPU so that coverage actually reaches Codecov. One job, one
+    # python version - the matrix stays the fast compatibility gate.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+        cache: "pip"
+    - name: Configure python
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install poetry
+    - name: Install system deps for CPU-only mesh3D tests
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y xvfb libgl1
+    - name: Install dependencies
+      run: |
+        python -m poetry install --with dev
+    - name: Install heavy optional deps (CPU only)
+      # The default torch wheel pulls ~2.5 GB of CUDA libraries that this job cannot
+      # use. `hf-deepali` is the correct distribution name - a bare `deepali` on PyPI
+      # is an unrelated project. `spineps` is deliberately absent: it depends on
+      # TPTBox itself, so installing it would pin a *released* TPTBox over this
+      # checkout. The tests that touch it fake the module instead.
+      run: |
+        python -m poetry run pip install torch --index-url https://download.pytorch.org/whl/cpu
+        python -m poetry run pip install antspyx nnunetv2 acvl-utils batchgenerators hf-deepali
+    - name: Test with pytest and create coverage report
+      run: |
+        python -m poetry run coverage run --source=TPTBox -m pytest unit_tests/ TPTBox/tests/
+        python -m poetry run coverage xml
+        echo "--- with the curated omit list (the reported number) ---"
+        python -m poetry run coverage report
+        echo "--- without it, for comparison ---"
+        python -m poetry run coverage report --omit="TPTBox/__no_such_path__/*"
+    - name: Upload coverage results to Codecov (Only on merge to main)
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      uses: codecov/codecov-action@v4
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        flags: full

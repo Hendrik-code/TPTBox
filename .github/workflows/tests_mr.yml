@@ -43,3 +43,30 @@ jobs:
     - name: Test with pytest
       run: |
         python -m poetry run pytest
+
+  heavy-deps:
+    # Same heavy-dependency set as the coverage job on main, so a PR that breaks a
+    # mocked torch / deepali test fails here instead of after the merge. No coverage
+    # upload - this is only a gate.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+        cache: "pip"
+    - name: Install system deps for CPU-only mesh3D tests
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y xvfb libgl1
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install poetry
+        python -m poetry install --with dev
+        python -m poetry run pip install torch --index-url https://download.pytorch.org/whl/cpu
+        python -m poetry run pip install antspyx nnunetv2 acvl-utils batchgenerators hf-deepali
+    - name: Test with pytest
+      run: |
+        python -m poetry run pytest unit_tests/
