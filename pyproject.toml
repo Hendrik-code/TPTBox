@@ -290,7 +290,7 @@ exclude_lines = [
     "raise "
 ]
 omit = [
-    "TPTBox/test/speedtest/*",
+    "TPTBox/tests/speedtests/*",
 ]
 [tool.ruff.format]
 # Like Black, use double quotes for strings.

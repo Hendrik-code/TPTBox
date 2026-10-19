@@ -51,13 +51,13 @@ Design notes
 
 from __future__ import annotations
 
-from itertools import pairwise
 from typing import Any
 
 import numpy as np
 from numpy.linalg import norm
 
 from TPTBox import POI, Location, Vertebra_Instance
+from TPTBox.core.compat import pairwise
 from TPTBox.spine.spinestats.angles import Def_Curvature, MoveTo
 
 # ---------------------------------------------------------------------------

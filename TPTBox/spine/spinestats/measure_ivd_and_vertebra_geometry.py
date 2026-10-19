@@ -439,7 +439,7 @@ def _segment_length(intersection_points) -> float:
     """
     if len(intersection_points) == 0:
         return 0
-    return np.sqrt(sum((a - b) ** 2 for a, b in zip(intersection_points[0], intersection_points[-1], strict=False)))
+    return np.sqrt(sum((a - b) ** 2 for a, b in zip(intersection_points[0], intersection_points[-1])))
 
 
 def _swap(a, b):

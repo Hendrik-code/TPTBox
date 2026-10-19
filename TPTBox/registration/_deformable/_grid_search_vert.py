@@ -132,7 +132,7 @@ if __name__ == "__main__":
     # Crop to speed up and decreas gpu memory consumption.
     c0 = femur_0_.compute_crop(dist=10)
     c1 = femur_1_reg.compute_crop(dist=10)
-    ex_slice = [slice(min(a.start, b.start), max(a.stop, b.stop)) for a, b in zip(c1, c0, strict=False)]
+    ex_slice = [slice(min(a.start, b.start), max(a.stop, b.stop)) for a, b in zip(c1, c0)]
     femur_0 = femur_0_.apply_crop(ex_slice)
     femur_1_reg.apply_crop_(ex_slice)
 
