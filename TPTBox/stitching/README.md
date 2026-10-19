@@ -8,8 +8,8 @@ You can verify alignment by opening the images in ITKSnap with "open additional 
 
 | Function | Description |
 |---|---|
-| `stitching(nii_list, out, ...)` | Stitch a list of `NII` objects; returns `(result_nii, ramp_nii)` |
-| `stitching_raw(paths, out, ...)` | Stitch from file paths directly |
+| `stitching(inputs, out, ...)` | High-level wrapper. `inputs` accepts any mix of `BIDS_FILE`, `NII`, `str`, or `Path`. Resolves the output path from a `BIDS_FILE` when one is passed. Returns `(result_nii, ramp_nii)` as `NII` objects. |
+| `stitching_raw(images, out, ...)` | Low-level driver. `images` accepts file paths, pre-loaded `NII` objects, or (fallback) `Nifti1Image` objects. Returns `(result_nii, ramp_nii)` as `NII` objects. |
 | `NAKO_stitch_T2w(HWS, BWS, LWS, n4_after_stitch=False)` | Stitch the three NAKO sagittal T2w spine stations (HWS cervical, BWS thoracic, LWS lumbar) into one volume |
 
 ![Example of a stitching](https://raw.githubusercontent.com/Hendrik-code/TPTBox/main/TPTBox/stitching/stitching.jpg "Example of a stitching")
@@ -24,7 +24,7 @@ stitching.py
 [-i IMAGES [IMAGES ...]] a list of input image paths
 [-o OUTPUT] The output image path
 [-v] verbose - if set, there will be more printouts.
-[-min_value MIN_VALUE] New pixels not present will get this value. Recommended 0 for MRI and for CT -1024 or the known min-value.
+[-min_value MIN_VALUE] Background fill used when resampling each chunk, and — when set explicitly — a hard floor applied to the stitched output. Pass 0 for MRI magnitude, -1024 for CT. Omitting it (the Python-API default `None`) uses 0 as the internal background and only applies a hard floor when the output dtype cannot represent negatives (unsigned integer types) — signed / float outputs then keep legitimate negatives (Philips-scaled fat-fraction, phase, B0 offsets).
 [-seg] This flag is required if you merge segmentation Niftis.
 Switches:
 [-no_bias] If set: Do not use n4_bias_field_correction. It speeds up the process, but n4_bias_field_correction helps in roughly aligning the histogram.
@@ -67,14 +67,15 @@ list_of_files = [
 # Call the stitching function
 # This will combine your images into a single NIfTI file
 stitching(
-    list_of_files,  # List of input files
-    out="out_path_stitched_image.nii.gz",  # Path to save stitched output
-    is_seg=False,  # Set True if these are segmentation masks
-    is_ct=False,  # True for CT, min_value will by -1024 instead of 0
+    list_of_files,  # BIDS_FILE / NII / str / Path (any mix)
+    out="out_path_stitched_image.nii.gz",  # Path or BIDS_FILE for the stitched output
+    is_seg=False,  # Set True for segmentation masks (forces integer dtype, nearest-neighbour resample)
+    is_ct=False,  # Sets min_value to -1024 (CT air) when min_value is not passed explicitly
     kick_out_fully_integrated_images=True,
-    dtype=float,  # Data type of the output image
+    dtype=float,  # Output dtype; "auto" picks the smallest lossless type from the inputs (float32 when any input has a non-trivial scl_slope/inter)
     match_histogram=False,  # Match intensity histograms across images
     store_ramp=False,  # Store blending ramp (optional)
+    min_value=None,  # Explicit background/floor. None (default) = clip only when the output dtype is unsigned integer (protects against negative-to-huge wraparound) and let signed / float outputs keep legitimate negatives. Pass 0 to floor magnitude MR at 0 so cubic-spline resample ringing doesn't leak small negatives into what should be a non-negative volume; pass -1024 for CT.
 )
 ```
 

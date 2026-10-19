@@ -267,13 +267,6 @@ def run_inference_on_file(
         if "memory_factor" not in ds_info:
             missing_mem_keys.append("memory_factor")
         memory_factor = float(ds_info.get("memory_factor", 160))
-    if missing_mem_keys:
-        _suggest_memory_estimation_script(
-            idx,
-            model_path,
-            f"Memory parameter(s) {missing_mem_keys} not set in the model's dataset.json; falling back to defaults. {memory_base=}, {memory_factor=}",
-            logger=logger,
-        )
 
     use_folds_arg = tuple(folds) if len(folds) != 5 else None
     # Include every setting that changes the loaded predictor so a cache hit is always equivalent
@@ -362,11 +355,43 @@ def run_inference_on_file(
     if padd != 0:
         p = (padd, padd)
         input_nii = [i.apply_pad([p, p, p], mode="reflect") for i in input_nii]
+
+    def _defaults_fit_gpu(memory: float, gpu: int | None, safety_factor: float = 2.0) -> bool:
+        """Whether the fallback ``memory_base`` reservation is a small fraction of GPU memory.
+
+        Returns ``True`` when ``memory_base * safety_factor <= total_gpu_memory_mb`` —
+        i.e. the fallback reservation leaves ample headroom for tile scheduling and
+        the missing ``memory_base``/``memory_factor`` defaults are safe to use
+        without warning. Returns ``False`` on CUDA-unavailable systems or when GPU
+        memory can't be probed, so the load-time warning still fires on
+        memory-constrained setups (CPU-only, small GPUs, or driver errors).
+        """
+        try:
+            import torch
+
+            if not torch.cuda.is_available():
+                return False
+            device = torch.device(f"cuda:{gpu}") if gpu is not None else torch.device("cuda:0")
+            _, total_bytes = torch.cuda.mem_get_info(device)
+            total_mb = total_bytes / (1024**2)
+        except Exception:  # noqa: BLE001
+            return False
+        return memory * safety_factor <= total_mb
+
+    num_classes = int(nnunet.label_manager.num_segmentation_heads)
+    est_full_mb = estimate_peak_ram_mb(input_nii[0].shape, num_classes, len(input_nii))
+    # Only warn if memory requirement is non-trivial.
+    if missing_mem_keys and not _defaults_fit_gpu(est_full_mb, gpu):
+        _suggest_memory_estimation_script(
+            idx,
+            model_path,
+            f"Memory parameter(s) {missing_mem_keys} not set in the model's dataset.json; falling back to defaults. {memory_base=}, {memory_factor=}",
+            logger=logger,
+        )
+
     if _cpu_chunks is None or _cpu_chunks <= 1:
-        num_classes = int(nnunet.label_manager.num_segmentation_heads)
         total_ram_mb = _get_total_ram_mb()
         target_ram_mb = total_ram_mb * 0.5
-        est_full_mb = estimate_peak_ram_mb(input_nii[0].shape, num_classes, len(input_nii))
         if est_full_mb > target_ram_mb:
             shape = input_nii[0].shape
             split_axis = int(np.argmax(shape))

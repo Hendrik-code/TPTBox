@@ -205,6 +205,7 @@ def _resample_from_to(
     mode: MODES = "nearest",
     align_corners: bool | Sentinel = Sentinel(),  # noqa: B008
     out_dtype: np.dtype | type | str | None = None,
+    c_val: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray, object]:
     """Resample *from_img* into the voxel space defined by *to_img*.
 
@@ -323,7 +324,7 @@ def _resample_from_to(
         to_shape,
         order=order,
         mode=mode,
-        cval=from_img.get_c_val(),
+        cval=from_img.get_c_val(c_val),
         output=scipy_out,
     )
     if post_cast is not None:
