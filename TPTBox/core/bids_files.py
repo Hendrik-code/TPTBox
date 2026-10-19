@@ -336,10 +336,10 @@ class BIDS_Global_info:
             datasets (typing.List[str]): List of dataset paths
             parents (typing.List[str]): List of parents (like ["rawdata","sourcedata","derivatives"])
             additional_key (list, optional): Additional keys that are not in the default BIDS but should not raise a warning. Defaults to ["sequ", "seg", "ovl"].
-            filter_folder: Filter function, input is the path of the folder and the level of the folder structure. Return True if we should continue searching.
-                        Level 1 is the first folder inside <dataset>/<parent>, i.e. the subject folder; level 2 is the session folder.
-                        Example:
-                        filter_folder = lambda p, lvl: True if (lvl != 1 or p.name in ["sub-123","sub-456"]) else False
+            filter_folder: Filter function, input is the path of the folder and the level of the folder structure.
+                Return True if we should continue searching. Level 1 is the first folder inside
+                ``<dataset>/<parent>``, i.e. the subject folder; level 2 is the session folder.
+                Example: ``filter_folder = lambda p, lvl: lvl != 1 or p.name in ["sub-123", "sub-456"]``
         """
         self.count_file = 0
         self._p_counter = 0
