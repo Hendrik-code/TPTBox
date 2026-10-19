@@ -91,6 +91,10 @@ pre-commit = "*"
 pyvista = "^0.43.2"
 coverage = ">=7.0.1"
 pytest-mock = "^3.6.0"
+# The `dicom` extra, in the dev group so unit_tests/test_dicom.py and
+# test_dicom_renamer.py run in every CI job instead of only where the extra is installed.
+pydicom = "*"
+dicom2nifti = "*"
 networkx = "*"  # optional: np_split_connected_component(method="mincut")
 exceptiongroup = { version = "^1.2", python = "<3.11" }
 tomli = {version = "*", python = "<3.11" }
