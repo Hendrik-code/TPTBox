@@ -388,10 +388,10 @@ def compute_lordosis_and_kyphosis(poi: POI, project_2D=True) -> dict[str, float 
     poi = poi.copy()
 
     for k, i in curvature_definition.items():
-        out[k] = round(
-            compute_angel_between_two_points_(poi, i.get_start_vert(poi), i.get_stop_vert(poi), "P", i.start_move, i.stop_move, project_2D),
-            4,
+        angle = compute_angel_between_two_points_(
+            poi, i.get_start_vert(poi), i.get_stop_vert(poi), "P", i.start_move, i.stop_move, project_2D
         )
+        out[k] = round(angle, 4) if angle is not None else None
     return out
 
 
@@ -738,7 +738,8 @@ def plot_compute_lordosis_and_kyphosis(
                 continue
             s = vert_id1_mv.get_location(id1, poi)
             a = _get_norm(poi, id1, vert_id1_mv, Location.Vertebra_Direction_Posterior, 1)
-            assert a is not None
+            if a is None:
+                continue
             out.append((id1.value, s, (a[0] * line_len, a[1] * line_len)))
             out.append((id1.value, s, (-a[0] * line_len * 3, -a[1] * line_len * 3)))
     out2 = compute_lordosis_and_kyphosis(poi, project_2D=project_2D)
