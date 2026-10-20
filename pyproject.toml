@@ -55,7 +55,20 @@ scikit-image = [
 # (TPTBox.core.dicom, TPTBox.segmentation) import successfully without these
 # and only raise - naming the extra - when an entry point is actually called.
 pydicom = { version = "*", optional = true }
-dicom2nifti = { version = "*", optional = true }
+# dicom2nifti 2.6.0 imports `pydicom.pixels` while still declaring
+# `pydicom >= 2.2`, and 2.6.1+ require `pydicom >= 3.0` outright. pydicom 3
+# needs python >= 3.10, so 2.5.x is the newest dicom2nifti that works on 3.9.
+dicom2nifti = [
+  { version = "<2.6.0", python = "<3.10", optional = true },
+  { version = "*", python = ">=3.10", optional = true },
+]
+# dicom2nifti requires `python-gdcm` with no upper bound, and on 3.9 nnunetv2
+# 2.4.2 (the `seg` extra) pulls dicom2nifti in as well. python-gdcm stopped
+# shipping cp39 wheels after 3.2.2 but still advertises
+# `requires-python = ">=3.7"`, so a resolver picks 3.2.6 on 3.9 and then fails
+# building its sdist - the tarball has no CMakeLists.txt. Cap it at the last
+# release with cp39 wheels; >=3.10 takes whatever dicom2nifti resolves to.
+python-gdcm = { version = "<=3.2.2", python = "<3.10", optional = true }
 torch = { version = "*", optional = true }
 # Mirror SPINEPS' own constraint so `TPTBox[seg]` and `spineps` can co-install.
 # nnunetv2 2.8+ requires Python >=3.10, so 3.9 stays on the last release supporting it.
@@ -75,7 +88,7 @@ hf-deepali = { version = "*", optional = true }
 # `spineps` is deliberately absent: it depends on TPTBox itself, so declaring it
 # here would be a circular dependency. It stays a documented `pip install spineps`.
 [tool.poetry.extras]
-dicom = ["pydicom", "dicom2nifti"]
+dicom = ["pydicom", "dicom2nifti", "python-gdcm"]
 seg = ["torch", "nnunetv2", "acvl-utils", "batchgenerators"]
 reg = ["torch", "hf-deepali"]
 
@@ -93,10 +106,14 @@ coverage = ">=7.0.1"
 pytest-mock = "^3.6.0"
 # The `dicom` extra, in the dev group so unit_tests/test_dicom.py and
 # test_dicom_renamer.py run in CI instead of only where the extra is installed.
-# Restricted to >=3.10: dicom2nifti pulls python-gdcm, which publishes no cp39 wheel
-# and fails to build from source. On 3.9 both test modules skip on their own guard.
-pydicom = { version = "*", python = ">=3.10" }
-dicom2nifti = { version = "*", python = ">=3.10" }
+# Deliberately unmarked: a `python = ">=3.10"` marker here does not keep the pair
+# off 3.9. Poetry 2.2 merges this declaration with the optional one above into a
+# group marker that still mentions `extra == "dicom"` and then installs the
+# package on 3.9 anyway - that is how python-gdcm 3.2.6 reached the 3.9 leg and
+# broke it. The cp39 wheel problem is fixed by the caps above instead. On 3.9 the
+# resolver lands on pydicom 2.4.4 / dicom2nifti 2.5.1, which both modules pass on.
+pydicom = "*"
+dicom2nifti = "*"
 networkx = "*"  # optional: np_split_connected_component(method="mincut")
 exceptiongroup = { version = "^1.2", python = "<3.11" }
 tomli = {version = "*", python = "<3.11" }
