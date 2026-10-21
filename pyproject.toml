@@ -26,6 +26,11 @@ scikit-learn = "*"
 pynrrd = "*"
 requests = "*"
 trimesh = "*"
+# trimesh's ray engine does its broad phase through rtree, which trimesh itself only
+# declares under its `easy` extra. Without it every mesh ray cast raises
+# ModuleNotFoundError, which takes out spine.spinestats.measure_ivd_and_vertebra_geometry
+# and spinestats.poi_fun.endplates.
+rtree = "*"
 numpy-stl = "*"
 
 # --- OLD STACK (Python < 3.11)
@@ -50,7 +55,20 @@ scikit-image = [
 # (TPTBox.core.dicom, TPTBox.segmentation) import successfully without these
 # and only raise - naming the extra - when an entry point is actually called.
 pydicom = { version = "*", optional = true }
-dicom2nifti = { version = "*", optional = true }
+# dicom2nifti 2.6.0 imports `pydicom.pixels` while still declaring
+# `pydicom >= 2.2`, and 2.6.1+ require `pydicom >= 3.0` outright. pydicom 3
+# needs python >= 3.10, so 2.5.x is the newest dicom2nifti that works on 3.9.
+dicom2nifti = [
+  { version = "<2.6.0", python = "<3.10", optional = true },
+  { version = "*", python = ">=3.10", optional = true },
+]
+# dicom2nifti requires `python-gdcm` with no upper bound, and on 3.9 nnunetv2
+# 2.4.2 (the `seg` extra) pulls dicom2nifti in as well. python-gdcm stopped
+# shipping cp39 wheels after 3.2.2 but still advertises
+# `requires-python = ">=3.7"`, so a resolver picks 3.2.6 on 3.9 and then fails
+# building its sdist - the tarball has no CMakeLists.txt. Cap it at the last
+# release with cp39 wheels; >=3.10 takes whatever dicom2nifti resolves to.
+python-gdcm = { version = "<=3.2.2", python = "<3.10", optional = true }
 torch = { version = "*", optional = true }
 # Mirror SPINEPS' own constraint so `TPTBox[seg]` and `spineps` can co-install.
 # nnunetv2 2.8+ requires Python >=3.10, so 3.9 stays on the last release supporting it.
@@ -70,7 +88,7 @@ hf-deepali = { version = "*", optional = true }
 # `spineps` is deliberately absent: it depends on TPTBox itself, so declaring it
 # here would be a circular dependency. It stays a documented `pip install spineps`.
 [tool.poetry.extras]
-dicom = ["pydicom", "dicom2nifti"]
+dicom = ["pydicom", "dicom2nifti", "python-gdcm"]
 seg = ["torch", "nnunetv2", "acvl-utils", "batchgenerators"]
 reg = ["torch", "hf-deepali"]
 
@@ -86,6 +104,16 @@ pre-commit = "*"
 pyvista = "^0.43.2"
 coverage = ">=7.0.1"
 pytest-mock = "^3.6.0"
+# The `dicom` extra, in the dev group so unit_tests/test_dicom.py and
+# test_dicom_renamer.py run in CI instead of only where the extra is installed.
+# Deliberately unmarked: a `python = ">=3.10"` marker here does not keep the pair
+# off 3.9. Poetry 2.2 merges this declaration with the optional one above into a
+# group marker that still mentions `extra == "dicom"` and then installs the
+# package on 3.9 anyway - that is how python-gdcm 3.2.6 reached the 3.9 leg and
+# broke it. The cp39 wheel problem is fixed by the caps above instead. On 3.9 the
+# resolver lands on pydicom 2.4.4 / dicom2nifti 2.5.1, which both modules pass on.
+pydicom = "*"
+dicom2nifti = "*"
 networkx = "*"  # optional: np_split_connected_component(method="mincut")
 exceptiongroup = { version = "^1.2", python = "<3.11" }
 tomli = {version = "*", python = "<3.11" }
@@ -289,8 +317,61 @@ exclude_lines = [
     "if TYPE_CHECKING: ",
     "raise "
 ]
+# Curated: every entry here is code a unit test cannot legitimately reach. Anything
+# that is merely awkward to test is NOT listed - it gets a test instead. The PR that
+# introduced this list reports the coverage number both with and without it.
 omit = [
-    "TPTBox/test/speedtest/*",
+    # Hand-run micro-benchmarks. The filenames do not match pytest's `test_*.py`, so
+    # they are measured but never executed.
+    "TPTBox/tests/speedtests/*",
+
+    # --- Vendored nnU-Net inference internals -------------------------------------
+    # Carried from upstream nnU-Net with no TPTBox-specific logic; reachable only with
+    # real weights on a GPU. TPTBox's own entry point around them,
+    # nnUnet_utils/inference_api.py, is deliberately NOT omitted and is tested with a
+    # mock at the model boundary.
+    "TPTBox/segmentation/nnUnet_utils/predictor.py",
+    "TPTBox/segmentation/nnUnet_utils/plans_handler.py",
+    "TPTBox/segmentation/nnUnet_utils/export_prediction.py",
+    "TPTBox/segmentation/nnUnet_utils/default_preprocessor.py",
+    "TPTBox/segmentation/nnUnet_utils/data_iterators.py",
+    "TPTBox/segmentation/nnUnet_utils/get_network_from_plans.py",
+    "TPTBox/segmentation/nnUnet_utils/sliding_window_prediction.py",
+    # GPU memory probing: shells out to nvidia-smi in a measurement loop.
+    "TPTBox/segmentation/nnUnet_utils/estimate_nnunet_memory.py",
+
+    # --- nnU-Net training drivers --------------------------------------------------
+    # Need a populated nnUNet_raw / nnUNet_preprocessed tree and a GPU.
+    "TPTBox/core/internal/train_nnUnet/*",
+
+    # --- Permanently unimportable --------------------------------------------------
+    # Both import `nipy`, which is not a declared dependency of this package (or
+    # installable on current Python). test_docs_examples.py already special-cases
+    # script_ax2sag for the same reason.
+    "TPTBox/registration/script_ax2sag.py",
+    "TPTBox/registration/_ridged_intensity/register.py",
+
+    # --- Dead vendored deepali optimisation engine ---------------------------------
+    # An adapted copy of deepali's own registration engine. It imports `yaml`, which is
+    # not declared either, and nothing in the public API reaches it: the package is
+    # referenced only by deformable_reg_old.py and grid_search.py, which are themselves
+    # unreferenced. Candidate for deletion rather than coverage.
+    "TPTBox/registration/_deformable/_deepali/*",
+    "TPTBox/registration/_deformable/deformable_reg_old.py",
+    "TPTBox/registration/_deformable/grid_search.py",
+    "TPTBox/registration/_deformable/_grid_search_vert.py",
+
+    # --- NAKO dataset pipelines ----------------------------------------------------
+    # Interactive input() prompts, hard-coded /DATA/NAS dataset roots, process pools
+    # over a private dataset, and pandas/Excel reporting over a finished run.
+    "TPTBox/spine/spinestats/_load_nako_wh.py",
+    "TPTBox/spine/spinestats/_load_nako.py",
+    "TPTBox/spine/spinestats/_run_all.py",
+    "TPTBox/spine/spinestats/_qc_report.py",
+
+    # --- One-off repair script -----------------------------------------------------
+    # Walks a real dataset and rewrites pickles in place.
+    "TPTBox/core/dicom/fix_brocken.py",
 ]
 [tool.ruff.format]
 # Like Black, use double quotes for strings.

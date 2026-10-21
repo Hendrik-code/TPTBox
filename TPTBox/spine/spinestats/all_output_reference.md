@@ -13,7 +13,7 @@ Python API.
 | Key | Source function | What it covers |
 |---|---|---|
 | `ivd_geometry` | `measure_ivd_and_vertebra_geometry(..., structure_label=100)` | intervertebral discs (per-label entries carry wedge angles/indices) |
-| `vert_geometry` | `measure_ivd_and_vertebra_geometry(..., structure_label=50)` | vertebral bodies (per-label entries carry wedge angles/indices) |
+| `vert_geometry` | `measure_ivd_and_vertebra_geometry(..., structure_label=0)` | vertebral bodies (per-label entries carry wedge angles/indices) |
 | `VBQ_score` | `VBQ_score` | vertebral bone quality (T2 signal ratio) |
 | `body_composition_score` | `body_composition_score` | axial CSA per tissue at chosen vertebral levels |
 | `muscle_fat_infiltration` | `muscle_fat_infiltration` | Dixon fat-fraction based muscle-quality metrics |

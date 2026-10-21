@@ -308,7 +308,7 @@ def _scan_tree(path, lvl=1, filter_folder=None, verbose=False):
         if entry.is_dir(follow_symlinks=False):
             if filter_folder is not None and not filter_folder(Path(entry.path), lvl):
                 continue
-            yield from _scan_tree(entry.path, lvl=lvl + 1, verbose=verbose)
+            yield from _scan_tree(entry.path, lvl=lvl + 1, filter_folder=filter_folder, verbose=verbose)
         elif entry.name[0] != ".":
             if verbose:
                 print(f"[{_cont:8}]", end="\r")
@@ -336,9 +336,10 @@ class BIDS_Global_info:
             datasets (typing.List[str]): List of dataset paths
             parents (typing.List[str]): List of parents (like ["rawdata","sourcedata","derivatives"])
             additional_key (list, optional): Additional keys that are not in the default BIDS but should not raise a warning. Defaults to ["sequ", "seg", "ovl"].
-            filter_folder: Filter function, input is the path of the folder and the level of the folder structure. Return True if we should continue searching
-                        Example:
-                        filter_folder = lambda p, lvl: True if (lvl != 2 or p.name in ["sub-123","sub-456"]) else False
+            filter_folder: Filter function, input is the path of the folder and the level of the folder structure.
+                Return True if we should continue searching. Level 1 is the first folder inside
+                ``<dataset>/<parent>``, i.e. the subject folder; level 2 is the session folder.
+                Example: ``filter_folder = lambda p, lvl: lvl != 1 or p.name in ["sub-123", "sub-456"]``
         """
         self.count_file = 0
         self._p_counter = 0
@@ -1872,8 +1873,11 @@ class Searchquery:
         assert self._flatten
 
         def json_filter(x: dict) -> bool:
-            """Return True if JSON ImageType contains all required channel keys."""
-            return "ImageType" not in x or all(k in x["ImageType"] for k in _keys)
+            """Return True if JSON ImageType contains any of the channel keys."""
+            # `_keys` lists alternative spellings of one channel ("W"/"WATER"), so this is
+            # `any`, matching `lam_filter` below. With `all` the filter dropped every file
+            # that had a sidecar, because no ImageType carries both spellings.
+            return "ImageType" not in x or any(k in x["ImageType"] for k in _keys)
 
         def lam_filter(x: str) -> bool:
             """Return True if the entity value matches one of the target channel keys."""

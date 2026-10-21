@@ -405,7 +405,11 @@ def assign_ribs_to_vert_segmentation(
     logger.on_debug(f"{rib_inst.unique()=}")
     # Merge rib assignments back into the original vert / sem segmentations
     # without disturbing existing (non-rib) labels. Skip unmatched CCs (sentinel error_value=255).
-    matched = (rib_inst != 0) & (rib_inst != error_value)
+    # Combine on the arrays, not on NII: `rib_inst != 0` yields a bool-backed NII and
+    # NII.__and__ rejects non-integer arrays, so the NII-level `&` raised TypeError and
+    # this function could never run to completion.
+    rib_inst_arr = rib_inst.get_seg_array()
+    matched = (rib_inst_arr != 0) & (rib_inst_arr != error_value)
     vert_seg[matched] = rib_inst[matched]
 
     sem_seg[rib_seg != 0] = rib_seg.map_labels({left_id: Location.Rib_Left.value, right_id: Location.Rib_Right.value})[rib_seg != 0]  # type: ignore
@@ -418,7 +422,9 @@ def assign_ribs_to_vert_segmentation(
             vert_seg2 = vert_seg.remove_labels(error_value).infect(vert_seg.extract_label(error_value), verbose=False)
             vert_seg[vert_seg != vert_seg2] = vert_seg2[vert_seg != vert_seg2]
             vert_seg[np.logical_and(rib_inst == error_value, vert_seg == 0)] = error_value
-        vert_seg[np.logical_and(vert_seg == 0, sem_seg.extract_label([Location.Rib_Left.value, Location.Rib_Right.value] == 1))] = (
-            error_value
-        )
+        # The closing bracket used to sit one token too far left, so this evaluated
+        # `[Rib_Left, Rib_Right] == 1` -> False -> extract_label(0), which trips the
+        # "zero label is the background" assertion and took the whole function down.
+        rib_sem = sem_seg.extract_label([Location.Rib_Left.value, Location.Rib_Right.value]).get_seg_array() == 1
+        vert_seg[np.logical_and(vert_seg.get_seg_array() == 0, rib_sem)] = error_value
     return vert_seg.reorient_(ori), sem_seg.reorient_(ori)

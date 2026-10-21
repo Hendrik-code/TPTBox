@@ -4,6 +4,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from TPTBox import NII
+from TPTBox.core.compat import zip_strict
 
 
 def _elasticdeform_install_hint() -> str:
@@ -109,7 +110,7 @@ def deformed_nii(
         order=[0 if v.seg else 3 for v in values],  # type: ignore
     )
     out2: dict[str, NII] = {}
-    for (k, nii), arr in zip(nii_dic.items(), out, strict=True):
+    for (k, nii), arr in zip_strict(nii_dic.items(), out):
         out2[k] = nii.set_array(arr[p:-p, p:-p, p:-p])
     print("Deformation took", round(time.time() - t, 1), "Seconds")
     if joint_normalize:
