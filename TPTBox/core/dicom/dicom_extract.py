@@ -158,6 +158,89 @@ def _generate_bids_path(
     return fname.file["json"], fname
 
 
+# DICOM anatomical direction letter → unit vector in LPS (DICOM) space.
+# L = +X (patient left), P = +Y (posterior), H = +Z (superior/head).
+_DCM_LETTER_TO_LPS_VEC = {
+    "L": np.array([1.0, 0.0, 0.0]),
+    "R": np.array([-1.0, 0.0, 0.0]),
+    "P": np.array([0.0, 1.0, 0.0]),
+    "A": np.array([0.0, -1.0, 0.0]),
+    "H": np.array([0.0, 0.0, 1.0]),
+    "F": np.array([0.0, 0.0, -1.0]),
+}
+# Negate X and Y to turn DICOM LPS cosines into NIfTI RAS cosines.
+_LPS_TO_RAS = np.array([-1.0, -1.0, 1.0])
+
+
+def _cosines_from_patient_orientation(patient_orientation) -> tuple[np.ndarray, np.ndarray] | tuple[None, None]:
+    """DICOM PatientOrientation (0020,0020) → RAS row/column cosines.
+
+    The tag's two values are single-letter anatomical codes (L/R, A/P, H/F)
+    describing the direction the row and column axes point in patient space.
+    Returns (None, None) if the tag is absent, has blanks, or uses an
+    unknown letter — the caller then falls back to the next heuristic.
+    """
+    if not patient_orientation or len(patient_orientation) < 2:
+        return None, None
+    row_letter = str(patient_orientation[0]).strip().upper()[:1]
+    col_letter = str(patient_orientation[1]).strip().upper()[:1]
+    row = _DCM_LETTER_TO_LPS_VEC.get(row_letter)
+    col = _DCM_LETTER_TO_LPS_VEC.get(col_letter)
+    if row is None or col is None:
+        return None, None
+    return row * _LPS_TO_RAS, col * _LPS_TO_RAS
+
+
+_VIEW_TOKEN_TO_LETTERS = {
+    "ap": ("L", "F"),
+    "pa": ("L", "F"),
+    "ll": ("P", "F"),
+    "llat": ("P", "F"),
+    "lateral": ("P", "F"),  # unspecified side defaults to left-lateral (clinical norm).
+    "lat": ("P", "F"),
+    "rl": ("A", "F"),
+    "rlat": ("A", "F"),
+}
+
+
+def _cosines_from_view_position(view_position) -> tuple[np.ndarray, np.ndarray] | tuple[None, None]:
+    """Fallback for projection X-rays whose PatientOrientation is blank.
+
+    Uses the canonical radiography convention for the given ViewPosition
+    (0018,5101): rows run horizontally in the image, columns run top-to-
+    bottom (head→feet). Returns (None, None) for unknown or ambiguous
+    codes (e.g. a bare ``LAT`` that does not say which side).
+    """
+    if not view_position:
+        return None, None
+    view = str(view_position).strip().lower()
+    letters = _VIEW_TOKEN_TO_LETTERS.get(view)
+    if letters is None:
+        return None, None
+    return _cosines_from_patient_orientation(list(letters))
+
+
+def _cosines_from_text_tokens(*texts) -> tuple[np.ndarray, np.ndarray] | tuple[None, None]:
+    """Last-ditch fallback: scan SeriesDescription / StudyDescription for AP/PA/LL/LAT tokens.
+
+    Some scanners drop both PatientOrientation and ViewPosition for projection
+    X-rays, leaving only free-text descriptions. Scan them as whitespace- /
+    underscore- / dash-separated tokens so we only match standalone words,
+    not substrings like 'ap' inside 'scaphoid'. Returns (None, None) if no
+    recognisable projection token is found.
+    """
+    import re
+
+    for text in texts:
+        if not text:
+            continue
+        for token in re.split(r"[\s_\-]+", str(text).lower()):
+            letters = _VIEW_TOKEN_TO_LETTERS.get(token)
+            if letters is not None:
+                return _cosines_from_patient_orientation(list(letters))
+    return None, None
+
+
 def dicom_to_nifti_multiframe_2d(ds, nii_path, pixel_array) -> None:
     """Convert a 2D multiframe DICOM dataset to a NIfTI file using its affine metadata.
 
@@ -170,18 +253,48 @@ def dicom_to_nifti_multiframe_2d(ds, nii_path, pixel_array) -> None:
         dy, dx = map(float, ds.PixelSpacing)
         affine = np.eye(4)
 
-        if hasattr(ds, "ImageOrientationPatient"):
-            orientation = list(map(float, ds.ImageOrientationPatient))
-            row_cosines = np.array(orientation[:3])
-            col_cosines = np.array(orientation[3:])
-            affine[:3, 0] = row_cosines * dx
-            affine[:3, 1] = col_cosines * dy
+        row_cos = col_cos = None
+        iop = getattr(ds, "ImageOrientationPatient", None)
+        if iop is not None:
+            orientation = list(map(float, iop))
+            # ImageOrientationPatient is in DICOM LPS; flip to NIfTI RAS.
+            row_cos = np.array(orientation[:3]) * _LPS_TO_RAS
+            col_cos = np.array(orientation[3:]) * _LPS_TO_RAS
+
+        # Projection X-rays (CR/DX) typically ship without ImageOrientationPatient
+        # but set PatientOrientation (0020,0020) or ViewPosition (0018,5101)
+        # instead. Without this fallback the affine stayed identity and viewers
+        # showed each series rotated or mirrored depending on how the modality
+        # happened to lay out the pixel buffer.
+        if row_cos is None:
+            row_cos, col_cos = _cosines_from_patient_orientation(getattr(ds, "PatientOrientation", None))
+        if row_cos is None:
+            row_cos, col_cos = _cosines_from_view_position(getattr(ds, "ViewPosition", None))
+        if row_cos is None:
+            row_cos, col_cos = _cosines_from_text_tokens(
+                getattr(ds, "SeriesDescription", None),
+                getattr(ds, "StudyDescription", None),
+                getattr(ds, "ProtocolName", None),
+            )
+
+        if row_cos is not None:
+            affine[:3, 0] = row_cos * dx
+            affine[:3, 1] = col_cos * dy
+            # The 2D image lies in the row x col plane; the "slice" axis must be
+            # the normal to that plane so the affine stays non-singular.
+            # Leaving np.eye's default (0,0,1) produces a degenerate affine
+            # whenever row/col already span X-Z or Y-Z (e.g. AP X-rays with
+            # row=L, col=F) — ITK refuses to open such a NIfTI.
+            slice_cos = np.cross(row_cos, col_cos)
+            dz = float(getattr(ds, "SliceThickness", 1.0) or 1.0)
+            affine[:3, 2] = slice_cos * dz
         else:
             affine[0, 0] = dx
             affine[1, 1] = dy
 
-        if hasattr(ds, "ImagePositionPatient"):
-            affine[:3, 3] = np.array(list(map(float, ds.ImagePositionPatient)))
+        ipp = getattr(ds, "ImagePositionPatient", None)
+        if ipp is not None:
+            affine[:3, 3] = np.array(list(map(float, ipp))) * _LPS_TO_RAS
 
     elif hasattr(ds, "ImagerPixelSpacing"):
         dy, dx = map(float, ds.ImagerPixelSpacing)
@@ -413,6 +526,16 @@ def _extract_nii_from_dicom(dicom_out_path, nii_path):
                     return False
             except Exception as e:
                 logger.on_debug("Multi-Frame DICOM did not work:", e)
+            # Multi-echo Philips DIXON (e.g. mDIX quant): N slices x M echoes at
+            # the same ImagePositionPatient. dicom2nifti's own stack detector
+            # collapses to N/2 fake groups of 2 slices, then fails inside
+            # `four_d_to_nifti → create_affine` with `NOT_A_VOLUME`. Convert
+            # per-echo to 3-D and stack into a 4-D NIfTI ourselves; the
+            # downstream `_split_multi_echo_dixon` will then split it into
+            # per-echo `-eco<i>` files.
+            if _dicoms_are_multi_echo(dicom_out_path) and _convert_multi_echo_dicoms_to_4d(dicom_out_path, nii_path):
+                logger.print("Save ", nii_path, Log_Type.SAVE)
+                return True
             ## The PDF dicom lands here
             convert_dicom.dicom_array_to_nifti(dicom_out_path, nii_path, True)
         else:
@@ -644,6 +767,84 @@ def _from_dicom_to_nii(
         # `dixon_mapping` or `parts_mapping`.
         _split_multi_echo_dixon(Path(nii_path), Path(json_file_name), dcm_data_l)
     return nii_path if add_grid else None
+
+
+def _dicoms_are_multi_echo(dcm_list) -> bool:
+    """True when ``dcm_list`` carries slices from more than one ``EchoNumbers`` value."""
+    if not isinstance(dcm_list, list) or len(dcm_list) < 2:
+        return False
+    seen: set[int] = set()
+    for d in dcm_list:
+        try:
+            en = int(getattr(d, "EchoNumbers", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if en > 0:
+            seen.add(en)
+            if len(seen) > 1:
+                return True
+    return False
+
+
+def _convert_multi_echo_dicoms_to_4d(dcm_list: list, nii_path: str | Path) -> bool:
+    """Convert a multi-echo DICOM list to a 4-D NIfTI (echoes on axis 3).
+
+    Per-echo buckets are converted separately with ``dicom2nifti`` (each is a
+    normal 3-D stack with no repeated ImagePositionPatient), then stacked along
+    a new fourth axis in ascending ``EchoNumbers``. Written to *nii_path*. The
+    caller's post-processing (``_split_multi_echo_dixon``) then splits the 4-D
+    file into per-echo ``-eco<i>`` files.
+
+    Returns True on success, False if any per-echo conversion fails or the
+    per-echo grids don't match.
+    """
+    per_echo: dict[int, list] = {}
+    for d in dcm_list:
+        try:
+            en = int(getattr(d, "EchoNumbers", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if en > 0:
+            per_echo.setdefault(en, []).append(d)
+    if len(per_echo) < 2:
+        return False
+
+    nii_path = Path(nii_path)
+    tmp_dir = Path(tempfile.mkdtemp(prefix=f"{nii_path.stem}.echoes.", dir=str(nii_path.parent)))
+    try:
+        arrays: list[np.ndarray] = []
+        ref_affine: np.ndarray | None = None
+        ref_header = None
+        ref_shape: tuple | None = None
+        for en in sorted(per_echo):
+            tmp_out = tmp_dir / f"echo{en}.nii.gz"
+            try:
+                convert_dicom.dicom_array_to_nifti(per_echo[en], str(tmp_out), True)
+            except Exception as e:  # noqa: BLE001
+                logger.on_warning(f"multi-echo split: per-echo conversion failed for EchoNumbers={en}: {type(e).__name__}: {e}")
+                return False
+            if not tmp_out.exists():
+                logger.on_warning(f"multi-echo split: per-echo NIfTI missing for EchoNumbers={en}")
+                return False
+            n = nib.load(str(tmp_out))
+            arr = np.asanyarray(n.dataobj, dtype=n.get_data_dtype())
+            if ref_affine is None:
+                ref_affine = n.affine
+                ref_header = n.header
+                ref_shape = arr.shape
+            elif arr.shape != ref_shape or not np.allclose(n.affine, ref_affine, atol=1e-3):
+                logger.on_warning(
+                    f"multi-echo split: grid mismatch between echoes (echo {en}: shape={arr.shape}); aborting per-echo stack."
+                )
+                return False
+            arrays.append(arr)
+        stacked = np.stack(arrays, axis=-1)
+        out_img = nib.Nifti1Image(stacked, ref_affine, ref_header)
+        out_img.set_data_dtype(arrays[0].dtype)
+        out_img.to_filename(str(nii_path))
+        return True
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 def _split_multi_echo_dixon(nii_path: Path, json_path: Path, dcm_data_l) -> list[Path] | None:

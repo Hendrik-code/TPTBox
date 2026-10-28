@@ -15,7 +15,7 @@ from TPTBox.core.vert_constants import DIRECTIONS, Location, Vertebra_Instance
 from TPTBox.spine.snapshot2D.snapshot_modular import Snapshot_Frame, create_snapshot
 
 IVD_MORE_ACCURATE = 15
-VERT_START_COBB = Vertebra_Instance.C2
+VERT_START_COBB = Vertebra_Instance.C3
 
 
 class MoveTo(Enum):
@@ -66,10 +66,10 @@ class MoveTo(Enum):
             subreg = Location.Additional_Vertebral_Body_Middle_Inferior_Median
             if (v, subreg) in poi:
                 return (v, subreg)
-            # Test if it has next POINT
+            # Fall back to averaging v's centroid with the next vertebra's centroid.
             next_vert = v.get_next_poi(poi)
-            if next_vert is not None and (next_vert, 50) in poi:
-                return (v, subreg, next_vert, subreg)
+            if next_vert is not None and (v, 50) in poi and (next_vert, 50) in poi:
+                return (v, 50, next_vert, 50)
         elif self == self.TOP:
             prev_vert = v.get_previous_poi(poi)
             # Test IVD
@@ -84,9 +84,9 @@ class MoveTo(Enum):
             subreg = Location.Additional_Vertebral_Body_Middle_Superior_Median
             if (v, subreg) in poi:
                 return (v, subreg)
-            # Test if it has next POINT
-            if prev_vert is not None and (prev_vert, 50) in poi:
-                return (v, subreg, prev_vert, subreg)
+            # Fall back to averaging v's centroid with the previous vertebra's centroid.
+            if prev_vert is not None and (v, 50) in poi and (prev_vert, 50) in poi:
+                return (v, 50, prev_vert, 50)
         return (v, 50)
 
     def get_point(self, v: Vertebra_Instance | int, poi: POI) -> np.ndarray:
@@ -254,11 +254,15 @@ def compute_angel_between_two_points_(
         return None
     assert id1 != id2, id1
 
-    # Ensure id1 is less than id2
-    if id1 > id2:
+    # Ensure id1 is anatomically above id2 (not just numerically smaller).
+    # T13 has label value 28 but sits between T12 (19) and L1 (20) in anatomical
+    # order; using the label value directly would misplace it and swap the wrong
+    # MoveTo semantics onto TOP/BOTTOM.
+    _order = Vertebra_Instance.order_dict()
+    if _order.get(id1, id1) > _order.get(id2, id2):
         id1, id2 = id2, id1
     # Reorient and rescale the POI data
-    poi.reorient_().rescale_()
+    poi.reorient_().rescale_(verbose=False)
     recompute_use_ivd_direction = False
     # Determine direction-specific settings
     location2 = None
@@ -388,17 +392,244 @@ def compute_lordosis_and_kyphosis(poi: POI, project_2D=True) -> dict[str, float 
     poi = poi.copy()
 
     for k, i in curvature_definition.items():
-        angle = compute_angel_between_two_points_(
-            poi, i.get_start_vert(poi), i.get_stop_vert(poi), "P", i.start_move, i.stop_move, project_2D
-        )
+        start = i.get_start_vert(poi)
+        stop = i.get_stop_vert(poi)
+        angle = compute_angel_between_two_points_(poi, start, stop, "P", i.start_move, i.stop_move, project_2D)
         out[k] = round(angle, 4) if angle is not None else None
+        out[f"{k}_apex"] = _find_curve_apex(poi, start, stop, i.start_move, i.stop_move, Location.Vertebra_Direction_Posterior)
     return out
 
 
+def _find_curve_apex(
+    poi: POI,
+    from_vert: Vertebra_Instance | int | None,
+    to_vert: Vertebra_Instance | int | None,
+    from_mv: MoveTo,
+    to_mv: MoveTo,
+    location: Location,
+) -> int | None:
+    """Return the vertebra between ``from_vert`` and ``to_vert`` whose direction is closest to the endpoint bisector.
+
+    Same apex heuristic as :func:`compute_max_cobb_angle`, just parameterised by
+    the direction location so it also works for lordosis / kyphosis
+    (``Vertebra_Direction_Posterior``). Returns ``None`` when either endpoint
+    direction is unavailable or no intermediate vertebra is present.
+    """
+    if from_vert is None or to_vert is None:
+        return None
+    from_v = from_vert if isinstance(from_vert, Vertebra_Instance) else Vertebra_Instance(from_vert)
+    to_v = to_vert if isinstance(to_vert, Vertebra_Instance) else Vertebra_Instance(to_vert)
+    a = _get_norm(poi, from_v, from_mv, location, 1)
+    b = _get_norm(poi, to_v, to_mv, location, 1)
+    if a is None or b is None:
+        return None
+    apex_v = (a + b) / 2
+    order = Vertebra_Instance.order()
+    try:
+        i_from = order.index(from_v)
+        i_to = order.index(to_v)
+    except ValueError:
+        return None
+    if i_from > i_to:
+        i_from, i_to = i_to, i_from
+    apex: int | None = None
+    cos_dis = -np.inf
+    for v in order[i_from : i_to + 1]:
+        n = _get_norm(poi, v, to_mv, location, 1)
+        if n is None:
+            continue
+        cos_new = cosine_distance(n, apex_v)
+        if cos_new > cos_dis:
+            cos_dis = cos_new
+            apex = v.value
+    return apex
+
+
+def _single_endplate_ap_direction(poi: POI, vert: Vertebra_Instance, side: MoveTo) -> np.ndarray | None:
+    """A/P direction of *one* endplate (superior for TOP, inferior for BOTTOM).
+
+    Uses ``Vertebra_Corpus``, ``Vertebral_Body_Endplate_Superior/Inferior`` and
+    ``Vertebra_Direction_Right`` to build a unit vector that lies in the endplate
+    plane and points *anteriorly* (matches :func:`_get_norm`'s ``inv=1`` sign
+    convention). Returns ``None`` if any required POI landmark is missing.
+    """
+    if side == MoveTo.TOP:
+        endplate_loc = Location.Vertebral_Body_Endplate_Superior
+    elif side == MoveTo.BOTTOM:
+        endplate_loc = Location.Vertebral_Body_Endplate_Inferior
+    else:
+        return None
+    if (vert, 50) not in poi or (vert, endplate_loc) not in poi or (vert, Location.Vertebra_Direction_Right) not in poi:
+        return None
+    corpus = np.array(poi[vert, 50], dtype=float)
+    ep = np.array(poi[vert, endplate_loc], dtype=float)
+    r_pt = np.array(poi[vert, Location.Vertebra_Direction_Right], dtype=float)
+    n = ep - corpus
+    if side == MoveTo.BOTTOM:
+        n = -n  # flip inferior endplate so both cases point superior
+    n_norm = np.linalg.norm(n)
+    r_vec = r_pt - corpus
+    r_norm = np.linalg.norm(r_vec)
+    if n_norm < 1e-8 or r_norm < 1e-8:
+        return None
+    n /= n_norm
+    r_vec /= r_norm
+    # cross(right, superior-pointing) lies in the endplate plane and points posterior;
+    # negate to match _get_norm's default sign (anterior for inv=1).
+    p = -np.cross(r_vec, n)
+    p_norm = np.linalg.norm(p)
+    if p_norm < 1e-8:
+        return None
+    return p / p_norm
+
+
+def _endplate_ap_direction(poi: POI, vert: Vertebra_Instance, mv: MoveTo) -> np.ndarray | None:
+    """Return the endplate-plane A/P direction at a vertebra-disc *boundary*.
+
+    For a lordosis / kyphosis chain to close at every transition (e.g. so
+    ``thoracic_kyphosis + lumbar_lordosis`` measures the same T4-top→L5-inferior
+    end-to-end angle as the total), the "bottom of upper" and "top of lower" at
+    each disc must use the *same* reference direction. This function averages the
+    two flanking endplate P/A directions at the disc:
+
+    - :attr:`MoveTo.BOTTOM` at vertebra ``V`` averages ``V``'s inferior endplate
+      with the superior endplate of the next vertebra in the POI (``V.get_next_poi``).
+    - :attr:`MoveTo.TOP` at vertebra ``V`` averages ``V``'s superior endplate
+      with the inferior endplate of the previous vertebra (``V.get_previous_poi``).
+
+    Falls back to the single-endplate direction when the neighbour is missing.
+    Returns ``None`` when even the local endplate is unavailable.
+    """
+    if isinstance(vert, int):
+        vert = Vertebra_Instance(vert)
+    if mv == MoveTo.BOTTOM:
+        neighbour = vert.get_next_poi(poi)
+        neighbour_side = MoveTo.TOP
+    elif mv == MoveTo.TOP:
+        neighbour = vert.get_previous_poi(poi)
+        neighbour_side = MoveTo.BOTTOM
+    else:
+        return _single_endplate_ap_direction(poi, vert, mv)
+    own = _single_endplate_ap_direction(poi, vert, mv)
+    other = _single_endplate_ap_direction(poi, neighbour, neighbour_side) if neighbour is not None else None
+    # If the local endplate landmark is missing (calc_endplate_points_ ray-cast
+    # sometimes fails to hit the mask), mirror across the disc: use the neighbour's
+    # endplate as the direction proxy so both sides of the boundary agree.
+    if own is None:
+        return other
+    if other is None:
+        return own
+    avg = own + other
+    n = np.linalg.norm(avg)
+    if n < 1e-8:
+        return own
+    return avg / n
+
+
+def _single_endplate_r_direction(poi: POI, vert: Vertebra_Instance, side: MoveTo) -> np.ndarray | None:
+    """R/L direction of *one* endplate (superior for TOP, inferior for BOTTOM).
+
+    Builds a unit vector that lies in the endplate plane along the vertebra's
+    right/left axis: takes ``corpus - Vertebra_Direction_Right`` (matching the
+    WK path's ``inv=1`` sign convention, which points *left*) and projects it
+    onto the plane perpendicular to the endplate normal (``endplate_point -
+    corpus``). Returns ``None`` if any required POI landmark is missing.
+    """
+    if side == MoveTo.TOP:
+        endplate_loc = Location.Vertebral_Body_Endplate_Superior
+    elif side == MoveTo.BOTTOM:
+        endplate_loc = Location.Vertebral_Body_Endplate_Inferior
+    else:
+        return None
+    if (vert, 50) not in poi or (vert, endplate_loc) not in poi or (vert, Location.Vertebra_Direction_Right) not in poi:
+        return None
+    corpus = np.array(poi[vert, 50], dtype=float)
+    ep = np.array(poi[vert, endplate_loc], dtype=float)
+    r_pt = np.array(poi[vert, Location.Vertebra_Direction_Right], dtype=float)
+    n = ep - corpus
+    if side == MoveTo.BOTTOM:
+        n = -n  # flip inferior endplate so both cases point superior
+    n_norm = np.linalg.norm(n)
+    # WK path uses ``corpus - right_pt`` (points anatomical LEFT); mirror that
+    # convention so both paths agree when they meet in
+    # ``compute_angel_between_two_points_``.
+    r_vec = corpus - r_pt
+    r_norm = np.linalg.norm(r_vec)
+    if n_norm < 1e-8 or r_norm < 1e-8:
+        return None
+    n /= n_norm
+    r_vec /= r_norm
+    # Project the vertebra right/left vector onto the endplate plane
+    r_ep = r_vec - np.dot(r_vec, n) * n
+    r_ep_norm = np.linalg.norm(r_ep)
+    if r_ep_norm < 1e-8:
+        return None
+    return r_ep / r_ep_norm
+
+
+def _endplate_r_direction(poi: POI, vert: Vertebra_Instance, mv: MoveTo) -> np.ndarray | None:
+    """R/L direction in the endplate plane at a vertebra-disc *boundary*.
+
+    Analogue of :func:`_endplate_ap_direction` for the coronal (right) direction,
+    used to obtain a classical endplate-line orientation for Cobb angles. Averages
+    the two flanking endplate R directions at a disc:
+
+    - :attr:`MoveTo.BOTTOM` at vertebra ``V`` averages ``V``'s inferior endplate
+      with the superior endplate of the next vertebra.
+    - :attr:`MoveTo.TOP` at vertebra ``V`` averages ``V``'s superior endplate
+      with the inferior endplate of the previous vertebra.
+
+    Falls back to the single-endplate direction when the neighbour is missing.
+    Returns ``None`` when even the local endplate is unavailable.
+    """
+    if isinstance(vert, int):
+        vert = Vertebra_Instance(vert)
+    if mv == MoveTo.BOTTOM:
+        neighbour = vert.get_next_poi(poi)
+        neighbour_side = MoveTo.TOP
+    elif mv == MoveTo.TOP:
+        neighbour = vert.get_previous_poi(poi)
+        neighbour_side = MoveTo.BOTTOM
+    else:
+        return _single_endplate_r_direction(poi, vert, mv)
+    own = _single_endplate_r_direction(poi, vert, mv)
+    other = _single_endplate_r_direction(poi, neighbour, neighbour_side) if neighbour is not None else None
+    if own is None:
+        return other
+    if other is None:
+        return own
+    avg = own + other
+    n = np.linalg.norm(avg)
+    if n < 1e-8:
+        return own
+    return avg / n
+
+
 def _get_norm(poi: POI, id1: int | Vertebra_Instance, mv: MoveTo, location: Location, inv: int = 1) -> np.ndarray | None:  # noqa: ARG001
-    """Return the normalised direction vector from a location POI to the vertebra centroid."""
+    """Return the normalised direction vector from a location POI to the vertebra centroid.
+
+    When ``location`` is :attr:`Location.Vertebra_Direction_Posterior` and ``mv`` targets
+    an endplate (:attr:`MoveTo.TOP` / :attr:`MoveTo.BOTTOM`), the buffered per-endplate
+    landmark (``Vertebral_Body_Endplate_Superior`` / ``_Inferior``) is preferred over
+    the averaged vertebral-body posterior direction — this yields the classical
+    endplate-line orientation used in Cobb-style lordosis/kyphosis measurements.
+    The same automatic switch applies to ``Location.Vertebra_Direction_Right``: it
+    is projected into the endplate plane so Cobb (scoliosis) angles are measured
+    between endplate lines, analogous to the sagittal case. The endplate direction
+    is used only when both the relevant endplate point and
+    ``Vertebra_Direction_Right`` are present in ``poi`` for that vertebra; otherwise
+    the code falls back to the WK-based averaged direction below.
+    """
     if isinstance(id1, int):
         id1 = Vertebra_Instance(id1)
+    if location == Location.Vertebra_Direction_Posterior and mv in (MoveTo.TOP, MoveTo.BOTTOM):
+        ep_norm = _endplate_ap_direction(poi, id1, mv)
+        if ep_norm is not None:
+            return ep_norm * inv
+    if location == Location.Vertebra_Direction_Right and mv in (MoveTo.TOP, MoveTo.BOTTOM):
+        ep_norm = _endplate_r_direction(poi, id1, mv)
+        if ep_norm is not None:
+            return ep_norm * inv
     subreg = 50
     if location in [Location.Vertebra_Disc_Inferior, Location.Vertebra_Disc_Superior]:
         subreg = 100
@@ -520,6 +751,8 @@ def compute_max_cobb_angle(
         assert b is not None
         apex_v = (a + b) / 2
         for i in vertebrae_list[vertebrae_list.index(Vertebra_Instance(from_vert)) : vertebrae_list.index(Vertebra_Instance(to_vert)) + 1]:
+            if i.value not in poi.keys_region():
+                continue
             try:
                 a = _get_norm(poi, i, vert_id2_mv, Location.Vertebra_Direction_Right, 1)
                 if a is None:
@@ -615,8 +848,13 @@ def compute_max_cobb_angle_multi(
         assert from_vert is not None
         assert to_vert is not None
         out_list.append((max_angle, from_vert, to_vert, apex))
+        # Exclusive split: neither endpoint of the just-found curve may participate
+        # in a subsequent curve. Prevents overlaps like (T1-T5) + (T5-T7); a
+        # sibling curve below the current one starts strictly caudal to to_vert,
+        # a sibling above ends strictly cranial to from_vert. Drop the ``+ 1``
+        # on the ``below`` slice to restore the textbook (endpoint-shared) split.
         above = vertebrae_list[: vertebrae_list.index(Vertebra_Instance(from_vert))]
-        below = vertebrae_list[vertebrae_list.index(Vertebra_Instance(to_vert)) :]
+        below = vertebrae_list[vertebrae_list.index(Vertebra_Instance(to_vert)) + 1 :]
         compute_max_cobb_angle_multi(
             poi,
             above,
@@ -686,6 +924,7 @@ def plot_compute_lordosis_and_kyphosis(
     seg: Image_Reference | None = None,
     line_len=100,
     project_2D=True,
+    curvature_definition=curvature_definition,
 ) -> tuple[dict[str, float | None], Snapshot_Frame]:
     """Plots and computes the angles of lordosis and kyphosis on a spinal image.
 
@@ -701,6 +940,12 @@ def plot_compute_lordosis_and_kyphosis(
         seg (Image_Reference | None): The segmentation image reference. Optional, can be None.
         line_len (int): The length of the lines representing the vertebrae directions (default is 100).
         project_2D (bool, optional): If True, the angles are computed in the 2D sagittal projection; otherwise in 3D. Defaults to True.
+        curvature_definition (dict[str, Def_Curvature], optional): Mapping of output-key name
+            → :class:`Def_Curvature` describing which vertebra pair defines each angle.
+            Defaults to the module-level ``curvature_definition`` (cervical_lordosis,
+            thoracic_kyphosis, lumbar_lordosis). Pass a custom dict to compute a different
+            set of segmental angles or to override the ``last_thoracic`` / ``last_lumbar``
+            resolution — the output dict's keys mirror this mapping's keys.
 
     Returns:
         tuple: A tuple containing:
@@ -724,7 +969,7 @@ def plot_compute_lordosis_and_kyphosis(
         >>> print(angles)
         {'cervical_lordosis': 34.5, 'thoracic_kyphosis': 42.7, 'lumbar_lordosis': 50.3}
     """
-    poi = poi.reorient().rescale_()
+    poi = poi.reorient().rescale_(verbose=False)
     poi = _add_artificial_ivd(poi)
     out = []
     text_out = []
@@ -744,12 +989,28 @@ def plot_compute_lordosis_and_kyphosis(
             out.append((id1.value, s, (-a[0] * line_len * 3, -a[1] * line_len * 3)))
     out2 = compute_lordosis_and_kyphosis(poi, project_2D=project_2D)
     for name, v in out2.items():
-        if v is None:
+        if v is None or name not in curvature_definition:
+            # Skip auxiliary keys like ``*_apex`` that live alongside the angles
+            # in the same dict but have no curve definition of their own.
             continue
+        # Apex annotation: mark the apex vertebra body with a star + label so
+        # the reader can see which vertebra the ``*_apex`` json key refers to.
+        apex_v = out2.get(f"{name}_apex")
+        if apex_v is not None and (apex_v, 50) in poi:
+            text_out.append((apex_v, ("*apex", -60)))
         id1 = curvature_definition[name].get_start_vert(poi)
         id2 = curvature_definition[name].get_stop_vert(poi)
 
-        vert = round((id1.value + id2.value) / 2)
+        # Cranio-caudal midpoint via the anatomical order — arithmetic mean of
+        # `.value` breaks for T13 (value 28, ordered after T12 but numbered after
+        # S1/COCC), landing the annotation on L1 instead of somewhere thoracic.
+        order = Vertebra_Instance.order()
+        try:
+            i1, i2 = order.index(id1), order.index(id2)
+            mid_inst = order[(min(i1, i2) + max(i1, i2)) // 2]
+            vert = mid_inst.value
+        except ValueError:
+            vert = round((id1.value + id2.value) / 2)
         while (vert, 50) not in poi and vert != 0:
             vert -= 1
         text_out.append((vert, (f"{v:.1f}° - {str(name).split('_')[-1]}", 25)))
@@ -806,7 +1067,7 @@ def plot_cobb_angle(
 
         >>> plot_cobb_angle("output.png", poi, img, seg, line_len=100, threshold_deg=10)
     """
-    poi = poi.reorient().rescale_()
+    poi = poi.reorient().rescale_(verbose=False)
     poi = _add_artificial_ivd(poi)
 
     out = []
@@ -824,34 +1085,36 @@ def plot_cobb_angle(
             for id1, mv in zip([from_vert, to_vert], [vert_id1_mv, vert_id2_mv]):
                 c = mv.get_location(id1, poi)
 
-                if use_ivd_direction and id1 > IVD_MORE_ACCURATE:
-                    norm1_post = _get_norm(poi, id1, mv, Location.Vertebra_Direction_Posterior)
-                    a = _get_norm(poi, id1, mv, Location.Vertebra_Disc_Inferior)
-                    a = np.cross(a, norm1_post)
-                else:
-                    a = _get_norm(poi, id1, mv, Location.Vertebra_Direction_Right)
-
-                # print(a, id1, mv, c)
+                # Always go through Vertebra_Direction_Right so _get_norm routes
+                # to the endplate-plane right direction (chain-closed across the
+                # shared disc: `_endplate_r_direction` averages both flanking
+                # endplates). The old ``use_ivd_direction`` branch pulled
+                # ``Vertebra_Disc_Inferior`` from each vertebra separately —
+                # T9-BOTTOM used the T9/T10 disc but T10-TOP used the T10/T11
+                # disc, so the same anatomic boundary got two different lines.
+                a = _get_norm(poi, id1, mv, Location.Vertebra_Direction_Right)
 
                 assert a is not None
                 out.append((apex, c, (-a[2] * line_len, a[1] * line_len)))
                 out.append((apex, c, (a[2] * line_len, -a[1] * line_len)))
-                # a = _get_norm(poi, id1, mv, Location.Vertebra_Disc_Inferior)
-                # out.append((apex, c, (a[2] * line_len, -a[1] * line_len)))
         if apex is not None:
-            cord = poi[apex, 50]
-            s = f"copp angle: {max_angle:.1f}° {Vertebra_Instance(from_vert)} - {Vertebra_Instance(to_vert)}"
-            text_out.append((apex, (s, 25, cord[1])))
+            # Align the label with the disc below the apex vertebra (IVD height)
+            # rather than the vertebra body centre, so the text sits at the same
+            # cranio-caudal level as the drawn Cobb line at the apex.
+            cord = poi[apex, Location.Vertebra_Disc.value] if (apex, Location.Vertebra_Disc.value) in poi else poi[apex, 50]
+            s = f"copp angle\n{max_angle:.1f}° {Vertebra_Instance(from_vert)} - {Vertebra_Instance(to_vert)}"
+            text_out.append((apex, (s, 35, cord[1])))
         poi.info["line_segments_cor"] = out + poi.info.get("line_segments_cor", [])
         poi.info["text_cor"] = text_out + poi.info.get("text_cor", [])
 
     axis = poi.get_axis("R")
     width = poi.shape[axis] / poi.zoom[axis] / 2
-    if width < 50:
+    min_half_width_mm = 80
+    if width < min_half_width_mm:
         padd = [(0, 0) for _ in range(3)]
-        padd[axis] = (int(50 - width), int(50 - width))
-        img = to_nii(img).apply_pad(padd)
-        seg = to_nii(seg, True).apply_pad(padd)
+        padd[axis] = (int(min_half_width_mm - width), int(min_half_width_mm - width))
+        img = to_nii(img).apply_pad(padd, verbose=False)
+        seg = to_nii(seg, True).apply_pad(padd, verbose=False)
         poi = poi.resample_from_to(seg)
     frame = Snapshot_Frame(
         img,

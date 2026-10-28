@@ -248,7 +248,6 @@ def _run_training(
     enable_deep_supervision=True,
     save_every=1,  # 50
 ):
-
     try:
         from nnunetv2.run.run_training import get_trainer_from_args, join, maybe_load_checkpoint
     except ImportError as e:
@@ -409,7 +408,6 @@ class NNUNetRunner:
     # ----------------------------------------------------------
 
     def _train_fold(self, fold: int | str):
-
         # from nnunetv2.run.run_training import run_training
 
         print(f"Training fold {fold}")
@@ -440,7 +438,6 @@ class NNUNetRunner:
     # ----------------------------------------------------------
 
     def _train(self):
-
         if self.cfg.single_gpu:
             os.environ["CUDA_VISIBLE_DEVICES"] = self.cfg.gpus[0]
 
