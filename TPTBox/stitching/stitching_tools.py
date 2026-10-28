@@ -201,6 +201,8 @@ def _center_frontal(size: int) -> slice:
     distance = int((upper_bound - lower_bound) / 2)
     middle = int(lower_bound + distance)
     # rather push it little back over the top in dorsal direction rather then not putting it into account
-    small_value = middle - 122
-    big_value = middle + 134
+    # Clamped to the volume: below ~258 voxels `middle - 122` turns negative, and numpy reads a
+    # negative slice start as an offset from the end, silently cropping from the wrong side.
+    small_value = max(0, middle - 122)
+    big_value = min(size, middle + 134)
     return slice(small_value, big_value)

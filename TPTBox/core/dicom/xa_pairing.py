@@ -208,7 +208,10 @@ def pair_biplane_xa(
                 if b_sequ == a_sequ:
                     continue
                 # Build the target path with A's sequ; keep all other entities.
-                new_bids = bf.get_changed_bids(info={"sequ": a_sequ}, non_strict_mode=True)
+                # `parent` must be the file's own parent: get_changed_bids defaults to
+                # "derivatives", which silently moved the B-side out of rawdata (where a
+                # rawdata-scoped scan - including the flip_z pass below - then lost it).
+                new_bids = bf.get_changed_bids(info={"sequ": a_sequ}, parent=bf.parent, non_strict_mode=True)
                 src_paths = {ext: Path(p) for ext, p in bf.file.items()}
                 new_nii = Path(new_bids.file.get("nii.gz", ""))
                 new_stem = str(new_nii).removesuffix(".nii.gz")

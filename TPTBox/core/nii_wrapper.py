@@ -2712,7 +2712,10 @@ class NII(NII_Math):
                 if out_path.is_dir():
                     out_path = out_path / f"mask_{label}.stl"
                 elif number_path:
-                    out_path.with_name(f"{out_path.stem}_{label}.stl")
+                    # with_name returns a new path; the result used to be discarded, so
+                    # to_stls() wrote every label to the same file and only the last
+                    # label's mesh survived.
+                    out_path = out_path.with_name(f"{out_path.stem}_{label}.stl")
                 log.on_save(f"Saving STL to {out_path}")
                 out_path.parent.mkdir(exist_ok=True,parents=True)
                 cube.save(str(out_path))

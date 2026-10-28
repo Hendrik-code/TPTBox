@@ -2218,9 +2218,11 @@ def np_calc_boundary_mask(
     """
     if adjust_intensity_for_ct:
         img = img + 1000
-    boundary = img.copy()
-    boundary[boundary > threshold] = 2
-    boundary[boundary <= threshold] = 0
+    # Compute the foreground mask *before* writing the sentinel: the two assignments
+    # used to run in place one after the other, so the 2 written by the first line was
+    # then compared against the threshold by the second. For any threshold >= 2 that
+    # wiped the foreground again and the function returned an empty mask.
+    boundary = np.where(img > threshold, 2, 0)
     infect_list = []
 
     def infect(x, y, z):
@@ -2242,7 +2244,6 @@ def np_calc_boundary_mask(
                 (-1, 0, 0),
                 (0, 1, 0),
                 (0, -1, 0),
-                (0, 1, 0),
                 (0, 0, 1),
                 (0, 0, -1),
             ]:

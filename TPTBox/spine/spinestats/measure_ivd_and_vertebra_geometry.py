@@ -173,7 +173,10 @@ def measure_ivd_and_vertebra_geometry(
             Location.Endplate,
         ],
         buffer_file=buffer_poi,
-        save_buffer_file=True,
+        # Only ask for a write-back when there is somewhere to write: the buffering
+        # decorator asserts buffer_file is not None, so hardcoding True made the
+        # documented default (buffer_poi=None) raise AssertionError.
+        save_buffer_file=buffer_poi is not None,
     )
     if instance_labels is None:
         instance_labels = [int(i) for i in vert.unique() if i > structure_label and i < structure_label + 100]
@@ -439,7 +442,7 @@ def _segment_length(intersection_points) -> float:
     """
     if len(intersection_points) == 0:
         return 0
-    return np.sqrt(sum((a - b) ** 2 for a, b in zip(intersection_points[0], intersection_points[-1], strict=False)))
+    return np.sqrt(sum((a - b) ** 2 for a, b in zip(intersection_points[0], intersection_points[-1])))
 
 
 def _swap(a, b):

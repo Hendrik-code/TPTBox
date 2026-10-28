@@ -58,7 +58,7 @@ not on the Python API. A standalone copy of this reference lives at
 | Key | Source function | What it covers |
 |---|---|---|
 | `ivd_geometry` | `measure_ivd_and_vertebra_geometry(..., structure_label=100)` | intervertebral discs (now also carries wedge angles/indices per label) |
-| `vert_geometry` | `measure_ivd_and_vertebra_geometry(..., structure_label=50)` | vertebral bodies (now also carries wedge angles/indices per label) |
+| `vert_geometry` | `measure_ivd_and_vertebra_geometry(..., structure_label=0)` | vertebral bodies (now also carries wedge angles/indices per label) |
 | `VBQ_score` | `VBQ_score` | vertebral bone quality (T2 signal ratio) |
 | `body_composition_score` | `body_composition_score` | axial CSA per tissue at chosen vertebral levels |
 | `muscle_fat_infiltration` | `muscle_fat_infiltration` | Dixon fat-fraction based muscle-quality metrics |

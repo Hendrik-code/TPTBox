@@ -65,7 +65,7 @@ def _preprocess_dataset(
     print(f"Preprocessing dataset {dataset_name}")
     plans_file = join(nnUNet_preprocessed, dataset_name, plans_identifier + ".json")  # type: ignore
     plans_manager = PlansManager(plans_file)
-    for n, c in zip(num_processes, configurations, strict=False):
+    for n, c in zip(num_processes, configurations):
         print(f"Configuration: {c}...")
         if c not in plans_manager.available_configurations:
             print(f"INFO: Configuration {c} not found in plans file {plans_identifier + '.json'} of dataset {dataset_name}. Skipping.")
