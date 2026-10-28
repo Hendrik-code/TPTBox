@@ -158,6 +158,88 @@ def _generate_bids_path(
     return fname.file["json"], fname
 
 
+# DICOM anatomical direction letter → unit vector in LPS (DICOM) space.
+# L = +X (patient left), P = +Y (posterior), H = +Z (superior/head).
+_DCM_LETTER_TO_LPS_VEC = {
+    "L": np.array([1.0, 0.0, 0.0]),
+    "R": np.array([-1.0, 0.0, 0.0]),
+    "P": np.array([0.0, 1.0, 0.0]),
+    "A": np.array([0.0, -1.0, 0.0]),
+    "H": np.array([0.0, 0.0, 1.0]),
+    "F": np.array([0.0, 0.0, -1.0]),
+}
+# Negate X and Y to turn DICOM LPS cosines into NIfTI RAS cosines.
+_LPS_TO_RAS = np.array([-1.0, -1.0, 1.0])
+
+
+def _cosines_from_patient_orientation(patient_orientation) -> tuple[np.ndarray, np.ndarray] | tuple[None, None]:
+    """DICOM PatientOrientation (0020,0020) → RAS row/column cosines.
+
+    The tag's two values are single-letter anatomical codes (L/R, A/P, H/F)
+    describing the direction the row and column axes point in patient space.
+    Returns (None, None) if the tag is absent, has blanks, or uses an
+    unknown letter — the caller then falls back to the next heuristic.
+    """
+    if not patient_orientation or len(patient_orientation) < 2:
+        return None, None
+    row_letter = str(patient_orientation[0]).strip().upper()[:1]
+    col_letter = str(patient_orientation[1]).strip().upper()[:1]
+    row = _DCM_LETTER_TO_LPS_VEC.get(row_letter)
+    col = _DCM_LETTER_TO_LPS_VEC.get(col_letter)
+    if row is None or col is None:
+        return None, None
+    return row * _LPS_TO_RAS, col * _LPS_TO_RAS
+
+
+_VIEW_TOKEN_TO_LETTERS = {
+    "ap": ("L", "F"),
+    "pa": ("L", "F"),
+    "ll": ("P", "F"),
+    "llat": ("P", "F"),
+    "lateral": ("P", "F"),  # unspecified side defaults to left-lateral (clinical norm).
+    "lat": ("P", "F"),
+    "rl": ("A", "F"),
+    "rlat": ("A", "F"),
+}
+
+
+def _cosines_from_view_position(view_position) -> tuple[np.ndarray, np.ndarray] | tuple[None, None]:
+    """Fallback for projection X-rays whose PatientOrientation is blank.
+
+    Uses the canonical radiography convention for the given ViewPosition
+    (0018,5101): rows run horizontally in the image, columns run top-to-
+    bottom (head→feet). Returns (None, None) for unknown or ambiguous
+    codes (e.g. a bare ``LAT`` that does not say which side).
+    """
+    if not view_position:
+        return None, None
+    view = str(view_position).strip().lower()
+    letters = _VIEW_TOKEN_TO_LETTERS.get(view)
+    if letters is None:
+        return None, None
+    return _cosines_from_patient_orientation(list(letters))
+
+
+def _cosines_from_text_tokens(*texts) -> tuple[np.ndarray, np.ndarray] | tuple[None, None]:
+    """Last-ditch fallback: scan SeriesDescription / StudyDescription for AP/PA/LL/LAT tokens.
+
+    Some scanners drop both PatientOrientation and ViewPosition for projection
+    X-rays, leaving only free-text descriptions. Scan them as whitespace- /
+    underscore- / dash-separated tokens so we only match standalone words,
+    not substrings like 'ap' inside 'scaphoid'. Returns (None, None) if no
+    recognisable projection token is found.
+    """
+    import re
+    for text in texts:
+        if not text:
+            continue
+        for token in re.split(r"[\s_\-]+", str(text).lower()):
+            letters = _VIEW_TOKEN_TO_LETTERS.get(token)
+            if letters is not None:
+                return _cosines_from_patient_orientation(list(letters))
+    return None, None
+
+
 def dicom_to_nifti_multiframe_2d(ds, nii_path, pixel_array) -> None:
     """Convert a 2D multiframe DICOM dataset to a NIfTI file using its affine metadata.
 
@@ -170,18 +252,48 @@ def dicom_to_nifti_multiframe_2d(ds, nii_path, pixel_array) -> None:
         dy, dx = map(float, ds.PixelSpacing)
         affine = np.eye(4)
 
-        if hasattr(ds, "ImageOrientationPatient"):
-            orientation = list(map(float, ds.ImageOrientationPatient))
-            row_cosines = np.array(orientation[:3])
-            col_cosines = np.array(orientation[3:])
-            affine[:3, 0] = row_cosines * dx
-            affine[:3, 1] = col_cosines * dy
+        row_cos = col_cos = None
+        iop = getattr(ds, "ImageOrientationPatient", None)
+        if iop is not None:
+            orientation = list(map(float, iop))
+            # ImageOrientationPatient is in DICOM LPS; flip to NIfTI RAS.
+            row_cos = np.array(orientation[:3]) * _LPS_TO_RAS
+            col_cos = np.array(orientation[3:]) * _LPS_TO_RAS
+
+        # Projection X-rays (CR/DX) typically ship without ImageOrientationPatient
+        # but set PatientOrientation (0020,0020) or ViewPosition (0018,5101)
+        # instead. Without this fallback the affine stayed identity and viewers
+        # showed each series rotated or mirrored depending on how the modality
+        # happened to lay out the pixel buffer.
+        if row_cos is None:
+            row_cos, col_cos = _cosines_from_patient_orientation(getattr(ds, "PatientOrientation", None))
+        if row_cos is None:
+            row_cos, col_cos = _cosines_from_view_position(getattr(ds, "ViewPosition", None))
+        if row_cos is None:
+            row_cos, col_cos = _cosines_from_text_tokens(
+                getattr(ds, "SeriesDescription", None),
+                getattr(ds, "StudyDescription", None),
+                getattr(ds, "ProtocolName", None),
+            )
+
+        if row_cos is not None:
+            affine[:3, 0] = row_cos * dx
+            affine[:3, 1] = col_cos * dy
+            # The 2D image lies in the row×col plane; the "slice" axis must be
+            # the normal to that plane so the affine stays non-singular.
+            # Leaving np.eye's default (0,0,1) produces a degenerate affine
+            # whenever row/col already span X-Z or Y-Z (e.g. AP X-rays with
+            # row=L, col=F) — ITK refuses to open such a NIfTI.
+            slice_cos = np.cross(row_cos, col_cos)
+            dz = float(getattr(ds, "SliceThickness", 1.0) or 1.0)
+            affine[:3, 2] = slice_cos * dz
         else:
             affine[0, 0] = dx
             affine[1, 1] = dy
 
-        if hasattr(ds, "ImagePositionPatient"):
-            affine[:3, 3] = np.array(list(map(float, ds.ImagePositionPatient)))
+        ipp = getattr(ds, "ImagePositionPatient", None)
+        if ipp is not None:
+            affine[:3, 3] = np.array(list(map(float, ipp))) * _LPS_TO_RAS
 
     elif hasattr(ds, "ImagerPixelSpacing"):
         dy, dx = map(float, ds.ImagerPixelSpacing)
