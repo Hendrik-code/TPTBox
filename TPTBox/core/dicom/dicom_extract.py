@@ -230,6 +230,7 @@ def _cosines_from_text_tokens(*texts) -> tuple[np.ndarray, np.ndarray] | tuple[N
     recognisable projection token is found.
     """
     import re
+
     for text in texts:
         if not text:
             continue
@@ -279,7 +280,7 @@ def dicom_to_nifti_multiframe_2d(ds, nii_path, pixel_array) -> None:
         if row_cos is not None:
             affine[:3, 0] = row_cos * dx
             affine[:3, 1] = col_cos * dy
-            # The 2D image lies in the row×col plane; the "slice" axis must be
+            # The 2D image lies in the row x col plane; the "slice" axis must be
             # the normal to that plane so the affine stays non-singular.
             # Leaving np.eye's default (0,0,1) produces a degenerate affine
             # whenever row/col already span X-Z or Y-Z (e.g. AP X-rays with
