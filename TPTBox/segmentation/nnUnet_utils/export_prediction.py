@@ -3,6 +3,8 @@
 # method for deep learning-based biomedical image segmentation. Nature methods, 18(2), 203-211.
 from __future__ import annotations
 
+from typing import Literal, overload
+
 import numpy as np
 import torch
 from acvl_utils.cropping_and_padding.bounding_boxes import bounding_box_to_slice
@@ -162,6 +164,30 @@ def convert_probabilities_to_segmentation(
     return segmentation
 
 
+@overload
+def convert_predicted_logits_to_segmentation_with_correct_shape(
+    predicted_logits: torch.Tensor | np.ndarray,
+    plans_manager: PlansManager,
+    configuration_manager: ConfigurationManager,
+    label_manager: LabelManager,
+    properties_dict: dict,
+    return_probabilities: Literal[False] = False,
+    num_threads_torch: int = 8,
+    device=None,
+    logger=...,
+) -> np.ndarray: ...
+@overload
+def convert_predicted_logits_to_segmentation_with_correct_shape(
+    predicted_logits: torch.Tensor | np.ndarray,
+    plans_manager: PlansManager,
+    configuration_manager: ConfigurationManager,
+    label_manager: LabelManager,
+    properties_dict: dict,
+    return_probabilities: Literal[True],
+    num_threads_torch: int = 8,
+    device=None,
+    logger=...,
+) -> tuple[np.ndarray, np.ndarray]: ...
 def convert_predicted_logits_to_segmentation_with_correct_shape(
     predicted_logits: torch.Tensor | np.ndarray,
     plans_manager: PlansManager,
@@ -172,7 +198,7 @@ def convert_predicted_logits_to_segmentation_with_correct_shape(
     num_threads_torch: int = 8,
     device=None,
     logger=logger,
-) -> np.ndarray:
+) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
     """Revert all preprocessing steps and return a segmentation in the original image space.
 
     Performs (in reverse order): resampling from network output spacing back to
@@ -190,23 +216,31 @@ def convert_predicted_logits_to_segmentation_with_correct_shape(
         properties_dict: Case properties dict as updated by
             :meth:`DefaultPreprocessor.run_case_npy` (contains cropping bbox,
             pre-crop shape, and original spacing).
-        return_probabilities: Reserved for future use. Raises
-            :class:`NotImplementedError` if ``True``.
+        return_probabilities: If ``True``, also return the softmax probabilities
+            (``float32``, ``(num_classes, X, Y, Z)``) in the same original image
+            space as the segmentation.
         num_threads_torch: Number of threads used by PyTorch during resampling.
         device: Torch device on which the argmax runs; ``None`` uses the tensor's current device.
         logger: Logger used for progress messages from the argmax GPU-fallback path.
 
     Returns:
         Integer segmentation array with dtype ``np.uint8`` or ``np.uint16``
-        in the original image space (before any preprocessing).
-
-    Raises:
-        NotImplementedError: If ``return_probabilities`` is ``True``.
+        in the original image space (before any preprocessing). With
+        ``return_probabilities`` a tuple ``(segmentation, probabilities)``.
     """
-    if return_probabilities:
-        raise NotImplementedError()
     old_threads = torch.get_num_threads()
     torch.set_num_threads(num_threads_torch)
+    # run_inference_on_file rescales the input to the model spacing itself, so nnUNet's own
+    # preprocessing/export resampling should be a no-op (same shape before and after).
+    logits_shape = tuple(int(i) for i in predicted_logits.shape[1:])
+    target_shape = tuple(int(i) for i in properties_dict["shape_after_cropping_and_before_resampling"])
+    if logits_shape != target_shape:
+        logger.on_warning(
+            f"nnUNet resamples the prediction {logits_shape} -> {target_shape} "
+            f"(model spacing {list(configuration_manager.spacing)}, input spacing {list(properties_dict['spacing'])}). "
+            "The input was expected to be pre-rescaled to the model spacing; this adds an interpolation step "
+            "(check `resolution_range`/`spacing` in the model's dataset.json / inference_config.json)."
+        )
     # resample to original shape
     current_spacing = (
         configuration_manager.spacing
@@ -222,6 +256,14 @@ def convert_predicted_logits_to_segmentation_with_correct_shape(
     # segmentation: np.ndarray = label_manager.convert_probabilities_to_segmentation(predicted_logits)  # type: ignore
     segmentation: np.ndarray = convert_probabilities_to_segmentation(label_manager, predicted_logits, device, logger=logger)
     segmentation = segmentation.astype(np.uint8 if len(label_manager.foreground_labels) < 255 else np.uint16)
+    probabilities: np.ndarray | None = None
+    if return_probabilities:
+        probs = predicted_logits.cpu().numpy() if isinstance(predicted_logits, torch.Tensor) else np.asarray(predicted_logits)
+        probabilities = np.zeros((probs.shape[0], *properties_dict["shape_before_cropping"]), dtype=np.float32)
+        probabilities[(slice(None), *bounding_box_to_slice(properties_dict["bbox_used_for_cropping"]))] = probs
+        del probs
+        # revert transpose (channel axis stays first)
+        probabilities = probabilities.transpose([0] + [i + 1 for i in plans_manager.transpose_backward])
     del predicted_logits
     # put segmentation in bbox (revert cropping)
     segmentation_reverted_cropping = np.zeros(
@@ -235,30 +277,9 @@ def convert_predicted_logits_to_segmentation_with_correct_shape(
     # revert transpose
     segmentation = segmentation.transpose(plans_manager.transpose_backward)
     logger.print(segmentation.shape)
-    # if return_probabilities:
-    #    raise NotImplementedError()
-    #    # revert cropping
-    #    try:
-    #        predicted_probabilities = predicted_logits  # noqa: F821
-    #        predicted_probabilities = label_manager.revert_cropping_on_probabilities(  # type: ignore
-    #            predicted_probabilities,
-    #            properties_dict["bbox_used_for_cropping"],
-    #            properties_dict["shape_before_cropping"],
-    #        )
-    #    except Exception:
-    #        predicted_probabilities = label_manager.revert_cropping(  # type: ignore
-    #            predicted_probabilities.numpy() if isinstance(predicted_probabilities, torch.Tensor) else predicted_probabilities,
-    #            properties_dict["bbox_used_for_cropping"],
-    #            properties_dict["shape_before_cropping"],
-    #        )
-    #    if isinstance(predicted_probabilities, torch.Tensor):
-    #        predicted_probabilities = predicted_probabilities.cpu().numpy()
-    #    # revert transpose
-    #    predicted_probabilities = predicted_probabilities.transpose([0] + [i + 1 for i in plans_manager.transpose_backward])
-    #    torch.set_num_threads(old_threads)
-    #    return segmentation, predicted_probabilities
-    # else:
     torch.set_num_threads(old_threads)
+    if probabilities is not None:
+        return segmentation, probabilities
     return segmentation
 
 

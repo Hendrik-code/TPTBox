@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from math import ceil, floor
 from queue import Queue
 from threading import Thread
+from typing import Literal, overload
 
 import numpy as np
 import torch
@@ -356,9 +357,17 @@ class nnUNetPredictor:
             self.network.eval()  # type: ignore
             self.loaded_networks = [self.network]
 
+    @overload
+    def predict_single_npy_array(
+        self, input_image: np.ndarray, image_properties: dict, save_or_return_probabilities: Literal[False] = False, logger=...
+    ) -> np.ndarray: ...
+    @overload
+    def predict_single_npy_array(
+        self, input_image: np.ndarray, image_properties: dict, save_or_return_probabilities: Literal[True], logger=...
+    ) -> tuple[np.ndarray, np.ndarray]: ...
     def predict_single_npy_array(
         self, input_image: np.ndarray, image_properties: dict, save_or_return_probabilities: bool = False, logger=logger
-    ) -> np.ndarray:
+    ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
         """Run full inference on a single numpy image array.
 
         Args:
@@ -366,14 +375,13 @@ class nnUNetPredictor:
                 the number of input channels.
             image_properties: Dictionary that must contain a ``'spacing'`` key
                 with the voxel spacing in mm (list/tuple of floats).
-            save_or_return_probabilities: If ``True``, also return softmax
-                probabilities in addition to the label map. Currently raises
-                :class:`NotImplementedError` inside the conversion step.
+            save_or_return_probabilities: If ``True``, also return the softmax
+                probabilities (``float32``, ``(C, ...)``) in addition to the label map.
             logger: Logger used for progress and error output.
 
         Returns:
-            The predicted segmentation array (or a tuple with probabilities if
-            ``save_or_return_probabilities`` is ``True``).
+            The predicted segmentation array, or ``(segmentation, probabilities)`` if
+            ``save_or_return_probabilities`` is ``True``.
         """
         segmentation_previous_stage: np.ndarray = None  # type: ignore # Was previously a parameter
 
@@ -402,16 +410,29 @@ class nnUNetPredictor:
         import time
 
         t = time.time()
-        ret = convert_predicted_logits_to_segmentation_with_correct_shape(
-            predicted_logits,
-            self.plans_manager,
-            self.configuration_manager,
-            self.label_manager,
-            dct["data_properites"],
-            return_probabilities=save_or_return_probabilities,
-            device=self.device,
-            logger=logger,
-        )
+        ret: np.ndarray | tuple[np.ndarray, np.ndarray]
+        if save_or_return_probabilities:
+            ret = convert_predicted_logits_to_segmentation_with_correct_shape(
+                predicted_logits,
+                self.plans_manager,
+                self.configuration_manager,
+                self.label_manager,
+                dct["data_properites"],
+                return_probabilities=True,
+                device=self.device,
+                logger=logger,
+            )
+        else:
+            ret = convert_predicted_logits_to_segmentation_with_correct_shape(
+                predicted_logits,
+                self.plans_manager,
+                self.configuration_manager,
+                self.label_manager,
+                dct["data_properites"],
+                return_probabilities=False,
+                device=self.device,
+                logger=logger,
+            )
         print("convert_predicted_logits_to_segmentation_with_correct_shape; Took", time.time() - t, " seconds")
 
         return ret
