@@ -1171,6 +1171,9 @@ def calc_poi_from_subreg_vert(
         if loc in subreg_id_int:
             log.print("Calc centroid from subregion id", Location(loc).name, verbose=verbose)
             vert_arr = vert_msk.get_seg_array()
+            # Only widen when needed: the offsets (up to v + 100) must fit into the dtype, otherwise NumPy 2 raises OverflowError
+            if vert_arr.dtype.kind in "ui" and np.iinfo(vert_arr.dtype).max < v + 100:
+                vert_arr = vert_arr.astype(np.int32)
             subreg_arr = subreg_msk.get_seg_array()
             # IVD / Endplates Superior / Endplate Inferior
             vert_arr[subreg_arr != loc] = 0
