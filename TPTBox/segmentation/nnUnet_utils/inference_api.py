@@ -301,21 +301,18 @@ def run_inference(
         predictor: Loaded ``nnUNetPredictor`` as returned by :func:`load_inf_model`.
         reorient_PIR: If True, reorient each input image to PIR orientation before
             passing it to the model.
-        logits: If True, return raw softmax logits.  Currently not implemented and
-            will raise ``NotImplementedError``.
+        logits: If True, also return the softmax probabilities as a ``float32`` array
+            ``(num_classes, X, Y, Z)`` on the grid (shape, orientation) of the first input.
         logger: Logger used for progress and error output.
         verbose: Unused; reserved for future logging support.
 
     Raises:
-        NotImplementedError: If *logits* is True.
         AssertionError: If *input_nii* is not a supported type, or if the output
             shape does not match the input shape.
 
     Returns:
         A tuple of (segmentation_NII, uncertainty_map_or_None, softmax_logits_or_None).
     """
-    if logits:
-        raise NotImplementedError("logits=True")
     if isinstance(input_nii, str):
         assert input_nii.endswith(".nii.gz"), f"input file is not a .nii.gz! Got {input_nii}"
         input_nii = NII.load(input_nii, seg=False)
@@ -339,13 +336,27 @@ def run_inference(
         logger.on_fail("could not stack images; shapes=", [a.shape for a in img_arrs])
         raise
     props = {"spacing": i.zoom[::-1]}  # PIR
-    out = predictor.predict_single_npy_array(img, props, save_or_return_probabilities=False, logger=logger)
-    segmentation: np.ndarray = out  # type: ignore
-    softmax_logits = None
+    probabilities: np.ndarray | None = None
+    if logits:
+        segmentation, probabilities = predictor.predict_single_npy_array(img, props, save_or_return_probabilities=True, logger=logger)
+    else:
+        segmentation = predictor.predict_single_npy_array(img, props, save_or_return_probabilities=False, logger=logger)
     segmentation = np.transpose(segmentation, axes=segmentation.ndim - 1 - np.arange(segmentation.ndim))
     assert segmentation.shape == input_nii[0].shape, (segmentation.shape, input_nii[0].shape)
     seg_nii = input_nii[0].set_array(segmentation.astype(np.uint8), seg=True)
     seg_nii.reorient_(orientation, verbose=False)
+
+    softmax_logits = None
+    if probabilities is not None:
+        # nnUNet axis order (C, z, y, x) -> NII order (C, x, y, z), then the same reorientation as the segmentation
+        probabilities = np.transpose(probabilities, axes=[0, *range(probabilities.ndim - 1, 0, -1)])
+        assert probabilities.shape[1:] == input_nii[0].shape, (probabilities.shape, input_nii[0].shape)
+        channels = []
+        for c in probabilities:
+            channel = input_nii[0].set_array(np.ascontiguousarray(c, dtype=np.float32), seg=False)
+            channel.reorient_(orientation, verbose=False)
+            channels.append(channel.get_array())
+        softmax_logits = np.stack(channels).astype(np.float32, copy=False)
     return seg_nii, None, softmax_logits
 
 
