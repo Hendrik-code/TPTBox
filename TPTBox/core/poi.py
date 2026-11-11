@@ -33,6 +33,7 @@ from TPTBox.core.vert_constants import (
     TRIPLE,
     ZOOMS,
     Abstract_lvl,
+    Any,
     Location,
     Sentinel,
     Vertebra_Instance,
@@ -1189,6 +1190,12 @@ def calc_poi_from_subreg_vert(
                 inplace=True,
             )
             subreg_id_int.remove(loc)
+    # calc_centroids* build new POIs from plain int ids and therefore drop the level info of ``extend_to``.
+    # This function works on vertebra instances + Location sub-regions, so (re-)set it here once.
+    if extend_to.level_one_info is Any:
+        extend_to.level_one_info = Vertebra_Instance
+    if extend_to.level_two_info is Any:
+        extend_to.level_two_info = Location
     # Step 5 call non_centroid_pois
     # Prepare mask to binary mask
     print("step 5", subreg_id_int) if _print_phases else None
