@@ -46,6 +46,41 @@ class Test_Centroids(unittest.TestCase):
         file.unlink(missing_ok=True)
         self.assertEqual(c, p)
 
+    def test_calc_poi_from_subreg_vert_sets_level_info(self):
+        """Regression: the POI returned by calc_poi_from_subreg_vert must carry Vertebra_Instance/Location.
+
+        calc_centroids is a general function (int stage ids) and drops the level info of ``extend_to``;
+        calc_poi_from_subreg_vert is responsible for setting it, otherwise indexing with enums warns.
+        """
+        import warnings
+
+        import numpy as np
+
+        from TPTBox import Location, Vertebra_Instance
+        from TPTBox.core.vert_constants import Any
+
+        arr = np.zeros((20, 20, 20), dtype=np.int32)
+        arr[5:10, 5:10, 5:10] = 1
+        vert = NII(nib.nifti1.Nifti1Image(arr, np.eye(4)), True)
+        sub = NII(nib.nifti1.Nifti1Image(arr * Location.Vertebra_Corpus.value, np.eye(4)), True)
+        with self.subTest("calc_centroids stays general (no level info invented)"):
+            self.assertIs(calc_centroids(vert, second_stage=Location.Vertebra_Corpus.value).level_two_info, Any)
+        with self.subTest("phase-1 sub-region"):
+            poi = calc_poi_from_subreg_vert(vert, sub, subreg_id=[Location.Vertebra_Corpus])
+            self.assertIs(poi.level_one_info, Vertebra_Instance)
+            self.assertIs(poi.level_two_info, Location)
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")
+                self.assertEqual(poi[1, Location.Vertebra_Corpus], poi[1, Location.Vertebra_Corpus.value])
+        with self.subTest("Vertebra_Full (step 3, int stage id)"):
+            poi = calc_poi_from_subreg_vert(vert, sub, subreg_id=[Location.Vertebra_Full])
+            self.assertIs(poi.level_two_info, Location)
+        with self.subTest("buffer file written by an older run without level info"), tempfile.TemporaryDirectory() as d:
+            f = Path(d, "buffer.json")
+            calc_poi_from_subreg_vert(vert, sub, subreg_id=[Location.Vertebra_Corpus], buffer_file=f, save_buffer_file=True)
+            poi = calc_poi_from_subreg_vert(vert, sub, subreg_id=[Location.Vertebra_Corpus, Location.Vertebra_Full], buffer_file=f)
+            self.assertIs(poi.level_two_info, Location)
+
     def test_calc_centroids_labeled_bufferd2(self):
         msk, cent, order, sizes = get_nii(num_point=random.randint(1, 7))
         msk2, cent2, order2, sizes2 = get_nii(x=msk.shape, num_point=len(cent) - 1)

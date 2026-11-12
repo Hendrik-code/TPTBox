@@ -429,11 +429,29 @@ class TestRunInferenceWithAMockedPredictor(unittest.TestCase):
         run_inference(niis, predictor)
         self.assertEqual(predictor.predict_single_npy_array.call_args[0][0].shape[0], 2)
 
-    def test_logits_are_not_implemented(self):
+    def test_probabilities_come_back_on_the_input_grid_in_input_order(self):
         from TPTBox.segmentation.nnUnet_utils.inference_api import run_inference  # noqa: PLC0415
 
-        with self.assertRaises((NotImplementedError, AssertionError)):
-            run_inference(_nii(_image(), seg=False), self._predictor(), logits=True)
+        nii = _nii(_image(), seg=False)
+        predictor = mock.MagicMock()
+
+        def predict(img, props, save_or_return_probabilities=False, **kwargs):  # noqa: ARG001
+            seg = np.zeros(img.shape[1:], dtype=np.uint8)
+            seg[0, 0, 0] = 1
+            assert save_or_return_probabilities
+            probs = np.zeros((2, *img.shape[1:]), dtype=np.float32)
+            probs[1, 0, 0, 0] = 0.75  # nnUNet order (z, y, x): voxel x=y=z=0 stays at the origin
+            probs[1, 0, 0, -1] = 0.5  # last x (nnUNet axis 3) must land on NII axis 0
+            return seg, probs
+
+        predictor.predict_single_npy_array.side_effect = predict
+        seg, _, softmax = run_inference(nii, predictor, logits=True)
+        self.assertIsNotNone(softmax)
+        self.assertEqual(softmax.shape, (2, *nii.shape))
+        self.assertEqual(softmax.dtype, np.float32)
+        self.assertAlmostEqual(float(softmax[1, 0, 0, 0]), 0.75)
+        self.assertAlmostEqual(float(softmax[1, -1, 0, 0]), 0.5)
+        np.testing.assert_array_equal(seg.get_seg_array() > 0, softmax[1] == 0.75)
 
     def test_an_unsupported_input_type_is_rejected(self):
         from TPTBox.segmentation.nnUnet_utils.inference_api import run_inference  # noqa: PLC0415
