@@ -49,7 +49,16 @@ def _compute_distance(
         all_pois_computed = True
     if not all_pois_computed:
         poi = calc_poi_from_subreg_vert(vert, subreg, extend_to=poi, subreg_id=[l1, l2])
-    poi.info[key] = poi.calculate_distances_poi_across_regions(l1, l2, keep_zoom=False)
+    # distance l1 -> l2 per vertebra in mm (global space, so voxel zoom does not matter); vertebrae missing either point are left out
+    pts: dict[int, dict[int, tuple[float, float, float]]] = {}
+    for region, subregion, c in poi.to_global().items():
+        if subregion in (l1.value, l2.value):
+            pts.setdefault(region, {})[subregion] = c
+    poi.info[key] = {
+        r: float(sum((a - b) ** 2 for a, b in zip(p[l1.value], p[l2.value])) ** 0.5)
+        for r, p in pts.items()
+        if l1.value in p and l2.value in p
+    }
     return poi
 
 
