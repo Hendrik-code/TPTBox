@@ -11,6 +11,7 @@ objects and `NII` segmentations.
 | `curvature.py` | Extended curvature metrics: SVA, coronal balance, wedge angles, segmental endplate angles, axial rotation, spline-based curvature profile, multi-curve Cobb |
 | `pelvic_parameters.py` | Pelvic Incidence / Pelvic Tilt / Sacral Slope / PI-LL mismatch from the fullbody-POI json |
 | `measure_ivd_and_vertebra_geometry.py` | Per-structure geometry (heights, widths, x1–x6) and T2 signal ratio for vertebrae and IVDs |
+| `bone_density.py` | CT opportunistic bone density: trabecular HU of the vertebral bodies per vertebra and pooled per region (CT counterpart of `VBQ_score`); also reads CT parameters (kVp, kernel, contrast) from the json sidecar to flag non-comparable HU |
 | `torso_vat_sat.py` | VBQ score, body composition CSA, muscle fat infiltration, torso VAT/SAT/muscle volumes; also `peak_centered_mean` |
 | `vertebra_anatomical_widths.py` | Anatomical distances per vertebra (IVD height, body height, LR/AP widths) stored on `POI.info` |
 | `body_quadrants.py` | Subdivides vertebra bodies into anatomical quadrants |
@@ -26,6 +27,7 @@ objects and `NII` segmentations.
 | `plot_cobb_and_lordosis_and_kyphosis` | `angles.py` | Combined computation + snapshot |
 | `measure_ivd_and_vertebra_geometry` | `measure_ivd_and_vertebra_geometry.py` | Geometry + signal per label |
 | `VBQ_score` | `torso_vat_sat.py` | Vertebral Bone Quality score (T2 vertebra / T2 CSF) |
+| `ct_bone_density` | `bone_density.py` | Trabecular HU (mean/median/std, volume) of the eroded vertebral bodies; optional user-supplied HU→BMD calibration |
 | `body_composition_score` | `torso_vat_sat.py` | Per-level axial CSA of muscle / VAT / SAT / psoas / autochthon |
 | `muscle_fat_infiltration` | `torso_vat_sat.py` | Dixon fat-fraction based muscle-quality metrics |
 | `torso_vat_sat_muscle_mass` | `torso_vat_sat.py` | Whole-torso VAT / SAT / muscle volumes inside an ROI |
