@@ -154,28 +154,30 @@ def normalize_label_name(d: dict | None) -> dict[int, dict]:
 
     Target: ``{region:int -> {subregion:int -> name:str, "name": group_name:str}}``.
     Accepts and migrates: the old flat ``{"(1, 2)": "C2"}`` form, a JSON-loaded nested
-    form with string keys ``{"1": {"2": "C2", "name": "Spine"}}``, and the already-nested
-    form (idempotent).
+    form with string keys ``{"1": {"2": "C2", "name": "Spine"}}``, the already-nested
+    form (idempotent), and any mix of the three in the same dict (produced e.g. when
+    ``join_left_`` merges a nested POI into a dict that still receives flat
+    ``"(region, subregion)"`` string entries).
     """
     import ast
 
     if not d:
         return {}
     out: dict[int, dict] = {}
-    # old flat format: every key is a "(region, subregion)" tuple string
-    if all(isinstance(k, str) and k.strip().startswith("(") for k in d):
-        for k, name in d.items():
+    for k, v in d.items():
+        # legacy flat entry: "(region, subregion)" -> "name"
+        if isinstance(k, str) and k.strip().startswith("("):
             region, subregion = ast.literal_eval(k)
-            out.setdefault(int(region), {})[int(subregion)] = name
-        return out
-    # nested format (region keys may be JSON strings)
-    for region, sub in d.items():
-        target = out.setdefault(int(region), {})
-        if isinstance(sub, dict):
-            for s, name in sub.items():
+            out.setdefault(int(region), {})[int(subregion)] = v
+            continue
+        # nested entry: region -> {subregion: name, "name": group_name} (or degenerate region -> name)
+        region_i = int(k)
+        target = out.setdefault(region_i, {})
+        if isinstance(v, dict):
+            for s, name in v.items():
                 target[_GROUP_NAME_KEY if s == _GROUP_NAME_KEY else int(s)] = name
-        else:  # degenerate {region: name} -> treat as the region group name
-            target[_GROUP_NAME_KEY] = sub
+        else:
+            target[_GROUP_NAME_KEY] = v
     return out
 
 
@@ -869,6 +871,19 @@ class Abstract_POI:
         d = label_name_dict(self.info)
         d.setdefault(_id_of(region), {})[_id_of(subregion)] = name
         self.info[LABEL_NAME] = d
+
+    def iter_label_names(self) -> Iterator[tuple[int, int, str]]:
+        """Yield ``(region, subregion, name)`` triples for every custom per-point name stored in ``info["label_name"]``.
+
+        The per-region group name (stored under the reserved ``"name"`` key) is
+        skipped; use :meth:`level_one_name` / :meth:`iter_level_one_names` for
+        that. Normalizes any legacy flat ``{"(r, s)": "name"}`` form on the fly.
+        """
+        for region, subs in label_name_dict(self.info).items():
+            for sub, name in subs.items():
+                if sub == _GROUP_NAME_KEY:
+                    continue
+                yield region, sub, name
 
     def level_one_name(self, region) -> str | None:
         """Return the group (level-one) name of ``region``.
