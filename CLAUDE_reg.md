@@ -40,6 +40,7 @@ TPTBox/registration/
 | `Template_Registration`        | `_deformable/multilabel_segmentation.py`                          | Two-stage rigid-then-deformable atlas → target alignment (POI-based rigid).      |
 | `Template_Registration2`       | `_deformable/multilabel_segmentation.py` **(NEW)**                | Same idea, but accepts a `Deepali_Point_Registration` as pre-registration to skip the SITK resample. |
 | `Rigid_Elements_Registration`  | `_deepali/spine_rigid_elements_reg.py`                            | Per-vertebra rigid registration + inverse-distance blending field.               |
+| `Polyrigid_Registration`       | `_deepali/polyrigid_reg.py` **(NEW)**                             | Little/Hill/Hawkes 1997 polyrigid field, closed form: Horn `L_i` per vertebra + blended `L(t)` + `\|h\|` basis on landmarks outside the bone. World-mm maths, fixed→moving, DeepALI `Grid`+`grid_sample` warp (CPU/GPU). `transform_nii`, analytic `transform_poi`, `save`/`load`. |
 
 ## Key invariants
 

@@ -69,6 +69,11 @@ try:
 except ImportError as _e_rer:
     Rigid_Elements_Registration = _make_missing_deepali_stub("Rigid_Elements_Registration", _e_rer)  # type: ignore[misc,assignment]
 
+try:
+    from ._deepali.polyrigid_reg import Polyrigid_Registration
+except ImportError as _e_poly:
+    Polyrigid_Registration = _make_missing_deepali_stub("Polyrigid_Registration", _e_poly)  # type: ignore[misc,assignment]
+
 # --- Template registrations (deformable + optional pre-reg) ----------------
 try:
     from TPTBox.registration._deformable.multilabel_segmentation import Template_Registration
@@ -86,6 +91,7 @@ __all__ = [
     "Deformable_Registration",
     "General_Registration",
     "Point_Registration",
+    "Polyrigid_Registration",
     "Rigid_Elements_Registration",
     "Template_Registration",
     "Template_Registration2",

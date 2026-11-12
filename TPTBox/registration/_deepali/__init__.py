@@ -7,6 +7,12 @@ except ImportError:
     pass
 
 try:
+    from .polyrigid_reg import Polyrigid_Registration
+
+except ImportError:
+    pass
+
+try:
     from .deepali_model import General_Registration
 
 except ImportError:
