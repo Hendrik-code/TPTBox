@@ -17,20 +17,49 @@ logger.prefix = "API"
 _interop = False
 
 
+def _job_ram_limit_mb() -> float | None:
+    """RAM limit (MB) imposed on this process by slurm or a cgroup, or ``None`` if there is none.
+
+    ``psutil`` / ``sysconf`` report the RAM of the whole node (e.g. 1 TB), but a slurm job (``--mem``) is killed at its own limit.
+    """
+    import os
+
+    limits: list[float] = []
+    try:
+        if "SLURM_MEM_PER_NODE" in os.environ:  # --mem, already in MB
+            limits.append(float(os.environ["SLURM_MEM_PER_NODE"]))
+        elif "SLURM_MEM_PER_CPU" in os.environ and "SLURM_CPUS_ON_NODE" in os.environ:  # --mem-per-cpu
+            limits.append(float(os.environ["SLURM_MEM_PER_CPU"]) * float(os.environ["SLURM_CPUS_ON_NODE"]))
+    except ValueError:
+        pass
+    for f in ("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes"):  # cgroup v2 / v1
+        try:
+            v = Path(f).read_text().strip()
+            if v.isdigit() and int(v) < 2**60:  # "max" or a huge number means unlimited
+                limits.append(int(v) / (1024 * 1024))
+        except OSError:
+            pass
+    return min(limits) if limits else None
+
+
 def _get_total_ram_mb() -> float:
-    """Return total system RAM in MB, or a conservative fallback if it cannot be determined."""
+    """Return the RAM available to this process in MB (node RAM, capped by a slurm / cgroup limit), or a conservative fallback."""
+    total = None
     try:
         import psutil
 
-        return psutil.virtual_memory().total / (1024 * 1024)
+        total = psutil.virtual_memory().total / (1024 * 1024)
     except ImportError:
-        pass
-    try:
-        import os
+        try:
+            import os
 
-        return (os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")) / (1024 * 1024)
-    except (AttributeError, ValueError, OSError):
-        return 8000.0
+            total = (os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")) / (1024 * 1024)
+        except (AttributeError, ValueError, OSError):
+            pass
+    limit = _job_ram_limit_mb()
+    if total is None:
+        return limit if limit is not None else 8000.0
+    return min(total, limit) if limit is not None else total
 
 
 def estimate_peak_ram_mb(shape: Sequence[int], num_classes: int, num_channels: int = 1) -> float:
