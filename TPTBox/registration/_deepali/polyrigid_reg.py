@@ -22,6 +22,7 @@ import dataclasses
 import pickle
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import torch
@@ -80,8 +81,17 @@ class Polyrigid_Registration:
         fixed_poi / moving_poi: optional pre-computed POIs.
         init: ``"auto"`` (rule above), ``"poi"`` (>= 3 POIs required, other vertebrae are dropped) or ``"centroid"``
             (ignore POIs for the rigid init).
-        refine_independent: stage A, per-vertebra optimisation on the mask overlap. ``None`` = only if a vertebra
-            started translation-only.
+        refine_independent: stage A, per-object optimisation on the mask overlap. Accepts
+            * ``True`` - refine every rigid object;
+            * ``False`` - refine none;
+            * ``None`` - refine every rigid object iff at least one has a non-Horn init (the
+              historical behaviour, equivalent to ``True`` whenever any object fell back to a
+              translation or centroid init);
+            * ``"non_horn"`` - refine only the objects whose init kind is not ``"horn"``, i.e.
+              those that had an under-determined POI init (0-2 shared non-collinear POIs). Use
+              this when a well-determined POI fit should be preserved for most objects but a
+              few under-determined ones should still be lifted by the mask overlap.
+            * ``Sequence[int]`` - refine exactly these object ids.
         joint_refine: stage B, optimise all rigid bodies together through the blended field, with a folding penalty and
             an incompressibility penalty for non-rigid labelled structures (``optim.compressibility`` lowers the weight
             for structures that may compress).
@@ -117,7 +127,7 @@ class Polyrigid_Registration:
         fixed_poi: POI | None = None,
         moving_poi: POI | None = None,
         init: str = "auto",
-        refine_independent: bool | None = None,
+        refine_independent: bool  | Literal["non_horn"] | Sequence[int]|None = "non_horn",
         joint_refine: bool = False,
         nonrigid_ids: str | Sequence[int] | None = None,
         optim: PolyrigidOptimConfig | None = None,
@@ -290,15 +300,15 @@ class Polyrigid_Registration:
         self.shape_scales = {}
         if self.shape_flagged:
             self._log("vertebrae that may change shape:", self.shape_flagged)
-        translation_only = any(k != "horn" for k in self.init_kinds.values())
-        independent = translation_only if self.refine_independent is None else self.refine_independent
-        if self.nonrigid_ids == "auto":  # reset vertebrae are re-fitted rigidly
-            independent = True if self.refine_independent is None else independent
+        refine_ids = self._resolve_refine_ids(ids)
+        if self.nonrigid_ids == "auto" and self.refine_independent is None:
+            # Reset vertebrae need to be re-fitted rigidly; same historical override.
+            refine_ids = list(ids)
             if self.optim.shape_tol <= 0:
                 self.optim = dataclasses.replace(self.optim, shape_tol=0.05)
         L = np.concatenate([t0[:, :, None], R0], axis=2)
-        if independent or self.joint_refine or self.shape_flagged:
-            L, self.optim_log = self._refine(ids, R0, t0, c_fix, crop, independent, axes)
+        if refine_ids or self.joint_refine or self.shape_flagged:
+            L, self.optim_log = self._refine(ids, R0, t0, c_fix, crop, refine_ids, axes)
             self.shape_scales = dict(self.optim_log.shape)
             self.shape_flagged = list(self.shape_scales)
             self._log("optim:", self.optim_log.summary())
@@ -315,11 +325,36 @@ class Polyrigid_Registration:
         self._field = None
         return self
 
-    def _refine(self, ids, R0, t0, c_fix, crop, independent: bool, axes=None):
-        """Stage A / B of :mod:`polyrigid_optim` on the cropped fixed grid and a cropped moving label map."""
+    def _resolve_refine_ids(self, ids: Sequence[int]) -> list[int]:
+        """Translate ``refine_independent`` into the explicit list of ids to refine."""
+        ri = self.refine_independent
+        if ri is True:
+            return list(ids)
+        if ri is False:
+            return []
+        if ri is None:
+            return list(ids) if any(k != "horn" for k in self.init_kinds.values()) else []
+        if isinstance(ri, str):
+            assert ri == "non_horn", f"refine_independent string must be 'non_horn', got {ri!r}"
+            return [v for v in ids if self.init_kinds.get(v) != "horn"]
+        rset = {int(v) for v in ri}
+        return [v for v in ids if v in rset]
+
+    def _refine(self, ids, R0, t0, c_fix, crop, refine_ids: Sequence[int], axes=None):
+        """Stage A / B of :mod:`polyrigid_optim` on the cropped fixed grid and a cropped moving label map.
+
+        ``refine_ids`` names which rigid bodies take part in stage A. When it's a strict subset
+        of ``ids`` the non-refined rows of ``L`` keep the closed-form POI init, and stage A runs
+        only on the subset. The joint stage B still uses every vertebra, because its field is
+        linear in all of them.
+        """
         assert self.ref is not None
+        refine_ids = list(refine_ids)
+        subset = len(refine_ids) > 0 and len(refine_ids) < len(ids)
+        independent = len(refine_ids) > 0  # anything to refine at all
+
         fixed_other = None
-        if self.joint_refine and self.optim.w_incomp > 0:  # non-rigid labelled structures of the fixed image (ribs, discs, ...)
+        if self.joint_refine and self.optim.w_incomp > 0:  # non-rigid labelled structures (ribs, discs, ...)
             arr = self.fixed_vert.get_seg_array().copy()
             arr[np.isin(arr, ids)] = 0
             other = self.fixed_vert.set_array(arr)
@@ -327,15 +362,59 @@ class Polyrigid_Registration:
                 fixed_other = other.resample_from_to(self.reference, mode="nearest", verbose=False)
             else:
                 fixed_other = other.apply_crop(crop) if crop is not None else other
-        mv = self.moving_vert.extract_label(ids, keep_label=True)
-        margin = int(np.ceil(30.0 / float(min(mv.zoom))))
-        mv = mv.apply_crop(mv.compute_crop(dist=margin))
-        return refine_rigid(
-            self.ref, mv, ids, R0, t0, c_fix, self.optim, self.device,
-            independent=independent, joint=self.joint_refine, fixed_other=fixed_other,
+
+        if not subset:
+            mv = self.moving_vert.extract_label(ids, keep_label=True)
+            margin = int(np.ceil(30.0 / float(min(mv.zoom))))
+            mv = mv.apply_crop(mv.compute_crop(dist=margin))
+            return refine_rigid(
+                self.ref, mv, ids, R0, t0, c_fix, self.optim, self.device,
+                independent=independent, joint=self.joint_refine, fixed_other=fixed_other,
+                shape_ids=self.shape_flagged, axes=axes,
+                my=self.my, min_dist_mm=self.min_dist_mm, verbose=self.verbose,
+            )  # fmt: skip
+
+        # Subset path: stage A on refine_ids, then (optional) stage B on all ids with the
+        # subset's refined rows already spliced in.
+        L_full = np.concatenate([t0[:, :, None], R0], axis=2)
+        idx_map = {v: i for i, v in enumerate(ids)}
+        sub_idx = [idx_map[v] for v in refine_ids]
+
+        mv_sub = self.moving_vert.extract_label(refine_ids, keep_label=True)
+        margin = int(np.ceil(30.0 / float(min(mv_sub.zoom))))
+        mv_sub = mv_sub.apply_crop(mv_sub.compute_crop(dist=margin))
+        fixed_sub = self.ref.extract_label(refine_ids, keep_label=True)
+        shape_sub = [v for v in self.shape_flagged if v in refine_ids]
+        axes_sub = None if axes is None else axes[sub_idx]
+        L_sub, log = refine_rigid(
+            fixed_sub, mv_sub, refine_ids,
+            R0[sub_idx], t0[sub_idx], c_fix[sub_idx], self.optim, self.device,
+            independent=True, joint=False, fixed_other=None,
+            shape_ids=shape_sub, axes=axes_sub,
+            my=self.my, min_dist_mm=self.min_dist_mm, verbose=self.verbose,
+        )
+        for k, i in enumerate(sub_idx):
+            L_full[i] = L_sub[k]
+
+        if not self.joint_refine:
+            return L_full, log
+
+        # Stage B with every vertebra, starting from the spliced L.
+        R_all = L_full[:, :, 1:].copy()
+        t_all = L_full[:, :, 0].copy()
+        mv_all = self.moving_vert.extract_label(ids, keep_label=True)
+        margin_all = int(np.ceil(30.0 / float(min(mv_all.zoom))))
+        mv_all = mv_all.apply_crop(mv_all.compute_crop(dist=margin_all))
+        L_all, log2 = refine_rigid(
+            self.ref, mv_all, ids, R_all, t_all, c_fix, self.optim, self.device,
+            independent=False, joint=True, fixed_other=fixed_other,
             shape_ids=self.shape_flagged, axes=axes,
             my=self.my, min_dist_mm=self.min_dist_mm, verbose=self.verbose,
-        )  # fmt: skip
+        )
+        # merge logs: keep subset-stage-A entries and joint-stage-B entries.
+        log.stages = [*log.stages, *log2.stages]
+        log.shape.update(log2.shape)
+        return L_all, log
 
     def _precompute_fields(self) -> None:
         """Distances (mm), weights and the blended linear field L(t) on the fixed grid (eqs 13–19)."""
