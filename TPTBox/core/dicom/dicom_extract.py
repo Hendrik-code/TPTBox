@@ -4,8 +4,9 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 import zipfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
@@ -45,6 +46,181 @@ logger = Print_Logger()
 # for automated pipelines. Callers can pass `skip_formats=set()` to keep them,
 # or add other formats (e.g. `{"pr", "ko"}` to also drop Key Object Selection).
 _DEFAULT_SKIP_FORMATS: set[str] = {"pr", "xa-helper"}
+
+# DICOM tags that differ for every stored DICOM object even when the series is the same
+# (the same series saved twice). They are ignored when `test_name_conflict` decides whether a
+# JSON that already sits at the target name belongs to the same series; otherwise every second
+# copy is renamed `...-a`. They are only skipped for the comparison, they stay in the sidecar.
+DEFAULT_CONFLICT_IGNORE_KEYS: tuple[str, ...] = ("SOPInstanceUID", "ReferencedImageSequence")
+
+# Resolving the output name (conflict test -> `_inc_key` -> reserving the JSON) is a
+# read-modify-write on the file system, so it must not run in two threads at once.
+_NAME_LOCK = threading.RLock()
+_IN_FLIGHT: set[str] = set()  # NIfTI paths a worker is converting right now
+
+
+class _NameOrder:
+    """Let worker threads resolve their output names in submission order.
+
+    Conversion runs in parallel, but which of two series claims the plain name and which gets the
+    `-a` suffix must not depend on which thread happens to be faster.
+    """
+
+    def __init__(self) -> None:
+        self._cond = threading.Condition()
+        self._next = 0
+        self._done: set[int] = set()
+
+    def wait(self, ticket: int) -> None:
+        with self._cond:
+            self._cond.wait_for(lambda: self._next >= ticket)
+
+    def release(self, ticket: int) -> None:
+        with self._cond:
+            self._done.add(ticket)
+            while self._next in self._done:
+                self._next += 1
+            self._cond.notify_all()
+
+
+class _Ticket:
+    def __init__(self, order: _NameOrder, ticket: int) -> None:
+        self.order, self.ticket = order, ticket
+
+    def wait(self) -> None:
+        self.order.wait(self.ticket)
+
+    def release(self) -> None:
+        self.order.release(self.ticket)
+
+
+def _ds_str(ds, name: str) -> str:
+    v = ds.get(name)
+    return "" if v is None else str(v)
+
+
+def _tm_seconds(tm: str) -> float | None:
+    """DICOM TM (``HHMMSS.ffffff``, trailing parts optional, ``:`` tolerated) -> seconds since midnight."""
+    tm = tm.replace(":", "").strip()
+    if len(tm) < 2:
+        return None
+    try:
+        return int(tm[:2]) * 3600 + (int(tm[2:4]) * 60 if len(tm) >= 4 else 0) + (float(tm[4:]) if len(tm) > 4 else 0.0)
+    except ValueError:
+        return None
+
+
+def _acq_seconds(ds) -> float | None:
+    """Acquisition moment as seconds (date + time); falls back to series / content time."""
+    date = _ds_str(ds, "AcquisitionDate") or _ds_str(ds, "SeriesDate") or _ds_str(ds, "StudyDate") or _ds_str(ds, "ContentDate")
+    tm = _tm_seconds(_ds_str(ds, "AcquisitionTime") or _ds_str(ds, "SeriesTime") or _ds_str(ds, "ContentTime"))
+    if tm is None:
+        return None
+    try:
+        day = datetime.strptime(date[:8], "%Y%m%d").toordinal() * 86400
+    except ValueError:
+        day = 0
+    return day + tm
+
+
+def _run_with_ticket(fn, ticket: _Ticket, key, files, parts):
+    """Run ``fn`` for one series and always hand the name turn on, even if it raised."""
+    try:
+        return fn(key, files, parts, ticket)
+    finally:
+        ticket.release()
+
+
+def _series_sort_key(item: tuple[str, list[FileDataset]]) -> tuple:
+    """Chronological, reproducible order for the series of one source folder.
+
+    Patient, acquisition time, SeriesNumber, then: full runs before key frames
+    (``FRAME_SELECTION``), the copy that carries an ``IrradiationEventUID`` (the original
+    acquisition linked to the dose report) before a copy without one, more frames first, the
+    plane, and finally the dictionary key so ties are stable.
+    """
+    key, files = item
+    d = files[0]
+    try:
+        series_number = int(d.get("SeriesNumber", 0))
+    except (TypeError, ValueError):
+        series_number = 0
+    try:
+        frames = int(d.get("NumberOfFrames", 1))
+    except (TypeError, ValueError):
+        frames = 1
+    derivation = _ds_str(d, "DerivationDescription").upper()
+    t = _acq_seconds(d)
+    return (
+        _ds_str(d, "PatientID"),
+        t if t is not None else float("inf"),
+        series_number,
+        "FRAME_SELECTION" in derivation,
+        not hasattr(d, "IrradiationEventUID"),
+        -frames,
+        _ds_str(d, "ImageType"),
+        key,
+    )
+
+
+def _drop_recomputed_xa_copies(items: list[tuple[str, list[FileDataset]]]) -> list[tuple[str, list[FileDataset]]]:
+    """Drop XA objects that are an extra copy of a series without an ``IrradiationEventUID``.
+
+    A copy is only dropped if another object with the same patient, SeriesInstanceUID,
+    ImageType, size and frame count *does* carry an ``IrradiationEventUID`` (the original).
+    """
+    groups: dict[tuple, list[int]] = {}
+    for i, (_k, files) in enumerate(items):
+        d = files[0]
+        if _ds_str(d, "Modality") != "XA":
+            continue
+        gk = (
+            _ds_str(d, "PatientID"),
+            _ds_str(d, "SeriesInstanceUID"),
+            _ds_str(d, "ImageType"),
+            _ds_str(d, "Rows"),
+            _ds_str(d, "Columns"),
+            _ds_str(d, "NumberOfFrames"),
+        )
+        groups.setdefault(gk, []).append(i)
+    drop: set[int] = set()
+    for idx in groups.values():
+        has = [i for i in idx if hasattr(items[i][1][0], "IrradiationEventUID")]
+        if has and len(has) < len(idx):
+            drop.update(i for i in idx if i not in has)
+    if drop:
+        logger.on_neutral(f"Dropping {len(drop)} extra XA copy object(s) without IrradiationEventUID (original kept).")
+    return [it for i, it in enumerate(items) if i not in drop]
+
+
+def _assign_xa_runs(items: list[tuple[str, list[FileDataset]]], tolerance_s: float = 5.0) -> dict[str, int]:
+    """Number the acquisitions of each patient in time order (``run-1``, ``run-2``, ...).
+
+    Objects whose acquisition time lies within ``tolerance_s`` of the first object of a run share
+    that run (A and B plane, key frames and stills a few seconds later). This replaces the
+    DICOM SeriesNumber, which Philips re-uses for a second acquisition, as the thing that tells
+    two acquisitions apart in the file name.
+    """
+    per_patient: dict[str, list[tuple[float, str]]] = {}
+    for key, files in items:
+        d = files[0]
+        if _ds_str(d, "Modality") != "XA":
+            continue
+        image_type = [str(x) for x in (d.get("ImageType") or [])]
+        if any(t in image_type for t in ("SECONDARY", "REFIMAGE", "EXAM PROTOCOL")):
+            continue
+        t = _acq_seconds(d)
+        if t is not None:
+            per_patient.setdefault(_ds_str(d, "PatientID"), []).append((t, key))
+    runs: dict[str, int] = {}
+    for entries in per_patient.values():
+        run, start = 0, None
+        for t, key in sorted(entries):
+            if start is None or t - start > tolerance_s:
+                run += 1
+                start = t
+            runs[key] = run
+    return runs
 
 
 def _next_letter_suffix(s: str, inc: int = 1) -> str:
@@ -115,7 +291,14 @@ def _inc_key(keys: dict, inc: int = 1, k: str = "sequ", path_exists: Callable[[d
 
 
 def _generate_bids_path(
-    dataset_nifti_dir, keys: dict, mri_format, simp_json, make_subject_chunks: int, parent="rawdata", _subject_folder_prefix="sub-"
+    dataset_nifti_dir,
+    keys: dict,
+    mri_format,
+    simp_json,
+    make_subject_chunks: int,
+    parent="rawdata",
+    _subject_folder_prefix="sub-",
+    ignore_keys_for_conflict: Iterable[str] = DEFAULT_CONFLICT_IGNORE_KEYS,
 ):
     """Generate a BIDS-compatible file path for NIfTI outputs based on extracted keys from DICOM headers.
 
@@ -152,7 +335,7 @@ def _generate_bids_path(
     # If a file already sits at this path, check whether its content matches ours
     # (ignoring the "grid" key). Same content → reuse the existing filename.
     # Different content → let _inc_key find a fresh, non-colliding filename.
-    if test_name_conflict(simp_json, fname.file["json"]):
+    if test_name_conflict(simp_json, fname.file["json"], ignore_keys=ignore_keys_for_conflict):
         _inc_key(keys, path_exists=lambda k: Path(_make_fname(k).file["json"]).exists())
         fname = _make_fname(keys)
     return fname.file["json"], fname
@@ -467,6 +650,7 @@ def _get_paths(
     chunk: int | str | None = None,
     keys: dict[str, str | None] | None = None,
     parent: str = "rawdata",
+    ignore_keys_for_conflict: Iterable[str] = DEFAULT_CONFLICT_IGNORE_KEYS,
 ) -> tuple:
     """Derive BIDS-compliant JSON and NIfTI output paths for a single DICOM series.
 
@@ -504,7 +688,13 @@ def _get_paths(
         keys=keys,
     )
     json_file_name, json_bids_name = _generate_bids_path(
-        dataset_nifti_dir, keys, mri_format, simp_json, make_subject_chunks=make_subject_chunks, parent=parent
+        dataset_nifti_dir,
+        keys,
+        mri_format,
+        simp_json,
+        make_subject_chunks=make_subject_chunks,
+        parent=parent,
+        ignore_keys_for_conflict=ignore_keys_for_conflict,
     )
     nii_path = str(json_file_name).replace(".json", "") + ending
     return json_file_name, json_bids_name, nii_path
@@ -532,6 +722,9 @@ def _from_dicom_to_nii(
     parent="rawdata",
     censor_list=None,
     skip_formats: set[str] | None = None,
+    ignore_keys_for_conflict: Iterable[str] = DEFAULT_CONFLICT_IGNORE_KEYS,
+    extra_keys: dict | None = None,
+    name_ticket: _Ticket | None = None,
 ):
     """Convert a list of DICOM datasets for one series to a NIfTI file.
 
@@ -592,6 +785,9 @@ def _from_dicom_to_nii(
                     skip_localizer=skip_localizer,
                     parent=parent,
                     skip_formats=skip_formats,
+                    ignore_keys_for_conflict=ignore_keys_for_conflict,
+                    extra_keys=extra_keys,
+                    name_ticket=name_ticket,
                 )
                 outs.append(o)
             return outs
@@ -604,46 +800,69 @@ def _from_dicom_to_nii(
     for censor_key in censor_list:
         if censor_key in simp_json:
             del simp_json[censor_key]
-    json_file_name, json_bids, nii_path = _get_paths(
-        simp_json,
-        dcm_data_l,
-        nifti_dir,
-        make_subject_chunks,
-        use_session,
-        parts,
-        map_series_description_to_file_format,
-        override_subject_name,
-        chunk=chunk,
-        parent=parent,
-    )
-    if skip_localizer and json_bids.bids_format == "localizer":
-        return
-    if json_bids.bids_format in skip_formats:
-        logger.on_debug(f"Skipping {json_bids.bids_format!r} series (in skip_formats): {Path(json_file_name).name}")
-        return None
-    logger.print(json_file_name, Log_Type.NEUTRAL, verbose=verbose)
-    exist = save_json(simp_json, json_file_name, override=False)
-    # logger.on_debug(exist, Path(nii_path).exists(), nii_path)
-    if exist and Path(nii_path).exists():
-        logger.print("already exists:", json_file_name, ltype=Log_Type.STRANGE, verbose=verbose)
-        return nii_path
-    add_grid = False
-    if nii_path.endswith(".pdf"):
-        _export_pdf_from_dicom(dcm_data_l, nii_path)
-    elif nii_path.endswith(".txt"):
-        _extract_txt_from_dicom(dcm_data_l, nii_path)
-    else:
-        add_grid = _extract_nii_from_dicom(dcm_data_l, nii_path)
+    # Resolve the output name and reserve it (write the sidecar JSON) as one step: the conflict
+    # test, `_inc_key` and `save_json` are a read-modify-write on the file system, so two workers
+    # must never do it at the same time. With `n_cpu > 1`, `name_ticket` additionally makes the
+    # workers take their turn in submission (= chronological) order, so the result does not
+    # depend on thread speed. The slow conversion below runs outside of the lock.
+    if name_ticket is not None:
+        name_ticket.wait()
+    try:
+        with _NAME_LOCK:
+            json_file_name, json_bids, nii_path = _get_paths(
+                simp_json,
+                dcm_data_l,
+                nifti_dir,
+                make_subject_chunks,
+                use_session,
+                parts,
+                map_series_description_to_file_format,
+                override_subject_name,
+                chunk=chunk,
+                keys=dict(extra_keys) if extra_keys else None,
+                parent=parent,
+                ignore_keys_for_conflict=ignore_keys_for_conflict,
+            )
+            if skip_localizer and json_bids.bids_format == "localizer":
+                return
+            if json_bids.bids_format in skip_formats:
+                logger.on_debug(f"Skipping {json_bids.bids_format!r} series (in skip_formats): {Path(json_file_name).name}")
+                return None
+            logger.print(json_file_name, Log_Type.NEUTRAL, verbose=verbose)
+            exist = save_json(simp_json, json_file_name, override=False)
+            # logger.on_debug(exist, Path(nii_path).exists(), nii_path)
+            if exist and Path(nii_path).exists():
+                logger.print("already exists:", json_file_name, ltype=Log_Type.STRANGE, verbose=verbose)
+                return nii_path
+            if nii_path in _IN_FLIGHT:
+                # the same series (identical sidecar) is being converted by another worker right now
+                logger.print("already being converted:", json_file_name, ltype=Log_Type.STRANGE, verbose=verbose)
+                return nii_path
+            _IN_FLIGHT.add(nii_path)
+    finally:
+        if name_ticket is not None:
+            name_ticket.release()
+    try:
+        add_grid = False
+        if nii_path.endswith(".pdf"):
+            _export_pdf_from_dicom(dcm_data_l, nii_path)
+        elif nii_path.endswith(".txt"):
+            _extract_txt_from_dicom(dcm_data_l, nii_path)
+        else:
+            add_grid = _extract_nii_from_dicom(dcm_data_l, nii_path)
 
-    if add_grid:
-        _add_grid_info_to_json(nii_path, json_file_name)
-        # Multi-echo Philips DIXON arrives as a 4-D NIfTI. Try to split whenever
-        # the output is 4-D — `_split_multi_echo_dixon` is a no-op on 3-D input
-        # and safely returns None. This catches multi-echo series whose `part`
-        # entity was mapped to something other than "magnitude"/"phase" via
-        # `dixon_mapping` or `parts_mapping`.
-        _split_multi_echo_dixon(Path(nii_path), Path(json_file_name), dcm_data_l)
-    return nii_path if add_grid else None
+        if add_grid:
+            _add_grid_info_to_json(nii_path, json_file_name)
+            # Multi-echo Philips DIXON arrives as a 4-D NIfTI. Try to split whenever
+            # the output is 4-D — `_split_multi_echo_dixon` is a no-op on 3-D input
+            # and safely returns None. This catches multi-echo series whose `part`
+            # entity was mapped to something other than "magnitude"/"phase" via
+            # `dixon_mapping` or `parts_mapping`.
+            _split_multi_echo_dixon(Path(nii_path), Path(json_file_name), dcm_data_l)
+        return nii_path if add_grid else None
+    finally:
+        with _NAME_LOCK:
+            _IN_FLIGHT.discard(nii_path)
 
 
 def _split_multi_echo_dixon(nii_path: Path, json_path: Path, dcm_data_l) -> list[Path] | None:
@@ -1198,6 +1417,11 @@ def extract_dicom_folder(
     skip_already_extracted: bool = True,
     force_rescan: bool = False,
     skip_formats: set[str] | None = None,
+    ignore_keys_for_conflict: Iterable[str] | None = None,
+    sort_series: bool = True,
+    skip_recomputed_xa_copies: bool = False,
+    xa_run_by_time: bool = False,
+    xa_run_tolerance_s: float = 5.0,
 ) -> dict:
     """Extract DICOM files from a directory or list of directories, convert them to NIfTI format, and store the output.
 
@@ -1241,12 +1465,34 @@ def extract_dicom_folder(
             Presentation State DICOMs carry no pixel data and only reference
             other series, so they normally contribute nothing to a downstream
             pipeline. Pass ``set()`` to keep them.
+        ignore_keys_for_conflict (Iterable[str] | None, optional): Header keys that are ignored when
+            deciding whether a JSON that already sits at the target name is the *same* series.
+            Defaults to :data:`DEFAULT_CONFLICT_IGNORE_KEYS` (``SOPInstanceUID``,
+            ``ReferencedImageSequence``): a series stored twice then produces one file instead of
+            a second one renamed ``...-a``. The keys stay in the saved sidecar.
+        sort_series (bool, optional): Process the series of a source folder in chronological order
+            (patient, acquisition time, SeriesNumber; full runs before key frames; the copy with an
+            ``IrradiationEventUID`` first). Makes the ``-a``/``-b`` suffix assignment reproducible.
+            With ``n_cpu > 1`` the names are still resolved in this order. Defaults to True.
+        skip_recomputed_xa_copies (bool, optional): Drop an XA object when an otherwise identical
+            object (same SeriesInstanceUID, ImageType, size, frame count) carries an
+            ``IrradiationEventUID`` and it does not (the original acquisition is kept). Defaults to
+            False because it discards data.
+        xa_run_by_time (bool, optional): Add a ``run`` entity to XA files, numbered per patient in
+            acquisition-time order, so two acquisitions that share a SeriesNumber do not collide.
+            Defaults to False (file names unchanged).
+        xa_run_tolerance_s (float, optional): Objects whose acquisition time lies within this many
+            seconds of the first object of a run share its ``run`` number (A/B plane, key frames,
+            stills). Defaults to 5.
 
     Returns:
         dict: A dictionary with keys representing DICOM series and values as paths to the generated NIfTI files.
     """
     if censor_list is None:
         censor_list = []
+    if ignore_keys_for_conflict is None:
+        ignore_keys_for_conflict = DEFAULT_CONFLICT_IGNORE_KEYS
+    ignore_keys_for_conflict = tuple(ignore_keys_for_conflict)
     if not validate_slicecount:
         convert_dicom.settings.disable_validate_slicecount()
     if not validate_orientation:
@@ -1279,8 +1525,15 @@ def extract_dicom_folder(
                 dicom_path = _unzip_files(dicom_path, temp_dir)
 
             dicom_files_dict, parts = _read_dicom_files(dicom_path)
+            series_items = list(dicom_files_dict.items())
+            if sort_series:
+                series_items.sort(key=_series_sort_key)
+            if skip_recomputed_xa_copies:
+                series_items = _drop_recomputed_xa_copies(series_items)
+            run_by_key = _assign_xa_runs(series_items, xa_run_tolerance_s) if xa_run_by_time else {}
+            name_order = _NameOrder() if (n_cpu is None or n_cpu > 1) else None
 
-            def process_series(key, files, parts):
+            def process_series(key, files, parts, ticket: _Ticket | None = None, _runs: dict[str, int] = run_by_key):
                 """Helper function for processing a single DICOM series."""
                 logger.print("Start", key, verbose=verbose)
                 part = parts.get(key, None)
@@ -1299,12 +1552,18 @@ def extract_dicom_folder(
                     parent=parent,
                     censor_list=censor_list,
                     skip_formats=skip_formats,
+                    ignore_keys_for_conflict=ignore_keys_for_conflict,
+                    extra_keys={"run": str(_runs[key])} if key in _runs else None,
+                    name_ticket=ticket,
                 )
 
             # Process in parallel or sequentially based on n_cpu
             if n_cpu is None or n_cpu > 1:
                 with ThreadPoolExecutor(max_workers=n_cpu) as executor:
-                    futures = {executor.submit(process_series, key, files, parts): key for key, files in dicom_files_dict.items()}
+                    futures = {}
+                    for i, (key, files) in enumerate(series_items):
+                        ticket = _Ticket(name_order, i)  # type: ignore[arg-type]
+                        futures[executor.submit(_run_with_ticket, process_series, ticket, key, files, parts)] = key
                     for future in as_completed(futures):
                         try:
                             key, out = future.result()
@@ -1312,7 +1571,7 @@ def extract_dicom_folder(
                         except Exception:
                             logger.print_error()
             else:
-                for key, files in dicom_files_dict.items():
+                for key, files in series_items:
                     try:
                         key2, out = process_series(key, files, parts)
                         outs[key2] = out

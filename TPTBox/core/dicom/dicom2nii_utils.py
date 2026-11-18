@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import pickle
+from collections.abc import Iterable
 from copy import deepcopy
 from datetime import date
 from pathlib import Path
@@ -277,12 +278,15 @@ def _get_json_from_dicom(py_dict: dict):
     return data1
 
 
-def test_name_conflict(json_ob: dict, file: str | Path) -> bool:
+def test_name_conflict(json_ob: dict, file: str | Path, ignore_keys: Iterable[str] = ()) -> bool:
     """Check whether an existing JSON file has different content from the given object.
 
     Args:
         json_ob: JSON-serialisable object to compare against the file on disk.
         file: Path to an existing (or non-existing) JSON file.
+        ignore_keys: Keys left out of the comparison (on both sides), e.g. ``SOPInstanceUID``, which
+            differs for every DICOM object even when the stored series is identical. ``grid`` is
+            always ignored. The keys are only skipped for the comparison, never removed from a file.
 
     Returns:
         ``True`` if the file exists and its content differs from ``json_ob``,
@@ -308,9 +312,8 @@ def test_name_conflict(json_ob: dict, file: str | Path) -> bool:
                 Print_Logger().on_warning(f"test_name_conflict: could not unlink corrupt JSON {file}: {unlink_err}")
                 return True  # fall back to the "rename around it" path
             return False
-        if "grid" in js:
-            del js["grid"]
-        return js != json_ob
+        ignore = {"grid", *ignore_keys}
+        return {k: v for k, v in js.items() if k not in ignore} != {k: v for k, v in json_ob.items() if k not in ignore}
     return False
 
 
