@@ -134,6 +134,8 @@ class TestConflictIgnoreKeys(unittest.TestCase):
 
         self.assertIn("SOPInstanceUID", DEFAULT_CONFLICT_IGNORE_KEYS)
         self.assertIn("ReferencedImageSequence", DEFAULT_CONFLICT_IGNORE_KEYS)
+        self.assertIn("IconImageSequence", DEFAULT_CONFLICT_IGNORE_KEYS)
+        self.assertIn("ReferencedPerformedProcedureStepSequence", DEFAULT_CONFLICT_IGNORE_KEYS)
         self.assertNotIn("IrradiationEventUID", DEFAULT_CONFLICT_IGNORE_KEYS)
 
 

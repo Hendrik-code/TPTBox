@@ -51,7 +51,12 @@ _DEFAULT_SKIP_FORMATS: set[str] = {"pr", "xa-helper"}
 # (the same series saved twice). They are ignored when `test_name_conflict` decides whether a
 # JSON that already sits at the target name belongs to the same series; otherwise every second
 # copy is renamed `...-a`. They are only skipped for the comparison, they stay in the sidecar.
-DEFAULT_CONFLICT_IGNORE_KEYS: tuple[str, ...] = ("SOPInstanceUID", "ReferencedImageSequence")
+DEFAULT_CONFLICT_IGNORE_KEYS: tuple[str, ...] = (
+    "SOPInstanceUID",
+    "ReferencedImageSequence",
+    "ReferencedPerformedProcedureStepSequence",
+    "IconImageSequence",  # embedded thumbnail, differs per stored object
+)
 
 # Resolving the output name (conflict test -> `_inc_key` -> reserving the JSON) is a
 # read-modify-write on the file system, so it must not run in two threads at once.
@@ -1468,7 +1473,8 @@ def extract_dicom_folder(
         ignore_keys_for_conflict (Iterable[str] | None, optional): Header keys that are ignored when
             deciding whether a JSON that already sits at the target name is the *same* series.
             Defaults to :data:`DEFAULT_CONFLICT_IGNORE_KEYS` (``SOPInstanceUID``,
-            ``ReferencedImageSequence``): a series stored twice then produces one file instead of
+            ``ReferencedImageSequence``, ``ReferencedPerformedProcedureStepSequence``,
+            ``IconImageSequence``): a series stored twice then produces one file instead of
             a second one renamed ``...-a``. The keys stay in the saved sidecar.
         sort_series (bool, optional): Process the series of a source folder in chronological order
             (patient, acquisition time, SeriesNumber; full runs before key frames; the copy with an
