@@ -104,7 +104,7 @@ def run_inference_on_file(
     gpu=None,
     keep_size: bool = False,
     fill_holes: bool = False,
-    logits: bool = False,  # deprecated
+    logits: bool = False,
     mapping=None,
     crop: bool = False,
     max_folds=None,
@@ -144,8 +144,11 @@ def run_inference_on_file(
             original image size.
         fill_holes: If ``True``, fill holes in the segmentation mask after
             inference.
-        logits: Deprecated; Was commented out for less GPU waste.
-            If ``True``, also return the raw softmax logits array.
+        logits: If ``True``, also return the softmax probabilities as a ``float32`` array
+            ``(num_classes, X, Y, Z)`` on the grid of ``input_nii[0]`` (linearly resampled
+            like the segmentation; channel ``c`` is nnUNet label ``c``, *before* ``mapping``).
+            Costs ``num_classes`` x volume of RAM. ``None`` in the returned tuple when the
+            run fell back to chunked/patched inference, which cannot return probabilities.
         mapping: Optional label remapping dict applied to the segmentation after
             inference.
         crop: If ``True``, crop the input to its foreground bounding box before
@@ -191,7 +194,7 @@ def run_inference_on_file(
     Returns:
         A tuple ``(seg_nii, softmax_logits)`` where ``seg_nii`` is the
         segmentation (as a :class:`~TPTBox.NII` or file path) and
-        ``softmax_logits`` is the raw logit array or ``None``.
+        ``softmax_logits`` is the softmax probability array or ``None``.
     """
     if model_path is None:
         auto_download = True
@@ -421,6 +424,23 @@ def run_inference_on_file(
 
     if padd != 0:
         seg_nii = seg_nii[padd:-padd, padd:-padd, padd:-padd]
+        if softmax_logits is not None:
+            softmax_logits = softmax_logits[:, padd:-padd, padd:-padd, padd:-padd]
+    if logits and softmax_logits is None:
+        logger.print("Probabilities requested but unavailable for this (chunked / low-memory) run.", Log_Type.WARNING)
+    if softmax_logits is not None and not keep_size:
+        # Same grid change as the segmentation, but linear so the maps stay smooth and within [0, 1]
+        # NII.set_array casts floats to int32 while *self* is a seg, so the template must not be one
+        grid = seg_nii.copy()
+        grid.seg = False
+        softmax_logits = np.stack(
+            [
+                grid.set_array(np.ascontiguousarray(c, dtype=np.float32))
+                .resample_from_to(og_nii, mode="nearest", order=1, verbose=False, out_dtype=np.float32)
+                .get_array()
+                for c in softmax_logits
+            ]
+        )
 
     if mapping is not None:
         seg_nii.map_labels_(mapping)
