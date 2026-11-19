@@ -256,10 +256,11 @@ class TestMoveTo(unittest.TestCase):
 class TestLordosisAndKyphosis(unittest.TestCase):
     def test_straight_spine_has_no_curvature(self):
         out = compute_lordosis_and_kyphosis(spine_poi())
-        self.assertEqual(sorted(out), ["cervical_lordosis", "lumbar_lordosis", "thoracic_kyphosis"])
-        for key, value in out.items():
+        angle_keys = sorted(k for k in out if not k.endswith("_apex"))
+        self.assertEqual(angle_keys, ["cervical_lordosis", "lumbar_lordosis", "thoracic_kyphosis"])
+        for key in angle_keys:
             with self.subTest(key=key):
-                self.assertEqual(value, 0.0)
+                self.assertEqual(out[key], 0.0)
 
     def test_tilting_c2_only_moves_the_cervical_value(self):
         out = compute_lordosis_and_kyphosis(spine_poi(sagittal_tilt={V.C2.value: 20.0}))
@@ -660,7 +661,8 @@ class TestPlottingEntryPoints(unittest.TestCase):
 
     def test_lordosis_plot_without_a_path_renders_nothing(self):
         values, _ = angles_mod.plot_compute_lordosis_and_kyphosis(None, self.poi.copy(), self.ct, self.vert)
-        self.assertEqual(sorted(values), ["cervical_lordosis", "lumbar_lordosis", "thoracic_kyphosis"])
+        angle_keys = sorted(k for k in values if not k.endswith("_apex"))
+        self.assertEqual(angle_keys, ["cervical_lordosis", "lumbar_lordosis", "thoracic_kyphosis"])
 
     def test_cobb_plot_returns_the_segments_and_a_frame(self):
         from TPTBox.spine.snapshot2D.snapshot_modular import Snapshot_Frame  # noqa: PLC0415
