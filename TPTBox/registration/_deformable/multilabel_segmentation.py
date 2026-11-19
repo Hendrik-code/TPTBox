@@ -4,7 +4,9 @@ import pickle
 from pathlib import Path
 from typing import TypeVar
 
-from TPTBox import NII, POI
+import numpy as np
+
+from TPTBox import NII, POI, Print_Logger
 from TPTBox.core.internal.deep_learning_utils import DEVICES
 from TPTBox.core.poi import calc_centroids
 from TPTBox.core.poi_fun.poi_global import POI_Global
@@ -14,6 +16,7 @@ from TPTBox.registration._ridged_points.deepali_point_registration import Deepal
 from TPTBox.registration._ridged_points.point_registration import Point_Registration
 
 _NIIOrPOI = TypeVar("_NIIOrPOI", NII, POI)
+logger = Print_Logger()
 
 
 def _r_axis_slicer(axis: int) -> tuple[slice, ...]:
@@ -435,6 +438,40 @@ class Template_Registration:
         return poi
 
 
+def _filter_pois(data_target: NII, nii_atlas_fov: NII, poi_target_cms, poi_atlas_cms):
+    u = data_target.unique()
+    cms_ids = [int(l) for l in u if not data_target.extract_label(l).is_segmentation_in_border()]
+    dropped = [int(l) for l in u if int(l) not in cms_ids]
+    if dropped:
+        logger.on_warning(f"labels {dropped} touch target FOV border - excluded from rigid CMS")
+    poi_target_cms_fit: POI | None = None
+    if not cms_ids:
+        # All target labels truncated. Fall back to the innermost point of each
+        # mask (argmax of the EDT) so the rigid stage at least matches the
+        # robust interior of the visible region, not the CMS of a truncated blob.
+        from scipy.ndimage import distance_transform_edt
+
+        cms_ids = [int(l) for l in u]
+        logger.on_warning(" all labels truncated - using innermost-point fallback for rigid anchor")
+        poi_target_cms_fit = data_target.make_empty_POI()
+        poi_atlas_cms_fit = nii_atlas_fov.make_empty_POI()
+        for lbl in cms_ids:
+            tmask = data_target.extract_label(lbl).get_seg_array().astype(bool)
+            amask = nii_atlas_fov.extract_label(lbl).get_seg_array().astype(bool)
+            if not tmask.any() or not amask.any():
+                continue
+            ti = np.unravel_index(int(np.argmax(distance_transform_edt(tmask))), tmask.shape)
+            ai = np.unravel_index(int(np.argmax(distance_transform_edt(amask))), amask.shape)
+            poi_target_cms_fit[lbl, 40] = tuple(float(x) for x in ti)
+            poi_atlas_cms_fit[lbl, 40] = tuple(float(x) for x in ai)
+        return (poi_target_cms_fit, poi_atlas_cms_fit)
+    else:
+        return (
+            poi_target_cms.extract_region(cms_ids),
+            poi_atlas_cms.extract_region(cms_ids),
+        )
+
+
 class Template_Registration2:
     """Atlas-to-target multi-stage registration with a pluggable pre-registration.
 
@@ -542,16 +579,17 @@ class Template_Registration2:
         if pre_registration is not None:
             self.reg_point = pre_registration
         else:
-            if poi_target_cms is None:
-                x_seg = target_seg.extract_label(cms_ids, keep_label=True) if cms_ids else target_seg
-                poi_target = calc_centroids(x_seg, second_stage=40, bar=True)
-            else:
-                poi_target = poi_target_cms.resample_from_to(target_seg)
             if poi_cms is None:
                 x_seg = atlas_seg.extract_label(cms_ids, keep_label=True) if cms_ids else atlas_seg
                 poi_cms_local = calc_centroids(x_seg, second_stage=40, bar=True)
             else:
                 poi_cms_local = poi_cms
+            if poi_target_cms is None:
+                x_seg = target_seg.extract_label(cms_ids, keep_label=True) if cms_ids else target_seg
+                poi_target = calc_centroids(x_seg, second_stage=40, bar=True)
+                poi_target, poi_cms_local = _filter_pois(target_seg, atlas_seg, poi_target, poi_cms_local)
+            else:
+                poi_target = poi_target_cms.resample_from_to(target_seg)
             if not poi_cms_local.assert_affine(atlas_seg, raise_error=False):
                 poi_cms_local = poi_cms_local.resample_from_to(atlas_seg)
             self.reg_point = Deepali_Point_Registration(poi_target, poi_cms_local, verbose=False, ddevice=ddevice, gpu=gpu)

@@ -70,7 +70,7 @@ _AX_P, _AX_I, _AX_R = 0, 1, 2
 
 def _prep(poi: POI) -> POI:
     """Return the POI in the internal ``(P, I, R)`` orientation at 1 mm scale."""
-    return poi.reorient().rescale()
+    return poi.reorient().rescale(verbose=False)
 
 
 def _get(poi: POI, vert: int | Vertebra_Instance, loc: Location) -> np.ndarray | None:
