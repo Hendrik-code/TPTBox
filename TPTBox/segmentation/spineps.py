@@ -74,7 +74,7 @@ def run_spineps(
     save_debug_data: bool = False,
     verbose: bool = False,
     save_raw: bool = False,
-    ignore_compatibility_issues: bool = False,
+    ignore_compatibility_issues: bool = True,
     use_cpu: bool = False,
     **args,
 ) -> dict[

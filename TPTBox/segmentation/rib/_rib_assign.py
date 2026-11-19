@@ -13,12 +13,9 @@ supported public entry point. They are not re-exported from the package.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from enum import Enum
-from functools import partial
 
 import numpy as np
 from tqdm import tqdm
@@ -59,7 +56,12 @@ def _split_ccs_by_side(rib_cc: NII, cms_cc: POI, cms_cc2: POI, cms_vert: POI) ->
             continue
         center = cms_cc[cc, 50]
         center2 = cms_cc2[cc, 50] if (cc, 50) in cms_cc2 else center  # noqa: SIM401
-        cand = RibCandidate(cc_label=cc, volume=vols.get(cc, 0), z=center[inf_axis], x=center2[right_axis])
+        cand = RibCandidate(
+            cc_label=cc,
+            volume=vols.get(cc, 0),
+            z=center[inf_axis],
+            x=center2[right_axis],
+        )
         distances = cms_vert.calculate_distances_cord(center2)
         min_key = min(distances, key=distances.get)  # type: ignore
         # x < vertebra center => patient right in RAS-like orientation
@@ -81,7 +83,11 @@ def _touching_surface(mask_a: np.ndarray, mask_b: np.ndarray, nii: NII, axis_wei
     All other axes have weight 1.0.
     """
     if axis_weights is None:
-        axis_weights = {nii.get_axis("S"): 0.01, nii.get_axis("A"): 0.1, nii.get_axis("R"): 1}
+        axis_weights = {
+            nii.get_axis("S"): 0.01,
+            nii.get_axis("A"): 0.1,
+            nii.get_axis("R"): 1,
+        }
     surface = 0.0
 
     for axis in range(mask_a.ndim):
@@ -102,7 +108,12 @@ def _touching_surface(mask_a: np.ndarray, mask_b: np.ndarray, nii: NII, axis_wei
 
 
 def _try_erosion_split(
-    cc_label: int, binary_cc: NII, erosion_pixels: int, min_volume: int, _pass=0, verbose=True
+    cc_label: int,
+    binary_cc: NII,
+    erosion_pixels: int,
+    min_volume: int,
+    _pass=0,
+    verbose=True,
 ) -> tuple[int, list[np.ndarray]] | None:
     """Try to split one CC by erosion.
 
@@ -157,7 +168,10 @@ def _try_erosion_split(
             target = remaining[0]
             # print("merge", target)
         else:
-            target = max(remaining, key=lambda candidate: _touching_surface(sub_mask, infected_arr == candidate, infected))
+            target = max(
+                remaining,
+                key=lambda candidate: _touching_surface(sub_mask, infected_arr == candidate, infected),
+            )
             # print("merge of many", target)
         infected_arr[infected_arr == sub] = target
         sub_labels.remove(sub)
@@ -240,7 +254,14 @@ def split_touching_rib_ccs(
 
             with ThreadPoolExecutor(max_workers=num_workers) as executor:
                 futures = [
-                    executor.submit(_try_erosion_split, cc_label, binary_cc, erosion_pixels, min_volume, _pass)
+                    executor.submit(
+                        _try_erosion_split,
+                        cc_label,
+                        binary_cc,
+                        erosion_pixels,
+                        min_volume,
+                        _pass,
+                    )
                     for cc_label, binary_cc in binary_ccs
                 ]
 
@@ -347,7 +368,12 @@ def assign_ribs_to_vert_segmentation(
     cms_vert = calc_centroids(vert_seg)
     if split_touching:
         rib_cc = split_touching_rib_ccs(
-            rib_cc, erosion_pixels=erosion_pixels, min_volume=min_volume, vert_ids=vert_ids, short_cut=short_cut, verbose=verbose
+            rib_cc,
+            erosion_pixels=erosion_pixels,
+            min_volume=min_volume,
+            vert_ids=vert_ids,
+            short_cut=short_cut,
+            verbose=verbose,
         )
     cms_cc = calc_centroids(rib_cc * vert_pred.calc_convex_hull(None).dilate_msk_euclid(5))
     cms_cc2 = calc_centroids(rib_cc)  # .dilate_msk_euclid(5)
@@ -406,8 +432,7 @@ def assign_ribs_to_vert_segmentation(
     # Merge rib assignments back into the original vert / sem segmentations
     # without disturbing existing (non-rib) labels. Skip unmatched CCs (sentinel error_value=255).
     # Combine on the arrays, not on NII: `rib_inst != 0` yields a bool-backed NII and
-    # NII.__and__ rejects non-integer arrays, so the NII-level `&` raised TypeError and
-    # this function could never run to completion.
+    # NII.__and__ rejects non-integer arrays, so the NII-level `&` raised TypeError.
     rib_inst_arr = rib_inst.get_seg_array()
     matched = (rib_inst_arr != 0) & (rib_inst_arr != error_value)
     vert_seg[matched] = rib_inst[matched]

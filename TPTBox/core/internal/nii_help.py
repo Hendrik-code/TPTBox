@@ -133,7 +133,6 @@ def _convert(obj):
 
 
 def _save_json(data, filepath: str | Path | bids_files.BIDS_FILE, indent=4, convert=_convert):
-
     if isinstance(filepath, bids_files.BIDS_FILE):
         if "json" in filepath.file:
             filepath = filepath.file["json"]
