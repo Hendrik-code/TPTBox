@@ -362,13 +362,21 @@ class TestRunInferenceWithAMockedPredictor(unittest.TestCase):
     """
 
     @staticmethod
-    def _predictor(label_value: int = 3):
+    def _predictor(label_value: int = 3, num_classes: int = 4):
         predictor = mock.MagicMock()
 
         def predict(img, props, **kwargs):  # noqa: ARG001
-            # img is (C, P, I, R); return a label map over the spatial dims
+            # img is (C, P, I, R); return a label map over the spatial dims. The pattern differs
+            # along every axis, so a transposed or flipped axis shows up in the assertions.
             out = np.zeros(img.shape[1:], dtype=np.uint8)
             out[..., : out.shape[-1] // 2] = label_value
+            out[out.shape[0] // 2 :, : out.shape[1] // 3, :] = label_value
+            if kwargs.get("save_or_return_probabilities"):
+                # nnU-Net returns (segmentation, probabilities) with probabilities as (C, z, y, x):
+                # here the one-hot softmax of the label map.
+                probabilities = np.zeros((num_classes, *out.shape), dtype=np.float32)
+                np.put_along_axis(probabilities, out[None].astype(np.int64), 1.0, axis=0)
+                return out, probabilities
             return out
 
         predictor.predict_single_npy_array.side_effect = predict
@@ -429,11 +437,41 @@ class TestRunInferenceWithAMockedPredictor(unittest.TestCase):
         run_inference(niis, predictor)
         self.assertEqual(predictor.predict_single_npy_array.call_args[0][0].shape[0], 2)
 
-    def test_logits_are_not_implemented(self):
+    def test_logits_return_float32_probabilities_on_the_input_grid(self):
         from TPTBox.segmentation.nnUnet_utils.inference_api import run_inference  # noqa: PLC0415
 
-        with self.assertRaises((NotImplementedError, AssertionError)):
-            run_inference(_nii(_image(), seg=False), self._predictor(), logits=True)
+        nii = _nii(_image(), seg=False)
+        seg, uncertainty, softmax = run_inference(nii, self._predictor(num_classes=4), logits=True)
+        self.assertIsNone(uncertainty)
+        self.assertIsNotNone(softmax)
+        self.assertEqual(softmax.dtype, np.float32)
+        self.assertEqual(softmax.shape, (4, *nii.shape))
+        np.testing.assert_allclose(softmax.sum(axis=0), 1.0)
+        # every voxel's most probable class is the segmentation label: channels and segmentation share one grid
+        np.testing.assert_array_equal(softmax.argmax(axis=0), seg.get_seg_array())
+
+    def test_the_probabilities_are_reoriented_together_with_the_segmentation(self):
+        from TPTBox.segmentation.nnUnet_utils.inference_api import run_inference  # noqa: PLC0415
+
+        # PIR forces a real reorientation of the model output back to the input orientation.
+        # `run_inference` reorients its input in place when reorient_PIR=True, so remember the original.
+        nii = _nii(_image(), seg=False)
+        orientation, shape = nii.orientation, nii.shape
+        seg, _, softmax = run_inference(nii, self._predictor(), reorient_PIR=True, logits=True)
+        self.assertEqual(seg.orientation, orientation)
+        self.assertEqual(softmax.shape[1:], shape)
+        np.testing.assert_array_equal(softmax.argmax(axis=0), seg.get_seg_array())
+
+    def test_the_predictor_returns_probabilities_only_when_asked(self):
+        from TPTBox.segmentation.nnUnet_utils.inference_api import run_inference  # noqa: PLC0415
+
+        nii = _nii(_image(), seg=False)
+        for logits, expected in ((False, False), (True, True)):
+            with self.subTest(logits=logits):
+                predictor = self._predictor()
+                _, _, softmax = run_inference(nii, predictor, logits=logits)
+                self.assertEqual(predictor.predict_single_npy_array.call_args.kwargs["save_or_return_probabilities"], expected)
+                self.assertEqual(softmax is not None, expected)
 
     def test_an_unsupported_input_type_is_rejected(self):
         from TPTBox.segmentation.nnUnet_utils.inference_api import run_inference  # noqa: PLC0415
