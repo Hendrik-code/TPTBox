@@ -497,6 +497,64 @@ def dicom_to_nifti_multiframe_2d(ds, nii_path, pixel_array) -> None:
     return nii_path
 
 
+def _is_rgb_image(ds) -> bool:
+    """RGB image (screenshot / overlay secondary capture); dicom2nifti cannot convert these."""
+    return int(getattr(ds, "SamplesPerPixel", 1) or 1) == 3
+
+
+def _rgb_datasets_to_nifti(datasets: list, nii_path: str | Path) -> str | Path:
+    """Stack RGB images (single- or multi-frame) into one NIfTI RGB24 volume of shape (x, y, n).
+
+    Geometry: if every image has ``ImageOrientationPatient`` + ``ImagePositionPatient`` (possibly inherited from a
+    reference CT series, see ``_inherit_geometry_from_reference``) the full 3D affine is built from them, with
+    slices ordered along the slice normal. Otherwise the affine is diagonal with the in-plane pixel spacing.
+    """
+    datasets = sorted(datasets, key=lambda d: int(d.get("InstanceNumber", 0) or 0))
+    frames = []
+    for d in datasets:
+        a = d.pixel_array
+        if a.ndim == 3:  # (rows, cols, 3) single frame
+            a = a[None]
+        if a.ndim != 4 or a.shape[-1] != 3:
+            raise ValueError(f"Expected RGB (rows, cols, 3) or (frames, rows, cols, 3), got {a.shape=}")
+        frames.append(a.astype(np.uint8))
+    shapes = {f.shape[1:] for f in frames}
+    if len(shapes) != 1:
+        raise ValueError(f"RGB images of different sizes cannot be stacked: {shapes}")
+    ds0 = datasets[0]
+    sp = getattr(ds0, "PixelSpacing", None) or getattr(ds0, "ImagerPixelSpacing", None)
+    dy, dx = (float(v) for v in sp) if sp is not None else (1.0, 1.0)
+    affine = np.diag([dx, dy, 1.0, 1.0])
+    has_geo = all(len(frames_) == 1 for frames_ in frames) and all(hasattr(d, "ImageOrientationPatient") and hasattr(d, "ImagePositionPatient") for d in datasets)
+    if has_geo:
+        iop = [float(v) for v in ds0.ImageOrientationPatient]
+        row_cos, col_cos = np.array(iop[:3]), np.array(iop[3:])
+        normal = np.cross(row_cos, col_cos)
+        pos = [np.array([float(v) for v in d.ImagePositionPatient]) for d in datasets]
+        order = np.argsort([float(p @ normal) for p in pos])  # ascending along the normal, like dicom2nifti
+        datasets = [datasets[i] for i in order]
+        frames = [frames[i] for i in order]
+        pos = [pos[i] for i in order]
+        step = (pos[-1] - pos[0]) / (len(pos) - 1) if len(pos) > 1 else normal * float(getattr(ds0, "SliceThickness", 1.0) or 1.0)
+        affine = np.eye(4)
+        affine[:3, 0] = row_cos * dx
+        affine[:3, 1] = col_cos * dy
+        affine[:3, 2] = step
+        affine[:3, 3] = pos[0]
+        affine[:2] *= -1  # DICOM LPS -> NIfTI RAS (same convention as dicom2nifti)
+    stack = np.concatenate(frames, axis=0)
+    rgb = np.ascontiguousarray(np.transpose(stack, (2, 1, 0, 3)))
+    if has_geo and abs(affine[1, 1]) > 0.5 * np.abs(affine[:3, 1]).sum() and affine[1, 1] < 0:
+        # axial-like: store with y increasing (LAS) like the CT NIfTIs written by dicom2nifti, so voxels line up 1:1
+        n_y = rgb.shape[1]
+        rgb = np.ascontiguousarray(rgb[:, ::-1])
+        affine = affine @ np.array([[1, 0, 0, 0], [0, -1, 0, n_y - 1], [0, 0, 1, 0], [0, 0, 0, 1]], dtype=float)
+    rgb_dtype = np.dtype([("R", "u1"), ("G", "u1"), ("B", "u1")])
+    nii = nib.Nifti1Image(rgb.view(rgb_dtype).reshape(rgb.shape[:3]), affine)
+    nib.save(nii, nii_path)
+    return nii_path
+
+
 def dicom_to_nifti_multiframe(ds: pydicom.FileDataset, nii_path: str | Path) -> str | Path:
     """Convert a multi-frame DICOM dataset to a NIfTI file.
 
@@ -519,6 +577,8 @@ def dicom_to_nifti_multiframe(ds: pydicom.FileDataset, nii_path: str | Path) -> 
     pixel_array = ds.pixel_array
     if len(pixel_array.shape) == 2:
         return dicom_to_nifti_multiframe_2d(ds, nii_path, pixel_array)
+    if _is_rgb_image(ds):
+        return _rgb_datasets_to_nifti([ds], nii_path)
 
     if len(pixel_array.shape) != 3 and len(pixel_array.shape) != 4:
         raise ValueError(f"Expected a shape with 3 colums not {len(pixel_array.shape)}; {pixel_array.shape=}")
@@ -687,6 +747,10 @@ def _extract_nii_from_dicom(dicom_out_path, nii_path):
     """
     try:
         if isinstance(dicom_out_path, list):
+            if dicom_out_path and all(_is_rgb_image(d) for d in dicom_out_path):
+                _rgb_datasets_to_nifti(dicom_out_path, nii_path)
+                logger.print("Save ", nii_path, Log_Type.SAVE)
+                return True
             try:
                 if len(dicom_out_path) == 1:
                     ds = dicom_out_path[0]
@@ -832,7 +896,7 @@ def _filter_dicom(dcm_data_l: list[pydicom.FileDataset]) -> list[pydicom.FileDat
     """Filter DICOM datasets to retain only those with spatial orientation metadata."""
     if len(dcm_data_l) == 1:
         return dcm_data_l
-    dcm_data_l = [d for d in dcm_data_l if hasattr(d, "ImageOrientationPatient")]
+    dcm_data_l = [d for d in dcm_data_l if hasattr(d, "ImageOrientationPatient") or _is_rgb_image(d)]
     return dcm_data_l
 
 
@@ -1379,6 +1443,64 @@ def _looks_like_dicom(path: Path) -> bool:
     return suffix in ("", ".dcm", ".ima", ".dicom")
 
 
+def _inherit_geometry_from_reference(dicom_files: dict[str, list[FileDataset]]) -> None:
+    """Give RGB derived series without orientation (e.g. overlay secondary captures) the geometry of their CT series.
+
+    Such series have no ImageOrientationPatient and a constant, meaningless ImagePositionPatient, but share the
+    FrameOfReferenceUID/StudyInstanceUID, matrix size and slice count with the CT series they were rendered from.
+    The reference is the unique series with orientation that matches on those, and on SliceThickness and
+    AcquisitionNumber when present. Slices are paired by rank of InstanceNumber; orientation, position and
+    pixel spacing are copied over (in memory only). Ambiguous or missing references leave the series unchanged.
+    """
+
+    def _num(d):
+        return int(d.get("InstanceNumber", 0) or 0)
+
+    refs = {k: v for k, v in dicom_files.items() if v and all(hasattr(d, "ImageOrientationPatient") and hasattr(d, "ImagePositionPatient") for d in v) and not _is_rgb_image(v[0])}
+    for key, group in dicom_files.items():
+        if not group or not all(_is_rgb_image(d) and not hasattr(d, "ImageOrientationPatient") for d in group):
+            continue
+        g0 = group[0]
+        cands = [
+            v
+            for v in refs.values()
+            if len(v) == len(group)
+            and v[0].get("FrameOfReferenceUID") == g0.get("FrameOfReferenceUID") is not None
+            and v[0].get("StudyInstanceUID") == g0.get("StudyInstanceUID")
+            and (v[0].get("Rows"), v[0].get("Columns")) == (g0.get("Rows"), g0.get("Columns"))
+        ]
+        if len(cands) > 1:  # narrow down
+            for tag in ("SliceThickness", "AcquisitionNumber"):
+                narrowed = [v for v in cands if str(v[0].get(tag)) == str(g0.get(tag))]
+                if narrowed:
+                    cands = narrowed
+        if len(cands) != 1:
+            logger.on_warning(f"No unique reference series for {g0.get('SeriesDescription')} ({len(cands)} candidates); geometry not inherited")
+            continue
+        ref = sorted(cands[0], key=_num)
+        ov_sorted = sorted(group, key=_num)
+        # The overlay's own ImagePositionPatient is constant (= position of its first slice). Pair in the order where
+        # that position is where the CT's first/last slice sits; otherwise the stack would be flipped along S/I.
+        try:
+            iop = np.array([float(v) for v in ref[0].ImageOrientationPatient])
+            normal = np.cross(iop[:3], iop[3:])
+            own = float(np.array([float(v) for v in ov_sorted[0].ImagePositionPatient]) @ normal)
+            first = float(np.array([float(v) for v in ref[0].ImagePositionPatient]) @ normal)
+            last = float(np.array([float(v) for v in ref[-1].ImagePositionPatient]) @ normal)
+            tol = 0.5 * abs(last - first) / max(len(ref) - 1, 1)
+            if abs(own - last) <= tol < abs(own - first):
+                ref = ref[::-1]
+            elif not abs(own - first) <= tol < abs(own - last):
+                logger.on_warning(f"Slice order of '{g0.get('SeriesDescription')}' vs reference is ambiguous; assuming same InstanceNumber order")
+        except Exception as e:  # noqa: BLE001
+            logger.on_warning(f"Could not determine slice order of '{g0.get('SeriesDescription')}': {e}")
+        for ov, ct in zip(ov_sorted, ref):
+            ov.ImageOrientationPatient = ct.ImageOrientationPatient
+            ov.ImagePositionPatient = ct.ImagePositionPatient
+            ov.PixelSpacing = ct.PixelSpacing
+        logger.on_log(f"Geometry of '{g0.get('SeriesDescription')}' taken from reference series '{ref[0].get('SeriesDescription')}'")
+
+
 def _read_dicom_files(dicom_out_path: Path) -> tuple[dict[str, list[FileDataset]], dict[str, list[str]]]:
     """Read DICOM files from a directory and categorize them based on SeriesInstanceUID and type.
 
@@ -1410,7 +1532,7 @@ def _read_dicom_files(dicom_out_path: Path) -> tuple[dict[str, list[FileDataset]
                     typ = ""
                 key1 = str(dcm_data.SeriesInstanceUID)
                 key = f"{key1}_{typ}"
-                if not hasattr(dcm_data, "ImageOrientationPatient"):
+                if not hasattr(dcm_data, "ImageOrientationPatient") and not _is_rgb_image(dcm_data):
                     key += "_" + dcm_data.get("SOPInstanceUID", 0)
 
                 if key1 not in dicom_types:
@@ -1422,6 +1544,7 @@ def _read_dicom_files(dicom_out_path: Path) -> tuple[dict[str, list[FileDataset]
                 dicom_files[key].append(dcm_data)
             except AttributeError:
                 pass
+    _inherit_geometry_from_reference(dicom_files)
     for key, value in dicom_files.items():
         dicom_files[key] = sorted(value, key=lambda dcm_data: np.array(dcm_data.get("ImagePositionPatient", 0)).sum())
     return dicom_files, _filter_file_type(dicom_types)
