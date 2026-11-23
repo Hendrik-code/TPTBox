@@ -1494,11 +1494,40 @@ def _inherit_geometry_from_reference(dicom_files: dict[str, list[FileDataset]]) 
                 logger.on_warning(f"Slice order of '{g0.get('SeriesDescription')}' vs reference is ambiguous; assuming same InstanceNumber order")
         except Exception as e:  # noqa: BLE001
             logger.on_warning(f"Could not determine slice order of '{g0.get('SeriesDescription')}': {e}")
+        ref_key = next((k for k, v in refs.items() if v[0] is cands[0][0]), None)
         for ov, ct in zip(ov_sorted, ref):
+            ov._tptbox_reference_key = ref_key  # noqa: SLF001 - used to write the ReferenceImage sidecar tag
             ov.ImageOrientationPatient = ct.ImageOrientationPatient
             ov.ImagePositionPatient = ct.ImagePositionPatient
             ov.PixelSpacing = ct.PixelSpacing
         logger.on_log(f"Geometry of '{g0.get('SeriesDescription')}' taken from reference series '{ref[0].get('SeriesDescription')}'")
+
+
+REFERENCE_IMAGE_KEY = "ReferenceImage"
+
+
+def _write_reference_image_tags(series_items, outs: dict) -> None:
+    """Add ``ReferenceImage`` to the sidecar JSON of series whose geometry was inherited from a reference series.
+
+    The value is the path of the reference NIfTI relative to the folder of the series' own NIfTI, e.g.
+    ``../ct/sub-X_sequ-5_acq-ax_ct.nii.gz``, so ``Path(nii).parent / value`` resolves it without any BIDS knowledge.
+    Only written when both series were exported.
+    """
+    for key, files in series_items:
+        ref_key = getattr(files[0], "_tptbox_reference_key", None) if files else None
+        nii, ref_nii = outs.get(key), outs.get(ref_key) if ref_key else None
+        if not nii or not ref_nii:
+            continue
+        try:
+            rel = Path(os.path.relpath(Path(ref_nii).resolve(), Path(nii).resolve().parent)).as_posix()
+            json_path = Path(str(nii).replace(".nii.gz", ".json"))
+            if not json_path.exists():
+                continue
+            j = load_json(json_path)
+            j[REFERENCE_IMAGE_KEY] = rel
+            secure_save_json(json_path, j, indent=4)
+        except Exception as e:  # noqa: BLE001
+            logger.on_warning(f"Could not write {REFERENCE_IMAGE_KEY} for {nii}: {e}")
 
 
 def _read_dicom_files(dicom_out_path: Path) -> tuple[dict[str, list[FileDataset]], dict[str, list[str]]]:
@@ -1822,7 +1851,7 @@ def extract_dicom_folder(
         censor_list = []
     if ignore_keys_for_conflict is None:
         ignore_keys_for_conflict = DEFAULT_CONFLICT_IGNORE_KEYS
-    ignore_keys_for_conflict = tuple(ignore_keys_for_conflict)
+    ignore_keys_for_conflict = (*ignore_keys_for_conflict, REFERENCE_IMAGE_KEY)  # added after export, not part of the series identity
     if not validate_slicecount:
         convert_dicom.settings.disable_validate_slicecount()
     if not validate_orientation:
@@ -1917,6 +1946,7 @@ def extract_dicom_folder(
             # are caught inside the loop so this fires even if individual
             # series were skipped (e.g. localizers) — but not if
             # `_read_dicom_files` itself raised.
+            _write_reference_image_tags(series_items, outs)
             if skip_already_extracted:
                 _write_extract_marker(source_for_marker, Path(dataset_path_out))
 
