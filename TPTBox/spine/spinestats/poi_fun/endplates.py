@@ -531,6 +531,7 @@ def endplate_to_super_infer_endplate(vert: NII, spine: NII) -> tuple[NII, NII]:
     if endplate_nii.sum() == 0:
         return vert, spine
     spine = spine.copy()
+    vert = vert.copy()  # work on a copy: the caller (calc_poi_from_subreg_vert) keeps using its vert mask afterwards
     vert_org = vert.copy()
     vert[vert >= 40] = 0
     vert[spine.extract_label([Location.Vertebra_Corpus, Location.Vertebra_Corpus_border, Vertebra_Instance.S1]) != 1] = 0
