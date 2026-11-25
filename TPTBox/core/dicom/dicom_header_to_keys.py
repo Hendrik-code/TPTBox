@@ -289,6 +289,28 @@ def get_plane_dicom(dicoms: list[pydicom.FileDataset] | NII, hires_threshold: fl
         return None
 
 
+XA_STILL_SUFFIX = "-still"
+XA_STILL_FORMATS = ("DSA", "fluroscopy")
+
+
+def _is_single_frame(simp_json: dict, dcm_data_l) -> bool:
+    """True if the series is exactly one image with ``NumberOfFrames == 1``.
+
+    A series made of several single-frame instances is a stack, not a still, so it only counts
+    when the header says one frame and the series holds one DICOM object (or its size is unknown).
+    """
+    try:
+        frames = int(simp_json.get("NumberOfFrames"))
+    except (TypeError, ValueError):
+        return False
+    if frames != 1:
+        return False
+    try:
+        return len(dcm_data_l) <= 1  # type: ignore[arg-type]
+    except TypeError:  # NII / path / None: size unknown
+        return True
+
+
 def extract_keys_from_json(  # noqa: C901
     simp_json: dict,
     dcm_data_l: list[pydicom.FileDataset] | NII | Path,
@@ -504,36 +526,50 @@ def extract_keys_from_json(  # noqa: C901
             derived = "DERIVED" in image_type
             series_description = _get("SeriesDescription", " ").lower()  # "SeriesDescription": "Durchleuchtung - gespeichert",
             monitor = _get("PositionerMotion", " ").lower()
-            # ftv = _get("FrameTimeVector", None).lower()
-            monitor = _get("PositionerMotion", " ").lower()
+            # NB: `_get` turns "_" into "-", so "SUBTRACTION;FRAME_SELECTION" arrives as
+            # "subtraction;frame-selection". Substring tests only - an equality test on the
+            # tag silently misses every combined value.
             tag = _get("DerivationDescription", " ").lower()
-            # "ImagerPixelSpacing"
-            # FrameTimeVector = _get("DerivationDescription", [])
-            # ftv is not None
-            if "durchleuchtung" in series_description or "fluroscopy" in series_description:
-                mri_format = "fluroscopy"
-            elif tag == "subtraction":
-                mri_format = "DSA" if monitor == "static" and "VOLUME" not in image_type and "RECON" not in image_type else "subtraction"
+            subtraction = "subtraction" in tag
+            keyframe = "frame-selection" in tag or "frame_selection" in tag
+            volume_like = "VOLUME" in image_type or "RECON" in image_type
+            # A missing PositionerMotion tag means "unknown", not "moving": only an explicit
+            # non-static value (e.g. a rotational run) makes a subtracted run a `subtraction` volume.
+            static_or_unknown = monitor.strip() in ("", "static")
+            # Decide from the image *content* (ImageType / DerivationDescription) first and use the
+            # SeriesDescription only as a fallback. Philips stores subtracted runs under
+            # "Durchleuchtung - gespeichert", which used to push them into `fluroscopy`.
+            if "ORIGINAL" in image_type and not subtraction and not volume_like and monitor != "dynamic" and "3DRA_PROP" not in image_type:
+                mri_format = "fluroscopy"  # native, unsubtracted live run
+            elif subtraction:
+                mri_format = "DSA" if static_or_unknown and not volume_like else "subtraction"
             elif "3DRA_PROP" in image_type:
                 mri_format = "3DRA"
-            elif monitor == "dynamic" or "VOLUME" in image_type or "RECON" in image_type or "3DRA_PROP" in image_type:
+            elif monitor == "dynamic" or volume_like:
                 mri_format = "DSA3D"
-            elif biplane and derived and "VOLUME" not in image_type and "RECON" not in image_type:
-                ##len(FrameTimeVector) >= 1 and (monitor == "static" and "VOLUME" not in image_type and "RECON" not in image_type)
+            elif biplane and derived:
                 mri_format = "DSA"
+            elif derived and "PRIMARY" in image_type:
+                # DERIVED + PRIMARY without a SUBTRACTION tag (e.g. single-plane "Carotid." runs) is still DSA
+                mri_format = "DSA"
+            elif "durchleuchtung" in series_description or "fluroscopy" in series_description:
+                mri_format = "fluroscopy"  # fallback, ImageType gave no answer
             else:
                 mri_format = "XA"
-            # Manufacturer-agnostic ImageType fallbacks — override the plain
-            # `XA` fallback with more specific labels when the header
-            # unambiguously says so. `ORIGINAL` runs are live fluoro; a
-            # `DERIVED PRIMARY` subtracted plane is a DSA. Keeps the
-            # SeriesDescription-string checks above as first-pass and only
-            # kicks in when they didn't resolve past `XA`.
+            # Manufacturer-agnostic ImageType fallback for whatever is still plain `XA`.
             if mri_format == "XA":
                 if "ORIGINAL" in image_type:
                     mri_format = "fluroscopy"
                 elif "DERIVED" in image_type and "PRIMARY" in image_type:
                     mri_format = "DSA"
+            # Key frames: a selected subset of an acquisition that is stored next to the full run
+            # (same SeriesNumber / SeriesInstanceUID). Mark them so they never compete for the plain name.
+            if keyframe:
+                keys["rec"] = "keyframe"
+            # A single image is a 2D picture, not a run: give it its own ending (`DSA-still`,
+            # `fluroscopy-still`) instead of letting it collide with the run that shares its number.
+            if mri_format in XA_STILL_FORMATS and _is_single_frame(simp_json, dcm_data_l):
+                mri_format = f"{mri_format}{XA_STILL_SUFFIX}"
         elif modality == "mr":
             for key, mri_format_new in map_series_description_to_file_format.items():
                 regex = re.compile(key)
