@@ -525,7 +525,9 @@ def _rgb_datasets_to_nifti(datasets: list, nii_path: str | Path) -> str | Path:
     sp = getattr(ds0, "PixelSpacing", None) or getattr(ds0, "ImagerPixelSpacing", None)
     dy, dx = (float(v) for v in sp) if sp is not None else (1.0, 1.0)
     affine = np.diag([dx, dy, 1.0, 1.0])
-    has_geo = all(len(frames_) == 1 for frames_ in frames) and all(hasattr(d, "ImageOrientationPatient") and hasattr(d, "ImagePositionPatient") for d in datasets)
+    has_geo = all(len(frames_) == 1 for frames_ in frames) and all(
+        hasattr(d, "ImageOrientationPatient") and hasattr(d, "ImagePositionPatient") for d in datasets
+    )
     if has_geo:
         iop = [float(v) for v in ds0.ImageOrientationPatient]
         row_cos, col_cos = np.array(iop[:3]), np.array(iop[3:])
@@ -1456,7 +1458,11 @@ def _inherit_geometry_from_reference(dicom_files: dict[str, list[FileDataset]]) 
     def _num(d):
         return int(d.get("InstanceNumber", 0) or 0)
 
-    refs = {k: v for k, v in dicom_files.items() if v and all(hasattr(d, "ImageOrientationPatient") and hasattr(d, "ImagePositionPatient") for d in v) and not _is_rgb_image(v[0])}
+    refs = {
+        k: v
+        for k, v in dicom_files.items()
+        if v and all(hasattr(d, "ImageOrientationPatient") and hasattr(d, "ImagePositionPatient") for d in v) and not _is_rgb_image(v[0])
+    }
     for group in dicom_files.values():
         if not group or not all(_is_rgb_image(d) and not hasattr(d, "ImageOrientationPatient") for d in group):
             continue
@@ -1475,7 +1481,9 @@ def _inherit_geometry_from_reference(dicom_files: dict[str, list[FileDataset]]) 
                 if narrowed:
                     cands = narrowed
         if len(cands) != 1:
-            logger.on_warning(f"No unique reference series for {g0.get('SeriesDescription')} ({len(cands)} candidates); geometry not inherited")
+            logger.on_warning(
+                f"No unique reference series for {g0.get('SeriesDescription')} ({len(cands)} candidates); geometry not inherited"
+            )
             continue
         ref = sorted(cands[0], key=_num)
         ov_sorted = sorted(group, key=_num)
@@ -1491,7 +1499,9 @@ def _inherit_geometry_from_reference(dicom_files: dict[str, list[FileDataset]]) 
             if abs(own - last) <= tol < abs(own - first):
                 ref = ref[::-1]
             elif not abs(own - first) <= tol < abs(own - last):
-                logger.on_warning(f"Slice order of '{g0.get('SeriesDescription')}' vs reference is ambiguous; assuming same InstanceNumber order")
+                logger.on_warning(
+                    f"Slice order of '{g0.get('SeriesDescription')}' vs reference is ambiguous; assuming same InstanceNumber order"
+                )
         except Exception as e:  # noqa: BLE001
             logger.on_warning(f"Could not determine slice order of '{g0.get('SeriesDescription')}': {e}")
         ref_key = next((k for k, v in refs.items() if v[0] is cands[0][0]), None)
