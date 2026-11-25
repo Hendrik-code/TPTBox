@@ -1457,7 +1457,7 @@ def _inherit_geometry_from_reference(dicom_files: dict[str, list[FileDataset]]) 
         return int(d.get("InstanceNumber", 0) or 0)
 
     refs = {k: v for k, v in dicom_files.items() if v and all(hasattr(d, "ImageOrientationPatient") and hasattr(d, "ImagePositionPatient") for d in v) and not _is_rgb_image(v[0])}
-    for key, group in dicom_files.items():
+    for group in dicom_files.values():
         if not group or not all(_is_rgb_image(d) and not hasattr(d, "ImageOrientationPatient") for d in group):
             continue
         g0 = group[0]
