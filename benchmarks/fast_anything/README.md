@@ -25,26 +25,27 @@ When `.fast/lib` holds no built port (a fresh clone, an installed wheel, CI), th
 
 ## Reproduce
 
-Requires Rust >= 1.88 (edition 2024). From the repo root:
+Requires Rust >= 1.88 (edition 2024). From the repo root, build the port into `.fast/lib` with plain cargo. It is
+built with `target-cpu=native`, so build it on the machine that runs it.
 
 ```sh
-cargo install fast-anything --version 0.8.8         # or: npm i -g @el4cteo/fast-anything
-fast-anything build                                 # release-build the port into .fast/lib
+PORT=fa_tptbox_core_poi_fun_strategies_corner_bisection_search
+(cd .fast/ports/TPTBox.core.poi_fun.strategies.corner_bisection_search && CARGO_TARGET_DIR=../../target cargo build --release)
+mkdir -p .fast/lib && cp .fast/target/release/lib$PORT.so .fast/lib/$PORT.abi3.so
 
 python -m benchmarks.fast_anything.bench            # exactness + kernel + pipeline timings (~1-2 min)
 python -m pytest unit_tests/test_corner_search.py   # runs against the active implementation
 FAST_ANYTHING_DISABLE=1 python -m pytest unit_tests/test_corner_search.py
 ```
 
-`fast-anything build` passes the interpreter recorded in `.fast/state.json` to PyO3; on a machine where that path
-does not exist, run the `scan` below once first. To build without fast-anything, run `CARGO_TARGET_DIR=../../target cargo build --release` inside the port's folder,
-then copy `.fast/target/release/libfa_tptbox_core_poi_fun_strategies_corner_bisection_search.so` to
-`.fast/lib/fa_tptbox_core_poi_fun_strategies_corner_bisection_search.abi3.so`. The port is built with
-`target-cpu=native`, so build it on the machine that runs it.
+`fast-anything build` fails on a fresh clone ("nothing ported yet"): it reads the port registry from
+`.fast/state.json`, which is per-machine (it records the local interpreter path) and not committed. `scan` followed
+by `port` recreates it; `port` re-records the calls but keeps the committed `src/lib.rs`.
 
 The full fast-anything loop, as it was run here:
 
 ```sh
+cargo install fast-anything --version 0.8.8                          # or: npm i -g @el4cteo/fast-anything
 fast-anything scan -- python -m benchmarks.fast_anything.workload   # -m, so TPTBox counts as importable
 fast-anything port TPTBox.core.poi_fun.strategies.corner_bisection_search
 fast-anything verify TPTBox.core.poi_fun.strategies.corner_bisection_search

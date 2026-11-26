@@ -21,3 +21,5 @@ startup.R
 bridge.R
 Rprof.out*
 *.rds
+# per-machine profile and port registry (holds the local interpreter path)
+state.json
