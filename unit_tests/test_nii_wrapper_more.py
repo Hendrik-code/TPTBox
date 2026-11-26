@@ -261,6 +261,34 @@ class TestIntensityOperations(unittest.TestCase):
         self.assertTrue(set(np.unique(out.get_seg_array())).issubset({0, 1, 2}))
         self.assertIn(2, np.unique(out.get_seg_array()), "other labels survive")
 
+    def test_smooth_gaussian_labelwise_delegates_to_smooth_labelwise(self):
+        arr = np.zeros((16, 16, 16), dtype=np.uint8)
+        arr[2:8, 2:8, 2:8] = 1
+        arr[9:14, 9:14, 9:14] = 2
+        nii = _nii(arr)
+        expected = nii.smooth_gaussian_labelwise([1, 2], sigma=1.5, radius=3).get_seg_array()
+        result = nii.smooth_labelwise([1, 2], method="gaussian", sigma=1.5, radius=3).get_seg_array()
+        np.testing.assert_array_equal(result, expected)
+
+    def test_smooth_labelwise_methods(self):
+        arr = np.zeros((16, 16, 16), dtype=np.uint8)
+        arr[2:8, 2:8, 2:8] = 1
+        arr[9:14, 9:14, 9:14] = 2
+        arr[8, 4, 4] = 1  # one-voxel bump on the cube
+        for method in ("gaussian", "laplacian", "taubin"):
+            with self.subTest(method=method):
+                nii = _nii(arr)
+                out = nii.smooth_labelwise(1, method=method, sigma=1.0, iterations=5)
+                np.testing.assert_array_equal(nii.get_seg_array(), arr, "the input must be untouched")
+                np.testing.assert_array_equal(out.get_seg_array() == 2, arr == 2, "unselected labels stay")
+                self.assertEqual(out.get_seg_array()[8, 4, 4], 0, "the bump is smoothed away")
+                nii.smooth_labelwise_(1, method=method, sigma=1.0, iterations=5)
+                np.testing.assert_array_equal(nii.get_seg_array(), out.get_seg_array())
+
+    def test_smooth_labelwise_rejects_non_segmentation(self):
+        with self.assertRaises(AssertionError):
+            _nii(np.zeros((4, 4, 4), dtype=np.float32), seg=False).smooth_labelwise(1, method="taubin")
+
 
 class TestGridAndAccessors(unittest.TestCase):
     def test_accessors(self):
