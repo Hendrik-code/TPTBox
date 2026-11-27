@@ -233,8 +233,7 @@ def old_np_unique(arr: np.ndarray) -> list[int]:
 def np_unique(arr: np.ndarray) -> list[int]:
     """Returns each existing label in the array (including zero!).
 
-    Uses cc3d statistics for unsigned-integer arrays for speed, and falls back
-    to ``numpy.unique`` for other dtypes.
+    Integer arrays go through :func:`unique_integers`, other dtypes through ``numpy.unique``.
 
     Args:
         arr (np.ndarray): Input label array.
@@ -243,14 +242,38 @@ def np_unique(arr: np.ndarray) -> list[int]:
         list[int]: Sorted list of every distinct label value present in ``arr``,
             including 0 (background).
     """
-    if np.issubdtype(arr.dtype, np.unsignedinteger):
-        # bincount is O(max_val) but ~5-10x faster than np.unique for dense label arrays
+    if arr.dtype.kind in "iu":
+        return unique_integers(arr)
+    return np.unique(arr).tolist()
+
+
+def unique_integers(arr: np.ndarray) -> list[int]:
+    """Sorted distinct values of an integer array, as Python ints.
+
+    Unsigned arrays whose maximum is below 2**20 are counted with ``np.bincount``, which is several
+    times faster than ``np.unique`` on label maps; everything else uses ``np.unique``.
+
+    Args:
+        arr (np.ndarray): Integer array of any shape.
+
+    Returns:
+        list[int]: The distinct values, ascending.
+
+    Raises:
+        TypeError: ``arr`` is not an integer array.
+        ValueError: ``arr`` is an empty unsigned array (an empty signed array gives ``[]``).
+
+    A Rust port of this function, verified call for call by fast-anything, replaces it when built
+    (see the blocks at the end of this module and ``benchmarks/fast_anything/README.md``).
+    """
+    if arr.dtype.kind not in "iu":
+        raise TypeError(f"expected an integer array, got {arr.dtype}")
+    if arr.dtype.kind == "u":
         max_val = int(arr.max())
         if max_val < 2**20:  # ~1M labels threshold — bincount stays fast
             counts = np.bincount(arr.ravel())
             return np.where(counts > 0)[0].tolist()
-        # For sparse label spaces fall back to np.unique
-    return old_np_unique(arr)
+    return np.unique(arr).tolist()
 
 
 def np_unique_withoutzero(arr: UINTARRAY) -> list[int]:
@@ -263,14 +286,7 @@ def np_unique_withoutzero(arr: UINTARRAY) -> list[int]:
         list[int]: Sorted list of every distinct label value present in ``arr``,
             excluding 0 (background).
     """
-    if np.issubdtype(arr.dtype, np.unsignedinteger):
-        max_val = int(arr.max())
-        if max_val == 0:
-            return []
-        if max_val < 2**20:
-            counts = np.bincount(arr.ravel())
-            return (np.where(counts[1:] > 0)[0] + 1).tolist()
-    return [i for i in np.unique(arr).tolist() if i != 0]
+    return [i for i in np_unique(arr) if i != 0]
 
 
 def old_np_unique_withoutzero(arr: UINTARRAY) -> list[int]:
@@ -512,6 +528,46 @@ def np_dice(seg: np.ndarray, gt: np.ndarray, binary_compare: bool = False, label
     return dice
 
 
+def euclidean_distance_transform(
+    mask: NDArray[np.bool_],
+    sampling: Sequence[float] | None = None,
+    return_distances: bool = True,
+    return_indices: bool = False,
+) -> tuple[NDArray[np.float64] | None, NDArray[np.int32] | None]:
+    """Exact Euclidean distance transform of a boolean mask, as ``scipy.ndimage.distance_transform_edt``.
+
+    For every voxel, the distance to the nearest ``False`` voxel and/or that voxel's index (the
+    feature transform). Ties go to the voxel scipy picks.
+
+    Args:
+        mask (NDArray[np.bool_]): Mask of at least one dimension; distances are measured to its ``False`` voxels.
+        sampling (Sequence[float] | None, optional): Voxel spacing per axis, or a single float for all
+            axes. Defaults to None (isotropic unit spacing).
+        return_distances (bool, optional): Compute the distances. Defaults to True.
+        return_indices (bool, optional): Compute the feature transform. Defaults to False.
+
+    Returns:
+        tuple: ``(distances, indices)``: float64 distances shaped like ``mask`` and int32 indices of
+        shape ``(mask.ndim, *mask.shape)``, each None when not requested.
+
+    Raises:
+        TypeError: ``mask`` is not a boolean array.
+        ValueError: ``mask`` is 0-dimensional.
+        RuntimeError: Neither output was requested, or ``sampling`` does not have one entry per axis.
+
+    A Rust port of this function, verified call for call by fast-anything, replaces it when built
+    (see the blocks at the end of this module and ``benchmarks/fast_anything/README.md``).
+    """
+    if mask.dtype != bool:
+        raise TypeError(f"expected a boolean mask, got {mask.dtype}")
+    if mask.ndim == 0:
+        raise ValueError("expected a mask with at least one dimension")
+    result = distance_transform_edt(mask, sampling=sampling, return_distances=return_distances, return_indices=return_indices)
+    if return_distances and return_indices:
+        return result  # type: ignore[return-value]
+    return (result, None) if return_distances else (None, result)  # type: ignore[return-value]
+
+
 def np_erode_msk_euclid(arr: np.ndarray, n_pixel: int = 3, use_crop=True, labels=None, mask=None) -> np.ndarray:
     """Euclidean erosion: shrink each foreground label by ``n_pixel`` voxels via distance transform.
 
@@ -538,7 +594,7 @@ def np_erode_msk_euclid(arr: np.ndarray, n_pixel: int = 3, use_crop=True, labels
     foreground = arrc > 0
 
     # distance inside foreground to nearest background
-    dist = distance_transform_edt(foreground)
+    dist, _ = euclidean_distance_transform(foreground)
 
     # copy original
     out = arrc.copy()
@@ -580,7 +636,7 @@ def np_dilate_msk_euclid(arr: np.ndarray, n_pixel: int = 3, use_crop=True, label
     foreground = arrc > 0
 
     # distance + nearest label indices
-    dist, indices = distance_transform_edt(~foreground, return_indices=True)
+    dist, indices = euclidean_distance_transform(~foreground, return_indices=True)
 
     # copy original
     out = arrc.copy()
@@ -697,8 +753,7 @@ def np_voronoi_labels(
         return np.zeros(arr.shape, dtype=np.int8 if signed_background else arr.dtype)
 
     want_distance = max_distance is not None
-    result = distance_transform_edt(background, sampling=zoom, return_distances=want_distance, return_indices=True)
-    distances, indices = result if want_distance else (None, result)
+    distances, indices = euclidean_distance_transform(background, sampling=zoom, return_distances=want_distance, return_indices=True)
     nearest = arr[tuple(indices)]
 
     out = nearest.astype(np.min_scalar_type(-int(arr.max()) - 1) if signed_background else arr.dtype, copy=True)
@@ -865,21 +920,57 @@ def np_erode_msk(
     for i in labels:
         if i == 0:  # or i not in present_labels:
             continue
-        data = msk_i_data.copy()
-        data[i != data] = 0
+        data = msk_i_data == i
         if use_crop:
             lcrop = np_bbox_binary(data, px_dist=1, raise_error=False)
             data = data[lcrop]
-        msk_ibe_data = binary_erosion(data, structure=struct, iterations=n_pixel, border_value=border_value)
-        data[~msk_ibe_data] = 0  # type: ignore
+        removed = data & ~binary_erosion_radius1(data, struct, n_pixel, border_value)
         if use_crop:
-            out[lcrop][(msk_i_data[lcrop] == i) & (data == 0)] = 0
+            out[lcrop][removed] = 0
         else:
-            out[(msk_i_data == i) & (data == 0)] = 0
+            out[removed] = 0
     if use_crop:
         arr[crop] = out
         return arr
     return out
+
+
+def binary_erosion_radius1(image: NDArray[np.bool_], struct: NDArray[np.bool_], iterations: int, border_value: int) -> NDArray[np.bool_]:
+    """Binary erosion with a structuring element of size 1 or 3 along every axis, as ``scipy.ndimage.binary_erosion``.
+
+    A voxel stays set when every voxel the structuring element (centred on it) covers is set.
+    Voxels outside the image count as set when ``border_value`` is truthy.
+
+    Only sizes 1 and 3 are accepted, which covers every ``generate_binary_structure`` element
+    (also with an axis expanded for slice-wise erosion). For wider elements scipy's iterated erosion
+    is not plain repeated erosion next to the border when ``border_value`` is set.
+
+    Args:
+        image (NDArray[np.bool_]): Mask to erode, at least one dimension.
+        struct (NDArray[np.bool_]): Structuring element with as many dimensions as ``image``.
+        iterations (int): Number of erosions; below 1, erode until nothing changes.
+        border_value (int): Value of the voxels outside the image.
+
+    Returns:
+        NDArray[np.bool_]: The eroded mask.
+
+    Raises:
+        TypeError: ``image`` or ``struct`` is not boolean.
+        RuntimeError: ``struct`` and ``image`` differ in dimensionality.
+        ValueError: ``image`` is 0-dimensional or ``struct`` has an axis of a size other than 1 or 3.
+
+    A Rust port of this function, verified call for call by fast-anything, replaces it when built
+    (see the blocks at the end of this module and ``benchmarks/fast_anything/README.md``).
+    """
+    if image.dtype != bool or struct.dtype != bool:
+        raise TypeError(f"expected boolean arrays, got {image.dtype} and {struct.dtype}")
+    if image.ndim == 0:
+        raise ValueError("expected an image with at least one dimension")
+    if struct.ndim != image.ndim:
+        raise RuntimeError("structure and input must have same dimensionality")
+    if any(s not in (1, 3) for s in struct.shape):
+        raise ValueError(f"structuring element must have size 1 or 3 along every axis, got {struct.shape}")
+    return binary_erosion(image, structure=struct, iterations=iterations, border_value=border_value)
 
 
 def np_map_labels(arr: UINTARRAY, label_map: LABEL_MAP) -> np.ndarray:
@@ -1395,6 +1486,40 @@ def np_compute_boundary_normals(
     return coords, gradient[touching]
 
 
+def connected_component_labels(arr: np.ndarray, connectivity: int) -> tuple[np.ndarray, int]:
+    """Connected components of a 2D or 3D label array, as ``cc3d.connected_components(..., return_N=True)``.
+
+    Neighbouring voxels belong to the same component when they hold the same non-zero value (floats
+    compare exactly, so NaN voxels never connect).
+
+    Args:
+        arr (np.ndarray): 2D or 3D bool, integer, float32 or float64 array.
+        connectivity (int): 6, 18 or 26 in 3D; 4 or 8 in 2D, where 6 counts as 4 and 18 and 26 as 8.
+
+    Returns:
+        tuple[np.ndarray, int]: The components numbered 1..N in memory order (C order, or Fortran
+        order for a Fortran-contiguous ``arr``; other views are copied to C order first) and N. The map is uint16 while cc3d's estimate of
+        provisional labels (runs of equal non-zero values along the fastest axis) is below 65535, and
+        uint32 or uint64 above. An empty ``arr`` gives an empty 1D array of its own dtype.
+
+    Raises:
+        TypeError: ``arr`` has an unsupported dtype.
+        ValueError: ``arr`` is not 2D or 3D, or ``connectivity`` is not supported for its dimensionality.
+
+    A Rust port of this function, verified call for call by fast-anything, replaces it when built
+    (see the blocks at the end of this module and ``benchmarks/fast_anything/README.md``).
+    """
+    if arr.dtype.kind not in "biu" and arr.dtype not in (np.float32, np.float64):
+        raise TypeError(f"expected a bool, integer, float32 or float64 array, got {arr.dtype}")
+    if arr.ndim not in (2, 3):
+        raise ValueError(f"expected 2D or 3D, but got {arr.ndim}")
+    if not (arr.flags.c_contiguous or arr.flags.f_contiguous):
+        # cc3d reads parts of its bookkeeping from the buffer behind a view, ignoring the strides,
+        # and then raises IndexError or mislabels about 1-2% of strided views (cc3d 3.26)
+        arr = np.ascontiguousarray(arr)
+    return _connected_components(arr, connectivity=connectivity, return_N=True)  # type: ignore[return-value]
+
+
 def np_connected_components(
     arr: UINTARRAY,
     label_ref: LABEL_REFERENCE | None = None,
@@ -1422,7 +1547,7 @@ def np_connected_components(
     if include_zero:
         arr[arr == 0] = arr.max() + 1
     arr[np_isin(arr, labels, invert=True)] = 0
-    cc_map, n = _connected_components(arr, connectivity=connectivity, return_N=True)
+    cc_map, n = connected_component_labels(arr, connectivity)
     return cc_map, n
 
 
@@ -1461,7 +1586,7 @@ def np_connected_components_per_label(
         labels = list(labels)
         labels.append(0)
     # call connected components
-    labels_out = _connected_components(arr, connectivity=connectivity, return_N=False)
+    labels_out, _ = connected_component_labels(arr, connectivity)
     # if zero, map it back for assignment
     if include_zero:
         arr[arr == zero_label] = 0
@@ -1511,7 +1636,7 @@ def np_filter_connected_components(
     labels: Sequence[int] = _to_labels(arr, label_ref)
     arr2[np_isin(arr2, labels, invert=True)] = 0  # type:ignore
 
-    labels_out, n = _connected_components(arr2, connectivity=connectivity, return_N=True)
+    labels_out, n = connected_component_labels(arr2, connectivity)
     largest_k_components_org = largest_k_components
     if largest_k_components is None:
         largest_k_components = n
@@ -1592,7 +1717,7 @@ def _expand_seeds_to_mask(seeds: UINTARRAY, mask: np.ndarray) -> UINTARRAY:
     unassigned = (mask != 0) & (seeds == 0)
     if not unassigned.any():
         return seeds
-    _, indices = distance_transform_edt(seeds == 0, return_indices=True)
+    _, indices = euclidean_distance_transform(seeds == 0, return_distances=False, return_indices=True)
     out = seeds.copy()
     out[unassigned] = seeds[tuple(indices[:, unassigned])]
     return out
@@ -1670,7 +1795,7 @@ def _split_cc_mincut(  # noqa: C901
 
     cc_connectivity = 6 if connectivity == 1 else (18 if connectivity == 2 else 26)
     vol = arr != 0
-    _, n = _connected_components(vol, connectivity=cc_connectivity, return_N=True)
+    _, n = connected_component_labels(vol, cc_connectivity)
     if n != 1:
         raise ValueError(f"volume separates into {n} parts at connectivity={connectivity}; it must be a single component.")
 
@@ -1686,7 +1811,7 @@ def _split_cc_mincut(  # noqa: C901
             vol_erode = np.where(separator, 0, vol)
         else:
             vol_erode = _binary_erosion(vol_erode, struct_now)
-        cc_erode, n = _connected_components(vol_erode, connectivity=cc_connectivity, return_N=True)
+        cc_erode, n = connected_component_labels(vol_erode, cc_connectivity)
         iterations += 1
         if n > 1:
             if max_ignore is not None:
@@ -2530,10 +2655,46 @@ def _binary_dilation(image: np.ndarray, struct=None) -> np.ndarray:
             selem = selem.astype(bool)
         if any(num_pixels % 2 == 0 for num_pixels in selem.shape):
             raise ValueError("Only structure element of odd dimension in each direction is supported.")
+    if selem is None:
+        raise RuntimeError("Only 1D, 2D and 3D images are supported.")
+    return binary_dilation_perimeter(image, selem)
+
+
+def binary_dilation_perimeter(image: NDArray[np.bool_], selem: NDArray[np.bool_]) -> NDArray[np.bool_]:
+    """Binary dilation of a 1D, 2D or 3D mask, stamping ``selem`` (centred) onto every perimeter voxel.
+
+    Only voxels with an unset face neighbour inside the image (see :func:`_get_perimeter_image`) are
+    stamped; for structuring elements that contain every voxel between their centre and any set
+    voxel (all ``generate_binary_structure`` elements) this equals a full dilation.
+
+    Args:
+        image (NDArray[np.bool_]): Mask to dilate.
+        selem (NDArray[np.bool_]): Structuring element with as many dimensions as ``image`` and an
+            odd size along every axis.
+
+    Returns:
+        NDArray[np.bool_]: The dilated mask.
+
+    Raises:
+        TypeError: ``image`` or ``selem`` is not boolean.
+        RuntimeError: ``image`` is not 1D, 2D or 3D.
+        ValueError: ``selem`` differs from ``image`` in dimensionality or has an even size.
+
+    A Rust port of this function, verified call for call by fast-anything, replaces it when built
+    (see the blocks at the end of this module and ``benchmarks/fast_anything/README.md``).
+    """
+    if image.dtype != bool or selem.dtype != bool:
+        raise TypeError(f"expected boolean arrays, got {image.dtype} and {selem.dtype}")
+    dim = image.ndim
+    if not 1 <= dim <= 3:
+        raise RuntimeError("Only 1D, 2D and 3D images are supported.")
+    if selem.ndim != dim:
+        raise ValueError(f"structure element must have {dim} dimensions, got {selem.ndim}")
+    if any(num_pixels % 2 == 0 for num_pixels in selem.shape):
+        raise ValueError("Only structure element of odd dimension in each direction is supported.")
     perimeter_image = _get_perimeter_image(image)
     perimeter_coords = np.where(perimeter_image)
     out = image.copy()
-    assert selem is not None
     if dim == 1:
         sx = selem.shape[0]
         rx = sx // 2
@@ -2695,3 +2856,123 @@ if __name__ == "__main__":
 
     print(array)
     print(np_voxel_connectivity_graph(array, connectivity=1))
+
+
+# >>> fast-anything: TPTBox.core.np_utils.unique_integers >>>
+# Uses the verified Rust port. FAST_ANYTHING_DISABLE=1 runs the Python above instead.
+# Undo with:  fast-anything disable TPTBox.core.np_utils.unique_integers
+def _fast_anything_load():
+    import os
+    import sys
+
+    if os.environ.get("FAST_ANYTHING_DISABLE"):
+        return None
+    lib = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../.fast/lib"))
+    if lib not in sys.path:
+        sys.path.append(lib)
+    try:
+        from fa_tptbox_core_np_utils_unique_integers import unique_integers
+    except ImportError:
+        return None
+    return unique_integers
+
+
+unique_integers = _fast_anything_load() or unique_integers
+del _fast_anything_load
+# <<< fast-anything: TPTBox.core.np_utils.unique_integers <<<
+
+
+# >>> fast-anything: TPTBox.core.np_utils.binary_dilation_perimeter >>>
+# Uses the verified Rust port. FAST_ANYTHING_DISABLE=1 runs the Python above instead.
+# Undo with:  fast-anything disable TPTBox.core.np_utils.binary_dilation_perimeter
+def _fast_anything_load():
+    import os
+    import sys
+
+    if os.environ.get("FAST_ANYTHING_DISABLE"):
+        return None
+    lib = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../.fast/lib"))
+    if lib not in sys.path:
+        sys.path.append(lib)
+    try:
+        from fa_tptbox_core_np_utils_binary_dilation_perimeter import binary_dilation_perimeter
+    except ImportError:
+        return None
+    return binary_dilation_perimeter
+
+
+binary_dilation_perimeter = _fast_anything_load() or binary_dilation_perimeter
+del _fast_anything_load
+# <<< fast-anything: TPTBox.core.np_utils.binary_dilation_perimeter <<<
+
+
+# >>> fast-anything: TPTBox.core.np_utils.binary_erosion_radius1 >>>
+# Uses the verified Rust port. FAST_ANYTHING_DISABLE=1 runs the Python above instead.
+# Undo with:  fast-anything disable TPTBox.core.np_utils.binary_erosion_radius1
+def _fast_anything_load():
+    import os
+    import sys
+
+    if os.environ.get("FAST_ANYTHING_DISABLE"):
+        return None
+    lib = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../.fast/lib"))
+    if lib not in sys.path:
+        sys.path.append(lib)
+    try:
+        from fa_tptbox_core_np_utils_binary_erosion_radius1 import binary_erosion_radius1
+    except ImportError:
+        return None
+    return binary_erosion_radius1
+
+
+binary_erosion_radius1 = _fast_anything_load() or binary_erosion_radius1
+del _fast_anything_load
+# <<< fast-anything: TPTBox.core.np_utils.binary_erosion_radius1 <<<
+
+
+# >>> fast-anything: TPTBox.core.np_utils.connected_component_labels >>>
+# Uses the verified Rust port. FAST_ANYTHING_DISABLE=1 runs the Python above instead.
+# Undo with:  fast-anything disable TPTBox.core.np_utils.connected_component_labels
+def _fast_anything_load():
+    import os
+    import sys
+
+    if os.environ.get("FAST_ANYTHING_DISABLE"):
+        return None
+    lib = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../.fast/lib"))
+    if lib not in sys.path:
+        sys.path.append(lib)
+    try:
+        from fa_tptbox_core_np_utils_connected_component_labels import connected_component_labels
+    except ImportError:
+        return None
+    return connected_component_labels
+
+
+connected_component_labels = _fast_anything_load() or connected_component_labels
+del _fast_anything_load
+# <<< fast-anything: TPTBox.core.np_utils.connected_component_labels <<<
+
+
+# >>> fast-anything: TPTBox.core.np_utils.euclidean_distance_transform >>>
+# Uses the verified Rust port. FAST_ANYTHING_DISABLE=1 runs the Python above instead.
+# Undo with:  fast-anything disable TPTBox.core.np_utils.euclidean_distance_transform
+def _fast_anything_load():
+    import os
+    import sys
+
+    if os.environ.get("FAST_ANYTHING_DISABLE"):
+        return None
+    lib = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../.fast/lib"))
+    if lib not in sys.path:
+        sys.path.append(lib)
+    try:
+        from fa_tptbox_core_np_utils_euclidean_distance_transform import euclidean_distance_transform
+    except ImportError:
+        return None
+    return euclidean_distance_transform
+
+
+euclidean_distance_transform = _fast_anything_load() or euclidean_distance_transform
+del _fast_anything_load
+# <<< fast-anything: TPTBox.core.np_utils.euclidean_distance_transform <<<
