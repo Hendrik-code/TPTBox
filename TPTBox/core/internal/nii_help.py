@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 import nibabel.processing as nip
 import numpy as np
+from numpy.typing import NDArray
 
 from TPTBox.core import bids_files
 
@@ -212,6 +213,10 @@ def _resample_from_to(
     order-0 (nearest-neighbour) interpolation by adjusting both affines so that
     voxel corners rather than voxel centres are aligned.
 
+    Orders 0 and 1 with mode ``"nearest"`` or ``"constant"`` go through
+    :func:`affine_resample` (a Rust port when built, with identical results);
+    everything else calls ``scipy.ndimage.affine_transform`` directly.
+
     Args:
         from_img: Source NII image to be resampled.
         to_img: Target space, given either as a ``(shape, affine, zooms)`` tuple
@@ -316,19 +321,78 @@ def _resample_from_to(
         else:
             scipy_out = np.dtype(np.float32)
             post_cast = req
-    data = scipy_img.affine_transform(  # type: ignore
-        from_img.get_array(),
-        rzs,
-        trans,
-        to_shape,
-        order=order,
-        mode=mode,
-        cval=from_img.get_c_val(c_val),
-        output=scipy_out,
-    )
+    arr = from_img.get_array()
+    cval = from_img.get_c_val(c_val)
+    in_kernel_domain = order in (0, 1) and mode in ("nearest", "constant") and arr.dtype.name in _RESAMPLE_DTYPES
+    if in_kernel_domain and len(to_shape) == arr.ndim and rzs.shape == (arr.ndim, arr.ndim):
+        data = affine_resample(
+            arr, rzs, trans, tuple(int(s) for s in to_shape), order, mode, cval, None if scipy_out is None else scipy_out.name
+        )
+    else:
+        data = scipy_img.affine_transform(arr, rzs, trans, to_shape, order=order, mode=mode, cval=cval, output=scipy_out)  # type: ignore
     if post_cast is not None:
         data = data.astype(post_cast, copy=False)
     return data, to_affine, from_img.header
+
+
+_RESAMPLE_DTYPES = ("uint8", "uint16", "uint32", "uint64", "int8", "int16", "int32", "int64", "float32", "float64")
+
+
+def affine_resample(
+    arr: np.ndarray,
+    matrix: NDArray[np.float64],
+    offset: NDArray[np.float64],
+    output_shape: tuple[int, ...],
+    order: int,
+    mode: str,
+    cval: float,
+    output_dtype: str | None,
+) -> np.ndarray:
+    """Nearest-neighbour or linear resampling through an affine map, as ``scipy.ndimage.affine_transform``.
+
+    Output voxel ``o`` takes the value of ``arr`` at the voxel coordinate ``matrix @ o + offset``.
+
+    Args:
+        arr: Image to sample from, with a dtype from ``_RESAMPLE_DTYPES``.
+        matrix: Square float64 matrix, ``arr.ndim`` on each side.
+        offset: Float64 offset of length ``arr.ndim``.
+        output_shape: Shape of the result, with ``arr.ndim`` entries.
+        order: 0 (nearest neighbour) or 1 (linear).
+        mode: ``"nearest"`` takes interpolation taps outside the image from the nearest edge voxel,
+            ``"constant"`` gives ``cval`` for every coordinate outside ``[0, n - 1]``.
+        cval: Value outside the image for ``mode="constant"``.
+        output_dtype: Name of the result dtype from ``_RESAMPLE_DTYPES``, or None for the dtype of
+            ``arr``. Integer results are rounded half away from zero and saturate at the dtype's
+            limits; NaN and values beyond the range of the 32/64-bit types follow scipy's C casts.
+
+    Returns:
+        np.ndarray: The resampled image.
+
+    Raises:
+        TypeError: A dtype outside ``_RESAMPLE_DTYPES``, or ``matrix``/``offset`` not float64.
+        ValueError: An ``order``, ``mode`` or shape outside the cases above, or an empty ``arr`` with
+            ``mode="nearest"`` (scipy reads outside the array there).
+
+    A Rust port of this function, verified call for call by fast-anything, replaces it when built
+    (see the block at the end of this module and ``benchmarks/fast_anything/README.md``).
+    """
+    import scipy.ndimage as scipy_img
+
+    if order not in (0, 1):
+        raise ValueError(f"order must be 0 or 1, got {order}")
+    if mode not in ("nearest", "constant"):
+        raise ValueError(f"mode must be 'nearest' or 'constant', got {mode!r}")
+    if arr.dtype.name not in _RESAMPLE_DTYPES or (output_dtype is not None and output_dtype not in _RESAMPLE_DTYPES):
+        raise TypeError(f"unsupported dtypes {arr.dtype} -> {output_dtype}")
+    if matrix.dtype != np.float64 or offset.dtype != np.float64:
+        raise TypeError(f"matrix and offset must be float64, got {matrix.dtype} and {offset.dtype}")
+    n = arr.ndim
+    if n == 0 or matrix.shape != (n, n) or offset.shape != (n,) or len(output_shape) != n:
+        raise ValueError(f"shapes do not fit a {n}D image: matrix {matrix.shape}, offset {offset.shape}, output {output_shape}")
+    if arr.size == 0 and mode == "nearest":
+        raise ValueError("mode='nearest' needs a non-empty image")
+    output = None if output_dtype is None else np.dtype(output_dtype)
+    return scipy_img.affine_transform(arr, matrix, offset, output_shape, order=order, mode=mode, cval=cval, output=output)  # type: ignore[return-value]
 
 
 def _add_grid_info_to_json(nii_path: Path | str, simp_json: Path | str, force_update: bool = False, add: bool = True) -> dict:
@@ -387,3 +451,27 @@ def _add_grid_info_to_json(nii_path: Path | str, simp_json: Path | str, force_up
         Print_Logger().on_save("save json with grid info", simp_json)
         save_json(simp_json, json_dict, indent=4)
     return json_dict
+
+
+# >>> fast-anything: TPTBox.core.internal.nii_help.affine_resample >>>
+# Uses the verified Rust port. FAST_ANYTHING_DISABLE=1 runs the Python above instead.
+# Undo with:  fast-anything disable TPTBox.core.internal.nii_help.affine_resample
+def _fast_anything_load():
+    import os
+    import sys
+
+    if os.environ.get("FAST_ANYTHING_DISABLE"):
+        return None
+    lib = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../../.fast/lib"))
+    if lib not in sys.path:
+        sys.path.append(lib)
+    try:
+        from fa_tptbox_core_internal_nii_help_affine_resample import affine_resample
+    except ImportError:
+        return None
+    return affine_resample
+
+
+affine_resample = _fast_anything_load() or affine_resample
+del _fast_anything_load
+# <<< fast-anything: TPTBox.core.internal.nii_help.affine_resample <<<

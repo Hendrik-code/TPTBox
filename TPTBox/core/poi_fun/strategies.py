@@ -5,6 +5,7 @@ from typing import Literal
 
 import numpy as np
 from numpy.linalg import norm
+from numpy.typing import NDArray
 from scipy.interpolate import RegularGridInterpolator
 
 from TPTBox import NII, POI, Logger_Interface, Print_Logger
@@ -195,26 +196,69 @@ def _find_corner_point(
         )
         return None
 
-    # Initialize factors and interpolator
+    # The mask is binary (0/1) whatever the segmentation dtype, so the uint8 cast is lossless.
+    return corner_bisection_search(
+        np.asarray(region.get_array(), dtype=np.uint8),
+        np.asarray(start_point_np, dtype=np.float64),
+        np.asarray(v1, dtype=np.float64),
+        np.asarray(v2, dtype=np.float64),
+        float(delta),
+    )
+
+
+def corner_bisection_search(
+    region: NDArray[np.uint8],
+    start: NDArray[np.float64],
+    v1: NDArray[np.float64],
+    v2: NDArray[np.float64],
+    delta: float,
+) -> NDArray[np.float64] | None:
+    """Furthest point ``start + a * v1 + b * v2`` inside a binary mask, by bisection on ``a`` and ``b``.
+
+    Inside means the trilinear interpolation of ``region`` at that point is above 0.5. First shrinks
+    ``a`` and ``b`` from 1 until the point is inside, then grows them in halving steps until the
+    mean step is below ``delta``.
+
+    Args:
+        region: 3D binary mask (0/1).
+        start: Local voxel coordinate the search starts from, shape ``(3,)``.
+        v1: First search direction, shape ``(3,)``.
+        v2: Second search direction, shape ``(3,)``.
+        delta: Stop once the mean step size falls below this.
+
+    Returns:
+        The point, shape ``(3,)``, or None when no point along the shrinking path is inside (``start``
+        outside the mask). Where the search can no longer change state (``delta`` at or below the
+        floating-point resolution) it returns the point reached.
+
+    Raises:
+        ValueError: A coordinate is NaN.
+
+    A Rust port of this function, verified call for call by fast-anything, replaces it when built
+    (see the block at the end of this module and ``benchmarks/fast_anything/README.md``).
+    """
     factor1 = factor2 = 1
-    interpolator = RegularGridInterpolator([np.arange(region.shape[i]) for i in range(3)], region.get_array())
+    interpolator = RegularGridInterpolator([np.arange(region.shape[i]) for i in range(3)], region)
 
     def is_inside(f1=0.0, f2=0.0):
-        coords = start_point_np + (factor1 + f1) * v1 + (factor2 + f2) * v2
+        coords = start + (factor1 + f1) * v1 + (factor2 + f2) * v2
         if any(i < 0 for i in coords) or any(coords[i] > region.shape[i] - 1 for i in range(len(coords))):
             return False
         return interpolator(coords) > 0.5
 
     # Adjust factors until inside region
     while not is_inside():
-        factor1 = factor1 * 0.9
-        factor2 = factor2 * 0.7
+        shrunk1, shrunk2 = factor1 * 0.9, factor2 * 0.7
+        if shrunk1 == factor1 and shrunk2 == factor2:  # stuck at the smallest subnormal: start is outside
+            return None
+        factor1, factor2 = shrunk1, shrunk2
     v1_n = 1.0
     v2_n = 0.4
     f1 = f2 = 0
 
     # Refine factors using delta
     while delta < (v1_n + v2_n) / 2:
+        state = (f1, f2, v1_n, v2_n)
         changed = False
         if is_inside(v1_n + f1, f2):
             f1 += v1_n
@@ -225,8 +269,10 @@ def _find_corner_point(
         if not changed:
             v1_n /= 2
             v2_n /= 2
+        if (f1, f2, v1_n, v2_n) == state:  # steps absorbed by rounding: no further progress possible
+            break
 
-    return start_point_np + (factor1 + f1) * v1 + (factor2 + f2) * v2
+    return start + (factor1 + f1) * v1 + (factor2 + f2) * v2
 
 
 ### ligament_attachment_point_flava ###
@@ -394,3 +440,27 @@ def strategy_shifted_line_cast(
         bb=bb,
         log=_log,
     )
+
+
+# >>> fast-anything: TPTBox.core.poi_fun.strategies.corner_bisection_search >>>
+# Uses the verified Rust port. FAST_ANYTHING_DISABLE=1 runs the Python above instead.
+# Undo with:  fast-anything disable TPTBox.core.poi_fun.strategies.corner_bisection_search
+def _fast_anything_load():
+    import os
+    import sys
+
+    if os.environ.get("FAST_ANYTHING_DISABLE"):
+        return None
+    lib = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../../.fast/lib"))
+    if lib not in sys.path:
+        sys.path.append(lib)
+    try:
+        from fa_tptbox_core_poi_fun_strategies_corner_bisection_search import corner_bisection_search
+    except ImportError:
+        return None
+    return corner_bisection_search
+
+
+corner_bisection_search = _fast_anything_load() or corner_bisection_search
+del _fast_anything_load
+# <<< fast-anything: TPTBox.core.poi_fun.strategies.corner_bisection_search <<<
