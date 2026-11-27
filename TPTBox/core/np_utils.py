@@ -4,7 +4,7 @@ import itertools
 import warnings
 from collections.abc import Sequence
 from math import ceil, floor
-from typing import Any, Literal, TypeVar, Union
+from typing import Any, Literal, TypeVar, Union, get_args
 
 import numpy as np
 import scipy
@@ -27,6 +27,7 @@ from scipy.ndimage import (
     maximum_filter,
     minimum_filter,
     sobel,
+    uniform_filter,
 )
 from scipy.spatial.distance import cdist
 from skimage.measure import euler_number as _euler_number
@@ -2000,29 +2001,46 @@ def np_fill_holes(
     return arr
 
 
-SMOOTHING_METHOD = Literal["gaussian", "laplacian", "taubin"]
+SMOOTHING_METHOD = Literal["gaussian", "laplacian", "taubin", "majority"]
 
 
 def _np_smooth_channel(
     arr_l: np.ndarray,
     method: SMOOTHING_METHOD,
     sigma: float,
-    radius: int,
+    radius: float | None,
     truncate: int,
     boundary_mode: str,
     iterations: int,
     lambda_: float,
     mu: float,
+    window_radius: float,
+    spacing: Sequence[float] | None,
 ) -> np.ndarray:
-    """Apply one smoothing filter to a single float label channel (see `np_smooth_labelwise`)."""
+    """Apply one smoothing filter to a single float label channel (see `np_smooth_labelwise`).
+
+    ``sigma``, ``radius`` and ``window_radius`` are in the unit of ``spacing``; ``spacing=None`` means voxels.
+    """
+    h = np.ones(arr_l.ndim) if spacing is None else np.asarray(spacing, dtype=float)
+
+    def to_voxels(length: float) -> tuple[int, ...]:
+        return tuple(int(v) for v in np.floor(length / h + 0.5))
+
     if method == "gaussian":
-        return gaussian_filter(arr_l, sigma=sigma, mode=boundary_mode, truncate=truncate, radius=radius)
-    # Umbrella-operator step on the voxel grid, u <- (1 - step) * u + step * mean(2*ndim face neighbours),
-    # as one symmetric stencil (convolve == correlate). Same lambda/mu scale as on a mesh.
+        sigma_vox = sigma if spacing is None else tuple(sigma / h)
+        radius_vox = None if radius is None else to_voxels(radius)  # None lets scipy size the kernel from truncate
+        return gaussian_filter(arr_l, sigma=sigma_vox, mode=boundary_mode, truncate=truncate, radius=radius_vox)
+    if method == "majority":
+        # The box mean of a one-hot channel is that label's vote share, so the argmax over channels is a plurality vote.
+        return uniform_filter(arr_l, size=[2 * r + 1 for r in to_voxels(window_radius)], mode=boundary_mode)
+    # Umbrella-operator step u <- (1 - step) * u + step * weighted mean of the 2*ndim face neighbours, as one
+    # symmetric stencil (convolve == correlate). Weights proportional to 1/h_i**2 make the diffusion isotropic in
+    # physical space; with equal spacing each neighbour weighs 1/(2*ndim), as in the mesh umbrella operator.
     center = (1,) * arr_l.ndim
-    neighbour_mean = generate_binary_structure(arr_l.ndim, 1).astype(float)
-    neighbour_mean[center] = 0
-    neighbour_mean /= neighbour_mean.sum()
+    neighbour_mean = np.zeros((3,) * arr_l.ndim)
+    for axis, weight in enumerate(h**-2 / (2 * np.sum(h**-2))):
+        for side in (0, 2):
+            neighbour_mean[(*center[:axis], side, *center[axis + 1 :])] = weight
     kernels = []
     for step in (lambda_,) if method == "laplacian" else (lambda_, mu):
         kernel = step * neighbour_mean
@@ -2040,11 +2058,13 @@ def np_smooth_labelwise(
     method: SMOOTHING_METHOD = "gaussian",
     label_weights: dict[int, float] | None = None,
     sigma: float = 3.0,
-    radius: int = 6,
+    radius: float | None = 6,
     truncate: int = 4,
     iterations: int = 10,
     lambda_: float = 0.5,
     mu: float = -0.53,
+    window_radius: float = 1,
+    spacing: Sequence[float] | None = None,
     boundary_mode: str = "nearest",
     dilate_prior: int = 0,
     dilate_connectivity: int = 3,
@@ -2057,11 +2077,11 @@ def np_smooth_labelwise(
     Every label is turned into a binary channel, the selected channels are low-pass filtered with ``method``,
     and the new segmentation is the per-voxel argmax over all channels.
 
-    Methods (all operate on the voxel grid, in voxel units, not on a surface mesh):
+    Methods (all operate on the voxel grid, not on a surface mesh):
         - ``"gaussian"``: ``scipy.ndimage.gaussian_filter`` with ``sigma``, ``radius`` and ``truncate``.
         - ``"laplacian"``: ``iterations`` explicit steps ``u <- u + lambda_ * (mean_of_face_neighbours(u) - u)``.
           This is discrete heat diffusion, so the result approaches a Gaussian blur with
-          ``sigma = sqrt(iterations * lambda_ / ndim)``. Shrinks convex parts and removes thin structures
+          ``sigma = sqrt(iterations * lambda_ / ndim)`` voxels. Shrinks convex parts and removes thin structures
           like the Gaussian does.
         - ``"taubin"``: Taubin's lambda|mu filter (Taubin, SIGGRAPH 1995). Each iteration is a smoothing step
           with ``lambda_ > 0`` followed by an inflating step with ``mu < -lambda_``. Frequencies below the
@@ -2069,6 +2089,18 @@ def np_smooth_labelwise(
           less and thin structures survive. It needs more iterations than ``"laplacian"`` to remove the same
           surface noise (e.g. 30 instead of 10). Channel values can over- or undershoot [0, 1] slightly, which
           does not affect the argmax.
+        - ``"majority"``: each voxel takes the most frequent label in a box of half-width ``window_radius``
+          (box mean of every channel, then argmax). Removes whatever covers less than about half of the box
+          around it (isolated voxels, one-voxel sheets, small holes) and rounds convex edges; flat faces stay.
+
+    Physical units (``spacing``):
+        ``spacing`` is the voxel size per axis (e.g. ``NII.zoom``). With it, ``sigma``, ``radius`` and
+        ``window_radius`` are given in that unit (mm) and converted per axis, rounding ``radius`` and
+        ``window_radius`` to the nearest voxel count. ``"laplacian"`` and ``"taubin"`` weight each face neighbour
+        by ``1/spacing_i**2``, which makes the diffusion isotropic in physical space. ``iterations`` stays a step
+        count: one ``"laplacian"`` run then approaches a Gaussian with
+        ``sigma = sqrt(iterations * lambda_ / sum_i(spacing_i**-2))`` in the unit of ``spacing``, so the same
+        settings smooth less on finer grids. ``dilate_prior`` is always in voxels.
 
     Internal Description:
         1. Optionally dilates specified labels prior to smoothing (if `dilate_prior > 0`).
@@ -2084,18 +2116,26 @@ def np_smooth_labelwise(
     Args:
         arr (UINTARRAY): Input Segmentation Mask Array
         label_to_smooth (list[int] | int): Which labels to smooth in the mask. Every other label will be untouched
-        method (SMOOTHING_METHOD, optional): ``"gaussian"``, ``"laplacian"`` or ``"taubin"``. Defaults to "gaussian".
+        method (SMOOTHING_METHOD, optional): ``"gaussian"``, ``"laplacian"``, ``"taubin"`` or ``"majority"``.
+            Defaults to "gaussian".
         label_weights (dict[int, float] | None, optional): Per-label multiplicative weight applied to each label's
             probability map before the argmax step. Labels not in the dict get weight 1.0. Defaults to no weighting.
         sigma (float, optional): Sigma of the gaussian blur. Only used by ``"gaussian"``. Defaults to 3.0.
-        radius (int, optional): Radius of the gaussian blur. Only used by ``"gaussian"``. Defaults to 6.
-        truncate (int, optional): Truncate of the gaussian blur. Only used by ``"gaussian"``. Defaults to 4.
+        radius (float | None, optional): Radius of the gaussian blur, rounded to whole voxels. None sizes the kernel
+            from ``truncate`` instead. Only used by ``"gaussian"``. Defaults to 6.
+        truncate (int, optional): Truncate of the gaussian blur in sigmas; only applies when ``radius`` is None.
+            Only used by ``"gaussian"``. Defaults to 4.
         iterations (int, optional): Number of iterations. Only used by ``"laplacian"`` and ``"taubin"``
             (one Taubin iteration is one lambda step plus one mu step). Defaults to 10.
         lambda_ (float, optional): Step size of the smoothing step, in (0, 1]. Values above 0.5 let the highest
             frequency oscillate. Only used by ``"laplacian"`` and ``"taubin"``. Defaults to 0.5.
         mu (float, optional): Step size of Taubin's inflating step; must satisfy ``mu < -lambda_``.
             Only used by ``"taubin"``. Defaults to -0.53.
+        window_radius (float, optional): Half-width of the voting box, which spans ``2 * window_radius + 1``
+            voxels per axis. Only used by ``"majority"``. Defaults to 1 (a 3x3x3 box).
+        spacing (Sequence[float] | None, optional): Voxel size per axis. If given, ``sigma``, ``radius`` and
+            ``window_radius`` are in this unit and the stencil of ``"laplacian"``/``"taubin"`` is weighted by it
+            (see "Physical units"). Defaults to None (voxel units, isotropic).
         boundary_mode (str, optional): ``scipy.ndimage`` boundary mode of the filter. Defaults to "nearest".
         dilate_prior (int, optional): Dilate this many voxels before smoothing. Defaults to 0.
         dilate_connectivity (int, optional): Connectivity of the dilation process, if applied. Defaults to 3.
@@ -2109,12 +2149,15 @@ def np_smooth_labelwise(
         UINTARRAY: The resulting smoothed array of the segmentation (with the same labels as the input)
 
     Raises:
-        ValueError: If ``method`` is unknown, or ``method="taubin"`` and ``mu >= -lambda_``.
+        ValueError: If ``method`` is unknown, ``method="taubin"`` and ``mu >= -lambda_``, or ``spacing`` does not
+            have one entry per axis of ``arr``.
     """
-    if method not in ("gaussian", "laplacian", "taubin"):
-        raise ValueError(f"Unknown smoothing method {method!r}, expected 'gaussian', 'laplacian' or 'taubin'")
+    if method not in get_args(SMOOTHING_METHOD):
+        raise ValueError(f"Unknown smoothing method {method!r}, expected one of {get_args(SMOOTHING_METHOD)}")
     if method == "taubin" and not mu < -lambda_ < 0:
         raise ValueError(f"Taubin smoothing needs mu < -lambda_ < 0, got lambda_={lambda_}, mu={mu}")
+    if spacing is not None and len(spacing) != arr.ndim:
+        raise ValueError(f"spacing needs one entry per axis of the {arr.ndim}D array, got {spacing}")
     filter_args = {
         "method": method,
         "sigma": sigma,
@@ -2124,6 +2167,8 @@ def np_smooth_labelwise(
         "iterations": iterations,
         "lambda_": lambda_,
         "mu": mu,
+        "window_radius": window_radius,
+        "spacing": spacing,
     }
     if label_weights is None:
         label_weights = {}

@@ -1476,11 +1476,13 @@ class NII(NII_Math):
         label_to_smooth: list[int] | int,
         method: SMOOTHING_METHOD = "gaussian",
         sigma: float = 3.0,
-        radius: int = 6,
+        radius: float | None = 6,
         truncate: int = 4,
         iterations: int = 10,
         lambda_: float = 0.5,
         mu: float = -0.53,
+        window_radius: float = 1,
+        in_mm: bool = False,
         boundary_mode: str = "nearest",
         dilate_prior: int = 0,
         dilate_connectivity: int = 1,
@@ -1492,17 +1494,19 @@ class NII(NII_Math):
     ) -> Self:
         """Smoothes the segmentation mask by filtering each label channel with ``method`` and then using argmax to derive the smoothed segmentation labels again.
 
-        All methods work on the voxel grid in voxel units; see `np_smooth_labelwise` for how they differ.
+        All methods work on the voxel grid; see `np_smooth_labelwise` for how they differ and what ``in_mm`` changes.
 
         Args:
             label_to_smooth (list[int] | int): Which labels to smooth in the mask. Every other label will be untouched
-            method (SMOOTHING_METHOD, optional): ``"gaussian"``, ``"laplacian"`` or ``"taubin"``. Defaults to "gaussian".
+            method (SMOOTHING_METHOD, optional): ``"gaussian"``, ``"laplacian"``, ``"taubin"`` or ``"majority"``. Defaults to "gaussian".
             sigma (float, optional): Sigma of the gaussian blur. Only used by ``"gaussian"``. Defaults to 3.0.
-            radius (int, optional): Radius of the gaussian blur. Only used by ``"gaussian"``. Defaults to 6.
-            truncate (int, optional): Truncate of the gaussian blur. Only used by ``"gaussian"``. Defaults to 4.
+            radius (float | None, optional): Radius of the gaussian blur, rounded to whole voxels; None sizes the kernel from ``truncate``. Only used by ``"gaussian"``. Defaults to 6.
+            truncate (int, optional): Truncate of the gaussian blur in sigmas; only applies when ``radius`` is None. Only used by ``"gaussian"``. Defaults to 4.
             iterations (int, optional): Number of iterations. Only used by ``"laplacian"`` and ``"taubin"``. Defaults to 10.
             lambda_ (float, optional): Step size of the smoothing step, in (0, 1]. Only used by ``"laplacian"`` and ``"taubin"``. Defaults to 0.5.
             mu (float, optional): Step size of Taubin's inflating step, must satisfy ``mu < -lambda_``. Only used by ``"taubin"``. Defaults to -0.53.
+            window_radius (float, optional): Half-width of the voting box (``2 * window_radius + 1`` voxels per axis). Only used by ``"majority"``. Defaults to 1.
+            in_mm (bool, optional): If True, ``sigma``, ``radius`` and ``window_radius`` are in mm and converted per axis with ``self.zoom``, and ``"laplacian"``/``"taubin"`` diffuse isotropically in mm. ``iterations`` and ``dilate_prior`` stay counts. Defaults to False (voxel units).
             boundary_mode (str, optional): ``scipy.ndimage`` boundary mode of the filter. Defaults to "nearest".
             dilate_prior (int, optional): Dilate this many voxels before smoothing. Defaults to 0.
             dilate_connectivity (int, optional): Connectivity of the dilation process, if applied. Defaults to 1.
@@ -1527,6 +1531,8 @@ class NII(NII_Math):
             iterations=iterations,
             lambda_=lambda_,
             mu=mu,
+            window_radius=window_radius,
+            spacing=self.zoom if in_mm else None,
             boundary_mode=boundary_mode,
             dilate_prior=dilate_prior,
             dilate_connectivity=dilate_connectivity,
@@ -1541,11 +1547,13 @@ class NII(NII_Math):
         label_to_smooth: list[int] | int,
         method: SMOOTHING_METHOD = "gaussian",
         sigma: float = 3.0,
-        radius: int = 6,
+        radius: float | None = 6,
         truncate: int = 4,
         iterations: int = 10,
         lambda_: float = 0.5,
         mu: float = -0.53,
+        window_radius: float = 1,
+        in_mm: bool = False,
         boundary_mode: str = "nearest",
         dilate_prior: int = 0,
         dilate_connectivity: int = 1,
@@ -1564,6 +1572,8 @@ class NII(NII_Math):
             iterations=iterations,
             lambda_=lambda_,
             mu=mu,
+            window_radius=window_radius,
+            in_mm=in_mm,
             boundary_mode=boundary_mode,
             dilate_prior=dilate_prior,
             dilate_connectivity=dilate_connectivity,

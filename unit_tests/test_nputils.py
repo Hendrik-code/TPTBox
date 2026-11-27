@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import random
 import unittest
+from typing import Any
 
 import numpy as np
+from scipy.ndimage import generic_filter
 
 from TPTBox.core import np_utils
 from TPTBox.tests.test_utils import get_nii, repeats
@@ -938,7 +940,7 @@ class Test_smooth_labelwise(unittest.TestCase):
     def test_unselected_labels_untouched(self):
         arr = _sphere_and_plate()
         arr[14:18, 14:18, 14:18] = 3  # cube inside the sphere, not smoothed
-        for method in ("gaussian", "laplacian", "taubin"):
+        for method in ("gaussian", "laplacian", "taubin", "majority"):
             with self.subTest(method=method):
                 out = np_utils.np_smooth_labelwise(arr, [1, 2], method=method, sigma=1.5)
                 np.testing.assert_array_equal(out == 3, arr == 3)
@@ -948,7 +950,7 @@ class Test_smooth_labelwise(unittest.TestCase):
     def test_2d_input(self):
         arr = np.zeros((20, 20), dtype=np.uint8)
         arr[5:15, 5:15] = 1
-        for method in ("gaussian", "laplacian", "taubin"):
+        for method in ("gaussian", "laplacian", "taubin", "majority"):
             with self.subTest(method=method):
                 out = np_utils.np_smooth_labelwise(arr, 1, method=method, sigma=1.0)
                 self.assertEqual(out.shape, arr.shape)
@@ -957,9 +959,65 @@ class Test_smooth_labelwise(unittest.TestCase):
 
     def test_invalid_arguments(self):
         arr = _sphere_and_plate()
-        for kwargs in ({"method": "median"}, {"method": "taubin", "mu": 0.53}, {"method": "taubin", "mu": -0.4}):
+        cases: list[dict[str, Any]] = [
+            {"method": "median"},
+            {"method": "taubin", "mu": 0.53},
+            {"method": "taubin", "mu": -0.4},
+            {"method": "gaussian", "spacing": (1.0, 1.0)},
+        ]
+        for kwargs in cases:
             with self.subTest(**kwargs), self.assertRaises(ValueError):
                 np_utils.np_smooth_labelwise(arr, 1, **kwargs)
+
+    def test_majority_matches_brute_force_vote(self):
+        arr = (np.random.default_rng(3).random((14, 13, 12)) < 0.45).astype(np.uint8)
+        # window_radius=1 is 1 voxel, or 1 mm -> (2, 1, 0) voxels at spacing (0.5, 1, 3).
+        for spacing, size in [(None, (3, 3, 3)), ((0.5, 1.0, 3.0), (5, 3, 1))]:
+            with self.subTest(spacing=spacing):
+                out = np_utils.np_smooth_labelwise(arr, 1, method="majority", window_radius=1, spacing=spacing)
+                vote = generic_filter(arr.astype(float), lambda v: v.mean() > 0.5, size=size, mode="nearest")
+                np.testing.assert_array_equal(out, vote.astype(int))
+
+    def test_majority_removes_islands_and_holes(self):
+        arr = np.zeros((16, 16, 16), dtype=np.uint8)
+        arr[3:13, 3:13, 3:13] = 1
+        arr[8, 8, 8] = 0  # hole
+        arr[0, 15, 15] = 1  # island
+        out = np_utils.np_smooth_labelwise(arr, 1, method="majority")
+        self.assertEqual(out[8, 8, 8], 1)
+        self.assertEqual(out[0, 15, 15], 0)
+        self.assertEqual(out[3, 8, 8], 1, "flat faces stay in place")
+
+    def test_unit_spacing_matches_voxel_units(self):
+        arr = _sphere_and_plate()
+        for method in ("gaussian", "laplacian", "taubin", "majority"):
+            with self.subTest(method=method):
+                expected = np_utils.np_smooth_labelwise(arr, [1, 2], method=method, sigma=1.5, radius=4)
+                result = np_utils.np_smooth_labelwise(arr, [1, 2], method=method, sigma=1.5, radius=4, spacing=(1.0, 1.0, 1.0))
+                np.testing.assert_array_equal(result, expected)
+
+    def test_gaussian_spacing_converts_mm_to_voxels(self):
+        arr = _sphere_and_plate()
+        expected = np_utils.np_smooth_labelwise(arr, [1, 2], sigma=1.0, radius=2)
+        result = np_utils.np_smooth_labelwise(arr, [1, 2], sigma=2.0, radius=4, spacing=(2.0, 2.0, 2.0))
+        np.testing.assert_array_equal(result, expected)
+
+    def test_spacing_makes_filters_isotropic_in_mm(self):
+        # Second moment of a smoothed impulse, per axis, in mm^2.
+        shape, spacing = (41, 41, 41), (0.5, 1.0, 2.0)
+        impulse = np.zeros(shape)
+        impulse[20, 20, 20] = 1
+        offsets_mm = (np.indices(shape) - 20) * np.array(spacing)[:, None, None, None]
+        params = {"sigma": 2.0, "radius": 8.0, "truncate": 4, "boundary_mode": "constant", "lambda_": 0.5, "mu": -0.53}
+        cases: list[tuple[np_utils.SMOOTHING_METHOD, float, float]] = [
+            ("gaussian", 4.0, 1e-2),
+            ("laplacian", 20 * 0.5 / np.sum(np.array(spacing) ** -2.0), 1e-9),
+        ]
+        for method, expected_var, tol in cases:
+            with self.subTest(method=method):
+                out = np_utils._np_smooth_channel(impulse, method, **params, iterations=20, window_radius=1, spacing=spacing)
+                var = (out * offsets_mm**2).sum(axis=(1, 2, 3)) / out.sum()
+                np.testing.assert_allclose(var, expected_var, rtol=tol)
 
 
 if __name__ == "__main__":
