@@ -19,6 +19,7 @@ import numpy as np
 
 from TPTBox import NII
 from TPTBox.core.nii_poi_abstract import Grid
+from TPTBox.core.np_utils import np_smooth_labelwise
 
 # `numpy-stl` is a declared dependency, but guard anyway so a partially installed
 # environment skips instead of erroring (same pattern as unit_tests/test_mesh3D.py).
@@ -260,6 +261,54 @@ class TestIntensityOperations(unittest.TestCase):
         out = _nii(arr).smooth_gaussian_labelwise(label_to_smooth=1, sigma=1.0, radius=2)
         self.assertTrue(set(np.unique(out.get_seg_array())).issubset({0, 1, 2}))
         self.assertIn(2, np.unique(out.get_seg_array()), "other labels survive")
+
+    def test_smooth_gaussian_labelwise_delegates_to_smooth_labelwise(self):
+        arr = np.zeros((16, 16, 16), dtype=np.uint8)
+        arr[2:8, 2:8, 2:8] = 1
+        arr[9:14, 9:14, 9:14] = 2
+        nii = _nii(arr)
+        expected = nii.smooth_gaussian_labelwise([1, 2], sigma=1.5, radius=3).get_seg_array()
+        result = nii.smooth_labelwise([1, 2], method="gaussian", sigma=1.5, radius=3).get_seg_array()
+        np.testing.assert_array_equal(result, expected)
+
+    def test_smooth_labelwise_methods(self):
+        arr = np.zeros((16, 16, 16), dtype=np.uint8)
+        arr[2:8, 2:8, 2:8] = 1
+        arr[9:14, 9:14, 9:14] = 2
+        arr[8, 4, 4] = 1  # one-voxel bump on the cube
+        for method in ("gaussian", "laplacian", "taubin", "majority"):
+            with self.subTest(method=method):
+                nii = _nii(arr)
+                out = nii.smooth_labelwise(1, method=method, sigma=1.0, iterations=5)
+                np.testing.assert_array_equal(nii.get_seg_array(), arr, "the input must be untouched")
+                np.testing.assert_array_equal(out.get_seg_array() == 2, arr == 2, "unselected labels stay")
+                self.assertEqual(out.get_seg_array()[8, 4, 4], 0, "the bump is smoothed away")
+                nii.smooth_labelwise_(1, method=method, sigma=1.0, iterations=5)
+                np.testing.assert_array_equal(nii.get_seg_array(), out.get_seg_array())
+
+    def test_smooth_labelwise_in_mm(self):
+        arr = np.zeros((16, 16, 16), dtype=np.uint8)
+        arr[2:8, 2:8, 2:8] = 1
+        arr[9:14, 9:14, 9:14] = 2
+        arr[8, 4, 4] = 1
+        iso2 = _nii(arr, zoom=(2.0, 2.0, 2.0))
+        with self.subTest("gaussian: sigma 2 mm on 2 mm voxels is sigma 1 voxel"):
+            mm = iso2.smooth_labelwise([1, 2], sigma=2.0, radius=4, in_mm=True).get_seg_array()
+            vox = iso2.smooth_labelwise([1, 2], sigma=1.0, radius=2).get_seg_array()
+            np.testing.assert_array_equal(mm, vox)
+        with self.subTest("majority: window radius 2 mm on 2 mm voxels is 1 voxel"):
+            mm = iso2.smooth_labelwise([1, 2], method="majority", window_radius=2, in_mm=True).get_seg_array()
+            vox = iso2.smooth_labelwise([1, 2], method="majority", window_radius=1).get_seg_array()
+            np.testing.assert_array_equal(mm, vox)
+        with self.subTest("anisotropic zoom is passed per array axis"):
+            nii = _nii(arr, zoom=(1.0, 1.0, 3.0))
+            out = nii.smooth_labelwise_(1, method="majority", window_radius=1, in_mm=True)
+            expected = np_smooth_labelwise(arr, 1, method="majority", window_radius=1, spacing=(1.0, 1.0, 3.0))
+            np.testing.assert_array_equal(out.get_seg_array(), expected)
+
+    def test_smooth_labelwise_rejects_non_segmentation(self):
+        with self.assertRaises(AssertionError):
+            _nii(np.zeros((4, 4, 4), dtype=np.float32), seg=False).smooth_labelwise(1, method="taubin")
 
 
 class TestGridAndAccessors(unittest.TestCase):
